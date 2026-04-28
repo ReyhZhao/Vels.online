@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: vels-online
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      initContainers:
+        - name: migrate
+          image: ghcr.io/reyhzhao/vels-online-backend:latest
+          command: ["python", "manage.py", "migrate", "--noinput"]
+          envFrom:
+            - secretRef:
+                name: backend-secret
+          env:
+            - name: ALLOWED_HOSTS
+              value: "vels.online"
+            - name: DEBUG
+              value: "False"
+      containers:
+        - name: backend
+          image: ghcr.io/reyhzhao/vels-online-backend:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: backend-secret
+          env:
+            - name: ALLOWED_HOSTS
+              value: "vels.online"
+            - name: DEBUG
+              value: "False"
+          readinessProbe:
+            httpGet:
+              path: /api/health/
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health/
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20

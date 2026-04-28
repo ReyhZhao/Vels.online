@@ -169,3 +169,19 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Node
+node_modules/
+frontend/dist/
+
+# Local test database
+test.db
+
+# IDE
+.idea/
+
+# Secrets — never commit real values
+# deployment/secrets/backend-secret.yaml is a template and safe to commit
+
+# Claude Code local settings
+.claude/settings.local.json
