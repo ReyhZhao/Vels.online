@@ -15,6 +15,10 @@ CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
 
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
 
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
