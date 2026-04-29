@@ -36,7 +36,8 @@ services:
     image: registry.vels.online/vels/frontend:latest
     build:
       context: ./frontend
-      dockerfile: Dockerfile.dev
+      #dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     volumes:
       - ./frontend:/app
       - /app/node_modules
