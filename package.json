@@ -1,0 +1,7 @@
+{
+  "name": "vels-online",
+  "version": "0.1.0",
+  "scripts": {
+    "sandcastle": "npx tsx .sandcastle/main.mts"
+  }
+}
