@@ -35,6 +35,7 @@ spec:
       containers:
         - name: backend
           image: registry.vels.online/vels/backend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           envFrom:

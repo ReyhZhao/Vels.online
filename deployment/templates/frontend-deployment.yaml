@@ -15,6 +15,7 @@ spec:
       containers:
         - name: frontend
           image: registry.vels.online/vels/frontend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           readinessProbe:
