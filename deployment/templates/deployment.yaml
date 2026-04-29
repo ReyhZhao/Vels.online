@@ -41,6 +41,11 @@ spec:
             - secretRef:
                 name: backend-secret
           env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cluster-velsonline-app
+                  key: fqdn-uri
             - name: ALLOWED_HOSTS
               value: "vels.online"
             - name: DEBUG
