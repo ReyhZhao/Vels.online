@@ -39,6 +39,24 @@ describe('AdminPostForm — create', () => {
       status: 'draft',
     });
   });
+
+  it('status field defaults to draft and accepts published', async () => {
+    api.post.mockResolvedValue({ data: { slug: 'new-post' } });
+
+    render(
+      <MemoryRouter initialEntries={['/admin/posts/new']}>
+        <Routes>
+          <Route path="/admin/posts/new" element={<AdminPostForm />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    const statusField = screen.getByLabelText('Status');
+    expect(statusField).toHaveValue('draft');
+
+    await userEvent.selectOptions(statusField, 'published');
+    expect(statusField).toHaveValue('published');
+  });
 });
 
 describe('AdminPostForm — edit', () => {

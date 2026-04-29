@@ -128,7 +128,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+backend/.env
 .venv
 env/
 venv/
@@ -185,3 +185,7 @@ test.db
 
 # Claude Code local settings
 .claude/settings.local.json
+
+
+.sandcastle
+.sandcastle/*

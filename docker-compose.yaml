@@ -23,7 +23,7 @@ services:
     environment:
       SECRET_KEY: dev-secret-key-not-for-production
       DEBUG: "True"
-      ALLOWED_HOSTS: "localhost,127.0.0.1"
+      ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
       DATABASE_URL: postgres://vels:vels_password@db:5432/vels_online
     depends_on:
       db:

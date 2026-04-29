@@ -9,19 +9,31 @@ vi.mock('../lib/axios', () => ({
 
 import api from '../lib/axios';
 
+const POST = {
+  slug: 'hello-world',
+  title: 'Hello World',
+  content: 'My post content',
+  published_at: '2026-01-15T00:00:00Z',
+};
+
+function renderPostDetail(slug = 'hello-world') {
+  return render(
+    <MemoryRouter initialEntries={[`/${slug}`]}>
+      <Routes>
+        <Route path="/:slug" element={<PostDetail />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
 describe('PostDetail', () => {
   it('renders post title and content', async () => {
-    api.get.mockResolvedValue({
-      data: { slug: 'hello-world', title: 'Hello World', content: 'My post content' },
+    api.get.mockImplementation((url) => {
+      if (url.includes('/api/posts/hello-world/')) return Promise.resolve({ data: POST });
+      return Promise.resolve({ data: [] });
     });
 
-    render(
-      <MemoryRouter initialEntries={['/hello-world']}>
-        <Routes>
-          <Route path="/:slug" element={<PostDetail />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderPostDetail();
 
     await waitFor(() => {
       expect(screen.getByText('Hello World')).toBeInTheDocument();
@@ -29,17 +41,43 @@ describe('PostDetail', () => {
     });
   });
 
+  it('renders the sidebar with publish date and read time', async () => {
+    api.get.mockImplementation((url) => {
+      if (url.includes('/api/posts/hello-world/')) return Promise.resolve({ data: POST });
+      return Promise.resolve({ data: [] });
+    });
+
+    renderPostDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText(/15 January 2026/i)).toBeInTheDocument();
+      expect(screen.getByText(/min read/i)).toBeInTheDocument();
+    });
+  });
+
+  it('renders recent posts in the sidebar', async () => {
+    api.get.mockImplementation((url) => {
+      if (url.includes('/api/posts/hello-world/')) return Promise.resolve({ data: POST });
+      return Promise.resolve({
+        data: [
+          { slug: 'hello-world', title: 'Hello World' },
+          { slug: 'other-post', title: 'Other Post' },
+        ],
+      });
+    });
+
+    renderPostDetail();
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'Other Post' })).toBeInTheDocument();
+    });
+  });
+
   it('renders nothing while loading', () => {
     api.get.mockReturnValue(new Promise(() => {}));
 
-    render(
-      <MemoryRouter initialEntries={['/hello-world']}>
-        <Routes>
-          <Route path="/:slug" element={<PostDetail />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderPostDetail();
 
-    expect(screen.queryByRole('article')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
   });
 });
