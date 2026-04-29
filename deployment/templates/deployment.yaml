@@ -30,7 +30,8 @@ spec:
               value: "vels.online"
             - name: DEBUG
               value: "False"
-
+            - name: CSRF_TRUSTED_ORIGINS
+              value: "https://vels.online"
 
       containers:
         - name: backend
