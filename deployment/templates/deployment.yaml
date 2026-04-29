@@ -19,11 +19,19 @@ spec:
           envFrom:
             - secretRef:
                 name: backend-secret
+
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cluster-velsonline-app
+                  key: fqdn-uri
           env:
             - name: ALLOWED_HOSTS
               value: "vels.online"
             - name: DEBUG
               value: "False"
+
+
       containers:
         - name: backend
           image: registry.vels.online/vels/backend:latest
@@ -37,6 +45,7 @@ spec:
               value: "vels.online"
             - name: DEBUG
               value: "False"
+
           readinessProbe:
             httpGet:
               path: /api/health/
