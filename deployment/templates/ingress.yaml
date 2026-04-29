@@ -5,11 +5,12 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
 spec:
-  ingressClassName: nginx
+  ingressClassName: bunkerweb
   tls:
     - hosts:
         - vels.online
       secretName: vels-online-tls
+
   rules:
     - host: vels.online
       http:
