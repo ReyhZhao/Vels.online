@@ -49,6 +49,8 @@ spec:
 
             - name: ALLOWED_HOSTS
               value: "vels.online"
+            - name: CSRF_TRUSTED_ORIGINS
+              value: "https://vels.online"
             - name: DEBUG
               value: "True"
 
