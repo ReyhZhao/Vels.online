@@ -46,20 +46,21 @@ spec:
                 secretKeyRef:
                   name: cluster-velsonline-app
                   key: fqdn-uri
+
             - name: ALLOWED_HOSTS
               value: "vels.online"
             - name: DEBUG
-              value: "False"
+              value: "True"
 
-          readinessProbe:
-            httpGet:
-              path: /api/health/
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /api/health/
-              port: 8000
-            initialDelaySeconds: 15
-            periodSeconds: 20
+#          readinessProbe:
+#            httpGet:
+#              path: /api/health/
+#              port: 8000
+#            initialDelaySeconds: 5
+#            periodSeconds: 10
+#          livenessProbe:
+#            httpGet:
+#              path: /api/health/
+#              port: 8000
+#            initialDelaySeconds: 15
+#            periodSeconds: 20
