@@ -16,16 +16,16 @@ spec:
         - name: frontend
           image: registry.vels.online/vels/frontend:latest
           ports:
-            - containerPort: 5173
+            - containerPort: 80
           readinessProbe:
             httpGet:
               path: /
-              port: 5173
+              port: 80
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /
-              port: 5173
+              port: 80
             initialDelaySeconds: 10
             periodSeconds: 20
