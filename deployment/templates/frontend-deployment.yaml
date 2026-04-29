@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: ghcr.io/reyhzhao/vels-online-frontend:latest
+          image: registry.vels.online/vels/frontend:latest
           ports:
             - containerPort: 80
           readinessProbe:

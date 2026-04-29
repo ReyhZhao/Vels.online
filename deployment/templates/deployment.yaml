@@ -15,7 +15,7 @@ spec:
     spec:
       initContainers:
         - name: migrate
-          image: ghcr.io/reyhzhao/vels-online-backend:latest
+          image: registry.vels.online/vels/backend:latest
           command: ["python", "manage.py", "migrate", "--noinput"]
           envFrom:
             - secretRef:
@@ -27,7 +27,7 @@ spec:
               value: "False"
       containers:
         - name: backend
-          image: ghcr.io/reyhzhao/vels-online-backend:latest
+          image: registry.vels.online/vels/backend:latest
           ports:
             - containerPort: 8000
           envFrom:
