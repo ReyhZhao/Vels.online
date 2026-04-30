@@ -83,3 +83,32 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  update-chart-values:
+    name: Update chart image tags
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Extract version
+        id: version
+        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Update image tags in values.yaml
+        run: |
+          yq e ".backend.image.tag = \"${{ steps.version.outputs.tag }}\"" -i deployment/values.yaml
+          yq e ".frontend.image.tag = \"${{ steps.version.outputs.tag }}\"" -i deployment/values.yaml
+
+      - name: Commit updated values
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deployment/values.yaml
+          git commit -m "chore: update image tags to ${{ steps.version.outputs.tag }} [skip ci]"
+          git push

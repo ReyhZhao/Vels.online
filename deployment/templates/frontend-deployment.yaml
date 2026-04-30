@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: registry.vels.online/vels/frontend:latest
+          image: registry.vels.online/vels/frontend:{{ .Values.frontend.image.tag }}
           imagePullPolicy: Always
           ports:
             - containerPort: 80

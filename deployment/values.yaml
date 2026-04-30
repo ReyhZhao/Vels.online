@@ -1,1 +1,7 @@
-vels-online: {}
+backend:
+  image:
+    tag: latest
+
+frontend:
+  image:
+    tag: latest
