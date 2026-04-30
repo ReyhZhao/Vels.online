@@ -1,7 +1,6 @@
 backend:
   image:
-    tag: latest
-
+    tag: 0.0.4
 frontend:
   image:
-    tag: latest
+    tag: 0.0.4
