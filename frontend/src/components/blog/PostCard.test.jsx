@@ -41,4 +41,13 @@ describe('PostCard', () => {
     renderCard({ title: 'Post', slug: 'post', content: shortContent });
     expect(screen.getByText('Short excerpt.')).toBeInTheDocument();
   });
+
+  it('strips markdown syntax from the excerpt', () => {
+    renderCard({
+      title: 'Post',
+      slug: 'post',
+      content: '# My Heading\n\n**bold** and _italic_ with `code`.',
+    });
+    expect(screen.getByText('My Heading bold and italic with code.')).toBeInTheDocument();
+  });
 });

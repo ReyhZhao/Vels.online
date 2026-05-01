@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { stripMarkdown } from '@/lib/utils';
 
 const EXCERPT_LENGTH = 150;
 
@@ -13,10 +14,11 @@ function formatDate(dateStr) {
 }
 
 function PostCard({ title, slug, publishedAt, content }) {
+  const plain = stripMarkdown(content);
   const excerpt =
-    content && content.length > EXCERPT_LENGTH
-      ? content.slice(0, EXCERPT_LENGTH) + '…'
-      : content;
+    plain && plain.length > EXCERPT_LENGTH
+      ? plain.slice(0, EXCERPT_LENGTH) + '…'
+      : plain;
 
   return (
     <Card className="flex flex-col transition-colors hover:bg-accent/50">
