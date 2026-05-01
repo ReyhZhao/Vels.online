@@ -19,4 +19,5 @@ def me(request):
         "id": request.user.id,
         "username": request.user.username,
         "email": request.user.email,
+        "is_staff": request.user.is_staff,
     })

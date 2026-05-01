@@ -1,4 +1,5 @@
 import { Link, NavLink } from 'react-router-dom';
+import StatusIndicator from './StatusIndicator';
 
 function TopNav() {
   return (
@@ -21,6 +22,7 @@ function TopNav() {
           >
             Blog
           </NavLink>
+          <StatusIndicator />
         </nav>
       </div>
     </header>

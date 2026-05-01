@@ -56,11 +56,9 @@ function Sidebar() {
         </SidebarSection>
 
         <SidebarSection title="Services">
-          <div className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground/50 cursor-default select-none">
-            <Server className="h-4 w-4 shrink-0" />
-            <span>Service Monitor</span>
-            <span className="ml-auto text-xs">Soon</span>
-          </div>
+          <SidebarLink to="/admin/status-settings" icon={Server}>
+            Service Monitor
+          </SidebarLink>
           <div className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground/50 cursor-default select-none">
             <Server className="h-4 w-4 shrink-0" />
             <span>Analytics</span>
