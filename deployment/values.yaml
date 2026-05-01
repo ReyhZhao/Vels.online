@@ -1,6 +1,6 @@
 backend:
   image:
-    tag: 0.0.5
+    tag: 0.0.6
 frontend:
   image:
-    tag: 0.0.5
+    tag: 0.0.6
