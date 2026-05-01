@@ -1,8 +1,8 @@
 backend:
   image:
-    repository: ghcr.io/reyhzhao/vels-online-backend
+    repository: reyhzhao/vels-online-backend
     tag: 0.0.6
 frontend:
   image:
-    repository: ghcr.io/reyhzhao/vels-online-frontend
+    repository: reyhzhao/vels-online-frontend
     tag: 0.0.6
