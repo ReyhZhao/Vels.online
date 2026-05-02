@@ -12,7 +12,7 @@ valkey:
   architecture: standalone
   auth:
     enabled: true
-    existingSecret: "valkey-secret"
+    existingSecret: "backend-secret"
     existingSecretPasswordKey: "valkey-password"
   primary:
     persistence:
