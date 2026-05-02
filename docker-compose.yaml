@@ -16,7 +16,7 @@ services:
   backend:
     platform: linux/amd64
     build: ./backend
-    image: registry.vels.online/vels/backend:latest
+    image: registry.vels.online/vels/backend:v0.0.6
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - ./backend:/app
@@ -33,7 +33,7 @@ services:
 
   frontend:
     platform: linux/amd64
-    image: registry.vels.online/vels/frontend:latest
+    image: registry.vels.online/vels/frontend:v0.0.6
     build:
       context: ./frontend
       #dockerfile: Dockerfile.dev
