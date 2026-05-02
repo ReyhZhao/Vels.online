@@ -1,10 +1,10 @@
 backend:
   image:
     repository: registry.vels.online/vels/backend
-    tag: 0.0.6
+    tag: 0.0.8
 frontend:
   image:
     repository: registry.vels.online/vels/frontend
-    tag: 0.0.6
+    tag: 0.0.8
 imagePullSecrets:
   - name: registry-credentials
