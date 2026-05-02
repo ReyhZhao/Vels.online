@@ -1,4 +1,12 @@
 services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   db:
     image: postgres:16-alpine
     environment:
@@ -27,8 +35,11 @@ services:
       DEBUG: "True"
       ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
       DATABASE_URL: postgres://vels:vels_password@db:5432/vels_online
+      REDIS_URL: redis://valkey:6379/0
     depends_on:
       db:
+        condition: service_healthy
+      valkey:
         condition: service_healthy
 
   frontend:

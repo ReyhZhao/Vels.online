@@ -8,3 +8,13 @@ frontend:
     tag: 0.0.9
 imagePullSecrets:
   - name: registry-credentials
+
+valkey:
+  architecture: standalone
+  auth:
+    enabled: true
+    existingSecret: "valkey-secret"
+    existingSecretPasswordKey: "valkey-password"
+  primary:
+    persistence:
+      enabled: false
