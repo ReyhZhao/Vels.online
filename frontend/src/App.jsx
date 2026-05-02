@@ -13,6 +13,7 @@ import StatusSettings from './pages/admin/StatusSettings';
 import OrgManagement from './pages/admin/OrgManagement';
 import SecurityDashboard from './pages/SecurityDashboard';
 import EnrollmentPage from './pages/EnrollmentPage';
+import AgentDetail from './pages/AgentDetail';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -43,6 +44,7 @@ function App() {
       >
         <Route index element={<SecurityDashboard />} />
         <Route path="enroll" element={<EnrollmentPage />} />
+        <Route path="agents/:agentId" element={<AgentDetail />} />
       </Route>
     </Routes>
   );

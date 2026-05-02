@@ -9,7 +9,8 @@ from rest_framework.response import Response
 from security.models import Organization, OrganizationMembership
 from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
 
-_CACHE_TTL = 60  # seconds
+_CACHE_TTL = 60          # seconds — dashboard / agents
+_EVENTS_CACHE_TTL = 300  # seconds — per-agent events (5 min)
 
 
 def _generate_slug(name):
@@ -53,6 +54,34 @@ def _dashboard_cache_key(slug):
 
 def _agents_cache_key(slug):
     return f"security_agents_{slug}"
+
+
+def _events_cache_key(agent_id, org_slug):
+    return f"security_events_{agent_id}_{org_slug}"
+
+
+def _event_severity(level):
+    if level >= 12:
+        return "critical"
+    if level >= 8:
+        return "high"
+    if level >= 4:
+        return "medium"
+    return "low"
+
+
+def _serialize_event(event):
+    rule = event.get("rule", {})
+    agent = event.get("agent", {})
+    level = rule.get("level", 0)
+    return {
+        "timestamp": event.get("timestamp"),
+        "rule_description": rule.get("description", ""),
+        "rule_id": rule.get("id", ""),
+        "level": level,
+        "severity": _event_severity(level),
+        "agent_name": agent.get("name", ""),
+    }
 
 
 def _resolve_org(request, slug):
@@ -162,7 +191,50 @@ def refresh_view(request):
 
     cache.delete(_dashboard_cache_key(org.slug))
     cache.delete(_agents_cache_key(org.slug))
+
+    agent_id = request.data.get("agent_id", "").strip()
+    if agent_id:
+        cache.delete(_events_cache_key(agent_id, org.slug))
+
     return Response({"detail": "Cache cleared."})
+
+
+@api_view(["GET"])
+def agent_events_view(request, agent_id):
+    slug = request.query_params.get("org", "").strip()
+    org, err = _resolve_org(request, slug)
+    if err:
+        return err
+
+    try:
+        offset = int(request.query_params.get("offset", 0))
+        limit = int(request.query_params.get("limit", 100))
+    except ValueError:
+        return Response({"detail": "offset and limit must be integers."}, status=400)
+
+    # Only cache the default first-page request
+    is_first_page = offset == 0 and limit == 100
+    cache_key = _events_cache_key(agent_id, org.slug)
+
+    if is_first_page:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+    try:
+        result = WazuhClient().get_agent_events(agent_id, hours=24, offset=offset, limit=limit)
+    except (WazuhAuthError, WazuhAPIError) as exc:
+        return Response({"detail": str(exc)}, status=502)
+
+    data = {
+        "events": [_serialize_event(e) for e in result["events"]],
+        "total": result["total"],
+    }
+
+    if is_first_page:
+        cache.set(cache_key, data, _EVENTS_CACHE_TTL)
+
+    return Response(data)
 
 
 @api_view(["GET"])
