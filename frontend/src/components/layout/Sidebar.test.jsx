@@ -33,11 +33,16 @@ describe('Sidebar', () => {
     expect(link).toHaveAttribute('href', '/admin/posts/new');
   });
 
-  it('renders Coming Soon service placeholders that are not links', () => {
+  it('renders a Service Monitor link pointing to /admin/status-settings', () => {
     renderSidebar();
-    expect(screen.getByText('Service Monitor')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /service monitor/i });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', '/admin/status-settings');
+  });
+
+  it('renders Analytics as a Coming Soon placeholder, not a link', () => {
+    renderSidebar();
     expect(screen.getByText('Analytics')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /service monitor/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /analytics/i })).not.toBeInTheDocument();
   });
 });

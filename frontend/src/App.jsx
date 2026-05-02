@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom';
 import PublicLayout from './components/layout/PublicLayout';
 import AdminLayout from './components/layout/AdminLayout';
+import SecurityLayout from './components/layout/SecurityLayout';
 import LandingPage from './pages/LandingPage';
 import BlogIndexPage from './pages/BlogIndexPage';
 import PostDetail from './pages/PostDetail';
@@ -10,6 +11,7 @@ import AdminPostList from './pages/AdminPostList';
 import AdminPostForm from './pages/AdminPostForm';
 import StatusSettings from './pages/admin/StatusSettings';
 import OrgManagement from './pages/admin/OrgManagement';
+import SecurityDashboard from './pages/SecurityDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -32,6 +34,13 @@ function App() {
         <Route path="posts/:slug/edit" element={<AdminPostForm />} />
         <Route path="status-settings" element={<StatusSettings />} />
         <Route path="security/organizations" element={<OrgManagement />} />
+      </Route>
+
+      <Route
+        path="/security"
+        element={<ProtectedRoute><SecurityLayout /></ProtectedRoute>}
+      >
+        <Route index element={<SecurityDashboard />} />
       </Route>
     </Routes>
   );
