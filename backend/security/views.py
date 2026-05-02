@@ -1,3 +1,5 @@
+import os
+
 from django.core.cache import cache
 from django.db import transaction
 from django.utils.text import slugify
@@ -161,3 +163,27 @@ def refresh_view(request):
     cache.delete(_dashboard_cache_key(org.slug))
     cache.delete(_agents_cache_key(org.slug))
     return Response({"detail": "Cache cleared."})
+
+
+@api_view(["GET"])
+def enrollment_view(request):
+    slug = request.query_params.get("org", "").strip()
+    org, err = _resolve_org(request, slug)
+    if err:
+        return err
+
+    manager_host = os.environ.get("WAZUH_MANAGER_HOST", "")
+    install_command = (
+        f"WAZUH_MANAGER='{manager_host}' "
+        f"WAZUH_AGENT_GROUP='{org.wazuh_group}' "
+        f"apt-get install -y wazuh-agent && "
+        f"systemctl daemon-reload && "
+        f"systemctl enable --now wazuh-agent"
+    )
+    return Response(
+        {
+            "wazuh_group": org.wazuh_group,
+            "manager_host": manager_host,
+            "install_command": install_command,
+        }
+    )

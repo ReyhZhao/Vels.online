@@ -12,6 +12,7 @@ import AdminPostForm from './pages/AdminPostForm';
 import StatusSettings from './pages/admin/StatusSettings';
 import OrgManagement from './pages/admin/OrgManagement';
 import SecurityDashboard from './pages/SecurityDashboard';
+import EnrollmentPage from './pages/EnrollmentPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -41,6 +42,7 @@ function App() {
         element={<ProtectedRoute><SecurityLayout /></ProtectedRoute>}
       >
         <Route index element={<SecurityDashboard />} />
+        <Route path="enroll" element={<EnrollmentPage />} />
       </Route>
     </Routes>
   );
