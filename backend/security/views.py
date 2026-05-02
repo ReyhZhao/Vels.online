@@ -9,8 +9,11 @@ from rest_framework.response import Response
 from security.models import Organization, OrganizationMembership
 from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
 
-_CACHE_TTL = 60          # seconds — dashboard / agents
-_EVENTS_CACHE_TTL = 300  # seconds — per-agent events (5 min)
+_CACHE_TTL = 60           # seconds — dashboard / agents
+_EVENTS_CACHE_TTL = 300   # seconds — per-agent events (5 min)
+_VULNS_CACHE_TTL = 3600   # seconds — per-agent vulnerabilities (1 hr)
+
+_SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 
 def _generate_slug(name):
@@ -58,6 +61,21 @@ def _agents_cache_key(slug):
 
 def _events_cache_key(agent_id, org_slug):
     return f"security_events_{agent_id}_{org_slug}"
+
+
+def _vulns_cache_key(agent_id, org_slug):
+    return f"security_vulns_{agent_id}_{org_slug}"
+
+
+def _serialize_vulnerability(vuln):
+    condition = vuln.get("condition", "")
+    return {
+        "cve": vuln.get("cve", ""),
+        "package": vuln.get("name", ""),
+        "version": vuln.get("version", ""),
+        "severity": vuln.get("severity", "").lower(),
+        "fix_available": "fixed in" in condition.lower(),
+    }
 
 
 def _event_severity(level):
@@ -195,6 +213,7 @@ def refresh_view(request):
     agent_id = request.data.get("agent_id", "").strip()
     if agent_id:
         cache.delete(_events_cache_key(agent_id, org.slug))
+        cache.delete(_vulns_cache_key(agent_id, org.slug))
 
     return Response({"detail": "Cache cleared."})
 
@@ -233,6 +252,43 @@ def agent_events_view(request, agent_id):
 
     if is_first_page:
         cache.set(cache_key, data, _EVENTS_CACHE_TTL)
+
+    return Response(data)
+
+
+@api_view(["GET"])
+def agent_vulnerabilities_view(request, agent_id):
+    slug = request.query_params.get("org", "").strip()
+    org, err = _resolve_org(request, slug)
+    if err:
+        return err
+
+    try:
+        offset = int(request.query_params.get("offset", 0))
+        limit = int(request.query_params.get("limit", 50))
+    except ValueError:
+        return Response({"detail": "offset and limit must be integers."}, status=400)
+
+    is_first_page = offset == 0 and limit == 50
+    cache_key = _vulns_cache_key(agent_id, org.slug)
+
+    if is_first_page:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+    try:
+        result = WazuhClient().get_agent_vulnerabilities(agent_id, offset=offset, limit=limit)
+    except (WazuhAuthError, WazuhAPIError) as exc:
+        return Response({"detail": str(exc)}, status=502)
+
+    serialized = [_serialize_vulnerability(v) for v in result["vulnerabilities"]]
+    serialized.sort(key=lambda v: _SEVERITY_ORDER.get(v["severity"], 99))
+
+    data = {"vulnerabilities": serialized, "total": result["total"]}
+
+    if is_first_page:
+        cache.set(cache_key, data, _VULNS_CACHE_TTL)
 
     return Response(data)
 

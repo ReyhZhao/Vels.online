@@ -22,24 +22,21 @@ function SeverityBadge({ severity }) {
   );
 }
 
-export default function AgentDetail() {
-  const { agentId } = useParams();
-  const navigate = useNavigate();
-  const { selectedOrg, isLoading: orgLoading } = useOrganization();
+const LIMIT = 50;
 
+function EventsTab({ agentId, orgSlug }) {
   const [events, setEvents] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchFirstPage = useCallback(async (slug) => {
+  const fetchFirstPage = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await api.get(
-        `/api/security/agents/${agentId}/events/?org=${slug}&offset=0&limit=100`
+        `/api/security/agents/${agentId}/events/?org=${orgSlug}&offset=0&limit=100`
       );
       setEvents(res.data.events);
       setTotal(res.data.total);
@@ -48,18 +45,16 @@ export default function AgentDetail() {
     } finally {
       setLoading(false);
     }
-  }, [agentId]);
+  }, [agentId, orgSlug]);
 
-  useEffect(() => {
-    if (selectedOrg) fetchFirstPage(selectedOrg.slug);
-  }, [selectedOrg, fetchFirstPage]);
+  useEffect(() => { fetchFirstPage(); }, [fetchFirstPage]);
 
   async function handleShowMore() {
-    if (!selectedOrg || loadingMore) return;
+    if (loadingMore) return;
     setLoadingMore(true);
     try {
       const res = await api.get(
-        `/api/security/agents/${agentId}/events/?org=${selectedOrg.slug}&offset=${events.length}&limit=100`
+        `/api/security/agents/${agentId}/events/?org=${orgSlug}&offset=${events.length}&limit=100`
       );
       setEvents((prev) => [...prev, ...res.data.events]);
       setTotal(res.data.total);
@@ -67,6 +62,184 @@ export default function AgentDetail() {
       setLoadingMore(false);
     }
   }
+
+  if (loading) return <p className="py-4 text-sm text-muted-foreground">Loading…</p>;
+  if (error) return <p className="text-sm text-red-600">{error}</p>;
+
+  return (
+    <div className="space-y-2">
+      {total > 0 && (
+        <p className="text-xs text-muted-foreground text-right">
+          Showing {events.length} of {total}
+        </p>
+      )}
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Timestamp</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Rule</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">
+                  No events in the last 24 hours.
+                </td>
+              </tr>
+            ) : (
+              events.map((event, idx) => (
+                <tr key={`${event.timestamp}-${idx}`} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                    {event.timestamp ? new Date(event.timestamp).toLocaleString() : '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <SeverityBadge severity={event.severity} />
+                  </td>
+                  <td className="px-4 py-3 text-foreground">{event.rule_description}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      {total > events.length && (
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={handleShowMore}
+            disabled={loadingMore}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            {loadingMore ? 'Loading…' : `Show more (${total - events.length} remaining)`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VulnerabilitiesTab({ agentId, orgSlug }) {
+  const [vulns, setVulns] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchPage = useCallback(async (pageIndex) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.get(
+        `/api/security/agents/${agentId}/vulnerabilities/?org=${orgSlug}&offset=${pageIndex * LIMIT}&limit=${LIMIT}`
+      );
+      setVulns(res.data.vulnerabilities);
+      setTotal(res.data.total);
+    } catch {
+      setError('Failed to load vulnerabilities.');
+    } finally {
+      setLoading(false);
+    }
+  }, [agentId, orgSlug]);
+
+  useEffect(() => { fetchPage(0); }, [fetchPage]);
+
+  const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+
+  function goToPage(p) {
+    setPage(p);
+    fetchPage(p);
+  }
+
+  if (loading) return <p className="py-4 text-sm text-muted-foreground">Loading…</p>;
+  if (error) return <p className="text-sm text-red-600">{error}</p>;
+
+  return (
+    <div className="space-y-2">
+      {total > 0 && (
+        <p className="text-xs text-muted-foreground text-right">
+          Page {page + 1} of {totalPages} · {total} total
+        </p>
+      )}
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">CVE</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Package</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Version</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Fix</th>
+            </tr>
+          </thead>
+          <tbody>
+            {vulns.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                  No vulnerabilities found.
+                </td>
+              </tr>
+            ) : (
+              vulns.map((vuln) => (
+                <tr key={vuln.cve} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 font-mono text-xs text-foreground">{vuln.cve}</td>
+                  <td className="px-4 py-3">
+                    <SeverityBadge severity={vuln.severity} />
+                  </td>
+                  <td className="px-4 py-3 text-foreground">{vuln.package}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{vuln.version}</td>
+                  <td className="px-4 py-3">
+                    {vuln.fix_available ? (
+                      <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                        Available
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">None</span>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <button
+            onClick={() => goToPage(page - 1)}
+            disabled={page === 0}
+            aria-label="Previous page"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            ← Previous
+          </button>
+          <span className="text-sm text-muted-foreground">
+            {page + 1} / {totalPages}
+          </span>
+          <button
+            onClick={() => goToPage(page + 1)}
+            disabled={page >= totalPages - 1}
+            aria-label="Next page"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            Next →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function AgentDetail() {
+  const { agentId } = useParams();
+  const navigate = useNavigate();
+  const { selectedOrg, isLoading: orgLoading } = useOrganization();
+
+  const [activeTab, setActiveTab] = useState('events');
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   async function handleRefresh() {
     if (!selectedOrg || refreshing) return;
@@ -76,7 +249,7 @@ export default function AgentDetail() {
         org: selectedOrg.slug,
         agent_id: agentId,
       });
-      await fetchFirstPage(selectedOrg.slug);
+      setRefreshKey((k) => k + 1);
     } finally {
       setRefreshing(false);
     }
@@ -99,87 +272,38 @@ export default function AgentDetail() {
         </div>
         <button
           onClick={handleRefresh}
-          disabled={refreshing || loading}
+          disabled={refreshing}
           className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-accent disabled:opacity-50"
         >
           {refreshing ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">
-            Security Events{' '}
-            <span className="font-normal text-muted-foreground">(last 24 h)</span>
-          </h2>
-          {total > 0 && (
-            <span className="text-xs text-muted-foreground">
-              Showing {events.length} of {total}
-            </span>
-          )}
+      <div>
+        <div className="flex gap-4 border-b border-border">
+          {['events', 'vulnerabilities'].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`pb-2 text-sm font-medium capitalize transition-colors border-b-2 ${
+                activeTab === tab
+                  ? 'border-foreground text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
 
-        {loading ? (
-          <p className="py-4 text-sm text-muted-foreground">Loading…</p>
-        ) : (
-          <>
-            <div className="overflow-hidden rounded-lg border border-border bg-card">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                      Timestamp
-                    </th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                      Severity
-                    </th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                      Rule
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {events.length === 0 ? (
-                    <tr>
-                      <td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">
-                        No events in the last 24 hours.
-                      </td>
-                    </tr>
-                  ) : (
-                    events.map((event, idx) => (
-                      <tr
-                        key={`${event.timestamp}-${idx}`}
-                        className="border-b border-border last:border-0"
-                      >
-                        <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                          {event.timestamp ? new Date(event.timestamp).toLocaleString() : '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <SeverityBadge severity={event.severity} />
-                        </td>
-                        <td className="px-4 py-3 text-foreground">{event.rule_description}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {total > events.length && (
-              <div className="flex justify-center pt-2">
-                <button
-                  onClick={handleShowMore}
-                  disabled={loadingMore}
-                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
-                >
-                  {loadingMore ? 'Loading…' : `Show more (${total - events.length} remaining)`}
-                </button>
-              </div>
-            )}
-          </>
-        )}
+        <div className="pt-4">
+          {activeTab === 'events' && (
+            <EventsTab key={`events-${refreshKey}`} agentId={agentId} orgSlug={selectedOrg.slug} />
+          )}
+          {activeTab === 'vulnerabilities' && (
+            <VulnerabilitiesTab key={`vulns-${refreshKey}`} agentId={agentId} orgSlug={selectedOrg.slug} />
+          )}
+        </div>
       </div>
     </div>
   );
