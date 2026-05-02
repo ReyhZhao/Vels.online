@@ -5,6 +5,9 @@ from .views import (
     AgentListView,
     AgentVulnerabilitiesView,
     DashboardView,
+    DownloadListView,
+    DownloadPresignedView,
+    DownloadUploadView,
     EnrollmentView,
     OrganizationListView,
     SecurityRefreshView,
@@ -18,4 +21,7 @@ urlpatterns = [
     path("dashboard/", DashboardView.as_view()),
     path("dashboard/refresh/", SecurityRefreshView.as_view()),
     path("enrollment/", EnrollmentView.as_view()),
+    path("downloads/", DownloadListView.as_view()),
+    path("downloads/<int:pk>/presigned/", DownloadPresignedView.as_view()),
+    path("downloads/<int:pk>/upload/", DownloadUploadView.as_view()),
 ]

@@ -1,20 +1,41 @@
 import { useState, useEffect } from 'react';
+import { Download } from 'lucide-react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
+
+const CATEGORY_LABELS = { agent: 'Agent', tool: 'Tool', config: 'Config' };
+const PLATFORM_LABELS = { windows: 'Windows', linux: 'Linux', macos: 'macOS', all: 'All' };
+
+function groupByCategory(downloads) {
+  return downloads.reduce((acc, d) => {
+    const key = d.category;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(d);
+    return acc;
+  }, {});
+}
 
 export default function EnrollmentPage() {
   const { selectedOrg, isLoading: orgLoading } = useOrganization();
   const [enrollment, setEnrollment] = useState(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [downloads, setDownloads] = useState([]);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   useEffect(() => {
     if (!selectedOrg) return;
     setLoading(true);
     setEnrollment(null);
-    api
-      .get(`/api/security/enrollment/?org=${selectedOrg.slug}`)
-      .then((res) => setEnrollment(res.data))
+    setDownloads([]);
+    Promise.all([
+      api.get(`/api/security/enrollment/?org=${selectedOrg.slug}`),
+      api.get(`/api/security/downloads/?org=${selectedOrg.slug}`),
+    ])
+      .then(([enrollRes, dlRes]) => {
+        setEnrollment(enrollRes.data);
+        setDownloads(dlRes.data);
+      })
       .finally(() => setLoading(false));
   }, [selectedOrg]);
 
@@ -25,6 +46,21 @@ export default function EnrollmentPage() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  async function handleDownload(downloadId) {
+    setDownloadingId(downloadId);
+    try {
+      const res = await api.get(`/api/security/downloads/${downloadId}/presigned/`);
+      const a = document.createElement('a');
+      a.href = res.data.url;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   if (orgLoading) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
@@ -33,8 +69,10 @@ export default function EnrollmentPage() {
     return <p className="text-sm text-muted-foreground">No organisation assigned.</p>;
   }
 
+  const grouped = groupByCategory(downloads);
+
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-3xl space-y-8">
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Enroll an Agent</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -73,6 +111,40 @@ export default function EnrollmentPage() {
               </>
             )}
           </p>
+        </div>
+      )}
+
+      {!loading && downloads.length > 0 && (
+        <div className="space-y-6" data-testid="downloads-section">
+          <h2 className="text-lg font-semibold text-foreground">Downloads</h2>
+          {Object.entries(grouped).map(([category, items]) => (
+            <div key={category} className="space-y-2">
+              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                {CATEGORY_LABELS[category] ?? category}
+              </h3>
+              <div className="rounded-lg border border-border divide-y divide-border">
+                {items.map((dl) => (
+                  <div key={dl.id} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{dl.label}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {PLATFORM_LABELS[dl.platform] ?? dl.platform}
+                      </p>
+                    </div>
+                    <button
+                      data-testid={`download-btn-${dl.id}`}
+                      onClick={() => handleDownload(dl.id)}
+                      disabled={downloadingId === dl.id}
+                      className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm hover:bg-accent transition-colors disabled:opacity-50"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      {downloadingId === dl.id ? 'Downloading…' : 'Download'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

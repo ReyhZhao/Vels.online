@@ -6,14 +6,18 @@ from django.utils.text import slugify
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from security.models import Organization, OrganizationMembership
+from django.db.models import Q
+from security.models import Download, Organization, OrganizationMembership
 from security.serializers import (
     AgentSerializer,
+    DownloadCreateSerializer,
+    DownloadSerializer,
     EnrollmentSerializer,
     OrganizationSerializer,
     PaginatedEventsSerializer,
     PaginatedVulnerabilitiesSerializer,
 )
+from security.storage import StorageClient
 from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
 
 _CACHE_TTL = 60           # seconds — dashboard / agents
@@ -313,3 +317,90 @@ class EnrollmentView(APIView):
             "install_command": install_command,
         }).data
         return Response(data)
+
+
+class DownloadListView(APIView):
+    def get(self, request):
+        org_slug = request.query_params.get("org", "").strip()
+
+        if org_slug:
+            org, err = _resolve_org(request, org_slug)
+            if err:
+                return err
+            downloads = Download.objects.filter(
+                Q(organization=None) | Q(organization=org)
+            ).select_related("organization")
+        else:
+            if not request.user.is_staff:
+                return Response({"detail": "org is required."}, status=400)
+            downloads = Download.objects.all().select_related("organization")
+
+        return Response(DownloadSerializer(downloads, many=True).data)
+
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response(status=403)
+
+        serializer = DownloadCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        data = serializer.validated_data
+        org = None
+        org_slug = data.get("organization_slug", "").strip()
+        if org_slug:
+            try:
+                org = Organization.objects.get(slug=org_slug)
+            except Organization.DoesNotExist:
+                return Response({"detail": "Organization not found."}, status=404)
+
+        download = Download.objects.create(
+            label=data["label"],
+            platform=data["platform"],
+            category=data["category"],
+            organization=org,
+        )
+        return Response(DownloadSerializer(download).data, status=201)
+
+
+class DownloadPresignedView(APIView):
+    def get(self, request, pk):
+        try:
+            download = Download.objects.select_related("organization").get(pk=pk)
+        except Download.DoesNotExist:
+            return Response(status=404)
+
+        if download.organization is not None:
+            if not request.user.is_staff:
+                if not OrganizationMembership.objects.filter(
+                    user=request.user, organization=download.organization
+                ).exists():
+                    return Response(status=403)
+
+        if not download.s3_key:
+            return Response({"detail": "No file uploaded yet."}, status=404)
+
+        url = StorageClient().generate_presigned_url(download.s3_key, expiry_seconds=300)
+        return Response({"url": url})
+
+
+class DownloadUploadView(APIView):
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            return Response(status=403)
+
+        try:
+            download = Download.objects.get(pk=pk)
+        except Download.DoesNotExist:
+            return Response(status=404)
+
+        file = request.FILES.get("file")
+        if not file:
+            return Response({"detail": "file is required."}, status=400)
+
+        key = f"downloads/{download.pk}/{file.name}"
+        StorageClient().upload_file(file, key)
+        download.s3_key = key
+        download.save()
+
+        return Response(DownloadSerializer(download).data)

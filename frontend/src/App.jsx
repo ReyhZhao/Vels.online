@@ -11,6 +11,7 @@ import AdminPostList from './pages/AdminPostList';
 import AdminPostForm from './pages/AdminPostForm';
 import StatusSettings from './pages/admin/StatusSettings';
 import OrgManagement from './pages/admin/OrgManagement';
+import DownloadManagement from './pages/admin/DownloadManagement';
 import SecurityDashboard from './pages/SecurityDashboard';
 import EnrollmentPage from './pages/EnrollmentPage';
 import AgentDetail from './pages/AgentDetail';
@@ -36,6 +37,7 @@ function App() {
         <Route path="posts/:slug/edit" element={<AdminPostForm />} />
         <Route path="status-settings" element={<StatusSettings />} />
         <Route path="security/organizations" element={<OrgManagement />} />
+        <Route path="security/downloads" element={<DownloadManagement />} />
       </Route>
 
       <Route

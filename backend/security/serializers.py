@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Organization
+from .models import Download, Organization
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -50,3 +50,24 @@ class EnrollmentSerializer(serializers.Serializer):
     wazuh_group = serializers.CharField()
     manager_host = serializers.CharField()
     install_command = serializers.CharField()
+
+
+class DownloadSerializer(serializers.ModelSerializer):
+    organization_slug = serializers.SlugRelatedField(
+        source="organization", slug_field="slug", read_only=True
+    )
+    has_file = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Download
+        fields = ["id", "label", "platform", "category", "organization_slug", "has_file"]
+
+    def get_has_file(self, obj):
+        return bool(obj.s3_key)
+
+
+class DownloadCreateSerializer(serializers.Serializer):
+    label = serializers.CharField()
+    platform = serializers.ChoiceField(choices=Download.PLATFORM_CHOICES)
+    category = serializers.ChoiceField(choices=Download.CATEGORY_CHOICES)
+    organization_slug = serializers.CharField(required=False, allow_blank=True, default="")
