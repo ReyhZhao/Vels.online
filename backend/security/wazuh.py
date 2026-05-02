@@ -1,0 +1,123 @@
+import os
+
+import requests
+import urllib3
+from django.core.cache import cache
+
+# Wazuh uses self-signed TLS internally; suppress the resulting warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+_TOKEN_CACHE_KEY = "wazuh_jwt_token"
+_TOKEN_CACHE_TTL = 800  # Wazuh tokens expire at 900s; cache slightly shorter
+
+
+class WazuhAuthError(RuntimeError):
+    pass
+
+
+class WazuhAPIError(RuntimeError):
+    pass
+
+
+class WazuhClient:
+    def __init__(self):
+        self._base_url = os.environ.get("WAZUH_API_URL", "").rstrip("/")
+        self._user = os.environ.get("WAZUH_API_USER", "")
+        self._password = os.environ.get("WAZUH_API_PASSWORD", "")
+
+    # ------------------------------------------------------------------ auth
+
+    def _fetch_token(self):
+        response = requests.post(
+            f"{self._base_url}/security/user/authenticate",
+            auth=(self._user, self._password),
+            verify=False,
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("error") != 0:
+            raise WazuhAuthError(f"Wazuh authentication failed: {data.get('message', 'unknown')}")
+        return data["data"]["token"]
+
+    def _get_token(self):
+        token = cache.get(_TOKEN_CACHE_KEY)
+        if token:
+            return token
+        token = self._fetch_token()
+        cache.set(_TOKEN_CACHE_KEY, token, _TOKEN_CACHE_TTL)
+        return token
+
+    def _headers(self):
+        return {"Authorization": f"Bearer {self._get_token()}"}
+
+    # ---------------------------------------------------------------- helpers
+
+    def _get(self, path, params=None):
+        response = requests.get(
+            f"{self._base_url}{path}",
+            headers=self._headers(),
+            params=params,
+            verify=False,
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("error") != 0:
+            raise WazuhAPIError(f"Wazuh API error on {path}: {data.get('message', 'unknown')}")
+        return data
+
+    def _post(self, path, body):
+        response = requests.post(
+            f"{self._base_url}{path}",
+            headers=self._headers(),
+            json=body,
+            verify=False,
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("error") != 0:
+            raise WazuhAPIError(f"Wazuh API error on {path}: {data.get('message', 'unknown')}")
+        return data
+
+    # --------------------------------------------------------- public methods
+
+    def create_group(self, group_name):
+        self._post("/groups", {"group_id": group_name})
+
+    def get_agents(self, group_name):
+        data = self._get(
+            "/agents",
+            params={
+                "groups_list": group_name,
+                "select": "id,name,ip,status,os.name,os.version,os.platform,lastKeepAlive",
+                "limit": 500,
+            },
+        )
+        return data["data"]["affected_items"]
+
+    def get_agent_events(self, agent_id, hours=24, offset=0, limit=100):
+        data = self._get(
+            "/events",
+            params={
+                "agent_ids": agent_id,
+                "q": f"timestamp>{hours}h",
+                "offset": offset,
+                "limit": limit,
+            },
+        )
+        return {
+            "events": data["data"]["affected_items"],
+            "total": data["data"]["total_affected_items"],
+        }
+
+    def get_agent_vulnerabilities(self, agent_id, offset=0, limit=50):
+        data = self._get(
+            f"/vulnerability/{agent_id}",
+            params={"offset": offset, "limit": limit},
+        )
+        return {
+            "vulnerabilities": data["data"]["affected_items"],
+            "total": data["data"]["total_affected_items"],
+        }
