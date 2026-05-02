@@ -121,3 +121,36 @@ class WazuhClient:
             "vulnerabilities": data["data"]["affected_items"],
             "total": data["data"]["total_affected_items"],
         }
+
+    def get_vulnerabilities_summary(self, agents):
+        """Return {critical, high, medium, low} counts across the given agent list."""
+        counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for agent in agents:
+            if agent.get("status") != "active":
+                continue
+            for severity in counts:
+                try:
+                    data = self._get(
+                        f"/vulnerability/{agent['id']}",
+                        params={"severity": severity, "limit": 1},
+                    )
+                    counts[severity] += data["data"]["total_affected_items"]
+                except WazuhAPIError:
+                    pass
+        return counts
+
+    def get_events_count(self, agents, hours=24):
+        """Return total security event count for the given agent list in the last N hours."""
+        total = 0
+        for agent in agents:
+            if agent.get("status") != "active":
+                continue
+            try:
+                data = self._get(
+                    "/events",
+                    params={"agent_ids": agent["id"], "q": f"timestamp>{hours}h", "limit": 1},
+                )
+                total += data["data"]["total_affected_items"]
+            except WazuhAPIError:
+                pass
+        return total

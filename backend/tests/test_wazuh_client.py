@@ -222,6 +222,61 @@ def test_get_agent_vulnerabilities_calls_correct_endpoint(mock_post, mock_get, m
     assert url == f"{_BASE_URL}/vulnerability/042"
 
 
+# ------------------------------------------------- get_vulnerabilities_summary
+
+
+@patch("security.wazuh.cache")
+@patch("security.wazuh.requests.get")
+@patch("security.wazuh.requests.post")
+def test_get_vulnerabilities_summary_sums_per_severity(mock_post, mock_get, mock_cache):
+    mock_cache.get.return_value = _FAKE_TOKEN
+    # Each call returns total=1 for whichever severity was requested
+    mock_get.return_value = _api_response([], total=1)
+
+    agents = [{"id": "001", "status": "active"}]
+    result = WazuhClient().get_vulnerabilities_summary(agents)
+
+    assert result == {"critical": 1, "high": 1, "medium": 1, "low": 1}
+    assert mock_get.call_count == 4  # one request per severity
+
+
+@patch("security.wazuh.cache")
+@patch("security.wazuh.requests.get")
+@patch("security.wazuh.requests.post")
+def test_get_vulnerabilities_summary_skips_inactive_agents(mock_post, mock_get, mock_cache):
+    mock_cache.get.return_value = _FAKE_TOKEN
+
+    agents = [{"id": "001", "status": "disconnected"}, {"id": "002", "status": "active"}]
+    mock_get.return_value = _api_response([], total=3)
+
+    result = WazuhClient().get_vulnerabilities_summary(agents)
+
+    # Only agent 002 (active) queried — 4 requests total
+    assert mock_get.call_count == 4
+    assert result == {"critical": 3, "high": 3, "medium": 3, "low": 3}
+
+
+# ----------------------------------------------------- get_events_count
+
+
+@patch("security.wazuh.cache")
+@patch("security.wazuh.requests.get")
+@patch("security.wazuh.requests.post")
+def test_get_events_count_sums_active_agents(mock_post, mock_get, mock_cache):
+    mock_cache.get.return_value = _FAKE_TOKEN
+    mock_get.return_value = _api_response([], total=10)
+
+    agents = [
+        {"id": "001", "status": "active"},
+        {"id": "002", "status": "active"},
+        {"id": "003", "status": "disconnected"},
+    ]
+    result = WazuhClient().get_events_count(agents)
+
+    assert result == 20  # 10 per active agent, inactive skipped
+    assert mock_get.call_count == 2
+
+
 # ---------------------------------------------------------------- create_group
 
 
