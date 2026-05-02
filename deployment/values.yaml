@@ -1,8 +1,10 @@
 backend:
   image:
-    repository: reyhzhao/vels-online-backend
+    repository: registry.vels.online/vels/backend
     tag: 0.0.6
 frontend:
   image:
-    repository: reyhzhao/vels-online-frontend
+    repository: registry.vels.online/vels/frontend
     tag: 0.0.6
+imagePullSecrets:
+  - name: registry-credentials
