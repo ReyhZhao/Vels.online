@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, FileText, FilePlus, Server } from 'lucide-react';
+import { LayoutDashboard, FileText, FilePlus, Server, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 function SidebarLink({ to, end, icon: Icon, children }) {
@@ -58,6 +58,9 @@ function Sidebar() {
         <SidebarSection title="Services">
           <SidebarLink to="/admin/status-settings" icon={Server}>
             Service Monitor
+          </SidebarLink>
+          <SidebarLink to="/admin/security/organizations" icon={Shield}>
+            Organisations
           </SidebarLink>
           <div className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground/50 cursor-default select-none">
             <Server className="h-4 w-4 shrink-0" />

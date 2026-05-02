@@ -9,6 +9,7 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminPostList from './pages/AdminPostList';
 import AdminPostForm from './pages/AdminPostForm';
 import StatusSettings from './pages/admin/StatusSettings';
+import OrgManagement from './pages/admin/OrgManagement';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
         <Route path="posts/new" element={<AdminPostForm />} />
         <Route path="posts/:slug/edit" element={<AdminPostForm />} />
         <Route path="status-settings" element={<StatusSettings />} />
+        <Route path="security/organizations" element={<OrgManagement />} />
       </Route>
     </Routes>
   );
