@@ -1,3 +1,4 @@
+from django.middleware.csrf import get_token
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -13,6 +14,10 @@ def health(request):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def me(request):
+    # Ensure csrftoken cookie is written so mutating API calls (POST/PATCH) can
+    # include it via X-CSRFToken. All API views are csrf_exempt at the Django
+    # middleware level, so without this the cookie is never set for SPA users.
+    get_token(request._request)
     if not request.user.is_authenticated:
         return Response(status=status.HTTP_401_UNAUTHORIZED)
     return Response({

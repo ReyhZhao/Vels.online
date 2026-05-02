@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 from django.core.cache import cache
+from django.test import Client
 
 from status.models import MonitorVisibility
 
@@ -104,6 +105,18 @@ def test_admin_status_requests_logs_from_uptimerobot(mock_get, admin_client, vis
 
 
 # --- POST /api/status/refresh/ ---
+
+@pytest.mark.django_db
+def test_me_sets_csrf_cookie(django_user_model):
+    """GET /api/me/ must write the csrftoken cookie so the SPA can attach
+    X-CSRFToken on POST/PATCH requests. All other API views are csrf_exempt,
+    so without this call the cookie is never set for SPA-only users."""
+    user = django_user_model.objects.create_user(username="admin_csrf", password="pass", is_staff=True)
+    c = Client()
+    c.force_login(user)
+    res = c.get("/api/me/")
+    assert "csrftoken" in res.cookies
+
 
 @pytest.mark.django_db
 def test_refresh_returns_403_for_anonymous(client):
