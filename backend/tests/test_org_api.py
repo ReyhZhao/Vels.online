@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from security.models import Organization, OrganizationMembership
-from security.wazuh import WazuhAPIError
+from security.wazuh import WazuhAPIError, WazuhAuthError
 
 
 @pytest.fixture
@@ -114,6 +114,24 @@ def test_wazuh_failure_rolls_back_org_creation(mock_wazuh_cls, admin_client):
     assert response.status_code == 400
     assert "Wazuh" in response.json()["detail"]
     assert not Organization.objects.filter(slug="bad-org").exists()
+
+
+@pytest.mark.django_db
+@patch("security.views.WazuhClient")
+def test_wazuh_auth_error_returns_400_not_500(mock_wazuh_cls, admin_client):
+    """Regression: 401 from Wazuh must return 400 to the client, not 500."""
+    mock_client = mock_wazuh_cls.return_value
+    mock_client.create_group.side_effect = WazuhAuthError("Wazuh authentication failed: 401 Unauthorized")
+
+    response = admin_client.post(
+        "/api/security/organizations/",
+        {"name": "Auth Fail Org"},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert "Wazuh" in response.json()["detail"]
+    assert not Organization.objects.filter(slug="auth-fail-org").exists()
 
 
 @pytest.mark.django_db

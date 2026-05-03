@@ -28,13 +28,20 @@ class WazuhClient:
     # ------------------------------------------------------------------ auth
 
     def _fetch_token(self):
+
+        if not self._user or not self._password:
+            raise Exception("Username or password not set in environment variables.")
+
         response = requests.post(
             f"{self._base_url}/security/user/authenticate",
             auth=(self._user, self._password),
             verify=False,
             timeout=10,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise WazuhAuthError(f"Wazuh authentication failed: {exc}") from exc
         data = response.json()
         if data.get("error") != 0:
             raise WazuhAuthError(f"Wazuh authentication failed: {data.get('message', 'unknown')}")
@@ -61,7 +68,10 @@ class WazuhClient:
             verify=False,
             timeout=10,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise WazuhAPIError(f"Wazuh API error on {path}: {exc}") from exc
         data = response.json()
         if data.get("error") != 0:
             raise WazuhAPIError(f"Wazuh API error on {path}: {data.get('message', 'unknown')}")
@@ -75,7 +85,10 @@ class WazuhClient:
             verify=False,
             timeout=10,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise WazuhAPIError(f"Wazuh API error on {path}: {exc}") from exc
         data = response.json()
         if data.get("error") != 0:
             raise WazuhAPIError(f"Wazuh API error on {path}: {data.get('message', 'unknown')}")

@@ -1,8 +1,9 @@
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+import requests
 
-from security.wazuh import WazuhAuthError, WazuhClient
+from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
 
 _FAKE_TOKEN = "eyJhbGciOiJFUzUxMiJ9.fake-token"
 _BASE_URL = "https://wazuh.test:55000"
@@ -102,6 +103,33 @@ def test_auth_failure_raises_wazuh_auth_error(mock_post, mock_cache):
     mock_post.return_value = _error_response("Invalid credentials")
 
     with pytest.raises(WazuhAuthError, match="Invalid credentials"):
+        WazuhClient().get_agents("acme")
+
+
+@patch("security.wazuh.cache")
+@patch("security.wazuh.requests.post")
+def test_auth_http_401_raises_wazuh_auth_error(mock_post, mock_cache):
+    """HTTP 401 from raise_for_status() must be translated to WazuhAuthError, not leak as HTTPError."""
+    mock_cache.get.return_value = None
+    resp = MagicMock()
+    resp.raise_for_status.side_effect = requests.exceptions.HTTPError("401 Client Error: Unauthorized")
+    mock_post.return_value = resp
+
+    with pytest.raises(WazuhAuthError, match="401"):
+        WazuhClient().get_agents("acme")
+
+
+@patch("security.wazuh.cache")
+@patch("security.wazuh.requests.get")
+@patch("security.wazuh.requests.post")
+def test_api_http_error_raises_wazuh_api_error(mock_post, mock_get, mock_cache):
+    """HTTP errors from _get() must be translated to WazuhAPIError."""
+    mock_cache.get.return_value = _FAKE_TOKEN
+    resp = MagicMock()
+    resp.raise_for_status.side_effect = requests.exceptions.HTTPError("404 Client Error: Not Found")
+    mock_get.return_value = resp
+
+    with pytest.raises(WazuhAPIError, match="404"):
         WazuhClient().get_agents("acme")
 
 
