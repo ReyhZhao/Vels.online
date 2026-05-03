@@ -31,3 +31,4 @@ htmlcov/
 
 # Unit testing
 tests/
+test.db

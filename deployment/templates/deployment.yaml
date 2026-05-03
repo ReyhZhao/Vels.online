@@ -31,8 +31,10 @@ spec:
                   key: fqdn-uri
             - name: ALLOWED_HOSTS
               value: "vels.online"
+
             - name: DEBUG
               value: "True"
+
             - name: CSRF_TRUSTED_ORIGINS
               value: "https://vels.online"
 
@@ -57,7 +59,7 @@ spec:
             - name: CSRF_TRUSTED_ORIGINS
               value: "https://vels.online"
             - name: DEBUG
-              value: "False"
+              value: "True"
 
 #          readinessProbe:
 #            httpGet:
