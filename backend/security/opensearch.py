@@ -6,7 +6,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _ALERTS_INDEX = "wazuh-alerts-4.x-*"
-_VULNS_INDEX = "wazuh-states-vulnerabilities-default"
+_VULNS_INDEX = "wazuh-states-vulnerabilities-wazuh"
 
 
 class OpenSearchError(RuntimeError):
