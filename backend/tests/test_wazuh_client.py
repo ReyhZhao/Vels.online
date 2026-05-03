@@ -170,7 +170,7 @@ def test_get_agents_sends_correct_params(mock_post, mock_get, mock_cache):
     WazuhClient().get_agents("acme-corp")
 
     _, kwargs = mock_get.call_args
-    assert kwargs["params"]["groups_list"] == "acme-corp"
+    assert kwargs["params"]["group"] == "acme-corp"
     assert "id,name" in kwargs["params"]["select"]
 
 

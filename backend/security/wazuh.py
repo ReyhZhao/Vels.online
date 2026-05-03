@@ -103,7 +103,7 @@ class WazuhClient:
         data = self._get(
             "/agents",
             params={
-                "groups_list": group_name,
+                "group": group_name,
                 "select": "id,name,ip,status,os.name,os.version,os.platform,lastKeepAlive",
                 "limit": 500,
             },
