@@ -1,3 +1,4 @@
+from django.contrib.auth import logout as django_logout
 from django.middleware.csrf import get_token
 from rest_framework import status
 from rest_framework.permissions import AllowAny
@@ -25,3 +26,11 @@ class MeView(APIView):
         if not request.user.is_authenticated:
             return Response(status=status.HTTP_401_UNAUTHORIZED)
         return Response(UserSerializer(request.user).data)
+
+
+class LogoutView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        django_logout(request)
+        return Response({"detail": "Logged out."})
