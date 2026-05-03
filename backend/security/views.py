@@ -18,6 +18,7 @@ from security.serializers import (
     PaginatedVulnerabilitiesSerializer,
 )
 from security.storage import StorageClient
+from security.opensearch import OpenSearchClient, OpenSearchError
 from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
 
 _CACHE_TTL = 60           # seconds — dashboard / agents
@@ -84,7 +85,7 @@ def _serialize_event(event):
     agent = event.get("agent", {})
     level = rule.get("level", 0)
     return {
-        "timestamp": event.get("timestamp"),
+        "timestamp": event.get("@timestamp") or event.get("timestamp"),
         "rule_description": rule.get("description", ""),
         "rule_id": rule.get("id", ""),
         "level": level,
@@ -94,13 +95,14 @@ def _serialize_event(event):
 
 
 def _serialize_vulnerability(vuln):
-    condition = vuln.get("condition", "")
+    v = vuln.get("vulnerability", {})
+    pkg = vuln.get("package", {})
     return {
-        "cve": vuln.get("cve", ""),
-        "package": vuln.get("name", ""),
-        "version": vuln.get("version", ""),
-        "severity": vuln.get("severity", "").lower(),
-        "fix_available": "fixed in" in condition.lower(),
+        "cve": v.get("id", ""),
+        "package": pkg.get("name", ""),
+        "version": pkg.get("version", ""),
+        "severity": v.get("severity", "").lower(),
+        "fix_available": v.get("status", "").lower() == "fixed",
     }
 
 
@@ -182,12 +184,12 @@ class DashboardView(APIView):
         if cached is not None:
             return Response(cached)
 
-        client = WazuhClient()
         try:
-            raw_agents = client.get_agents(org.wazuh_group)
-            vuln_summary = client.get_vulnerabilities_summary(raw_agents)
-            event_count = client.get_events_count(raw_agents)
-        except (WazuhAuthError, WazuhAPIError) as exc:
+            raw_agents = WazuhClient().get_agents(org.wazuh_group)
+            os_client = OpenSearchClient()
+            vuln_summary = os_client.get_vulnerabilities_summary(raw_agents)
+            event_count = os_client.get_events_count(raw_agents)
+        except (WazuhAuthError, WazuhAPIError, OpenSearchError) as exc:
             return Response({"detail": str(exc)}, status=502)
 
         active = sum(1 for a in raw_agents if a.get("status") == "active")
@@ -241,8 +243,8 @@ class AgentEventsView(APIView):
                 return Response(cached)
 
         try:
-            result = WazuhClient().get_agent_events(agent_id, hours=24, offset=offset, limit=limit)
-        except (WazuhAuthError, WazuhAPIError) as exc:
+            result = OpenSearchClient().get_agent_events(agent_id, hours=24, offset=offset, limit=limit)
+        except OpenSearchError as exc:
             return Response({"detail": str(exc)}, status=502)
 
         data = PaginatedEventsSerializer({
@@ -278,8 +280,8 @@ class AgentVulnerabilitiesView(APIView):
                 return Response(cached)
 
         try:
-            result = WazuhClient().get_agent_vulnerabilities(agent_id, offset=offset, limit=limit)
-        except (WazuhAuthError, WazuhAPIError) as exc:
+            result = OpenSearchClient().get_agent_vulnerabilities(agent_id, offset=offset, limit=limit)
+        except OpenSearchError as exc:
             return Response({"detail": str(exc)}, status=502)
 
         serialized = [_serialize_vulnerability(v) for v in result["vulnerabilities"]]

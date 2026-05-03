@@ -131,12 +131,12 @@ def test_dashboard_non_member_gets_403(client, regular_user, acme):
 
 
 @pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
 @patch("security.views.WazuhClient")
-def test_dashboard_returns_fleet_stats(mock_wazuh_cls, client, acme_member, acme):
-    mock = mock_wazuh_cls.return_value
-    mock.get_agents.return_value = _WAZUH_AGENTS
-    mock.get_vulnerabilities_summary.return_value = _VULN_SUMMARY
-    mock.get_events_count.return_value = 42
+def test_dashboard_returns_fleet_stats(mock_wazuh_cls, mock_os_cls, client, acme_member, acme):
+    mock_wazuh_cls.return_value.get_agents.return_value = _WAZUH_AGENTS
+    mock_os_cls.return_value.get_vulnerabilities_summary.return_value = _VULN_SUMMARY
+    mock_os_cls.return_value.get_events_count.return_value = 42
     client.force_login(acme_member)
 
     response = client.get("/api/security/dashboard/?org=acme")
@@ -150,27 +150,27 @@ def test_dashboard_returns_fleet_stats(mock_wazuh_cls, client, acme_member, acme
 
 
 @pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
 @patch("security.views.WazuhClient")
-def test_dashboard_served_from_cache_on_second_request(mock_wazuh_cls, client, acme_member, acme):
-    mock = mock_wazuh_cls.return_value
-    mock.get_agents.return_value = _WAZUH_AGENTS
-    mock.get_vulnerabilities_summary.return_value = _VULN_SUMMARY
-    mock.get_events_count.return_value = 0
+def test_dashboard_served_from_cache_on_second_request(mock_wazuh_cls, mock_os_cls, client, acme_member, acme):
+    mock_wazuh_cls.return_value.get_agents.return_value = _WAZUH_AGENTS
+    mock_os_cls.return_value.get_vulnerabilities_summary.return_value = _VULN_SUMMARY
+    mock_os_cls.return_value.get_events_count.return_value = 0
     client.force_login(acme_member)
 
     client.get("/api/security/dashboard/?org=acme")
     client.get("/api/security/dashboard/?org=acme")
 
-    mock.get_agents.assert_called_once()
+    mock_wazuh_cls.return_value.get_agents.assert_called_once()
 
 
 @pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
 @patch("security.views.WazuhClient")
-def test_dashboard_admin_can_query_any_org(mock_wazuh_cls, admin_client, acme):
-    mock = mock_wazuh_cls.return_value
-    mock.get_agents.return_value = []
-    mock.get_vulnerabilities_summary.return_value = _VULN_SUMMARY
-    mock.get_events_count.return_value = 0
+def test_dashboard_admin_can_query_any_org(mock_wazuh_cls, mock_os_cls, admin_client, acme):
+    mock_wazuh_cls.return_value.get_agents.return_value = []
+    mock_os_cls.return_value.get_vulnerabilities_summary.return_value = _VULN_SUMMARY
+    mock_os_cls.return_value.get_events_count.return_value = 0
     response = admin_client.get("/api/security/dashboard/?org=acme")
     assert response.status_code == 200
 
@@ -192,21 +192,21 @@ def test_refresh_non_member_gets_403(client, regular_user, acme):
 
 
 @pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
 @patch("security.views.WazuhClient")
-def test_refresh_busts_dashboard_cache(mock_wazuh_cls, client, acme_member, acme):
-    mock = mock_wazuh_cls.return_value
-    mock.get_agents.return_value = _WAZUH_AGENTS
-    mock.get_vulnerabilities_summary.return_value = _VULN_SUMMARY
-    mock.get_events_count.return_value = 0
+def test_refresh_busts_dashboard_cache(mock_wazuh_cls, mock_os_cls, client, acme_member, acme):
+    mock_wazuh_cls.return_value.get_agents.return_value = _WAZUH_AGENTS
+    mock_os_cls.return_value.get_vulnerabilities_summary.return_value = _VULN_SUMMARY
+    mock_os_cls.return_value.get_events_count.return_value = 0
     client.force_login(acme_member)
 
     client.get("/api/security/dashboard/?org=acme")
-    assert mock.get_agents.call_count == 1
+    assert mock_wazuh_cls.return_value.get_agents.call_count == 1
 
     client.post("/api/security/dashboard/refresh/", {"org": "acme"}, content_type="application/json")
 
     client.get("/api/security/dashboard/?org=acme")
-    assert mock.get_agents.call_count == 2
+    assert mock_wazuh_cls.return_value.get_agents.call_count == 2
 
 
 @pytest.mark.django_db
