@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -19,6 +19,15 @@ const WITH_LOGS = {
     { datetime: '2026-01-01T10:02:00.000Z', type: 'up', duration_seconds: 0 },
   ],
 };
+
+const makeLogs = (n) =>
+  Array.from({ length: n }, (_, i) => ({
+    datetime: `2026-01-${String(i + 1).padStart(2, '0')}T10:00:00.000Z`,
+    type: i % 2 === 0 ? 'down' : 'up',
+    duration_seconds: i * 10,
+  }));
+
+const WITH_MANY_LOGS = { ...UP, logs: makeLogs(8) };
 
 const baseStatus = { monitors: [], overallStatus: 'unknown', isLoading: false, isRefreshing: false, error: null, forceRefresh: vi.fn() };
 
@@ -158,5 +167,42 @@ describe('StatusPage — admin view', () => {
     useStatus.mockReturnValue({ ...baseStatus, monitors: [monitor], overallStatus: 'operational' });
     renderPage();
     expect(screen.getByText('No incidents recorded.')).toBeInTheDocument();
+  });
+
+  it('shows at most 5 log rows by default when there are more than 5', () => {
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MANY_LOGS], overallStatus: 'operational' });
+    renderPage();
+    const rows = screen.getAllByRole('row').filter((r) => within(r).queryAllByRole('columnheader').length === 0);
+    expect(rows).toHaveLength(5);
+  });
+
+  it('shows "Show N more" button when logs exceed 5', () => {
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MANY_LOGS], overallStatus: 'operational' });
+    renderPage();
+    expect(screen.getByRole('button', { name: /show 3 more/i })).toBeInTheDocument();
+  });
+
+  it('expands to show all logs when "Show N more" is clicked', () => {
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MANY_LOGS], overallStatus: 'operational' });
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /show 3 more/i }));
+    const rows = screen.getAllByRole('row').filter((r) => within(r).queryAllByRole('columnheader').length === 0);
+    expect(rows).toHaveLength(8);
+    expect(screen.getByRole('button', { name: /show less/i })).toBeInTheDocument();
+  });
+
+  it('collapses back to 5 when "Show less" is clicked', () => {
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MANY_LOGS], overallStatus: 'operational' });
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /show 3 more/i }));
+    fireEvent.click(screen.getByRole('button', { name: /show less/i }));
+    const rows = screen.getAllByRole('row').filter((r) => within(r).queryAllByRole('columnheader').length === 0);
+    expect(rows).toHaveLength(5);
+  });
+
+  it('does not show expand button when logs are 5 or fewer', () => {
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_LOGS], overallStatus: 'operational' });
+    renderPage();
+    expect(screen.queryByRole('button', { name: /show.*more/i })).not.toBeInTheDocument();
   });
 });

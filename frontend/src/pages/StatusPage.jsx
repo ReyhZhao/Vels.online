@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '../context/AuthContext';
 import { useStatus } from '../hooks/useStatus';
+
+const LOG_LIMIT = 5;
 
 const BANNER = {
   operational: { bg: 'bg-green-50 border-green-200', text: 'text-green-800', label: 'All systems operational' },
@@ -48,9 +51,15 @@ function SummaryBanner({ overallStatus, isLoading }) {
 }
 
 function IncidentLogTable({ logs }) {
+  const [expanded, setExpanded] = useState(false);
+
   if (!logs || logs.length === 0) {
     return <p className="mt-3 text-xs text-muted-foreground">No incidents recorded.</p>;
   }
+
+  const visible = expanded ? logs : logs.slice(0, LOG_LIMIT);
+  const hidden = logs.length - LOG_LIMIT;
+
   return (
     <div className="mt-3 overflow-x-auto">
       <table className="w-full text-xs">
@@ -62,7 +71,7 @@ function IncidentLogTable({ logs }) {
           </tr>
         </thead>
         <tbody>
-          {logs.map((log, i) => (
+          {visible.map((log, i) => (
             <tr key={i} className="border-b last:border-0">
               <td className="py-1 pr-4 text-foreground">
                 {new Date(log.datetime).toLocaleString()}
@@ -79,6 +88,14 @@ function IncidentLogTable({ logs }) {
           ))}
         </tbody>
       </table>
+      {logs.length > LOG_LIMIT && (
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {expanded ? 'Show less' : `Show ${hidden} more`}
+        </button>
+      )}
     </div>
   );
 }
