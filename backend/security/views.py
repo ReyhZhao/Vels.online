@@ -120,6 +120,25 @@ def _resolve_org(request, slug):
     return org, None
 
 
+def _resolve_agent(request, org, agent_id):
+    """Checks that agent_id belongs to org. Staff users are exempt. Returns error_response or None."""
+    if request.user.is_staff:
+        return None
+    cache_key = _agents_cache_key(org.slug)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        agent_ids = {str(a["id"]) for a in cached}
+    else:
+        try:
+            raw_agents = WazuhClient().get_agents(org.wazuh_group)
+        except (WazuhAuthError, WazuhAPIError) as exc:
+            return Response({"detail": str(exc)}, status=502)
+        agent_ids = {str(a.get("id")) for a in raw_agents}
+    if str(agent_id) not in agent_ids:
+        return Response(status=403)
+    return None
+
+
 class OrganizationListView(APIView):
     def get(self, request):
         if request.user.is_staff:
@@ -228,6 +247,10 @@ class AgentEventsView(APIView):
         if err:
             return err
 
+        err = _resolve_agent(request, org, agent_id)
+        if err:
+            return err
+
         try:
             offset = int(request.query_params.get("offset", 0))
             limit = int(request.query_params.get("limit", 100))
@@ -262,6 +285,10 @@ class AgentVulnerabilitiesView(APIView):
     def get(self, request, agent_id):
         slug = request.query_params.get("org", "").strip()
         org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        err = _resolve_agent(request, org, agent_id)
         if err:
             return err
 

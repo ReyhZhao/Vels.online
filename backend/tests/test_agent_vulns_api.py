@@ -24,9 +24,15 @@ _OPENSEARCH_VULNS = [
 ]
 
 
+_ACME_AGENT_CACHE = [
+    {"id": "001", "name": "server-01", "ip": "10.0.0.1", "status": "active", "os": "Ubuntu 20.04", "last_seen": "2024-01-15T10:00:00Z"},
+]
+
+
 @pytest.fixture(autouse=True)
 def clear_cache():
     cache.clear()
+    cache.set("security_agents_acme", _ACME_AGENT_CACHE, 3600)
     yield
     cache.clear()
 
@@ -167,17 +173,20 @@ def test_paginated_vulns_not_cached(mock_os_cls, client, acme_member, acme):
 
 
 @pytest.mark.django_db
+@patch("security.views.WazuhClient")
 @patch("security.views.OpenSearchClient")
-def test_refresh_busts_vulns_cache(mock_os_cls, client, acme_member, acme):
+def test_refresh_busts_vulns_cache(mock_os_cls, mock_wazuh_cls, client, acme_member, acme):
     mock_os_cls.return_value.get_agent_vulnerabilities.return_value = {
         "vulnerabilities": _OPENSEARCH_VULNS,
         "total": 3,
     }
+    mock_wazuh_cls.return_value.get_agents.return_value = [{"id": "001"}]
     client.force_login(acme_member)
 
     client.get("/api/security/agents/001/vulnerabilities/?org=acme")
     assert mock_os_cls.return_value.get_agent_vulnerabilities.call_count == 1
 
+    # Refresh busts agents cache and vulns cache
     client.post(
         "/api/security/dashboard/refresh/",
         {"org": "acme", "agent_id": "001"},
@@ -186,3 +195,22 @@ def test_refresh_busts_vulns_cache(mock_os_cls, client, acme_member, acme):
 
     client.get("/api/security/agents/001/vulnerabilities/?org=acme")
     assert mock_os_cls.return_value.get_agent_vulnerabilities.call_count == 2
+
+
+@pytest.mark.django_db
+def test_vulns_cross_org_agent_id_gets_403(client, acme_member, acme):
+    client.force_login(acme_member)
+    # Agent "999" does not belong to acme — cache has only "001"
+    response = client.get("/api/security/agents/999/vulnerabilities/?org=acme")
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_vulns_staff_bypasses_agent_ownership_check(mock_os_cls, client, acme, django_user_model):
+    mock_os_cls.return_value.get_agent_vulnerabilities.return_value = {"vulnerabilities": [], "total": 0}
+    staff = django_user_model.objects.create_user(username="staff", password="pass", is_staff=True)
+    client.force_login(staff)
+    # Agent "999" is not in acme's agent list, but staff is exempt
+    response = client.get("/api/security/agents/999/vulnerabilities/?org=acme")
+    assert response.status_code == 200
