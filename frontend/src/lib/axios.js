@@ -9,7 +9,10 @@ const MUTATING_METHODS = ['post', 'put', 'patch', 'delete'];
 
 export function attachCsrfToken(config) {
   if (MUTATING_METHODS.includes(config.method?.toLowerCase())) {
-    config.headers['X-CSRFToken'] = getCookie('csrftoken');
+    const token = getCookie('csrftoken');
+    if (token !== null) {
+      config.headers['X-CSRFToken'] = token;
+    }
   }
   return config;
 }

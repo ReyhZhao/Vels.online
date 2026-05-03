@@ -10,8 +10,16 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     api
       .get('/api/me/')
-      .then((res) => setUser(res.data))
-      .catch(() => setUser(null))
+      .then((res) => {
+        const csrf = res.headers?.['x-csrftoken'];
+        if (csrf) api.defaults.headers.common['X-CSRFToken'] = csrf;
+        setUser(res.data);
+      })
+      .catch((err) => {
+        const csrf = err.response?.headers?.['x-csrftoken'];
+        if (csrf) api.defaults.headers.common['X-CSRFToken'] = csrf;
+        setUser(null);
+      })
       .finally(() => setIsLoading(false));
   }, []);
 

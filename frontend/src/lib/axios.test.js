@@ -23,6 +23,17 @@ describe('attachCsrfToken', () => {
     const result = attachCsrfToken(config);
     expect(result.headers['X-CSRFToken']).toBeUndefined();
   });
+
+  it('does not set X-CSRFToken when cookie is absent', () => {
+    Object.defineProperty(document, 'cookie', {
+      writable: true,
+      configurable: true,
+      value: '',
+    });
+    const config = { method: 'post', headers: { 'X-CSRFToken': 'existing-token' } };
+    const result = attachCsrfToken(config);
+    expect(result.headers['X-CSRFToken']).toBe('existing-token');
+  });
 });
 
 describe('api instance', () => {

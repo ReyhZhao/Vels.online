@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AuthProvider, useAuth } from './AuthContext';
 
 vi.mock('../lib/axios', () => ({
-  default: { get: vi.fn() },
+  default: { get: vi.fn(), defaults: { headers: { common: {} } } },
 }));
 
 import api from '../lib/axios';
@@ -20,7 +20,10 @@ function TestConsumer() {
 }
 
 describe('useAuth', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.defaults.headers.common = {};
+  });
 
   it('returns authenticated user when /api/me/ resolves', async () => {
     api.get.mockResolvedValue({
@@ -64,5 +67,38 @@ describe('useAuth', () => {
     );
 
     expect(screen.getByText('loading')).toBeInTheDocument();
+  });
+
+  it('stores X-CSRFToken default header from authenticated /api/me/ response', async () => {
+    api.get.mockResolvedValue({
+      data: { id: 1, username: 'eddie', email: 'eddie@vels.online' },
+      headers: { 'x-csrftoken': 'csrf-from-me' },
+    });
+
+    render(
+      <AuthProvider>
+        <TestConsumer />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(api.defaults.headers.common['X-CSRFToken']).toBe('csrf-from-me');
+    });
+  });
+
+  it('stores X-CSRFToken default header from 401 /api/me/ response', async () => {
+    api.get.mockRejectedValue({
+      response: { status: 401, headers: { 'x-csrftoken': 'csrf-from-401' } },
+    });
+
+    render(
+      <AuthProvider>
+        <TestConsumer />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(api.defaults.headers.common['X-CSRFToken']).toBe('csrf-from-401');
+    });
   });
 });
