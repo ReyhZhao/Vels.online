@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { OrgProvider } from '../../context/OrgContext';
 import OrgSwitcher from '../OrgSwitcher';
+import Breadcrumb from './Breadcrumb';
 
 function NavItem({ to, end, children }) {
   return (
@@ -33,6 +34,7 @@ function SecurityLayout() {
           <OrgSwitcher />
         </header>
         <main className="flex-1 p-6">
+          <Breadcrumb />
           <Outlet />
         </main>
       </div>
