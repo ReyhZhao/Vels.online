@@ -100,6 +100,24 @@ describe('TopNav', () => {
     expect(screen.queryByRole('link', { name: /login/i })).not.toBeInTheDocument();
   });
 
+  it('shows Security link when authenticated', () => {
+    useAuth.mockReturnValue({
+      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+
+    renderTopNav();
+    const securityLink = screen.getByRole('link', { name: 'Security' });
+    expect(securityLink).toBeInTheDocument();
+    expect(securityLink).toHaveAttribute('href', '/security');
+  });
+
+  it('does not show Security link when not authenticated', () => {
+    renderTopNav();
+    expect(screen.queryByRole('link', { name: 'Security' })).not.toBeInTheDocument();
+  });
+
   it('calls POST /api/logout/ when Logout is clicked', async () => {
     useAuth.mockReturnValue({
       user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },

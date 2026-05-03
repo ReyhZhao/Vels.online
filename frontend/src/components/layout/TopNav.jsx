@@ -33,17 +33,29 @@ function TopNav() {
           </NavLink>
           <StatusIndicator />
           {isAuthenticated ? (
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted-foreground" data-testid="nav-username">
-                {user.username}
-              </span>
-              <button
-                onClick={handleLogout}
-                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
+            <>
+              <NavLink
+                to="/security"
+                className={({ isActive }) =>
+                  `text-sm font-medium transition-colors hover:text-foreground ${
+                    isActive ? 'text-foreground' : 'text-muted-foreground'
+                  }`
+                }
               >
-                Logout
-              </button>
-            </div>
+                Security
+              </NavLink>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground" data-testid="nav-username">
+                  {user.username}
+                </span>
+                <button
+                  onClick={handleLogout}
+                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
+                >
+                  Logout
+                </button>
+              </div>
+            </>
           ) : (
             <a
               href="/auth/oidc/authentik/login/"
