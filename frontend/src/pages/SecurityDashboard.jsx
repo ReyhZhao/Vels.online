@@ -49,8 +49,9 @@ export default function SecurityDashboard() {
       ]);
       setStats(dashRes.data);
       setAgents(agentsRes.data);
-    } catch {
-      setError('Failed to load dashboard data.');
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      setError(detail ? `Failed to load dashboard data: ${detail}` : 'Failed to load dashboard data.');
     } finally {
       setLoading(false);
     }

@@ -123,4 +123,28 @@ describe('SecurityDashboard', () => {
     renderDashboard(null);
     expect(screen.getByText('No organisation assigned.')).toBeInTheDocument();
   });
+
+  it('shows backend detail in error message when API returns an error with detail', async () => {
+    api.get.mockRejectedValue({
+      response: { data: { detail: 'Wazuh authentication failed: 401 Unauthorized' } },
+    });
+
+    renderDashboard();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Failed to load dashboard data: Wazuh authentication failed: 401 Unauthorized')
+      ).toBeInTheDocument()
+    );
+  });
+
+  it('shows generic fallback when API error has no detail', async () => {
+    api.get.mockRejectedValue(new Error('Network Error'));
+
+    renderDashboard();
+
+    await waitFor(() =>
+      expect(screen.getByText('Failed to load dashboard data.')).toBeInTheDocument()
+    );
+  });
 });
