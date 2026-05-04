@@ -160,3 +160,50 @@ def test_refresh_public_cache_does_not_include_logs(mock_get, client, admin_clie
     admin_client.post("/api/status/refresh/")
     response = client.get("/api/status/")
     assert "logs" not in response.json()[0]
+
+
+# --- MonitorListView: GET /api/status/monitors/ ---
+
+
+@pytest.mark.django_db
+@patch("status.views.get_monitors")
+def test_monitor_list_no_db_record_defaults_to_hidden(mock_get, admin_client):
+    mock_get.return_value = [_RAW_MONITOR]
+    # No MonitorVisibility record created — monitor should be returned as hidden
+    response = admin_client.get("/api/status/monitors/")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["monitor_id"] == "12345"
+    assert data[0]["is_visible"] is False
+
+
+@pytest.mark.django_db
+@patch("status.views.get_monitors")
+def test_monitor_list_explicit_visible_record_preserved(mock_get, admin_client, visible_monitor):
+    mock_get.return_value = [_RAW_MONITOR]
+    response = admin_client.get("/api/status/monitors/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["is_visible"] is True
+
+
+@pytest.mark.django_db
+@patch("status.views.get_monitors")
+def test_monitor_list_explicit_hidden_record_preserved(mock_get, admin_client, hidden_monitor):
+    raw = {**_RAW_MONITOR, "id": 99999}
+    mock_get.return_value = [raw]
+    response = admin_client.get("/api/status/monitors/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["is_visible"] is False
+
+
+@pytest.mark.django_db
+@patch("status.views.get_monitors")
+def test_monitor_list_requires_staff(mock_get, client, django_user_model):
+    mock_get.return_value = [_RAW_MONITOR]
+    user = django_user_model.objects.create_user(username="regular", password="pass")
+    client.force_login(user)
+    response = client.get("/api/status/monitors/")
+    assert response.status_code == 403

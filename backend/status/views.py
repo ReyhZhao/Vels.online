@@ -85,7 +85,7 @@ class MonitorListView(APIView):
                 "name": m["friendly_name"],
                 "is_visible": visibility_map[str(m["id"])].is_visible
                 if str(m["id"]) in visibility_map
-                else True,
+                else False,
             }
             for m in raw_monitors
         ]
