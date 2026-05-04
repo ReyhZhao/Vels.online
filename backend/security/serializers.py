@@ -20,6 +20,7 @@ class AgentSerializer(serializers.Serializer):
 
 
 class EventSerializer(serializers.Serializer):
+    id = serializers.CharField()
     timestamp = serializers.CharField(allow_null=True)
     rule_description = serializers.CharField()
     rule_id = serializers.CharField()

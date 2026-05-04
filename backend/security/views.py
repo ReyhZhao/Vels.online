@@ -87,6 +87,7 @@ def _serialize_event(event):
     agent = event.get("agent", {})
     level = rule.get("level", 0)
     return {
+        "id": event.get("_id", ""),
         "timestamp": event.get("@timestamp") or event.get("timestamp"),
         "rule_description": rule.get("description", ""),
         "rule_id": rule.get("id", ""),
@@ -94,6 +95,52 @@ def _serialize_event(event):
         "severity": _event_severity(level),
         "agent_name": agent.get("name", ""),
     }
+
+
+def _serialize_event_detail(event):
+    rule = event.get("rule", {})
+    agent = event.get("agent", {})
+    mitre = rule.get("mitre", {})
+    data_fields = event.get("data", {})
+
+    detail = {
+        "id": event.get("_id", ""),
+        "timestamp": event.get("@timestamp") or event.get("timestamp"),
+        "severity": _event_severity(rule.get("level", 0)),
+        "rule_description": rule.get("description", ""),
+        "rule_id": rule.get("id", ""),
+        "level": rule.get("level", 0),
+        "rule_groups": rule.get("groups", []),
+        "agent_name": agent.get("name", ""),
+        "agent_ip": agent.get("ip", ""),
+        "log_source": event.get("location", ""),
+        "raw_log": event.get("full_log", ""),
+    }
+
+    mitre_data = {}
+    tactic = mitre.get("tactic")
+    technique = mitre.get("technique")
+    technique_id = mitre.get("id")
+    if tactic:
+        mitre_data["tactic"] = tactic if isinstance(tactic, list) else [tactic]
+    if technique:
+        mitre_data["technique"] = technique if isinstance(technique, list) else [technique]
+    if technique_id:
+        mitre_data["technique_id"] = technique_id if isinstance(technique_id, list) else [technique_id]
+    if mitre_data:
+        detail["mitre"] = mitre_data
+
+    network_data = {}
+    if data_fields.get("srcip"):
+        network_data["src_ip"] = data_fields["srcip"]
+    if data_fields.get("dstip"):
+        network_data["dst_ip"] = data_fields["dstip"]
+    if data_fields.get("protocol"):
+        network_data["protocol"] = data_fields["protocol"]
+    if network_data:
+        detail["network"] = network_data
+
+    return detail
 
 
 def _serialize_vulnerability(vuln):
@@ -288,6 +335,28 @@ class AgentEventsView(APIView):
             cache.set(cache_key, data, _EVENTS_CACHE_TTL)
 
         return Response(data)
+
+
+class AgentEventDetailView(APIView):
+    def get(self, request, agent_id, event_id):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        err = _resolve_agent(request, org, agent_id)
+        if err:
+            return err
+
+        try:
+            event = OpenSearchClient().get_event_by_id(agent_id, event_id)
+        except OpenSearchError as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        if event is None:
+            return Response(status=404)
+
+        return Response(_serialize_event_detail(event))
 
 
 class AgentVulnerabilitiesView(APIView):

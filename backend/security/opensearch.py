@@ -64,9 +64,24 @@ class OpenSearchClient:
         data = self._search(_ALERTS_INDEX, body)
         hits = data["hits"]
         return {
-            "events": [h["_source"] for h in hits["hits"]],
+            "events": [{"_id": h.get("_id", ""), **h["_source"]} for h in hits["hits"]],
             "total": hits["total"]["value"],
         }
+
+    def get_event_by_id(self, agent_id, event_id):
+        body = {
+            "query": {"bool": {"filter": [
+                {"ids": {"values": [event_id]}},
+                {"term": {"agent.id": str(agent_id)}},
+            ]}},
+            "size": 1,
+        }
+        data = self._search(_ALERTS_INDEX, body)
+        hits = data["hits"]["hits"]
+        if not hits:
+            return None
+        h = hits[0]
+        return {"_id": h.get("_id", event_id), **h["_source"]}
 
     def get_agent_vulnerabilities(self, agent_id, offset=0, limit=50):
         body = {

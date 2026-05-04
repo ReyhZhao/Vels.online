@@ -7,11 +7,13 @@ from security.models import Organization, OrganizationMembership
 
 _OPENSEARCH_EVENTS = [
     {
+        "_id": "evt-abc-001",
         "@timestamp": "2024-01-15T10:00:00Z",
         "rule": {"description": "SSH brute force", "level": 10, "id": "5710"},
         "agent": {"id": "001", "name": "server-01"},
     },
     {
+        "_id": "evt-xyz-002",
         "@timestamp": "2024-01-15T09:00:00Z",
         "rule": {"description": "Sudo usage", "level": 5, "id": "5402"},
         "agent": {"id": "001", "name": "server-01"},
@@ -80,6 +82,7 @@ def test_events_returns_serialised_events(mock_os_cls, client, acme_member, acme
     assert data["total"] == 2
     assert len(data["events"]) == 2
     first = data["events"][0]
+    assert first["id"] == "evt-abc-001"
     assert first["timestamp"] == "2024-01-15T10:00:00Z"
     assert first["rule_description"] == "SSH brute force"
     assert first["severity"] == "high"   # level 10 → high

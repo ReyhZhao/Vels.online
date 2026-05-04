@@ -15,13 +15,14 @@ def opensearch_env(monkeypatch):
     monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "secret")
 
 
-def _search_response(hits, total=None):
+def _search_response(hits, total=None, ids=None):
     m = MagicMock()
     m.raise_for_status.return_value = None
     actual_total = total if total is not None else len(hits)
+    hit_ids = ids if ids is not None else [f"id{i}" for i in range(len(hits))]
     m.json.return_value = {
         "hits": {
-            "hits": [{"_source": h} for h in hits],
+            "hits": [{"_id": hit_ids[i], "_source": h} for i, h in enumerate(hits)],
             "total": {"value": actual_total},
         }
     }
@@ -52,13 +53,13 @@ def test_get_agent_events_queries_alerts_index(mock_post):
 
 @patch("security.opensearch.requests.post")
 def test_get_agent_events_returns_events_and_total(mock_post):
-    events = [
-        {"@timestamp": "2024-01-15T10:00:00Z", "rule": {"description": "SSH brute force", "level": 10, "id": "5710"}, "agent": {"id": "001", "name": "server-01"}},
-    ]
-    mock_post.return_value = _search_response(events, total=5)
+    source = {"@timestamp": "2024-01-15T10:00:00Z", "rule": {"description": "SSH brute force", "level": 10, "id": "5710"}, "agent": {"id": "001", "name": "server-01"}}
+    mock_post.return_value = _search_response([source], total=5, ids=["abc123"])
     result = OpenSearchClient().get_agent_events("001")
-    assert result["events"] == events
     assert result["total"] == 5
+    assert len(result["events"]) == 1
+    assert result["events"][0]["_id"] == "abc123"
+    assert result["events"][0]["@timestamp"] == source["@timestamp"]
 
 
 @patch("security.opensearch.requests.post")
@@ -228,6 +229,38 @@ def test_get_events_count_empty_agent_list(mock_post):
     result = OpenSearchClient().get_events_count([])
     assert result == 0
     mock_post.assert_not_called()
+
+
+# ------------------------------------------ get_event_by_id
+
+
+@patch("security.opensearch.requests.post")
+def test_get_event_by_id_returns_event_with_id(mock_post):
+    source = {"@timestamp": "2024-01-15T10:00:00Z", "rule": {"level": 10, "description": "SSH brute force"}, "agent": {"id": "001"}}
+    mock_post.return_value = _search_response([source], ids=["abc123"])
+    result = OpenSearchClient().get_event_by_id("001", "abc123")
+    assert result is not None
+    assert result["_id"] == "abc123"
+    assert result["@timestamp"] == source["@timestamp"]
+
+
+@patch("security.opensearch.requests.post")
+def test_get_event_by_id_returns_none_when_not_found(mock_post):
+    mock_post.return_value = _search_response([], total=0)
+    result = OpenSearchClient().get_event_by_id("001", "nonexistent")
+    assert result is None
+
+
+@patch("security.opensearch.requests.post")
+def test_get_event_by_id_filters_by_agent_and_document_id(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_event_by_id("042", "doc-xyz")
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    ids_filter = next(f for f in filters if "ids" in f)
+    agent_filter = next(f for f in filters if "term" in f)
+    assert ids_filter["ids"]["values"] == ["doc-xyz"]
+    assert agent_filter["term"]["agent.id"] == "042"
 
 
 # ------------------------------------------ error handling

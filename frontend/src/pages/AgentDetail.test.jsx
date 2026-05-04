@@ -14,14 +14,44 @@ import AgentDetail from './AgentDetail';
 const SELECTED_ORG = { id: 1, name: 'Acme Corp', slug: 'acme', wazuh_group: 'acme' };
 
 const EVENTS_PAGE_1 = [
-  { timestamp: '2024-01-15T10:00:00Z', rule_description: 'SSH brute force', rule_id: '5710', level: 10, severity: 'high',     agent_name: 'server-01' },
-  { timestamp: '2024-01-15T09:00:00Z', rule_description: 'Sudo usage',       rule_id: '5402', level:  5, severity: 'medium',   agent_name: 'server-01' },
-  { timestamp: '2024-01-15T08:00:00Z', rule_description: 'Failed login',     rule_id: '5501', level: 13, severity: 'critical', agent_name: 'server-01' },
+  { id: 'evt-abc', timestamp: '2024-01-15T10:00:00Z', rule_description: 'SSH brute force', rule_id: '5710', level: 10, severity: 'high',     agent_name: 'server-01' },
+  { id: 'evt-def', timestamp: '2024-01-15T09:00:00Z', rule_description: 'Sudo usage',       rule_id: '5402', level:  5, severity: 'medium',   agent_name: 'server-01' },
+  { id: 'evt-ghi', timestamp: '2024-01-15T08:00:00Z', rule_description: 'Failed login',     rule_id: '5501', level: 13, severity: 'critical', agent_name: 'server-01' },
 ];
 
 const EVENTS_PAGE_2 = [
-  { timestamp: '2024-01-15T07:00:00Z', rule_description: 'Package updated', rule_id: '2900', level: 2, severity: 'low', agent_name: 'server-01' },
+  { id: 'evt-jkl', timestamp: '2024-01-15T07:00:00Z', rule_description: 'Package updated', rule_id: '2900', level: 2, severity: 'low', agent_name: 'server-01' },
 ];
+
+const EVENT_DETAIL_FULL = {
+  id: 'evt-abc',
+  timestamp: '2024-01-15T10:00:00Z',
+  severity: 'high',
+  rule_description: 'SSH brute force',
+  rule_id: '5710',
+  level: 10,
+  rule_groups: ['authentication_failures', 'sshd'],
+  agent_name: 'server-01',
+  agent_ip: '10.0.0.1',
+  log_source: '/var/log/auth.log',
+  raw_log: 'Jan 15 10:00:00 server-01 sshd: Failed password for root',
+  mitre: { tactic: ['Credential Access'], technique: ['Brute Force'], technique_id: ['T1110'] },
+  network: { src_ip: '192.168.1.100', dst_ip: '10.0.0.1', protocol: 'tcp' },
+};
+
+const EVENT_DETAIL_MINIMAL = {
+  id: 'evt-abc',
+  timestamp: '2024-01-15T10:00:00Z',
+  severity: 'high',
+  rule_description: 'SSH brute force',
+  rule_id: '5710',
+  level: 10,
+  rule_groups: ['authentication_failures'],
+  agent_name: 'server-01',
+  agent_ip: '10.0.0.1',
+  log_source: '/var/log/auth.log',
+  raw_log: 'Jan 15 10:00:00 server-01 sshd: Failed password for root',
+};
 
 const VULNS = [
   { cve: 'CVE-2024-0001', severity: 'critical', package: 'curl',    version: '7.68.0', fix_available: false },
@@ -43,8 +73,16 @@ function renderAgentDetail(agentId = '001', selectedOrg = SELECTED_ORG, search =
 }
 
 // Default: events endpoint returns EVENTS_PAGE_1, vulns endpoint returns VULNS
-function setupMocks({ events = EVENTS_PAGE_1, eventsTotal = 3, vulns = VULNS, vulnsTotal = 3 } = {}) {
+function setupMocks({
+  events = EVENTS_PAGE_1,
+  eventsTotal = 3,
+  vulns = VULNS,
+  vulnsTotal = 3,
+  eventDetail = EVENT_DETAIL_FULL,
+} = {}) {
   api.get.mockImplementation((url) => {
+    // Detail URL: /events/<id>/ — has a non-empty segment after /events/
+    if (/\/events\/[^?/]+\//.test(url)) return Promise.resolve({ data: eventDetail });
     if (url.includes('/events/'))          return Promise.resolve({ data: { events, total: eventsTotal } });
     if (url.includes('/vulnerabilities/')) return Promise.resolve({ data: { vulnerabilities: vulns, total: vulnsTotal } });
     return Promise.reject(new Error(`unexpected: ${url}`));
@@ -303,6 +341,111 @@ describe('AgentDetail — FilterBar', () => {
     );
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(expect.stringMatching(/hours=6/))
+    );
+  });
+});
+
+describe('AgentDetail — EventSlideOver', () => {
+  beforeEach(() => { vi.clearAllMocks(); setupMocks(); });
+
+  it('clicking an event row opens the slide-over and fetches detail', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByText('SSH brute force'));
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/events/evt-abc/'))
+    );
+    await waitFor(() =>
+      expect(screen.getByText('Event Detail')).toBeInTheDocument()
+    );
+  });
+
+  it('renders summary, rule details, and agent sections', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByText('SSH brute force'));
+
+    await waitFor(() => screen.getByText('Summary'));
+    expect(screen.getByText('Rule Details')).toBeInTheDocument();
+    expect(screen.getByText('Agent')).toBeInTheDocument();
+  });
+
+  it('renders MITRE ATT&CK section when data is present', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByText('SSH brute force'));
+
+    await waitFor(() => screen.getByText('MITRE ATT&CK'));
+    expect(screen.getByText('Credential Access')).toBeInTheDocument();
+    expect(screen.getByText('T1110')).toBeInTheDocument();
+  });
+
+  it('renders Network section when data is present', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByText('SSH brute force'));
+
+    await waitFor(() => screen.getByText('Network'));
+    expect(screen.getByText('192.168.1.100')).toBeInTheDocument();
+  });
+
+  it('does not render MITRE ATT&CK section when absent from response', async () => {
+    setupMocks({ eventDetail: EVENT_DETAIL_MINIMAL });
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByText('SSH brute force'));
+
+    await waitFor(() => screen.getByText('Rule Details'));
+    expect(screen.queryByText('MITRE ATT&CK')).not.toBeInTheDocument();
+  });
+
+  it('does not render Network section when absent from response', async () => {
+    setupMocks({ eventDetail: EVENT_DETAIL_MINIMAL });
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByText('SSH brute force'));
+
+    await waitFor(() => screen.getByText('Rule Details'));
+    expect(screen.queryByText('Network')).not.toBeInTheDocument();
+  });
+
+  it('raw log Advanced section is collapsed by default', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByText('SSH brute force'));
+
+    await waitFor(() => screen.getByText('Advanced'));
+    const details = screen.getByText('Advanced').closest('details');
+    expect(details.open).toBe(false);
+  });
+
+  it('slide-over closes when close button is clicked', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByText('SSH brute force'));
+    await waitFor(() => screen.getByText('Event Detail'));
+
+    await user.click(screen.getByRole('button', { name: /close/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByText('Summary')).not.toBeInTheDocument()
     );
   });
 });
