@@ -5,7 +5,13 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '../context/AuthContext';
 import { useStatus } from '../hooks/useStatus';
 
-const LOG_LIMIT = 5;
+export function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${+(seconds / 60).toFixed(1)}m`;
+  return `${+(seconds / 3600).toFixed(1)}h`;
+}
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 const BANNER = {
   operational: { bg: 'bg-green-50 border-green-200', text: 'text-green-800', label: 'All systems operational' },
@@ -51,14 +57,16 @@ function SummaryBanner({ overallStatus, isLoading }) {
 }
 
 function IncidentLogTable({ logs }) {
-  const [expanded, setExpanded] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   if (!logs || logs.length === 0) {
     return <p className="mt-3 text-xs text-muted-foreground">No incidents recorded.</p>;
   }
 
-  const visible = expanded ? logs : logs.slice(0, LOG_LIMIT);
-  const hidden = logs.length - LOG_LIMIT;
+  const cutoff = new Date(Date.now() - SEVEN_DAYS_MS);
+  const recent = logs.filter((log) => new Date(log.datetime) >= cutoff);
+  const hasOlder = logs.some((log) => new Date(log.datetime) < cutoff);
+  const visible = showAll ? logs : recent;
 
   return (
     <div className="mt-3 overflow-x-auto">
@@ -82,18 +90,18 @@ function IncidentLogTable({ logs }) {
                 </span>
               </td>
               <td className="py-1 text-muted-foreground">
-                {log.duration_seconds != null ? `${log.duration_seconds}s` : '—'}
+                {log.duration_seconds != null ? formatDuration(log.duration_seconds) : '—'}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      {logs.length > LOG_LIMIT && (
+      {!showAll && hasOlder && (
         <button
-          onClick={() => setExpanded((e) => !e)}
+          onClick={() => setShowAll(true)}
           className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
-          {expanded ? 'Show less' : `Show ${hidden} more`}
+          Load older incidents
         </button>
       )}
     </div>
@@ -102,7 +110,7 @@ function IncidentLogTable({ logs }) {
 
 function MonitorCard({ monitor, isAdmin }) {
   const uptime = monitor.uptime_ratio ? `${parseFloat(monitor.uptime_ratio).toFixed(2)}%` : '—';
-  const responseTime = monitor.response_time ? `${monitor.response_time} ms` : '—';
+  const responseTime = monitor.response_time ? `${Math.round(monitor.response_time)} ms` : '—';
 
   return (
     <Card>

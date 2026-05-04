@@ -7,27 +7,33 @@ vi.mock('../context/AuthContext');
 
 import { useStatus } from '../hooks/useStatus';
 import { useAuth } from '../context/AuthContext';
-import StatusPage from './StatusPage';
+import StatusPage, { formatDuration } from './StatusPage';
 
 const UP = { name: 'API', status: 'up', uptime_ratio: '99.95', response_time: '120' };
 const DOWN = { name: 'Database', status: 'down', uptime_ratio: '95.00', response_time: '0' };
 const DEGRADED = { name: 'CDN', status: 'seems_down', uptime_ratio: '98.50', response_time: '500' };
+
+const daysAgo = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
 const WITH_LOGS = {
   ...UP,
   logs: [
-    { datetime: '2026-01-01T10:00:00.000Z', type: 'down', duration_seconds: 120 },
-    { datetime: '2026-01-01T10:02:00.000Z', type: 'up', duration_seconds: 0 },
+    { datetime: daysAgo(1), type: 'down', duration_seconds: 120 },
+    { datetime: daysAgo(2), type: 'up', duration_seconds: 0 },
   ],
 };
 
-const makeLogs = (n) =>
-  Array.from({ length: n }, (_, i) => ({
-    datetime: `2026-01-${String(i + 1).padStart(2, '0')}T10:00:00.000Z`,
-    type: i % 2 === 0 ? 'down' : 'up',
-    duration_seconds: i * 10,
-  }));
-
-const WITH_MANY_LOGS = { ...UP, logs: makeLogs(8) };
+// 3 recent + 2 older-than-7-days logs
+const WITH_MIXED_LOGS = {
+  ...UP,
+  logs: [
+    { datetime: daysAgo(1), type: 'down', duration_seconds: 60 },
+    { datetime: daysAgo(3), type: 'up',   duration_seconds: 0 },
+    { datetime: daysAgo(5), type: 'down', duration_seconds: 120 },
+    { datetime: daysAgo(8),  type: 'up',  duration_seconds: 0 },
+    { datetime: daysAgo(10), type: 'down', duration_seconds: 300 },
+  ],
+};
 
 const baseStatus = { monitors: [], overallStatus: 'unknown', isLoading: false, isRefreshing: false, error: null, forceRefresh: vi.fn() };
 
@@ -38,6 +44,30 @@ function renderPage() {
     </MemoryRouter>
   );
 }
+
+// ---------------------------------------------------------------- formatDuration
+
+describe('formatDuration', () => {
+  it('returns seconds for values under 60', () => {
+    expect(formatDuration(45)).toBe('45s');
+    expect(formatDuration(0)).toBe('0s');
+    expect(formatDuration(59)).toBe('59s');
+  });
+
+  it('returns minutes for values 60–3599', () => {
+    expect(formatDuration(180)).toBe('3m');
+    expect(formatDuration(90)).toBe('1.5m');
+    expect(formatDuration(60)).toBe('1m');
+  });
+
+  it('returns hours for values 3600 and above', () => {
+    expect(formatDuration(7200)).toBe('2h');
+    expect(formatDuration(5400)).toBe('1.5h');
+    expect(formatDuration(3600)).toBe('1h');
+  });
+});
+
+// ---------------------------------------------------------------- public view
 
 describe('StatusPage — public view', () => {
   beforeEach(() => {
@@ -82,6 +112,13 @@ describe('StatusPage — public view', () => {
     expect(screen.getByText('120 ms')).toBeInTheDocument();
   });
 
+  it('rounds response time to a whole number', () => {
+    const monitor = { ...UP, response_time: '120.7' };
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [monitor], overallStatus: 'operational' });
+    renderPage();
+    expect(screen.getByText('121 ms')).toBeInTheDocument();
+  });
+
   it('shows status badge for each monitor', () => {
     useStatus.mockReturnValue({ ...baseStatus, monitors: [UP, DOWN], overallStatus: 'outage' });
     renderPage();
@@ -121,6 +158,8 @@ describe('StatusPage — public view', () => {
   });
 });
 
+// ---------------------------------------------------------------- admin view
+
 describe('StatusPage — admin view', () => {
   beforeEach(() => {
     useAuth.mockReturnValue({ user: { id: 1, username: 'admin', is_staff: true } });
@@ -154,12 +193,12 @@ describe('StatusPage — admin view', () => {
     expect(screen.getByText('Duration')).toBeInTheDocument();
   });
 
-  it('renders log rows with type and duration', () => {
+  it('renders log rows with formatted duration', () => {
     useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_LOGS], overallStatus: 'operational' });
     renderPage();
     expect(screen.getByText('Down')).toBeInTheDocument();
     expect(screen.getByText('Recovery')).toBeInTheDocument();
-    expect(screen.getByText('120s')).toBeInTheDocument();
+    expect(screen.getByText('2m')).toBeInTheDocument();
   });
 
   it('shows "No incidents recorded" when logs array is empty', () => {
@@ -169,40 +208,37 @@ describe('StatusPage — admin view', () => {
     expect(screen.getByText('No incidents recorded.')).toBeInTheDocument();
   });
 
-  it('shows at most 5 log rows by default when there are more than 5', () => {
-    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MANY_LOGS], overallStatus: 'operational' });
+  it('shows only recent logs (last 7 days) by default', () => {
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MIXED_LOGS], overallStatus: 'operational' });
     renderPage();
+    const rows = screen.getAllByRole('row').filter((r) => within(r).queryAllByRole('columnheader').length === 0);
+    expect(rows).toHaveLength(3);
+  });
+
+  it('shows "Load older incidents" button when there are older logs', () => {
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MIXED_LOGS], overallStatus: 'operational' });
+    renderPage();
+    expect(screen.getByRole('button', { name: /load older incidents/i })).toBeInTheDocument();
+  });
+
+  it('shows all logs when "Load older incidents" is clicked', () => {
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MIXED_LOGS], overallStatus: 'operational' });
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /load older incidents/i }));
     const rows = screen.getAllByRole('row').filter((r) => within(r).queryAllByRole('columnheader').length === 0);
     expect(rows).toHaveLength(5);
   });
 
-  it('shows "Show N more" button when logs exceed 5', () => {
-    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MANY_LOGS], overallStatus: 'operational' });
+  it('does not show load-more button once all logs are visible', () => {
+    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MIXED_LOGS], overallStatus: 'operational' });
     renderPage();
-    expect(screen.getByRole('button', { name: /show 3 more/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /load older incidents/i }));
+    expect(screen.queryByRole('button', { name: /load older incidents/i })).not.toBeInTheDocument();
   });
 
-  it('expands to show all logs when "Show N more" is clicked', () => {
-    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MANY_LOGS], overallStatus: 'operational' });
-    renderPage();
-    fireEvent.click(screen.getByRole('button', { name: /show 3 more/i }));
-    const rows = screen.getAllByRole('row').filter((r) => within(r).queryAllByRole('columnheader').length === 0);
-    expect(rows).toHaveLength(8);
-    expect(screen.getByRole('button', { name: /show less/i })).toBeInTheDocument();
-  });
-
-  it('collapses back to 5 when "Show less" is clicked', () => {
-    useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_MANY_LOGS], overallStatus: 'operational' });
-    renderPage();
-    fireEvent.click(screen.getByRole('button', { name: /show 3 more/i }));
-    fireEvent.click(screen.getByRole('button', { name: /show less/i }));
-    const rows = screen.getAllByRole('row').filter((r) => within(r).queryAllByRole('columnheader').length === 0);
-    expect(rows).toHaveLength(5);
-  });
-
-  it('does not show expand button when logs are 5 or fewer', () => {
+  it('does not show load-more button when all logs are within 7 days', () => {
     useStatus.mockReturnValue({ ...baseStatus, monitors: [WITH_LOGS], overallStatus: 'operational' });
     renderPage();
-    expect(screen.queryByRole('button', { name: /show.*more/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load older/i })).not.toBeInTheDocument();
   });
 });
