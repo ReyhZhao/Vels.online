@@ -35,6 +35,7 @@ class PaginatedEventsSerializer(serializers.Serializer):
 
 
 class VulnerabilitySerializer(serializers.Serializer):
+    id = serializers.CharField()
     cve = serializers.CharField()
     package = serializers.CharField()
     version = serializers.CharField()

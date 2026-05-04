@@ -109,9 +109,24 @@ class OpenSearchClient:
         data = self._search(_VULNS_INDEX, body)
         hits = data["hits"]
         return {
-            "vulnerabilities": [h["_source"] for h in hits["hits"]],
+            "vulnerabilities": [{"_id": h.get("_id", ""), **h["_source"]} for h in hits["hits"]],
             "total": hits["total"]["value"],
         }
+
+    def get_vulnerability_by_id(self, agent_id, vuln_id):
+        body = {
+            "query": {"bool": {"filter": [
+                {"ids": {"values": [vuln_id]}},
+                {"term": {"agent.id": str(agent_id)}},
+            ]}},
+            "size": 1,
+        }
+        data = self._search(_VULNS_INDEX, body)
+        hits = data["hits"]["hits"]
+        if not hits:
+            return None
+        h = hits[0]
+        return {"_id": h.get("_id", vuln_id), **h["_source"]}
 
     def get_vulnerabilities_summary(self, agents):
         agent_ids = [a["id"] for a in agents if a.get("status") == "active"]

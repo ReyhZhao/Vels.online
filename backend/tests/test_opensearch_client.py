@@ -156,13 +156,13 @@ def test_get_agent_vulnerabilities_queries_vulns_index(mock_post):
 
 @patch("security.opensearch.requests.post")
 def test_get_agent_vulnerabilities_returns_vulns_and_total(mock_post):
-    vulns = [
-        {"vulnerability": {"id": "CVE-2024-0001", "severity": "High", "status": "Fixed"}, "package": {"name": "openssl", "version": "1.1.1"}},
-    ]
-    mock_post.return_value = _search_response(vulns, total=10)
+    source = {"vulnerability": {"id": "CVE-2024-0001", "severity": "High", "status": "Fixed"}, "package": {"name": "openssl", "version": "1.1.1"}}
+    mock_post.return_value = _search_response([source], total=10, ids=["vuln-id-001"])
     result = OpenSearchClient().get_agent_vulnerabilities("001")
-    assert result["vulnerabilities"] == vulns
     assert result["total"] == 10
+    assert len(result["vulnerabilities"]) == 1
+    assert result["vulnerabilities"][0]["_id"] == "vuln-id-001"
+    assert result["vulnerabilities"][0]["vulnerability"] == source["vulnerability"]
 
 
 @patch("security.opensearch.requests.post")
@@ -323,6 +323,46 @@ def test_get_event_by_id_filters_by_agent_and_document_id(mock_post):
     agent_filter = next(f for f in filters if "term" in f)
     assert ids_filter["ids"]["values"] == ["doc-xyz"]
     assert agent_filter["term"]["agent.id"] == "042"
+
+
+# ------------------------------------------ get_vulnerability_by_id
+
+
+@patch("security.opensearch.requests.post")
+def test_get_vulnerability_by_id_returns_vuln_with_id(mock_post):
+    source = {"vulnerability": {"id": "CVE-2024-0001", "severity": "High"}, "package": {"name": "openssl", "version": "1.1.1"}}
+    mock_post.return_value = _search_response([source], ids=["vuln-abc"])
+    result = OpenSearchClient().get_vulnerability_by_id("001", "vuln-abc")
+    assert result is not None
+    assert result["_id"] == "vuln-abc"
+    assert result["vulnerability"]["id"] == "CVE-2024-0001"
+
+
+@patch("security.opensearch.requests.post")
+def test_get_vulnerability_by_id_returns_none_when_not_found(mock_post):
+    mock_post.return_value = _search_response([], total=0)
+    result = OpenSearchClient().get_vulnerability_by_id("001", "nonexistent")
+    assert result is None
+
+
+@patch("security.opensearch.requests.post")
+def test_get_vulnerability_by_id_filters_by_agent_and_document_id(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_vulnerability_by_id("042", "vuln-xyz")
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    ids_filter = next(f for f in filters if "ids" in f)
+    agent_filter = next(f for f in filters if "term" in f)
+    assert ids_filter["ids"]["values"] == ["vuln-xyz"]
+    assert agent_filter["term"]["agent.id"] == "042"
+
+
+@patch("security.opensearch.requests.post")
+def test_get_vulnerability_by_id_queries_vulns_index(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_vulnerability_by_id("001", "vuln-abc")
+    url = mock_post.call_args[0][0]
+    assert "wazuh-states-vulnerabilities" in url
 
 
 # ------------------------------------------ error handling

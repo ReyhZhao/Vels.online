@@ -54,10 +54,38 @@ const EVENT_DETAIL_MINIMAL = {
 };
 
 const VULNS = [
-  { cve: 'CVE-2024-0001', severity: 'critical', package: 'curl',    version: '7.68.0', fix_available: false },
-  { cve: 'CVE-2024-0002', severity: 'high',     package: 'openssl', version: '1.1.1',  fix_available: true  },
-  { cve: 'CVE-2024-0003', severity: 'medium',   package: 'libc6',   version: '2.31',   fix_available: true  },
+  { id: 'vuln-001', cve: 'CVE-2024-0001', severity: 'critical', package: 'curl',    version: '7.68.0', fix_available: false },
+  { id: 'vuln-002', cve: 'CVE-2024-0002', severity: 'high',     package: 'openssl', version: '1.1.1',  fix_available: true  },
+  { id: 'vuln-003', cve: 'CVE-2024-0003', severity: 'medium',   package: 'libc6',   version: '2.31',   fix_available: true  },
 ];
+
+const VULN_DETAIL_FULL = {
+  id: 'vuln-001',
+  cve: 'CVE-2024-0001',
+  severity: 'critical',
+  cvss_score: 9.8,
+  package: 'curl',
+  installed_version: '7.68.0',
+  fixed_version: '7.88.1',
+  description: 'A buffer overflow in curl allows remote attackers to execute arbitrary code.',
+  published: '2024-01-10T00:00:00Z',
+  references: [
+    'https://nvd.nist.gov/vuln/detail/CVE-2024-0001',
+    'https://curl.se/docs/CVE-2024-0001.html',
+  ],
+};
+
+const VULN_DETAIL_MINIMAL = {
+  id: 'vuln-002',
+  cve: 'CVE-2024-0002',
+  severity: 'high',
+  cvss_score: null,
+  package: 'openssl',
+  installed_version: '1.1.1',
+  fixed_version: null,
+  description: 'An issue in openssl.',
+  published: null,
+};
 
 function renderAgentDetail(agentId = '001', selectedOrg = SELECTED_ORG, search = '') {
   const path = `/security/agents/${agentId}${search ? `?${search}` : ''}`;
@@ -79,12 +107,15 @@ function setupMocks({
   vulns = VULNS,
   vulnsTotal = 3,
   eventDetail = EVENT_DETAIL_FULL,
+  vulnDetail = VULN_DETAIL_FULL,
 } = {}) {
   api.get.mockImplementation((url) => {
     // Detail URL: /events/<id>/ — has a non-empty segment after /events/
-    if (/\/events\/[^?/]+\//.test(url)) return Promise.resolve({ data: eventDetail });
-    if (url.includes('/events/'))          return Promise.resolve({ data: { events, total: eventsTotal } });
-    if (url.includes('/vulnerabilities/')) return Promise.resolve({ data: { vulnerabilities: vulns, total: vulnsTotal } });
+    if (/\/events\/[^?/]+\//.test(url))          return Promise.resolve({ data: eventDetail });
+    if (url.includes('/events/'))                 return Promise.resolve({ data: { events, total: eventsTotal } });
+    // Detail URL: /vulnerabilities/<id>/ — has a non-empty segment after /vulnerabilities/
+    if (/\/vulnerabilities\/[^?/]+\//.test(url)) return Promise.resolve({ data: vulnDetail });
+    if (url.includes('/vulnerabilities/'))        return Promise.resolve({ data: { vulnerabilities: vulns, total: vulnsTotal } });
     return Promise.reject(new Error(`unexpected: ${url}`));
   });
   api.post.mockResolvedValue({ data: { detail: 'Cache cleared.' } });
@@ -549,5 +580,87 @@ describe('AgentDetail — Vuln FilterBar', () => {
       expect(lastVulnCall).not.toContain('fix_available=');
       expect(lastVulnCall).not.toContain('severity=');
     });
+  });
+});
+
+describe('AgentDetail — VulnerabilitySlideOver', () => {
+  beforeEach(() => { vi.clearAllMocks(); setupMocks(); });
+
+  async function openVulnsTab() {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+    await user.click(screen.getByRole('button', { name: /vulnerabilities/i }));
+    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    return user;
+  }
+
+  it('clicking a vuln row opens the slide-over and fetches detail', async () => {
+    const user = await openVulnsTab();
+
+    await user.click(screen.getByText('CVE-2024-0001'));
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/vulnerabilities/vuln-001/'))
+    );
+    await waitFor(() =>
+      expect(screen.getByText('Vulnerability Detail')).toBeInTheDocument()
+    );
+  });
+
+  it('renders Summary, Package, and Details sections', async () => {
+    const user = await openVulnsTab();
+
+    await user.click(screen.getByText('CVE-2024-0001'));
+
+    await waitFor(() => screen.getByText('Summary'));
+    expect(screen.getAllByText('Package').length).toBeGreaterThan(0);
+    expect(screen.getByText('Details')).toBeInTheDocument();
+  });
+
+  it('renders CVE ID, CVSS score, severity, and package details', async () => {
+    const user = await openVulnsTab();
+
+    await user.click(screen.getByText('CVE-2024-0001'));
+
+    await waitFor(() => screen.getByText('Vulnerability Detail'));
+    expect(screen.getAllByText('CVE-2024-0001').length).toBeGreaterThan(0);
+    expect(screen.getByText('9.8')).toBeInTheDocument();
+    expect(screen.getAllByText('7.68.0').length).toBeGreaterThan(0);
+    expect(screen.getByText('7.88.1')).toBeInTheDocument();
+  });
+
+  it('renders References section with clickable links when present', async () => {
+    const user = await openVulnsTab();
+
+    await user.click(screen.getByText('CVE-2024-0001'));
+
+    await waitFor(() => screen.getByText('References'));
+    const links = screen.getAllByRole('link');
+    expect(links.some(l => l.href.includes('nvd.nist.gov'))).toBe(true);
+  });
+
+  it('does not render References section when absent from response', async () => {
+    setupMocks({ vulnDetail: VULN_DETAIL_MINIMAL });
+    const user = await openVulnsTab();
+
+    await user.click(screen.getByText('CVE-2024-0001'));
+
+    await waitFor(() => screen.getByText('Vulnerability Detail'));
+    await waitFor(() => screen.getByText('Summary'));
+    expect(screen.queryByText('References')).not.toBeInTheDocument();
+  });
+
+  it('slide-over closes when close button is clicked', async () => {
+    const user = await openVulnsTab();
+
+    await user.click(screen.getByText('CVE-2024-0001'));
+    await waitFor(() => screen.getByText('Vulnerability Detail'));
+
+    await user.click(screen.getByRole('button', { name: /close/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByText('Summary')).not.toBeInTheDocument()
+    );
   });
 });

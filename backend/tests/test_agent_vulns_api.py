@@ -7,16 +7,19 @@ from security.models import Organization, OrganizationMembership
 
 _OPENSEARCH_VULNS = [
     {
+        "_id": "vuln-001",
         "vulnerability": {"id": "CVE-2024-0001", "severity": "High", "status": "Fixed"},
         "package": {"name": "openssl", "version": "1.1.1"},
         "agent": {"id": "001", "name": "server-01"},
     },
     {
+        "_id": "vuln-002",
         "vulnerability": {"id": "CVE-2024-0002", "severity": "Critical", "status": "Unfixed"},
         "package": {"name": "curl", "version": "7.68.0"},
         "agent": {"id": "001", "name": "server-01"},
     },
     {
+        "_id": "vuln-003",
         "vulnerability": {"id": "CVE-2024-0003", "severity": "Medium", "status": "Fixed"},
         "package": {"name": "libc6", "version": "2.31"},
         "agent": {"id": "001", "name": "server-01"},
@@ -87,6 +90,7 @@ def test_vulns_serialised_correctly(mock_os_cls, client, acme_member, acme):
     assert len(vulns) == 3
 
     # First entry should be Critical (sorted to top)
+    assert vulns[0]["id"] == "vuln-002"
     assert vulns[0]["cve"] == "CVE-2024-0002"
     assert vulns[0]["severity"] == "critical"
     assert vulns[0]["package"] == "curl"

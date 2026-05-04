@@ -150,12 +150,38 @@ def _serialize_vulnerability(vuln):
     v = vuln.get("vulnerability", {})
     pkg = vuln.get("package", {})
     return {
+        "id": vuln.get("_id", ""),
         "cve": v.get("id", ""),
         "package": pkg.get("name", ""),
         "version": pkg.get("version", ""),
         "severity": v.get("severity", "").lower(),
         "fix_available": v.get("status", "").lower() == "fixed",
     }
+
+
+def _serialize_vulnerability_detail(vuln):
+    v = vuln.get("vulnerability", {})
+    pkg = vuln.get("package", {})
+    cvss = v.get("cvss", {})
+    cvss3 = cvss.get("cvss3", {})
+
+    detail = {
+        "id": vuln.get("_id", ""),
+        "cve": v.get("id", ""),
+        "severity": v.get("severity", "").lower(),
+        "cvss_score": cvss3.get("base_score"),
+        "package": pkg.get("name", ""),
+        "installed_version": pkg.get("version", ""),
+        "fixed_version": pkg.get("fixed_version", "") or None,
+        "description": v.get("description", ""),
+        "published": v.get("published", "") or None,
+    }
+
+    refs = v.get("references", [])
+    if refs:
+        detail["references"] = refs if isinstance(refs, list) else [refs]
+
+    return detail
 
 
 def _resolve_org(request, slug):
@@ -412,6 +438,28 @@ class AgentVulnerabilitiesView(APIView):
             cache.set(cache_key, data, _VULNS_CACHE_TTL)
 
         return Response(data)
+
+
+class AgentVulnerabilityDetailView(APIView):
+    def get(self, request, agent_id, vuln_id):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        err = _resolve_agent(request, org, agent_id)
+        if err:
+            return err
+
+        try:
+            vuln = OpenSearchClient().get_vulnerability_by_id(agent_id, vuln_id)
+        except OpenSearchError as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        if vuln is None:
+            return Response(status=404)
+
+        return Response(_serialize_vulnerability_detail(vuln))
 
 
 class EnrollmentView(APIView):

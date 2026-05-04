@@ -360,7 +360,72 @@ function EventsTab({ agentId, orgSlug }) {
   );
 }
 
+function VulnerabilitySlideOver({ agentId, orgSlug, vulnId, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const open = Boolean(vulnId);
+
+  useEffect(() => {
+    if (!vulnId) { setDetail(null); return; }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.get(`/api/security/agents/${agentId}/vulnerabilities/${vulnId}/?org=${orgSlug}`)
+      .then(res => { if (!cancelled) { setDetail(res.data); setLoading(false); } })
+      .catch(() => { if (!cancelled) { setError('Failed to load vulnerability details.'); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [agentId, orgSlug, vulnId]);
+
+  return (
+    <SlideOver open={open} onClose={onClose} title="Vulnerability Detail" loading={loading}>
+      {error ? (
+        <p className="px-6 py-4 text-sm text-red-600">{error}</p>
+      ) : detail ? (
+        <div className="px-6 py-4 space-y-6">
+          <Section title="Summary">
+            <Field label="CVE"><span className="font-mono text-xs">{detail.cve}</span></Field>
+            <Field label="Severity"><SeverityBadge severity={detail.severity} /></Field>
+            {detail.cvss_score != null && <Field label="CVSS Score">{detail.cvss_score}</Field>}
+          </Section>
+
+          <Section title="Package">
+            <Field label="Name">{detail.package}</Field>
+            <Field label="Installed">{detail.installed_version}</Field>
+            {detail.fixed_version && <Field label="Fixed in">{detail.fixed_version}</Field>}
+          </Section>
+
+          <Section title="Details">
+            {detail.description && <Field label="Description">{detail.description}</Field>}
+            {detail.published && <Field label="Published">{new Date(detail.published).toLocaleDateString()}</Field>}
+          </Section>
+
+          {detail.references?.length > 0 && (
+            <Section title="References">
+              <ul className="space-y-1">
+                {detail.references.map((ref, i) => (
+                  <li key={i}>
+                    <a
+                      href={ref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline break-all"
+                    >
+                      {ref}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+        </div>
+      ) : null}
+    </SlideOver>
+  );
+}
+
 function VulnerabilitiesTab({ agentId, orgSlug }) {
+  const [selectedVulnId, setSelectedVulnId] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const severitiesStr = searchParams.get('severity') || '';
@@ -459,7 +524,11 @@ function VulnerabilitiesTab({ agentId, orgSlug }) {
               </tr>
             ) : (
               vulns.map((vuln) => (
-                <tr key={vuln.cve} className="border-b border-border last:border-0">
+                <tr
+                  key={vuln.cve}
+                  onClick={() => setSelectedVulnId(vuln.id)}
+                  className="border-b border-border last:border-0 cursor-pointer hover:bg-accent/40 transition-colors"
+                >
                   <td className="px-4 py-3 font-mono text-xs text-foreground">{vuln.cve}</td>
                   <td className="px-4 py-3">
                     <SeverityBadge severity={vuln.severity} />
@@ -505,6 +574,12 @@ function VulnerabilitiesTab({ agentId, orgSlug }) {
           </button>
         </div>
       )}
+      <VulnerabilitySlideOver
+        agentId={agentId}
+        orgSlug={orgSlug}
+        vulnId={selectedVulnId}
+        onClose={() => setSelectedVulnId(null)}
+      />
     </div>
   );
 }
