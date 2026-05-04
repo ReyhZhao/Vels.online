@@ -80,6 +80,68 @@ def test_get_agent_events_respects_offset_and_limit(mock_post):
     assert body["size"] == 25
 
 
+@patch("security.opensearch.requests.post")
+def test_get_agent_events_severity_filter_adds_level_range(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_events("001", severity=["critical"])
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    severity_filter = next(f for f in filters if "bool" in f)
+    should = severity_filter["bool"]["should"]
+    assert should == [{"range": {"rule.level": {"gte": 12}}}]
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_events_multiple_severities_build_should_clauses(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_events("001", severity=["high", "low"])
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    severity_filter = next(f for f in filters if "bool" in f)
+    should = severity_filter["bool"]["should"]
+    assert {"range": {"rule.level": {"gte": 8, "lt": 12}}} in should
+    assert {"range": {"rule.level": {"lt": 4}}} in should
+    assert severity_filter["bool"]["minimum_should_match"] == 1
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_events_no_severity_omits_level_filter(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_events("001", severity=None)
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    assert not any("bool" in f for f in filters)
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_events_search_adds_match_query(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_events("001", search="brute force")
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    match_filter = next(f for f in filters if "match" in f)
+    assert match_filter["match"]["rule.description"] == "brute force"
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_events_empty_search_omits_match_query(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_events("001", search="")
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    assert not any("match" in f for f in filters)
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_events_hours_controls_time_range(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_events("001", hours=6)
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    range_filter = next(f for f in filters if "range" in f)
+    assert range_filter["range"]["@timestamp"]["gte"] == "now-6h"
+
+
 # ------------------------------------------ get_agent_vulnerabilities
 
 

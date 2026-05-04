@@ -29,9 +29,10 @@ const VULNS = [
   { cve: 'CVE-2024-0003', severity: 'medium',   package: 'libc6',   version: '2.31',   fix_available: true  },
 ];
 
-function renderAgentDetail(agentId = '001', selectedOrg = SELECTED_ORG) {
+function renderAgentDetail(agentId = '001', selectedOrg = SELECTED_ORG, search = '') {
+  const path = `/security/agents/${agentId}${search ? `?${search}` : ''}`;
   return render(
-    <MemoryRouter initialEntries={[`/security/agents/${agentId}`]}>
+    <MemoryRouter initialEntries={[path]}>
       <OrgContext.Provider value={{ orgs: [SELECTED_ORG], selectedOrg, setSelectedOrg: vi.fn(), isLoading: false }}>
         <Routes>
           <Route path="/security/agents/:agentId" element={<AgentDetail />} />
@@ -60,9 +61,9 @@ describe('AgentDetail — events tab', () => {
     await waitFor(() => expect(screen.getByText('SSH brute force')).toBeInTheDocument());
     expect(screen.getByText('Sudo usage')).toBeInTheDocument();
     expect(screen.getByText('Failed login')).toBeInTheDocument();
-    expect(screen.getByText('high')).toBeInTheDocument();
-    expect(screen.getByText('medium')).toBeInTheDocument();
-    expect(screen.getByText('critical')).toBeInTheDocument();
+    expect(screen.getAllByText('high').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('medium').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('critical').length).toBeGreaterThan(0);
   });
 
   it('does not show Show more when total equals loaded count', async () => {
@@ -162,6 +163,146 @@ describe('AgentDetail — vulnerabilities tab', () => {
 
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(expect.stringContaining('offset=50'))
+    );
+  });
+});
+
+describe('AgentDetail — FilterBar', () => {
+  beforeEach(() => { vi.clearAllMocks(); setupMocks(); });
+
+  it('renders all four severity chips', async () => {
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+    expect(screen.getByRole('button', { name: 'critical' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'high' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'medium' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'low' })).toBeInTheDocument();
+  });
+
+  it('renders time range dropdown and search input', async () => {
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+    expect(screen.getByRole('combobox', { name: /time range/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /search rules/i })).toBeInTheDocument();
+  });
+
+  it('does not show clear button when no filters are active', async () => {
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+    expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
+  });
+
+  it('clicking a severity chip calls API with that severity', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByRole('button', { name: 'critical' }));
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('severity=critical'))
+    );
+  });
+
+  it('clicking two severity chips calls API with both', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByRole('button', { name: 'critical' }));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining('severity=critical')));
+
+    await user.click(screen.getByRole('button', { name: 'high' }));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('severity=critical%2Chigh'))
+    );
+  });
+
+  it('changing time range calls API with hours param', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /time range/i }), '6');
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('hours=6'))
+    );
+  });
+
+  it('typing in search calls API with search param', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.type(screen.getByRole('textbox', { name: /search rules/i }), 'brute');
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('search=brute'))
+    );
+  });
+
+  it('shows clear button when a filter is active', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByRole('button', { name: 'critical' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
+    );
+  });
+
+  it('clear button removes filter params from URL and calls API without them', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+
+    await user.click(screen.getByRole('button', { name: 'critical' }));
+    await waitFor(() => screen.getByRole('button', { name: /clear filters/i }));
+
+    await user.click(screen.getByRole('button', { name: /clear filters/i }));
+
+    await waitFor(() => {
+      const calls = api.get.mock.calls.map(c => c[0]);
+      const lastCall = calls[calls.length - 1];
+      expect(lastCall).not.toContain('severity=');
+    });
+  });
+
+  it('filter change resets offset to 0', async () => {
+    api.get
+      .mockResolvedValueOnce({ data: { events: EVENTS_PAGE_1, total: 4 } })
+      .mockResolvedValueOnce({ data: { events: EVENTS_PAGE_2, total: 4 } })
+      .mockResolvedValue({ data: { events: EVENTS_PAGE_1, total: 4 } });
+    api.post.mockResolvedValue({ data: { detail: 'Cache cleared.' } });
+
+    const user = userEvent.setup();
+    renderAgentDetail();
+
+    await waitFor(() => screen.getByText('SSH brute force'));
+    await user.click(screen.getByRole('button', { name: /show more/i }));
+    await waitFor(() => screen.getByText('Package updated'));
+
+    await user.click(screen.getByRole('button', { name: 'critical' }));
+
+    await waitFor(() => {
+      const calls = api.get.mock.calls.map(c => c[0]);
+      const lastCall = calls[calls.length - 1];
+      expect(lastCall).toContain('offset=0');
+      expect(lastCall).toContain('severity=critical');
+    });
+  });
+
+  it('initial URL params restore filter state and pass them to API', async () => {
+    renderAgentDetail('001', SELECTED_ORG, 'severity=high&hours=6');
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringMatching(/severity=high/))
+    );
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringMatching(/hours=6/))
     );
   });
 });

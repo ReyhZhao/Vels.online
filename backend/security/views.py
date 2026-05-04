@@ -46,8 +46,10 @@ def _agents_cache_key(slug):
     return f"security_agents_{slug}"
 
 
-def _events_cache_key(agent_id, org_slug):
-    return f"security_events_{agent_id}_{org_slug}"
+def _events_cache_key(agent_id, org_slug, hours=24, severity=None, search=""):
+    sev_part = ",".join(sorted(severity)) if severity else ""
+    search_part = search.replace(" ", "+")
+    return f"security_events_{agent_id}_{org_slug}_{hours}_{sev_part}_{search_part}"
 
 
 def _vulns_cache_key(agent_id, org_slug):
@@ -251,14 +253,18 @@ class AgentEventsView(APIView):
         if err:
             return err
 
+        severity_raw = request.query_params.get("severity", "").strip()
+        severity = [s.strip() for s in severity_raw.split(",") if s.strip()] or None
+        search = request.query_params.get("search", "").strip()
         try:
+            hours = int(request.query_params.get("hours", 24))
             offset = int(request.query_params.get("offset", 0))
             limit = int(request.query_params.get("limit", 100))
         except ValueError:
-            return Response({"detail": "offset and limit must be integers."}, status=400)
+            return Response({"detail": "hours, offset and limit must be integers."}, status=400)
 
         is_first_page = offset == 0 and limit == 100
-        cache_key = _events_cache_key(agent_id, org.slug)
+        cache_key = _events_cache_key(agent_id, org.slug, hours=hours, severity=severity, search=search)
 
         if is_first_page:
             cached = cache.get(cache_key)
@@ -266,7 +272,10 @@ class AgentEventsView(APIView):
                 return Response(cached)
 
         try:
-            result = OpenSearchClient().get_agent_events(agent_id, hours=24, offset=offset, limit=limit)
+            result = OpenSearchClient().get_agent_events(
+                agent_id, hours=hours, offset=offset, limit=limit,
+                severity=severity, search=search,
+            )
         except OpenSearchError as exc:
             return Response({"detail": str(exc)}, status=502)
 

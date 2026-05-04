@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 
@@ -24,97 +24,211 @@ function SeverityBadge({ severity }) {
 
 const LIMIT = 50;
 
+const TIME_RANGES = [
+  { label: 'Last 1h',  value: '1' },
+  { label: 'Last 6h',  value: '6' },
+  { label: 'Last 24h', value: '24' },
+  { label: 'Last 7d',  value: '168' },
+  { label: 'Last 30d', value: '720' },
+];
+
+const ALL_SEVERITIES = ['critical', 'high', 'medium', 'low'];
+
+function FilterBar({ filters, onChange, onClear }) {
+  const hasActive = filters.severities.length > 0 || filters.hours !== '24' || filters.search !== '';
+
+  function toggleSeverity(sev) {
+    const next = filters.severities.includes(sev)
+      ? filters.severities.filter(s => s !== sev)
+      : [...filters.severities, sev];
+    onChange({ ...filters, severities: next });
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 pb-3">
+      {ALL_SEVERITIES.map(sev => (
+        <button
+          key={sev}
+          onClick={() => toggleSeverity(sev)}
+          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border transition-colors ${
+            filters.severities.includes(sev)
+              ? `${SEVERITY_CLASSES[sev]} border-current`
+              : 'border-border text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {sev}
+        </button>
+      ))}
+      <select
+        value={filters.hours}
+        onChange={e => onChange({ ...filters, hours: e.target.value })}
+        className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        aria-label="Time range"
+      >
+        {TIME_RANGES.map(({ label, value }) => (
+          <option key={value} value={value}>{label}</option>
+        ))}
+      </select>
+      <input
+        type="text"
+        placeholder="Search rules…"
+        value={filters.search}
+        onChange={e => onChange({ ...filters, search: e.target.value })}
+        className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground w-40"
+        aria-label="Search rules"
+      />
+      {hasActive && (
+        <button
+          onClick={onClear}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Clear filters
+        </button>
+      )}
+    </div>
+  );
+}
+
 function EventsTab({ agentId, orgSlug }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const severitiesStr = searchParams.get('severity') || '';
+  const hours = searchParams.get('hours') || '24';
+  const search = searchParams.get('search') || '';
+  const severities = severitiesStr ? severitiesStr.split(',').filter(Boolean) : [];
+
   const [events, setEvents] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchFirstPage = useCallback(async () => {
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    try {
-      const res = await api.get(
-        `/api/security/agents/${agentId}/events/?org=${orgSlug}&offset=0&limit=100`
-      );
-      setEvents(res.data.events);
-      setTotal(res.data.total);
-    } catch {
-      setError('Failed to load events.');
-    } finally {
-      setLoading(false);
-    }
-  }, [agentId, orgSlug]);
-
-  useEffect(() => { fetchFirstPage(); }, [fetchFirstPage]);
+    const params = new URLSearchParams({ org: orgSlug, offset: '0', limit: '100', hours });
+    if (severities.length > 0) params.set('severity', severities.join(','));
+    if (search) params.set('search', search);
+    api.get(`/api/security/agents/${agentId}/events/?${params}`)
+      .then(res => {
+        if (!cancelled) {
+          setEvents(res.data.events);
+          setTotal(res.data.total);
+        }
+      })
+      .catch(() => { if (!cancelled) setError('Failed to load events.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [agentId, orgSlug, hours, severitiesStr, search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleShowMore() {
     if (loadingMore) return;
     setLoadingMore(true);
+    const params = new URLSearchParams({ org: orgSlug, offset: String(events.length), limit: '100', hours });
+    if (severities.length > 0) params.set('severity', severities.join(','));
+    if (search) params.set('search', search);
     try {
-      const res = await api.get(
-        `/api/security/agents/${agentId}/events/?org=${orgSlug}&offset=${events.length}&limit=100`
-      );
-      setEvents((prev) => [...prev, ...res.data.events]);
+      const res = await api.get(`/api/security/agents/${agentId}/events/?${params}`);
+      setEvents(prev => [...prev, ...res.data.events]);
       setTotal(res.data.total);
     } finally {
       setLoadingMore(false);
     }
   }
 
-  if (loading) return <p className="py-4 text-sm text-muted-foreground">Loading…</p>;
-  if (error) return <p className="text-sm text-red-600">{error}</p>;
+  function handleFilterChange(newFilters) {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (newFilters.severities.length > 0) {
+        next.set('severity', newFilters.severities.join(','));
+      } else {
+        next.delete('severity');
+      }
+      if (newFilters.hours !== '24') {
+        next.set('hours', newFilters.hours);
+      } else {
+        next.delete('hours');
+      }
+      if (newFilters.search) {
+        next.set('search', newFilters.search);
+      } else {
+        next.delete('search');
+      }
+      return next;
+    });
+  }
+
+  function handleClearFilters() {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('severity');
+      next.delete('hours');
+      next.delete('search');
+      return next;
+    });
+  }
+
+  const filters = { severities, hours, search };
 
   return (
     <div className="space-y-2">
-      {total > 0 && (
-        <p className="text-xs text-muted-foreground text-right">
-          Showing {events.length} of {total}
-        </p>
-      )}
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Timestamp</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Rule</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">
-                  No events in the last 24 hours.
-                </td>
-              </tr>
-            ) : (
-              events.map((event, idx) => (
-                <tr key={`${event.timestamp}-${idx}`} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                    {event.timestamp ? new Date(event.timestamp).toLocaleString() : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <SeverityBadge severity={event.severity} />
-                  </td>
-                  <td className="px-4 py-3 text-foreground">{event.rule_description}</td>
+      <FilterBar filters={filters} onChange={handleFilterChange} onClear={handleClearFilters} />
+      {loading ? (
+        <p className="py-4 text-sm text-muted-foreground">Loading…</p>
+      ) : error ? (
+        <p className="text-sm text-red-600">{error}</p>
+      ) : (
+        <>
+          {total > 0 && (
+            <p className="text-xs text-muted-foreground text-right">
+              Showing {events.length} of {total}
+            </p>
+          )}
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Timestamp</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Rule</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-      {total > events.length && (
-        <div className="flex justify-center pt-2">
-          <button
-            onClick={handleShowMore}
-            disabled={loadingMore}
-            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
-          >
-            {loadingMore ? 'Loading…' : `Show more (${total - events.length} remaining)`}
-          </button>
-        </div>
+              </thead>
+              <tbody>
+                {events.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">
+                      No events found.
+                    </td>
+                  </tr>
+                ) : (
+                  events.map((event, idx) => (
+                    <tr key={`${event.timestamp}-${idx}`} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                        {event.timestamp ? new Date(event.timestamp).toLocaleString() : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <SeverityBadge severity={event.severity} />
+                      </td>
+                      <td className="px-4 py-3 text-foreground">{event.rule_description}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {total > events.length && (
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={handleShowMore}
+                disabled={loadingMore}
+                className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+              >
+                {loadingMore ? 'Loading…' : `Show more (${total - events.length} remaining)`}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

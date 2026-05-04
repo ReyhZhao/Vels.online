@@ -8,6 +8,13 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _ALERTS_INDEX = "wazuh-alerts-4.x-*"
 _VULNS_INDEX = "wazuh-states-vulnerabilities-wazuh"
 
+_SEVERITY_LEVEL_RANGES = {
+    "critical": {"gte": 12},
+    "high":     {"gte": 8, "lt": 12},
+    "medium":   {"gte": 4, "lt": 8},
+    "low":      {"lt": 4},
+}
+
 
 class OpenSearchError(RuntimeError):
     pass
@@ -35,12 +42,20 @@ class OpenSearchClient:
             raise OpenSearchError(f"OpenSearch error on {index}: {exc}") from exc
         return response.json()
 
-    def get_agent_events(self, agent_id, hours=24, offset=0, limit=100):
+    def get_agent_events(self, agent_id, hours=24, offset=0, limit=100, severity=None, search=""):
+        filters = [
+            {"term": {"agent.id": str(agent_id)}},
+            {"range": {"@timestamp": {"gte": f"now-{hours}h"}}},
+        ]
+        if severity:
+            valid = [s for s in severity if s in _SEVERITY_LEVEL_RANGES]
+            if valid:
+                should = [{"range": {"rule.level": _SEVERITY_LEVEL_RANGES[s]}} for s in valid]
+                filters.append({"bool": {"should": should, "minimum_should_match": 1}})
+        if search:
+            filters.append({"match": {"rule.description": search}})
         body = {
-            "query": {"bool": {"filter": [
-                {"term": {"agent.id": str(agent_id)}},
-                {"range": {"@timestamp": {"gte": f"now-{hours}h"}}},
-            ]}},
+            "query": {"bool": {"filter": filters}},
             "sort": [{"@timestamp": {"order": "desc"}}],
             "from": offset,
             "size": limit,

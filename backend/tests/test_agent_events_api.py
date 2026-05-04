@@ -125,7 +125,7 @@ def test_events_offset_and_limit_forwarded(mock_os_cls, client, acme_member, acm
     client.get("/api/security/agents/001/events/?org=acme&offset=100&limit=50")
 
     mock_os_cls.return_value.get_agent_events.assert_called_once_with(
-        "001", hours=24, offset=100, limit=50
+        "001", hours=24, offset=100, limit=50, severity=None, search=""
     )
 
 
@@ -205,3 +205,76 @@ def test_events_staff_bypasses_agent_ownership_check(mock_os_cls, client, acme, 
     # Agent "999" is not in acme's agent list, but staff is exempt
     response = client.get("/api/security/agents/999/events/?org=acme")
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------- Filter params
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_events_severity_param_forwarded(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_events.return_value = {"events": [], "total": 0}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/events/?org=acme&severity=critical,high")
+
+    mock_os_cls.return_value.get_agent_events.assert_called_once_with(
+        "001", hours=24, offset=0, limit=100, severity=["critical", "high"], search=""
+    )
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_events_hours_param_forwarded(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_events.return_value = {"events": [], "total": 0}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/events/?org=acme&hours=6")
+
+    mock_os_cls.return_value.get_agent_events.assert_called_once_with(
+        "001", hours=6, offset=0, limit=100, severity=None, search=""
+    )
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_events_search_param_forwarded(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_events.return_value = {"events": [], "total": 0}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/events/?org=acme&search=brute+force")
+
+    mock_os_cls.return_value.get_agent_events.assert_called_once_with(
+        "001", hours=24, offset=0, limit=100, severity=None, search="brute force"
+    )
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_events_filter_combos_have_distinct_cache_keys(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_events.return_value = {"events": _OPENSEARCH_EVENTS, "total": 2}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/events/?org=acme")
+    client.get("/api/security/agents/001/events/?org=acme&severity=critical")
+
+    assert mock_os_cls.return_value.get_agent_events.call_count == 2
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_events_same_filter_combo_served_from_cache(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_events.return_value = {"events": _OPENSEARCH_EVENTS, "total": 2}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/events/?org=acme&severity=critical&hours=6")
+    client.get("/api/security/agents/001/events/?org=acme&severity=critical&hours=6")
+
+    mock_os_cls.return_value.get_agent_events.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_events_ownership_check_applies_with_filters(client, acme_member, acme):
+    client.force_login(acme_member)
+    response = client.get("/api/security/agents/999/events/?org=acme&severity=critical&hours=6")
+    assert response.status_code == 403
