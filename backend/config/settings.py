@@ -120,6 +120,15 @@ CACHES = {
 
 UPTIMEROBOT_API_KEY = os.environ.get("UPTIMEROBOT_API_KEY", "")
 
+CELERY_BROKER_URL = _REDIS_URL or "memory://"
+CELERY_RESULT_BACKEND = _REDIS_URL or "cache+memory://"
+CELERY_BEAT_SCHEDULE = {
+    "snapshot-vulnerabilities-daily": {
+        "task": "security.tasks.snapshot_vulnerabilities",
+        "schedule": 86400,  # every 24 hours
+    },
+}
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",

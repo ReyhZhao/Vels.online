@@ -29,6 +29,7 @@ function SecurityLayout() {
           <nav className="flex items-center gap-6">
             <span className="text-sm font-semibold text-foreground">Security</span>
             <NavItem to="/security" end>Dashboard</NavItem>
+            <NavItem to="/security/vulnerabilities">Vulnerabilities</NavItem>
             <NavItem to="/security/enroll">Enroll</NavItem>
           </nav>
           <OrgSwitcher />

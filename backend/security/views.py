@@ -7,15 +7,18 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from django.db.models import Q
-from security.models import Download, Organization, OrganizationMembership
+from security.models import Download, Organization, OrganizationMembership, VulnerabilitySnapshot
 from security.serializers import (
     AgentSerializer,
+    CveDetailSerializer,
     DownloadCreateSerializer,
     DownloadSerializer,
     EnrollmentSerializer,
+    FleetVulnerabilitiesResponseSerializer,
     OrganizationSerializer,
     PaginatedEventsSerializer,
     PaginatedVulnerabilitiesSerializer,
+    VulnerabilitySnapshotSerializer,
 )
 from security.storage import StorageClient
 from security.opensearch import OpenSearchClient, OpenSearchError
@@ -460,6 +463,163 @@ class AgentVulnerabilityDetailView(APIView):
             return Response(status=404)
 
         return Response(_serialize_vulnerability_detail(vuln))
+
+
+_FLEET_VULNS_CACHE_TTL = 300  # 5 min — fleet-wide CVE aggregation
+_VALID_SORT_FIELDS = {"severity", "cvss_score", "affected_agents", "published"}
+
+
+def _fleet_vulns_cache_key(org_slug, severity=None, fix_available=None, search="", agent_id="", sort_by="severity", sort_order="desc"):
+    sev_part = ",".join(sorted(severity)) if severity else ""
+    fix_part = "1" if fix_available else ""
+    return f"fleet_vulns_{org_slug}_{sev_part}_{fix_part}_{search}_{agent_id}_{sort_by}_{sort_order}"
+
+
+class FleetVulnerabilitiesView(APIView):
+    def get(self, request):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        severity_raw = request.query_params.get("severity", "").strip()
+        severity = [s.strip() for s in severity_raw.split(",") if s.strip()] or None
+        fix_available_raw = request.query_params.get("fix_available", "").strip().lower()
+        fix_available = True if fix_available_raw == "true" else None
+        search = request.query_params.get("search", "").strip()
+        agent_id_filter = request.query_params.get("agent", "").strip() or None
+        sort_by = request.query_params.get("sort_by", "severity").strip()
+        sort_order = request.query_params.get("sort_order", "desc").strip()
+        if sort_by not in _VALID_SORT_FIELDS:
+            sort_by = "severity"
+        if sort_order not in ("asc", "desc"):
+            sort_order = "desc"
+        try:
+            offset = int(request.query_params.get("offset", 0))
+            limit = int(request.query_params.get("limit", 50))
+        except ValueError:
+            return Response({"detail": "offset and limit must be integers."}, status=400)
+
+        cache_key = _fleet_vulns_cache_key(
+            org.slug, severity=severity, fix_available=fix_available,
+            search=search, agent_id=agent_id_filter or "",
+            sort_by=sort_by, sort_order=sort_order,
+        )
+        is_first_page = offset == 0 and limit == 50
+        if is_first_page:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return Response(cached)
+
+        try:
+            raw_agents = WazuhClient().get_agents(org.wazuh_group)
+        except (WazuhAuthError, WazuhAPIError) as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        agent_ids = [a["id"] for a in raw_agents if a.get("status") == "active"]
+
+        try:
+            result = OpenSearchClient().get_fleet_vulnerabilities(
+                agent_ids,
+                severity=severity,
+                fix_available=fix_available,
+                search=search,
+                agent_id_filter=agent_id_filter,
+                offset=offset,
+                limit=limit,
+                sort_by=sort_by,
+                sort_order=sort_order,
+            )
+        except OpenSearchError as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        data = FleetVulnerabilitiesResponseSerializer(result).data
+        if is_first_page:
+            cache.set(cache_key, data, _FLEET_VULNS_CACHE_TTL)
+        return Response(data)
+
+
+class FleetVulnerabilityTrendView(APIView):
+    def get(self, request):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        try:
+            days = int(request.query_params.get("days", 30))
+        except ValueError:
+            return Response({"detail": "days must be an integer."}, status=400)
+        if days not in (7, 30, 90):
+            days = 30
+
+        from datetime import date, timedelta
+        cutoff = date.today() - timedelta(days=days)
+        snapshots = (
+            VulnerabilitySnapshot.objects
+            .filter(organization=org, date__gte=cutoff)
+            .order_by("date")
+        )
+        data = VulnerabilitySnapshotSerializer(snapshots, many=True).data
+        return Response({"snapshots": data})
+
+
+class CveDetailView(APIView):
+    def get(self, request, cve_id):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        try:
+            raw_agents = WazuhClient().get_agents(org.wazuh_group)
+        except (WazuhAuthError, WazuhAPIError) as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        agent_ids = [a["id"] for a in raw_agents if a.get("status") == "active"]
+        agent_map = {str(a["id"]): _serialize_agent(a) for a in raw_agents}
+
+        try:
+            os_client = OpenSearchClient()
+            sample = os_client.get_cve_detail(agent_ids, cve_id)
+            if sample is None:
+                return Response(status=404)
+            affected_docs = os_client.get_cve_affected_agents(agent_ids, cve_id)
+        except OpenSearchError as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        v = sample.get("vulnerability", {})
+        pkg = sample.get("package", {})
+        cvss = v.get("cvss", {}).get("cvss3", {})
+        refs = v.get("references", [])
+
+        affected = []
+        for doc in affected_docs:
+            a = doc.get("agent", {})
+            p = doc.get("package", {})
+            dv = doc.get("vulnerability", {})
+            agent_info = agent_map.get(str(a.get("id", "")), {})
+            affected.append({
+                "agent_id": str(a.get("id", "")),
+                "agent_name": a.get("name") or agent_info.get("name") or "",
+                "installed_version": p.get("version") or None,
+                "fixed_version": p.get("fixed_version") or None,
+                "fix_available": dv.get("status", "").lower() == "fixed",
+            })
+
+        detail = {
+            "cve": v.get("id", cve_id),
+            "severity": v.get("severity", "").lower(),
+            "cvss_score": cvss.get("base_score"),
+            "package": pkg.get("name", ""),
+            "description": v.get("description", ""),
+            "published": v.get("published") or None,
+            "affected_agents": affected,
+        }
+        if refs:
+            detail["references"] = refs if isinstance(refs, list) else [refs]
+
+        return Response(CveDetailSerializer(detail).data)
 
 
 class EnrollmentView(APIView):

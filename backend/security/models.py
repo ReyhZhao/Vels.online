@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils import timezone
 
 
 class Download(models.Model):
@@ -58,3 +59,23 @@ class OrganizationMembership(models.Model):
 
     def __str__(self):
         return f"{self.user} → {self.organization}"
+
+
+class VulnerabilitySnapshot(models.Model):
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="vuln_snapshots"
+    )
+    date = models.DateField(default=timezone.now)
+    critical = models.IntegerField(default=0)
+    high = models.IntegerField(default=0)
+    medium = models.IntegerField(default=0)
+    low = models.IntegerField(default=0)
+    new_count = models.IntegerField(default=0)
+    resolved_count = models.IntegerField(default=0)
+    cve_ids = models.JSONField(default=list)
+
+    class Meta:
+        unique_together = [("organization", "date")]
+
+    def __str__(self):
+        return f"{self.organization} snapshot {self.date}"

@@ -13,6 +13,8 @@ import StatusSettings from './pages/admin/StatusSettings';
 import OrgManagement from './pages/admin/OrgManagement';
 import DownloadManagement from './pages/admin/DownloadManagement';
 import SecurityDashboard from './pages/SecurityDashboard';
+import VulnerabilityDashboard from './pages/VulnerabilityDashboard';
+import CveDetail from './pages/CveDetail';
 import EnrollmentPage from './pages/EnrollmentPage';
 import AgentDetail from './pages/AgentDetail';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -45,6 +47,8 @@ function App() {
         element={<ProtectedRoute><SecurityLayout /></ProtectedRoute>}
       >
         <Route index element={<SecurityDashboard />} />
+        <Route path="vulnerabilities" element={<VulnerabilityDashboard />} />
+        <Route path="vulnerabilities/:cveId" element={<CveDetail />} />
         <Route path="enroll" element={<EnrollmentPage />} />
         <Route path="agents/:agentId" element={<AgentDetail />} />
       </Route>

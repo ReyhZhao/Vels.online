@@ -54,6 +54,60 @@ class EnrollmentSerializer(serializers.Serializer):
     install_command = serializers.CharField()
 
 
+class FleetVulnStatsSerializer(serializers.Serializer):
+    critical = serializers.IntegerField()
+    high = serializers.IntegerField()
+    medium = serializers.IntegerField()
+    low = serializers.IntegerField()
+    affected_systems = serializers.IntegerField()
+    fixable = serializers.IntegerField()
+
+
+class FleetVulnerabilitySerializer(serializers.Serializer):
+    cve = serializers.CharField()
+    severity = serializers.CharField()
+    cvss_score = serializers.FloatField(allow_null=True)
+    package = serializers.CharField()
+    affected_agents = serializers.IntegerField()
+    fix_available = serializers.BooleanField()
+    published = serializers.CharField(allow_null=True)
+
+
+class FleetVulnerabilitiesResponseSerializer(serializers.Serializer):
+    vulnerabilities = FleetVulnerabilitySerializer(many=True)
+    total = serializers.IntegerField()
+    stats = FleetVulnStatsSerializer()
+
+
+class VulnerabilitySnapshotSerializer(serializers.Serializer):
+    date = serializers.DateField()
+    critical = serializers.IntegerField()
+    high = serializers.IntegerField()
+    medium = serializers.IntegerField()
+    low = serializers.IntegerField()
+    new_count = serializers.IntegerField()
+    resolved_count = serializers.IntegerField()
+
+
+class CveAffectedAgentSerializer(serializers.Serializer):
+    agent_id = serializers.CharField()
+    agent_name = serializers.CharField()
+    installed_version = serializers.CharField(allow_null=True)
+    fixed_version = serializers.CharField(allow_null=True)
+    fix_available = serializers.BooleanField()
+
+
+class CveDetailSerializer(serializers.Serializer):
+    cve = serializers.CharField()
+    severity = serializers.CharField()
+    cvss_score = serializers.FloatField(allow_null=True)
+    package = serializers.CharField()
+    description = serializers.CharField()
+    published = serializers.CharField(allow_null=True)
+    references = serializers.ListField(child=serializers.CharField(), required=False)
+    affected_agents = CveAffectedAgentSerializer(many=True)
+
+
 class DownloadSerializer(serializers.ModelSerializer):
     organization_slug = serializers.SlugRelatedField(
         source="organization", slug_field="slug", read_only=True
