@@ -101,16 +101,46 @@ class OpenSearchClient:
         if search:
             filters.append({"multi_match": {"query": search, "fields": ["vulnerability.id", "package.name"]}})
         body = {
+            "size": 0,
             "query": {"bool": {"filter": filters}},
-            "from": offset,
-            "size": limit,
-            "track_total_hits": True,
+            "aggs": {
+                "by_cve": {
+                    "terms": {"field": "vulnerability.id", "size": 10000},
+                    "aggs": {
+                        "package": {"terms": {"field": "package.name", "size": 1}},
+                        "severity": {"terms": {"field": "vulnerability.severity", "size": 1}},
+                        "status": {"terms": {"field": "vulnerability.status", "size": 1}},
+                        "version": {"terms": {"field": "package.version", "size": 1}},
+                    },
+                }
+            },
         }
         data = self._search(_VULNS_INDEX, body)
-        hits = data["hits"]
+        buckets = data.get("aggregations", {}).get("by_cve", {}).get("buckets", [])
+
+        def _first_key(agg):
+            b = agg.get("buckets", [])
+            return b[0]["key"] if b else ""
+
+        vulns = [
+            {
+                "_id": b["key"],
+                "vulnerability": {
+                    "id": b["key"],
+                    "severity": _first_key(b.get("severity", {})),
+                    "status": _first_key(b.get("status", {})),
+                },
+                "package": {
+                    "name": _first_key(b.get("package", {})),
+                    "version": _first_key(b.get("version", {})),
+                },
+            }
+            for b in buckets
+        ]
+        total = len(vulns)
         return {
-            "vulnerabilities": [{"_id": h.get("_id", ""), **h["_source"]} for h in hits["hits"]],
-            "total": hits["total"]["value"],
+            "vulnerabilities": vulns[offset: offset + limit],
+            "total": total,
         }
 
     def get_vulnerability_by_id(self, agent_id, vuln_id):

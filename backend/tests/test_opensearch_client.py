@@ -39,6 +39,26 @@ def _agg_response(buckets):
     return m
 
 
+def _agg_vulns_response(buckets):
+    m = MagicMock()
+    m.raise_for_status.return_value = None
+    m.json.return_value = {
+        "hits": {"hits": [], "total": {"value": 0}},
+        "aggregations": {"by_cve": {"buckets": buckets}},
+    }
+    return m
+
+
+def _vuln_bucket(cve_id, package="", severity="", status="", version=""):
+    return {
+        "key": cve_id,
+        "package": {"buckets": [{"key": package}] if package else []},
+        "severity": {"buckets": [{"key": severity}] if severity else []},
+        "status": {"buckets": [{"key": status}] if status else []},
+        "version": {"buckets": [{"key": version}] if version else []},
+    }
+
+
 # ------------------------------------------ get_agent_events
 
 
@@ -156,22 +176,42 @@ def test_get_agent_vulnerabilities_queries_vulns_index(mock_post):
 
 @patch("security.opensearch.requests.post")
 def test_get_agent_vulnerabilities_returns_vulns_and_total(mock_post):
-    source = {"vulnerability": {"id": "CVE-2024-0001", "severity": "High", "status": "Fixed"}, "package": {"name": "openssl", "version": "1.1.1"}}
-    mock_post.return_value = _search_response([source], total=10, ids=["vuln-id-001"])
+    mock_post.return_value = _agg_vulns_response([
+        _vuln_bucket("CVE-2024-0001", package="openssl", severity="High", status="Fixed", version="1.1.1"),
+        _vuln_bucket("CVE-2024-0002", package="curl", severity="Critical", status="Unfixed", version="7.68.0"),
+    ])
     result = OpenSearchClient().get_agent_vulnerabilities("001")
-    assert result["total"] == 10
-    assert len(result["vulnerabilities"]) == 1
-    assert result["vulnerabilities"][0]["_id"] == "vuln-id-001"
-    assert result["vulnerabilities"][0]["vulnerability"] == source["vulnerability"]
+    assert result["total"] == 2
+    assert len(result["vulnerabilities"]) == 2
+    v = result["vulnerabilities"][0]
+    assert v["_id"] == "CVE-2024-0001"
+    assert v["vulnerability"]["id"] == "CVE-2024-0001"
+    assert v["vulnerability"]["severity"] == "High"
+    assert v["vulnerability"]["status"] == "Fixed"
+    assert v["package"]["name"] == "openssl"
+    assert v["package"]["version"] == "1.1.1"
 
 
 @patch("security.opensearch.requests.post")
 def test_get_agent_vulnerabilities_respects_offset_and_limit(mock_post):
-    mock_post.return_value = _search_response([])
-    OpenSearchClient().get_agent_vulnerabilities("001", offset=20, limit=10)
-    body = mock_post.call_args[1]["json"]
-    assert body["from"] == 20
-    assert body["size"] == 10
+    buckets = [_vuln_bucket(f"CVE-2024-{i:04d}") for i in range(30)]
+    mock_post.return_value = _agg_vulns_response(buckets)
+    result = OpenSearchClient().get_agent_vulnerabilities("001", offset=10, limit=5)
+    assert result["total"] == 30
+    assert len(result["vulnerabilities"]) == 5
+    assert result["vulnerabilities"][0]["_id"] == "CVE-2024-0010"
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_vulnerabilities_deduplicates_by_cve(mock_post):
+    # Wazuh stores thousands of identical docs per CVE — aggregation must collapse them to one entry
+    mock_post.return_value = _agg_vulns_response([
+        _vuln_bucket("CVE-2024-9999", package="linux-image", severity="High", status="Unfixed", version="5.15.0"),
+    ])
+    result = OpenSearchClient().get_agent_vulnerabilities("001")
+    assert result["total"] == 1
+    assert len(result["vulnerabilities"]) == 1
+    assert result["vulnerabilities"][0]["_id"] == "CVE-2024-9999"
 
 
 # ------------------------------------------ get_agent_vulnerabilities filters
