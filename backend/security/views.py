@@ -52,8 +52,11 @@ def _events_cache_key(agent_id, org_slug, hours=24, severity=None, search=""):
     return f"security_events_{agent_id}_{org_slug}_{hours}_{sev_part}_{search_part}"
 
 
-def _vulns_cache_key(agent_id, org_slug):
-    return f"security_vulns_{agent_id}_{org_slug}"
+def _vulns_cache_key(agent_id, org_slug, severity=None, fix_available=None, search=""):
+    sev_part = ",".join(sorted(severity)) if severity else ""
+    fix_part = "1" if fix_available else ""
+    search_part = search.replace(" ", "+")
+    return f"security_vulns_{agent_id}_{org_slug}_{sev_part}_{fix_part}_{search_part}"
 
 
 def _serialize_agent(agent):
@@ -370,6 +373,11 @@ class AgentVulnerabilitiesView(APIView):
         if err:
             return err
 
+        severity_raw = request.query_params.get("severity", "").strip()
+        severity = [s.strip() for s in severity_raw.split(",") if s.strip()] or None
+        fix_available_raw = request.query_params.get("fix_available", "").strip().lower()
+        fix_available = True if fix_available_raw == "true" else None
+        search = request.query_params.get("search", "").strip()
         try:
             offset = int(request.query_params.get("offset", 0))
             limit = int(request.query_params.get("limit", 50))
@@ -377,7 +385,7 @@ class AgentVulnerabilitiesView(APIView):
             return Response({"detail": "offset and limit must be integers."}, status=400)
 
         is_first_page = offset == 0 and limit == 50
-        cache_key = _vulns_cache_key(agent_id, org.slug)
+        cache_key = _vulns_cache_key(agent_id, org.slug, severity=severity, fix_available=fix_available, search=search)
 
         if is_first_page:
             cached = cache.get(cache_key)
@@ -385,7 +393,10 @@ class AgentVulnerabilitiesView(APIView):
                 return Response(cached)
 
         try:
-            result = OpenSearchClient().get_agent_vulnerabilities(agent_id, offset=offset, limit=limit)
+            result = OpenSearchClient().get_agent_vulnerabilities(
+                agent_id, offset=offset, limit=limit,
+                severity=severity, fix_available=fix_available, search=search,
+            )
         except OpenSearchError as exc:
             return Response({"detail": str(exc)}, status=502)
 

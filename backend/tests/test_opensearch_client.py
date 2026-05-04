@@ -174,6 +174,68 @@ def test_get_agent_vulnerabilities_respects_offset_and_limit(mock_post):
     assert body["size"] == 10
 
 
+# ------------------------------------------ get_agent_vulnerabilities filters
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_vulnerabilities_severity_filter_uses_terms(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_vulnerabilities("001", severity=["critical", "high"])
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    sev_filter = next(f for f in filters if "terms" in f)
+    assert set(sev_filter["terms"]["vulnerability.severity"]) == {"Critical", "High"}
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_vulnerabilities_no_severity_omits_terms(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_vulnerabilities("001", severity=None)
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    assert not any("terms" in f for f in filters)
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_vulnerabilities_fix_available_adds_status_term(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_vulnerabilities("001", fix_available=True)
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    status_filter = next(f for f in filters if "term" in f and "vulnerability.status" in f.get("term", {}))
+    assert status_filter["term"]["vulnerability.status"] == "Fixed"
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_vulnerabilities_fix_available_none_omits_status_term(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_vulnerabilities("001", fix_available=None)
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    assert not any("term" in f and "vulnerability.status" in f.get("term", {}) for f in filters)
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_vulnerabilities_search_adds_multi_match(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_vulnerabilities("001", search="openssl")
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    mm_filter = next(f for f in filters if "multi_match" in f)
+    assert mm_filter["multi_match"]["query"] == "openssl"
+    assert "vulnerability.id" in mm_filter["multi_match"]["fields"]
+    assert "package.name" in mm_filter["multi_match"]["fields"]
+
+
+@patch("security.opensearch.requests.post")
+def test_get_agent_vulnerabilities_empty_search_omits_multi_match(mock_post):
+    mock_post.return_value = _search_response([])
+    OpenSearchClient().get_agent_vulnerabilities("001", search="")
+    body = mock_post.call_args[1]["json"]
+    filters = body["query"]["bool"]["filter"]
+    assert not any("multi_match" in f for f in filters)
+
+
 # ------------------------------------------ get_vulnerabilities_summary
 
 

@@ -449,3 +449,105 @@ describe('AgentDetail — EventSlideOver', () => {
     );
   });
 });
+
+describe('AgentDetail — Vuln FilterBar', () => {
+  beforeEach(() => { vi.clearAllMocks(); setupMocks(); });
+
+  async function openVulnsTab() {
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await waitFor(() => screen.getByText('SSH brute force'));
+    await user.click(screen.getByRole('button', { name: /vulnerabilities/i }));
+    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    return user;
+  }
+
+  it('shows Fix available toggle but not time range dropdown', async () => {
+    await openVulnsTab();
+    expect(screen.getByRole('button', { name: /fix available/i })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /time range/i })).not.toBeInTheDocument();
+  });
+
+  it('shows Search CVE or package input', async () => {
+    await openVulnsTab();
+    expect(screen.getByRole('textbox', { name: /search cve or package/i })).toBeInTheDocument();
+  });
+
+  it('clicking Fix available calls API with fix_available=true', async () => {
+    const user = await openVulnsTab();
+    await user.click(screen.getByRole('button', { name: /fix available/i }));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('fix_available=true'))
+    );
+  });
+
+  it('clicking a severity chip calls API with that severity', async () => {
+    const user = await openVulnsTab();
+    await user.click(screen.getByRole('button', { name: 'critical' }));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('severity=critical'))
+    );
+  });
+
+  it('typing in search calls API with search param', async () => {
+    const user = await openVulnsTab();
+    await user.type(screen.getByRole('textbox', { name: /search cve or package/i }), 'z');
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('search=z'))
+    );
+  });
+
+  it('filter change resets page to offset 0', async () => {
+    setupMocks({ vulnsTotal: 120 });
+    const user = await openVulnsTab();
+
+    await waitFor(() => screen.getByRole('button', { name: /next/i }));
+    await user.click(screen.getByRole('button', { name: /next/i }));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('offset=50'))
+    );
+
+    await user.click(screen.getByRole('button', { name: 'critical' }));
+
+    await waitFor(() => {
+      const calls = api.get.mock.calls.map(c => c[0]);
+      const lastCall = calls[calls.length - 1];
+      expect(lastCall).toContain('offset=0');
+      expect(lastCall).toContain('severity=critical');
+    });
+  });
+
+  it('initial URL params restore filter state on mount', async () => {
+    const user = userEvent.setup();
+    renderAgentDetail('001', SELECTED_ORG, 'severity=critical&fix_available=true');
+    await waitFor(() => screen.getByText('SSH brute force'));
+    await user.click(screen.getByRole('button', { name: /vulnerabilities/i }));
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        expect.stringMatching(/vulnerabilities.*severity=critical/)
+      )
+    );
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        expect.stringMatching(/vulnerabilities.*fix_available=true/)
+      )
+    );
+  });
+
+  it('clear filters removes all vuln filter params', async () => {
+    const user = await openVulnsTab();
+
+    await user.click(screen.getByRole('button', { name: /fix available/i }));
+    await waitFor(() => screen.getByRole('button', { name: /clear filters/i }));
+
+    await user.click(screen.getByRole('button', { name: /clear filters/i }));
+
+    await waitFor(() => {
+      const calls = api.get.mock.calls.map(c => c[0]);
+      const lastVulnCall = [...calls].reverse().find(c => c.includes('/vulnerabilities/'));
+      expect(lastVulnCall).not.toContain('fix_available=');
+      expect(lastVulnCall).not.toContain('severity=');
+    });
+  });
+});

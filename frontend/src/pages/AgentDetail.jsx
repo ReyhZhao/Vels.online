@@ -124,8 +124,18 @@ const TIME_RANGES = [
 
 const ALL_SEVERITIES = ['critical', 'high', 'medium', 'low'];
 
-function FilterBar({ filters, onChange, onClear }) {
-  const hasActive = filters.severities.length > 0 || filters.hours !== '24' || filters.search !== '';
+function FilterBar({
+  filters,
+  onChange,
+  onClear,
+  showTimeRange = true,
+  showFixAvailable = false,
+  searchPlaceholder = "Search rules…",
+}) {
+  const hasActive = filters.severities.length > 0
+    || (showTimeRange && (filters.hours || '24') !== '24')
+    || (showFixAvailable && !!filters.fixAvailable)
+    || filters.search !== '';
 
   function toggleSeverity(sev) {
     const next = filters.severities.includes(sev)
@@ -149,23 +159,38 @@ function FilterBar({ filters, onChange, onClear }) {
           {sev}
         </button>
       ))}
-      <select
-        value={filters.hours}
-        onChange={e => onChange({ ...filters, hours: e.target.value })}
-        className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-        aria-label="Time range"
-      >
-        {TIME_RANGES.map(({ label, value }) => (
-          <option key={value} value={value}>{label}</option>
-        ))}
-      </select>
+      {showTimeRange && (
+        <select
+          value={filters.hours}
+          onChange={e => onChange({ ...filters, hours: e.target.value })}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+          aria-label="Time range"
+        >
+          {TIME_RANGES.map(({ label, value }) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      )}
+      {showFixAvailable && (
+        <button
+          onClick={() => onChange({ ...filters, fixAvailable: !filters.fixAvailable })}
+          aria-pressed={!!filters.fixAvailable}
+          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border transition-colors ${
+            filters.fixAvailable
+              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-current'
+              : 'border-border text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Fix available
+        </button>
+      )}
       <input
         type="text"
-        placeholder="Search rules…"
+        placeholder={searchPlaceholder}
         value={filters.search}
         onChange={e => onChange({ ...filters, search: e.target.value })}
         className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground w-40"
-        aria-label="Search rules"
+        aria-label={searchPlaceholder}
       />
       {hasActive && (
         <button
@@ -336,42 +361,79 @@ function EventsTab({ agentId, orgSlug }) {
 }
 
 function VulnerabilitiesTab({ agentId, orgSlug }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const severitiesStr = searchParams.get('severity') || '';
+  const fixAvailableParam = searchParams.get('fix_available') || '';
+  const search = searchParams.get('search') || '';
+  const severities = severitiesStr ? severitiesStr.split(',').filter(Boolean) : [];
+  const fixAvailable = fixAvailableParam === 'true';
+
   const [vulns, setVulns] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchPage = useCallback(async (pageIndex) => {
+  // Reset to page 0 when filters change
+  useEffect(() => { setPage(0); }, [severitiesStr, fixAvailableParam, search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    try {
-      const res = await api.get(
-        `/api/security/agents/${agentId}/vulnerabilities/?org=${orgSlug}&offset=${pageIndex * LIMIT}&limit=${LIMIT}`
-      );
-      setVulns(res.data.vulnerabilities);
-      setTotal(res.data.total);
-    } catch {
-      setError('Failed to load vulnerabilities.');
-    } finally {
-      setLoading(false);
-    }
-  }, [agentId, orgSlug]);
-
-  useEffect(() => { fetchPage(0); }, [fetchPage]);
+    const params = new URLSearchParams({ org: orgSlug, offset: String(page * LIMIT), limit: String(LIMIT) });
+    if (severities.length > 0) params.set('severity', severities.join(','));
+    if (fixAvailable) params.set('fix_available', 'true');
+    if (search) params.set('search', search);
+    api.get(`/api/security/agents/${agentId}/vulnerabilities/?${params}`)
+      .then(res => { if (!cancelled) { setVulns(res.data.vulnerabilities); setTotal(res.data.total); } })
+      .catch(() => { if (!cancelled) setError('Failed to load vulnerabilities.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [agentId, orgSlug, page, severitiesStr, fixAvailableParam, search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
-  function goToPage(p) {
-    setPage(p);
-    fetchPage(p);
+  function goToPage(p) { setPage(p); }
+
+  function handleFilterChange(newFilters) {
+    setPage(0);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (newFilters.severities.length > 0) { next.set('severity', newFilters.severities.join(',')); } else { next.delete('severity'); }
+      if (newFilters.fixAvailable) { next.set('fix_available', 'true'); } else { next.delete('fix_available'); }
+      if (newFilters.search) { next.set('search', newFilters.search); } else { next.delete('search'); }
+      return next;
+    });
   }
+
+  function handleClearFilters() {
+    setPage(0);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('severity');
+      next.delete('fix_available');
+      next.delete('search');
+      return next;
+    });
+  }
+
+  const filters = { severities, fixAvailable, search };
 
   if (loading) return <p className="py-4 text-sm text-muted-foreground">Loading…</p>;
   if (error) return <p className="text-sm text-red-600">{error}</p>;
 
   return (
     <div className="space-y-2">
+      <FilterBar
+        filters={filters}
+        onChange={handleFilterChange}
+        onClear={handleClearFilters}
+        showTimeRange={false}
+        showFixAvailable={true}
+        searchPlaceholder="Search CVE or package…"
+      />
       {total > 0 && (
         <p className="text-xs text-muted-foreground text-right">
           Page {page + 1} of {totalPages} · {total} total

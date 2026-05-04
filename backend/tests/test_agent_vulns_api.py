@@ -153,7 +153,7 @@ def test_vulns_offset_and_limit_forwarded(mock_os_cls, client, acme_member, acme
     client.get("/api/security/agents/001/vulnerabilities/?org=acme&offset=50&limit=50")
 
     mock_os_cls.return_value.get_agent_vulnerabilities.assert_called_once_with(
-        "001", offset=50, limit=50
+        "001", offset=50, limit=50, severity=None, fix_available=None, search=""
     )
 
 
@@ -214,3 +214,76 @@ def test_vulns_staff_bypasses_agent_ownership_check(mock_os_cls, client, acme, d
     # Agent "999" is not in acme's agent list, but staff is exempt
     response = client.get("/api/security/agents/999/vulnerabilities/?org=acme")
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------- Filter params
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_vulns_severity_param_forwarded(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_vulnerabilities.return_value = {"vulnerabilities": [], "total": 0}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/vulnerabilities/?org=acme&severity=critical,high")
+
+    mock_os_cls.return_value.get_agent_vulnerabilities.assert_called_once_with(
+        "001", offset=0, limit=50, severity=["critical", "high"], fix_available=None, search=""
+    )
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_vulns_fix_available_param_forwarded(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_vulnerabilities.return_value = {"vulnerabilities": [], "total": 0}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/vulnerabilities/?org=acme&fix_available=true")
+
+    mock_os_cls.return_value.get_agent_vulnerabilities.assert_called_once_with(
+        "001", offset=0, limit=50, severity=None, fix_available=True, search=""
+    )
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_vulns_search_param_forwarded(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_vulnerabilities.return_value = {"vulnerabilities": [], "total": 0}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/vulnerabilities/?org=acme&search=openssl")
+
+    mock_os_cls.return_value.get_agent_vulnerabilities.assert_called_once_with(
+        "001", offset=0, limit=50, severity=None, fix_available=None, search="openssl"
+    )
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_vulns_filter_combos_have_distinct_cache_keys(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_vulnerabilities.return_value = {"vulnerabilities": _OPENSEARCH_VULNS, "total": 3}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/vulnerabilities/?org=acme")
+    client.get("/api/security/agents/001/vulnerabilities/?org=acme&severity=critical")
+
+    assert mock_os_cls.return_value.get_agent_vulnerabilities.call_count == 2
+
+
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+def test_vulns_same_filter_combo_served_from_cache(mock_os_cls, client, acme_member, acme):
+    mock_os_cls.return_value.get_agent_vulnerabilities.return_value = {"vulnerabilities": _OPENSEARCH_VULNS, "total": 3}
+    client.force_login(acme_member)
+
+    client.get("/api/security/agents/001/vulnerabilities/?org=acme&severity=critical&fix_available=true")
+    client.get("/api/security/agents/001/vulnerabilities/?org=acme&severity=critical&fix_available=true")
+
+    mock_os_cls.return_value.get_agent_vulnerabilities.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_vulns_ownership_check_applies_with_filters(client, acme_member, acme):
+    client.force_login(acme_member)
+    response = client.get("/api/security/agents/999/vulnerabilities/?org=acme&severity=critical&fix_available=true")
+    assert response.status_code == 403

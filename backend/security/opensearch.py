@@ -15,6 +15,13 @@ _SEVERITY_LEVEL_RANGES = {
     "low":      {"lt": 4},
 }
 
+_VULN_SEVERITY_LABEL = {
+    "critical": "Critical",
+    "high":     "High",
+    "medium":   "Medium",
+    "low":      "Low",
+}
+
 
 class OpenSearchError(RuntimeError):
     pass
@@ -83,11 +90,18 @@ class OpenSearchClient:
         h = hits[0]
         return {"_id": h.get("_id", event_id), **h["_source"]}
 
-    def get_agent_vulnerabilities(self, agent_id, offset=0, limit=50):
+    def get_agent_vulnerabilities(self, agent_id, offset=0, limit=50, severity=None, fix_available=None, search=""):
+        filters = [{"term": {"agent.id": str(agent_id)}}]
+        if severity:
+            valid = [_VULN_SEVERITY_LABEL[s] for s in severity if s in _VULN_SEVERITY_LABEL]
+            if valid:
+                filters.append({"terms": {"vulnerability.severity": valid}})
+        if fix_available is True:
+            filters.append({"term": {"vulnerability.status": "Fixed"}})
+        if search:
+            filters.append({"multi_match": {"query": search, "fields": ["vulnerability.id", "package.name"]}})
         body = {
-            "query": {"bool": {"filter": [
-                {"term": {"agent.id": str(agent_id)}},
-            ]}},
+            "query": {"bool": {"filter": filters}},
             "from": offset,
             "size": limit,
             "track_total_hits": True,
