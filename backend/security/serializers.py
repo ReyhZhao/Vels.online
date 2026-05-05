@@ -172,3 +172,8 @@ class WorkPackageSerializer(serializers.ModelSerializer):
     class Meta:
         model = WorkPackage
         fields = ["id", "created_at", "generated_by", "items"]
+
+
+class WorkPackageItemUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=WorkPackageItem.STATUS_CHOICES)
+    note = serializers.CharField(required=False, allow_blank=True, default="")

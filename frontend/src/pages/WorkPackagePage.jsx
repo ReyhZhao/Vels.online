@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 
@@ -23,6 +23,8 @@ const STATUS_LABELS = {
   accepted_risk: 'Accepted Risk',
 };
 
+const STATUS_OPTIONS = Object.entries(STATUS_LABELS);
+
 function SeverityBadge({ severity }) {
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[severity] ?? SEVERITY_CLASSES.low}`}>
@@ -39,32 +41,113 @@ function StatusBadge({ status }) {
   );
 }
 
-function CveItem({ item }) {
+function CveItem({ item, onUpdate }) {
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const noteTimerRef = useRef(null);
+
+  async function handleStatusChange(e) {
+    const newStatus = e.target.value;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const payload = { status: newStatus };
+      if (newStatus !== 'accepted_risk') payload.note = '';
+      const res = await api.patch(`/api/security/work-package/items/${item.id}/`, payload);
+      onUpdate(res.data);
+    } catch {
+      setSaveError('Failed to save status.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleNoteChange(e) {
+    const note = e.target.value;
+    onUpdate({ ...item, note });
+    clearTimeout(noteTimerRef.current);
+    noteTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await api.patch(`/api/security/work-package/items/${item.id}/`, {
+          status: item.status,
+          note,
+        });
+        onUpdate(res.data);
+      } catch {
+        setSaveError('Failed to save note.');
+      }
+    }, 600);
+  }
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-start gap-4 px-5 py-4 text-left hover:bg-accent/40 transition-colors"
-      >
-        <div className="flex-1 min-w-0">
+      {/* Header row — always visible */}
+      <div className="flex items-start gap-4 px-5 py-4">
+        {/* Expand toggle + CVE info */}
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="flex-1 min-w-0 text-left"
+        >
           <div className="flex flex-wrap items-center gap-2 mb-1">
             <span className="font-mono text-sm font-semibold text-foreground">{item.cve_id}</span>
             <SeverityBadge severity={item.severity} />
-            <StatusBadge status={item.status} />
           </div>
           <p className="text-sm text-muted-foreground line-clamp-2">{item.description || 'No description available.'}</p>
-        </div>
-        <div className="shrink-0 text-right text-xs text-muted-foreground space-y-1">
-          <div>CVSS <span className="font-semibold text-foreground">{item.cvss_score?.toFixed(1) ?? '—'}</span></div>
-          <div>Agents <span className="font-semibold text-foreground">{item.affected_agent_count}</span></div>
-          <div>Score <span className="font-semibold text-foreground">{item.impact_score}</span></div>
-        </div>
-      </button>
+        </button>
 
+        {/* Right-side: scores + inline status selector */}
+        <div className="shrink-0 flex flex-col items-end gap-2">
+          <div className="text-right text-xs text-muted-foreground space-y-0.5">
+            <div>CVSS <span className="font-semibold text-foreground">{item.cvss_score?.toFixed(1) ?? '—'}</span></div>
+            <div>Agents <span className="font-semibold text-foreground">{item.affected_agent_count}</span></div>
+            <div>Score <span className="font-semibold text-foreground">{item.impact_score}</span></div>
+          </div>
+
+          {/* Status selector */}
+          <div className="flex items-center gap-2">
+            {saving && <span className="text-xs text-muted-foreground">Saving…</span>}
+            {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+            <select
+              value={item.status}
+              onChange={handleStatusChange}
+              disabled={saving}
+              onClick={e => e.stopPropagation()}
+              className={`rounded-full px-3 py-0.5 text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 ${STATUS_CLASSES[item.status] ?? STATUS_CLASSES.open}`}
+            >
+              {STATUS_OPTIONS.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded detail */}
       {open && (
         <div className="border-t border-border px-5 py-4 space-y-4 bg-card">
+          {item.status === 'accepted_risk' && (
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">
+                Risk Acceptance Note <span className="normal-case font-normal">(optional)</span>
+              </label>
+              <textarea
+                rows={3}
+                value={item.note ?? ''}
+                onChange={handleNoteChange}
+                placeholder="Record the rationale for accepting this risk…"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+              />
+            </div>
+          )}
+
+          {item.note && item.status !== 'accepted_risk' && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Note</p>
+              <p className="text-sm text-foreground">{item.note}</p>
+            </div>
+          )}
+
           {item.description && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
@@ -121,13 +204,6 @@ function CveItem({ item }) {
               </div>
             </div>
           )}
-
-          {item.note && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Note</p>
-              <p className="text-sm text-foreground">{item.note}</p>
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -157,6 +233,16 @@ export default function WorkPackagePage() {
     if (selectedOrg) fetchPackage(selectedOrg.slug);
   }, [selectedOrg, fetchPackage]);
 
+  function handleItemUpdate(updatedItem) {
+    setPackageData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        items: prev.items.map(i => i.id === updatedItem.id ? updatedItem : i),
+      };
+    });
+  }
+
   if (orgLoading) return <p className="text-sm text-muted-foreground p-6">Loading…</p>;
   if (!selectedOrg) return <p className="text-sm text-muted-foreground p-6">No organisation assigned.</p>;
 
@@ -176,9 +262,7 @@ export default function WorkPackagePage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {loading && (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      )}
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
 
       {!loading && packageData === null && (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card py-20 text-center">
@@ -195,7 +279,7 @@ export default function WorkPackagePage() {
             {packageData.items.length} prioritised {packageData.items.length === 1 ? 'vulnerability' : 'vulnerabilities'}
           </p>
           {packageData.items.map(item => (
-            <CveItem key={item.id} item={item} />
+            <CveItem key={item.id} item={item} onUpdate={handleItemUpdate} />
           ))}
         </div>
       )}

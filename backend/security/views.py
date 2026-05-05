@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from django.db.models import Q
-from security.models import Download, Organization, OrganizationMembership, VulnerabilitySnapshot, WorkPackage
+from security.models import Download, Organization, OrganizationMembership, VulnerabilitySnapshot, WorkPackage, WorkPackageItem
 from security.serializers import (
     AgentSerializer,
     CveDetailSerializer,
@@ -19,6 +19,8 @@ from security.serializers import (
     PaginatedEventsSerializer,
     PaginatedVulnerabilitiesSerializer,
     VulnerabilitySnapshotSerializer,
+    WorkPackageItemSerializer,
+    WorkPackageItemUpdateSerializer,
     WorkPackageSerializer,
 )
 from security.storage import StorageClient
@@ -844,3 +846,34 @@ class WorkPackageView(APIView):
         if package is None:
             return Response({"package": None})
         return Response({"package": WorkPackageSerializer(package).data})
+
+
+class WorkPackageItemPatchView(APIView):
+    def patch(self, request, item_id):
+        try:
+            item = WorkPackageItem.objects.select_related("work_package__org").get(pk=item_id)
+        except WorkPackageItem.DoesNotExist:
+            return Response(status=404)
+
+        org = item.work_package.org
+        if not request.user.is_staff:
+            if not OrganizationMembership.objects.filter(user=request.user, organization=org).exists():
+                return Response(status=403)
+
+        if item.work_package.status != WorkPackage.STATUS_ACTIVE:
+            return Response({"detail": "Cannot update items on an archived work package."}, status=400)
+
+        serializer = WorkPackageItemUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        new_status = serializer.validated_data["status"]
+        note = serializer.validated_data.get("note", "")
+        if new_status != WorkPackageItem.STATUS_ACCEPTED_RISK:
+            note = ""
+
+        item.status = new_status
+        item.note = note
+        item.save(update_fields=["status", "note"])
+
+        return Response(WorkPackageItemSerializer(item).data)
