@@ -6,7 +6,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 
 def login_redirect_view(request):
     if request.user.is_authenticated:
-        return redirect("/admin/" if request.user.is_staff else "/security")
+        return redirect("/dashboard")
     return redirect("/")
 
 
