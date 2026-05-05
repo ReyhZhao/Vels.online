@@ -72,7 +72,7 @@ export default function EnrollmentPage() {
   const grouped = groupByCategory(downloads);
 
   return (
-    <div className="max-w-3xl space-y-8">
+    <div className="max-w-3xl space-y-8 p-6">
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Enroll an Agent</h1>
         <p className="mt-1 text-sm text-muted-foreground">
