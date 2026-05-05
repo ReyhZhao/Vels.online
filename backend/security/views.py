@@ -55,6 +55,12 @@ def _events_cache_key(agent_id, org_slug, hours=24, severity=None, search=""):
     return f"security_events_{agent_id}_{org_slug}_{hours}_{sev_part}_{search_part}"
 
 
+def _fleet_events_cache_key(org_slug, minutes=1440, severity=None, search="", agent_filter="", offset=0):
+    sev_part = ",".join(sorted(severity)) if severity else ""
+    search_part = search.replace(" ", "+")
+    return f"security_fleet_events_{org_slug}_{minutes}_{sev_part}_{search_part}_{agent_filter}_{offset}"
+
+
 def _vulns_cache_key(agent_id, org_slug, severity=None, fix_available=None, search=""):
     sev_part = ",".join(sorted(severity)) if severity else ""
     fix_part = "1" if fix_available else ""
@@ -99,6 +105,7 @@ def _serialize_event(event):
         "rule_id": rule.get("id", ""),
         "level": level,
         "severity": _event_severity(level),
+        "agent_id": str(agent.get("id", "")),
         "agent_name": agent.get("name", ""),
     }
 
@@ -562,6 +569,80 @@ class FleetVulnerabilityTrendView(APIView):
         )
         data = VulnerabilitySnapshotSerializer(snapshots, many=True).data
         return Response({"snapshots": data})
+
+
+_FLEET_EVENTS_CACHE_TTL = 60   # 1 minute — fleet events change frequently
+_VALID_MINUTES = {5, 15, 30, 60, 360, 1440, 10080, 43200}
+
+
+class FleetEventsView(APIView):
+    def get(self, request):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        try:
+            minutes = int(request.query_params.get("minutes", 1440))
+            offset = int(request.query_params.get("offset", 0))
+            limit = int(request.query_params.get("limit", 100))
+        except ValueError:
+            return Response({"detail": "minutes, offset and limit must be integers."}, status=400)
+
+        if minutes not in _VALID_MINUTES:
+            return Response(
+                {"detail": f"minutes must be one of {sorted(_VALID_MINUTES)}."},
+                status=400,
+            )
+
+        severity_raw = request.query_params.get("severity", "").strip()
+        severity = [s.strip() for s in severity_raw.split(",") if s.strip()] or None
+        search = request.query_params.get("search", "").strip()
+        agent_filter = request.query_params.get("agent", "").strip()
+
+        # Resolve agent filter — non-staff users restricted to their org's agents
+        if agent_filter:
+            err = _resolve_agent(request, org, agent_filter)
+            if err:
+                return err
+
+        cached_agents = cache.get(_agents_cache_key(org.slug))
+        if cached_agents is None:
+            return Response({"detail": "Agent list not available. Try refreshing."}, status=503)
+        agent_ids = [str(a["id"]) for a in cached_agents]
+
+        cache_key = _fleet_events_cache_key(
+            org.slug, minutes=minutes, severity=severity,
+            search=search, agent_filter=agent_filter, offset=offset,
+        )
+        if offset == 0:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return Response(cached)
+
+        try:
+            result = OpenSearchClient().get_fleet_events(
+                agent_ids,
+                minutes=minutes,
+                offset=offset,
+                limit=limit,
+                severity=severity,
+                search=search,
+                agent_id_filter=agent_filter or None,
+            )
+        except OpenSearchError as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        data = {
+            "events": [_serialize_event(e) for e in result["events"]],
+            "total": result["total"],
+            "stats": result["stats"],
+        }
+
+        if offset == 0:
+            cache.set(cache_key, data, _FLEET_EVENTS_CACHE_TTL)
+
+        return Response(data)
 
 
 class CveDetailView(APIView):

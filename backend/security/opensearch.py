@@ -316,6 +316,77 @@ class OpenSearchClient:
         data = self._search(_VULNS_INDEX, body)
         return [{"_id": h.get("_id", ""), **h["_source"]} for h in data["hits"]["hits"]]
 
+    def get_fleet_events(
+        self, agent_ids, minutes=1440, offset=0, limit=100,
+        severity=None, search="", agent_id_filter=None,
+    ):
+        if not agent_ids:
+            empty_stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": 0, "events_24h": 0}
+            return {"events": [], "total": 0, "stats": empty_stats}
+
+        main_filters = [
+            {"terms": {"agent.id": [str(a) for a in agent_ids]}},
+            {"range": {"@timestamp": {"gte": f"now-{minutes}m"}}},
+        ]
+        if agent_id_filter:
+            main_filters.append({"term": {"agent.id": str(agent_id_filter)}})
+        if severity:
+            valid = [s for s in severity if s in _SEVERITY_LEVEL_RANGES]
+            if valid:
+                should = [{"range": {"rule.level": _SEVERITY_LEVEL_RANGES[s]}} for s in valid]
+                main_filters.append({"bool": {"should": should, "minimum_should_match": 1}})
+        if search:
+            main_filters.append({"match": {"rule.description": search}})
+
+        body = {
+            "query": {"bool": {"filter": main_filters}},
+            "sort": [{"@timestamp": {"order": "desc"}}],
+            "from": offset,
+            "size": limit,
+            "track_total_hits": True,
+            "aggs": {
+                "severity_critical": {"filter": {"range": {"rule.level": {"gte": 12}}}},
+                "severity_high":     {"filter": {"range": {"rule.level": {"gte": 8, "lt": 12}}}},
+                "severity_medium":   {"filter": {"range": {"rule.level": {"gte": 4, "lt": 8}}}},
+                "severity_low":      {"filter": {"range": {"rule.level": {"lt": 4}}}},
+                "events_24h_global": {
+                    "global": {},
+                    "aggs": {
+                        "within_24h": {
+                            "filter": {
+                                "bool": {
+                                    "filter": [
+                                        {"terms": {"agent.id": [str(a) for a in agent_ids]}},
+                                        {"range": {"@timestamp": {"gte": "now-1440m"}}},
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                },
+            },
+        }
+
+        data = self._search(_ALERTS_INDEX, body)
+        hits = data["hits"]
+        aggs = data.get("aggregations", {})
+        total = hits["total"]["value"]
+
+        stats = {
+            "critical": aggs.get("severity_critical", {}).get("doc_count", 0),
+            "high":     aggs.get("severity_high",     {}).get("doc_count", 0),
+            "medium":   aggs.get("severity_medium",   {}).get("doc_count", 0),
+            "low":      aggs.get("severity_low",      {}).get("doc_count", 0),
+            "total":    total,
+            "events_24h": aggs.get("events_24h_global", {}).get("within_24h", {}).get("doc_count", 0),
+        }
+
+        return {
+            "events": [{"_id": h.get("_id", ""), **h["_source"]} for h in hits["hits"]],
+            "total": total,
+            "stats": stats,
+        }
+
     def get_events_count(self, agents, hours=24):
         agent_ids = [a["id"] for a in agents if a.get("status") == "active"]
         if not agent_ids:

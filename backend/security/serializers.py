@@ -79,6 +79,32 @@ class FleetVulnerabilitiesResponseSerializer(serializers.Serializer):
     stats = FleetVulnStatsSerializer()
 
 
+class FleetEventSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    timestamp = serializers.CharField(allow_null=True)
+    rule_description = serializers.CharField()
+    rule_id = serializers.CharField()
+    level = serializers.IntegerField()
+    severity = serializers.CharField()
+    agent_id = serializers.CharField()
+    agent_name = serializers.CharField()
+
+
+class FleetEventStatsSerializer(serializers.Serializer):
+    critical = serializers.IntegerField()
+    high = serializers.IntegerField()
+    medium = serializers.IntegerField()
+    low = serializers.IntegerField()
+    total = serializers.IntegerField()
+    events_24h = serializers.IntegerField()
+
+
+class FleetEventsResponseSerializer(serializers.Serializer):
+    events = FleetEventSerializer(many=True)
+    total = serializers.IntegerField()
+    stats = FleetEventStatsSerializer()
+
+
 class VulnerabilitySnapshotSerializer(serializers.Serializer):
     date = serializers.DateField()
     critical = serializers.IntegerField()
