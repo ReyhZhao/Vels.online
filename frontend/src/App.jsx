@@ -16,6 +16,7 @@ import VulnerabilityDashboard from './pages/VulnerabilityDashboard';
 import CveDetail from './pages/CveDetail';
 import EnrollmentPage from './pages/EnrollmentPage';
 import AgentDetail from './pages/AgentDetail';
+import FleetEventsPage from './pages/FleetEventsPage';
 import DashboardPage from './pages/DashboardPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -42,6 +43,7 @@ function App() {
         <Route path="/security" element={<SecurityDashboard />} />
         <Route path="/security/vulnerabilities" element={<VulnerabilityDashboard />} />
         <Route path="/security/vulnerabilities/:cveId" element={<CveDetail />} />
+        <Route path="/security/events" element={<FleetEventsPage />} />
         <Route path="/security/enroll" element={<EnrollmentPage />} />
         <Route path="/security/agents/:agentId" element={<AgentDetail />} />
       </Route>

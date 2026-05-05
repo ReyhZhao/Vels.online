@@ -9,6 +9,7 @@ import {
   Download,
   ShieldCheck,
   Bug,
+  Activity,
   UserPlus,
   BarChart2,
   ChevronLeft,
@@ -143,6 +144,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 </SidebarLink>
                 <SidebarLink to="/security/vulnerabilities" icon={Bug} collapsed={collapsed}>
                   Vulnerabilities
+                </SidebarLink>
+                <SidebarLink to="/security/events" icon={Activity} collapsed={collapsed}>
+                  Events
                 </SidebarLink>
                 <SidebarLink to="/security/enroll" icon={UserPlus} collapsed={collapsed}>
                   Enroll
