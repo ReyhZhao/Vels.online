@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
+import { useAuth } from '../context/AuthContext';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -210,11 +211,43 @@ function CveItem({ item, onUpdate }) {
   );
 }
 
+function ConfirmDialog({ onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg">
+        <h2 className="text-lg font-semibold text-foreground">Generate new work package?</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The current active package will be archived and a new one generated from the latest
+          vulnerability data. This cannot be undone.
+        </p>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+          >
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function WorkPackagePage() {
+  const { user } = useAuth();
+  const isStaff = user?.is_staff;
   const { selectedOrg, isLoading: orgLoading } = useOrganization();
   const [packageData, setPackageData] = useState(undefined);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const fetchPackage = useCallback(async (slug) => {
     setLoading(true);
@@ -233,6 +266,20 @@ export default function WorkPackagePage() {
     if (selectedOrg) fetchPackage(selectedOrg.slug);
   }, [selectedOrg, fetchPackage]);
 
+  async function handleGenerate() {
+    setShowConfirm(false);
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await api.post(`/api/security/work-package/generate/?org=${selectedOrg.slug}`);
+      setPackageData(res.data.package);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to generate work package.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   function handleItemUpdate(updatedItem) {
     setPackageData(prev => {
       if (!prev) return prev;
@@ -248,15 +295,34 @@ export default function WorkPackagePage() {
 
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-foreground">Work Package — {selectedOrg.name}</h1>
-        {packageData && (
-          <p className="mt-1 text-sm text-muted-foreground">
-            Generated {new Date(packageData.created_at).toLocaleDateString(undefined, {
-              weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-            })}
-            {packageData.generated_by ? ` by ${packageData.generated_by}` : ' automatically'}
-          </p>
+      {showConfirm && (
+        <ConfirmDialog
+          onConfirm={handleGenerate}
+          onCancel={() => setShowConfirm(false)}
+        />
+      )}
+
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Work Package — {selectedOrg.name}</h1>
+          {packageData && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Generated {new Date(packageData.created_at).toLocaleDateString(undefined, {
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+              })}
+              {packageData.generated_by ? ` by ${packageData.generated_by}` : ' automatically'}
+            </p>
+          )}
+        </div>
+
+        {isStaff && (
+          <button
+            onClick={() => setShowConfirm(true)}
+            disabled={generating || loading}
+            className="shrink-0 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            {generating ? 'Generating…' : 'Generate new package'}
+          </button>
         )}
       </div>
 

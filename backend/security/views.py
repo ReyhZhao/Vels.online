@@ -24,6 +24,7 @@ from security.serializers import (
     WorkPackageSerializer,
 )
 from security.storage import StorageClient
+from security.work_package_service import generate_work_package
 from security.opensearch import OpenSearchClient, OpenSearchError
 from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
 
@@ -846,6 +847,28 @@ class WorkPackageView(APIView):
         if package is None:
             return Response({"package": None})
         return Response({"package": WorkPackageSerializer(package).data})
+
+
+class WorkPackageGenerateView(APIView):
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response(status=403)
+
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        package = generate_work_package(org, generated_by=request.user)
+
+        if package is None:
+            return Response(
+                {"detail": "No CVE data available for this organisation."},
+                status=502,
+            )
+
+        package = WorkPackage.objects.prefetch_related("items").get(pk=package.pk)
+        return Response({"package": WorkPackageSerializer(package).data}, status=201)
 
 
 class WorkPackageItemPatchView(APIView):
