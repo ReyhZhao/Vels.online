@@ -1,7 +1,6 @@
 import { Routes, Route } from 'react-router-dom';
 import PublicLayout from './components/layout/PublicLayout';
-import AdminLayout from './components/layout/AdminLayout';
-import SecurityLayout from './components/layout/SecurityLayout';
+import AppLayout from './components/layout/AppLayout';
 import LandingPage from './pages/LandingPage';
 import BlogIndexPage from './pages/BlogIndexPage';
 import PostDetail from './pages/PostDetail';
@@ -29,28 +28,20 @@ function App() {
         <Route path="/:slug" element={<PostDetail />} />
       </Route>
 
-      <Route
-        path="/admin"
-        element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}
-      >
-        <Route index element={<AdminDashboard />} />
-        <Route path="posts" element={<AdminPostList />} />
-        <Route path="posts/new" element={<AdminPostForm />} />
-        <Route path="posts/:slug/edit" element={<AdminPostForm />} />
-        <Route path="status-settings" element={<StatusSettings />} />
-        <Route path="security/organizations" element={<OrgManagement />} />
-        <Route path="security/downloads" element={<DownloadManagement />} />
-      </Route>
+      <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/posts" element={<AdminPostList />} />
+        <Route path="/admin/posts/new" element={<AdminPostForm />} />
+        <Route path="/admin/posts/:slug/edit" element={<AdminPostForm />} />
+        <Route path="/admin/status-settings" element={<StatusSettings />} />
+        <Route path="/admin/security/organizations" element={<OrgManagement />} />
+        <Route path="/admin/security/downloads" element={<DownloadManagement />} />
 
-      <Route
-        path="/security"
-        element={<ProtectedRoute><SecurityLayout /></ProtectedRoute>}
-      >
-        <Route index element={<SecurityDashboard />} />
-        <Route path="vulnerabilities" element={<VulnerabilityDashboard />} />
-        <Route path="vulnerabilities/:cveId" element={<CveDetail />} />
-        <Route path="enroll" element={<EnrollmentPage />} />
-        <Route path="agents/:agentId" element={<AgentDetail />} />
+        <Route path="/security" element={<SecurityDashboard />} />
+        <Route path="/security/vulnerabilities" element={<VulnerabilityDashboard />} />
+        <Route path="/security/vulnerabilities/:cveId" element={<CveDetail />} />
+        <Route path="/security/enroll" element={<EnrollmentPage />} />
+        <Route path="/security/agents/:agentId" element={<AgentDetail />} />
       </Route>
     </Routes>
   );
