@@ -18,6 +18,7 @@ from .views import (
     FleetVulnerabilityTrendView,
     OrganizationListView,
     SecurityRefreshView,
+    WorkPackageView,
 )
 
 urlpatterns = [
@@ -38,4 +39,5 @@ urlpatterns = [
     path("downloads/<int:pk>/", DownloadDeleteView.as_view()),
     path("downloads/<int:pk>/presigned/", DownloadPresignedView.as_view()),
     path("downloads/<int:pk>/upload/", DownloadUploadView.as_view()),
+    path("work-package/", WorkPackageView.as_view()),
 ]

@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from django.db.models import Q
-from security.models import Download, Organization, OrganizationMembership, VulnerabilitySnapshot
+from security.models import Download, Organization, OrganizationMembership, VulnerabilitySnapshot, WorkPackage
 from security.serializers import (
     AgentSerializer,
     CveDetailSerializer,
@@ -19,6 +19,7 @@ from security.serializers import (
     PaginatedEventsSerializer,
     PaginatedVulnerabilitiesSerializer,
     VulnerabilitySnapshotSerializer,
+    WorkPackageSerializer,
 )
 from security.storage import StorageClient
 from security.opensearch import OpenSearchClient, OpenSearchError
@@ -825,3 +826,21 @@ class DownloadUploadView(APIView):
         download.save()
 
         return Response(DownloadSerializer(download).data)
+
+
+class WorkPackageView(APIView):
+    def get(self, request):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        package = (
+            WorkPackage.objects
+            .filter(org=org, status=WorkPackage.STATUS_ACTIVE)
+            .prefetch_related("items")
+            .first()
+        )
+        if package is None:
+            return Response({"package": None})
+        return Response({"package": WorkPackageSerializer(package).data})

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Download, Organization
+from .models import Download, Organization, WorkPackage, WorkPackageItem
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -153,3 +153,22 @@ class DownloadCreateSerializer(serializers.Serializer):
     platform = serializers.ChoiceField(choices=Download.PLATFORM_CHOICES)
     category = serializers.ChoiceField(choices=Download.CATEGORY_CHOICES)
     organization_slug = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class WorkPackageItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WorkPackageItem
+        fields = [
+            "id", "cve_id", "severity", "cvss_score", "description",
+            "references", "affected_agent_count", "impact_score",
+            "affected_agents", "status", "note",
+        ]
+
+
+class WorkPackageSerializer(serializers.ModelSerializer):
+    items = WorkPackageItemSerializer(many=True, read_only=True)
+    generated_by = serializers.StringRelatedField()
+
+    class Meta:
+        model = WorkPackage
+        fields = ["id", "created_at", "generated_by", "items"]

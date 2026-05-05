@@ -12,6 +12,7 @@ import {
   Activity,
   UserPlus,
   BarChart2,
+  ClipboardList,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -147,6 +148,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 </SidebarLink>
                 <SidebarLink to="/security/events" icon={Activity} collapsed={collapsed}>
                   Events
+                </SidebarLink>
+                <SidebarLink to="/security/work-package" icon={ClipboardList} collapsed={collapsed}>
+                  Work Package
                 </SidebarLink>
                 <SidebarLink to="/security/enroll" icon={UserPlus} collapsed={collapsed}>
                   Enroll
