@@ -1,8 +1,16 @@
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../../context/AuthContext';
 import AppSidebar from './AppSidebar';
+
+let store = {};
+const mockStorage = {
+  getItem: (key) => store[key] ?? null,
+  setItem: (key, value) => { store[key] = String(value); },
+  removeItem: (key) => { delete store[key]; },
+};
 
 function renderSidebar(user, initialPath = '/security') {
   return render(
@@ -18,6 +26,17 @@ const regularUser = { id: 1, username: 'alice', is_staff: false };
 const staffUser = { id: 2, username: 'bob', is_staff: true };
 
 describe('AppSidebar', () => {
+  beforeEach(() => {
+    store = {};
+    vi.stubGlobal('localStorage', mockStorage);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // ── existing nav content tests ────────────────────────────────────────────
+
   it('renders Security section items for a regular user', () => {
     renderSidebar(regularUser);
 
@@ -69,5 +88,107 @@ describe('AppSidebar', () => {
 
     const overviewLink = screen.getByRole('link', { name: /overview/i });
     expect(overviewLink).not.toHaveClass('bg-accent');
+  });
+
+  // ── section collapse / expand ─────────────────────────────────────────────
+
+  it('collapses Security section items when toggle is clicked', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    expect(screen.getByRole('link', { name: /overview/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /security/i }));
+
+    expect(screen.queryByRole('link', { name: /overview/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /vulnerabilities/i })).not.toBeInTheDocument();
+  });
+
+  it('expands Security section again after a second toggle click', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    await user.click(screen.getByRole('button', { name: /security/i }));
+    await user.click(screen.getByRole('button', { name: /security/i }));
+
+    expect(screen.getByRole('link', { name: /overview/i })).toBeInTheDocument();
+  });
+
+  it('collapses Admin section items when toggle is clicked', async () => {
+    const user = userEvent.setup();
+    renderSidebar(staffUser);
+
+    expect(screen.getByRole('link', { name: /^posts$/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /admin/i }));
+
+    expect(screen.queryByRole('link', { name: /^posts$/i })).not.toBeInTheDocument();
+  });
+
+  // ── icon-only mode ────────────────────────────────────────────────────────
+
+  it('hides text labels when sidebar is collapsed to icon-only mode', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    expect(screen.getByText('Overview')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }));
+
+    expect(screen.queryByText('Overview')).not.toBeInTheDocument();
+    expect(screen.queryByText('Vulnerabilities')).not.toBeInTheDocument();
+  });
+
+  it('shows text labels again when sidebar is expanded from icon-only mode', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }));
+    await user.click(screen.getByRole('button', { name: /expand sidebar/i }));
+
+    expect(screen.getByText('Overview')).toBeInTheDocument();
+  });
+
+  // ── localStorage persistence ──────────────────────────────────────────────
+
+  it('restores collapsed (icon-only) state from localStorage on mount', () => {
+    store['sidebar:collapsed'] = 'true';
+    renderSidebar(regularUser);
+
+    expect(screen.queryByText('Overview')).not.toBeInTheDocument();
+    // links still accessible via title attribute
+    expect(screen.getByRole('link', { name: /overview/i })).toBeInTheDocument();
+  });
+
+  it('restores Security section collapsed state from localStorage on mount', () => {
+    store['sidebar:security:open'] = 'false';
+    renderSidebar(regularUser);
+
+    expect(screen.queryByRole('link', { name: /overview/i })).not.toBeInTheDocument();
+  });
+
+  it('restores Admin section collapsed state from localStorage on mount', () => {
+    store['sidebar:admin:open'] = 'false';
+    renderSidebar(staffUser);
+
+    expect(screen.queryByRole('link', { name: /^posts$/i })).not.toBeInTheDocument();
+  });
+
+  it('persists collapsed state to localStorage when toggled', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }));
+
+    expect(JSON.parse(store['sidebar:collapsed'])).toBe(true);
+  });
+
+  it('persists Security section state to localStorage when toggled', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    await user.click(screen.getByRole('button', { name: /security/i }));
+
+    expect(JSON.parse(store['sidebar:security:open'])).toBe(false);
   });
 });
