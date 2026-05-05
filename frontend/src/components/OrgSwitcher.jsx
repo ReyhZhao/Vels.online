@@ -3,8 +3,11 @@ import { useOrganization } from '../context/OrgContext';
 
 function OrgSwitcher() {
   const { user } = useAuth();
-  const { orgs, selectedOrg, setSelectedOrg } = useOrganization();
+  const orgContext = useOrganization();
 
+  if (!orgContext) return null;
+
+  const { orgs, selectedOrg, setSelectedOrg } = orgContext;
   const isAdmin = user?.is_staff;
 
   if (orgs.length === 0 || !selectedOrg) return null;

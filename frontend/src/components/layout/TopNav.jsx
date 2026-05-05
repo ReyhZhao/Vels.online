@@ -1,6 +1,7 @@
 import { Link, NavLink } from 'react-router-dom';
 import StatusIndicator from './StatusIndicator';
 import { useAuth } from '../../context/AuthContext';
+import OrgSwitcher from '../OrgSwitcher';
 import api from '../../lib/axios';
 
 function TopNav() {
@@ -35,15 +36,16 @@ function TopNav() {
           {isAuthenticated ? (
             <>
               <NavLink
-                to="/security"
+                to="/dashboard"
                 className={({ isActive }) =>
                   `text-sm font-medium transition-colors hover:text-foreground ${
                     isActive ? 'text-foreground' : 'text-muted-foreground'
                   }`
                 }
               >
-                Security
+                Dashboard
               </NavLink>
+              <OrgSwitcher />
               <div className="flex items-center gap-3">
                 <span className="text-sm text-muted-foreground" data-testid="nav-username">
                   {user.username}

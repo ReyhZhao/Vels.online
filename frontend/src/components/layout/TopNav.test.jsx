@@ -15,6 +15,10 @@ vi.mock('../../lib/axios', () => ({
   default: { get: vi.fn(), post: vi.fn() },
 }));
 
+vi.mock('../OrgSwitcher', () => ({
+  default: () => <div data-testid="org-switcher" />,
+}));
+
 import { useAuth } from '../../context/AuthContext';
 import api from '../../lib/axios';
 import TopNav from './TopNav';
@@ -100,7 +104,7 @@ describe('TopNav', () => {
     expect(screen.queryByRole('link', { name: /login/i })).not.toBeInTheDocument();
   });
 
-  it('shows Security link when authenticated', () => {
+  it('shows Dashboard link when authenticated', () => {
     useAuth.mockReturnValue({
       user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
       isAuthenticated: true,
@@ -108,14 +112,30 @@ describe('TopNav', () => {
     });
 
     renderTopNav();
-    const securityLink = screen.getByRole('link', { name: 'Security' });
-    expect(securityLink).toBeInTheDocument();
-    expect(securityLink).toHaveAttribute('href', '/security');
+    const dashboardLink = screen.getByRole('link', { name: 'Dashboard' });
+    expect(dashboardLink).toBeInTheDocument();
+    expect(dashboardLink).toHaveAttribute('href', '/dashboard');
   });
 
-  it('does not show Security link when not authenticated', () => {
+  it('does not show Dashboard link when not authenticated', () => {
     renderTopNav();
-    expect(screen.queryByRole('link', { name: 'Security' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Dashboard' })).not.toBeInTheDocument();
+  });
+
+  it('renders OrgSwitcher when authenticated', () => {
+    useAuth.mockReturnValue({
+      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: false },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+
+    renderTopNav();
+    expect(screen.getByTestId('org-switcher')).toBeInTheDocument();
+  });
+
+  it('does not render OrgSwitcher when not authenticated', () => {
+    renderTopNav();
+    expect(screen.queryByTestId('org-switcher')).not.toBeInTheDocument();
   });
 
   it('calls POST /api/logout/ when Logout is clicked', async () => {
