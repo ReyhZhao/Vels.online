@@ -55,3 +55,14 @@ def snapshot_vulnerabilities():
                 )
         except (WazuhAuthError, WazuhAPIError, OpenSearchError):
             continue
+
+
+@shared_task
+def generate_work_packages():
+    from security.models import Organization
+    from security.work_package_service import cleanup_old_packages, generate_work_package
+
+    for org in Organization.objects.all():
+        generate_work_package(org)
+
+    cleanup_old_packages()

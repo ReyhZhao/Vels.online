@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from celery.schedules import crontab
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -122,10 +123,21 @@ UPTIMEROBOT_API_KEY = os.environ.get("UPTIMEROBOT_API_KEY", "")
 
 CELERY_BROKER_URL = _REDIS_URL or "memory://"
 CELERY_RESULT_BACKEND = _REDIS_URL or "cache+memory://"
+def _parse_crontab(cron_str):
+    minute, hour, dom, month, dow = cron_str.split()
+    return crontab(minute=minute, hour=hour, day_of_month=dom, month_of_year=month, day_of_week=dow)
+
+
+_WORK_PACKAGE_CRON = os.environ.get("WORK_PACKAGE_CRON_SCHEDULE", "0 6 * * 1")
+
 CELERY_BEAT_SCHEDULE = {
     "snapshot-vulnerabilities-daily": {
         "task": "security.tasks.snapshot_vulnerabilities",
         "schedule": 86400,  # every 24 hours
+    },
+    "generate-work-packages-weekly": {
+        "task": "security.tasks.generate_work_packages",
+        "schedule": _parse_crontab(_WORK_PACKAGE_CRON),
     },
 }
 
