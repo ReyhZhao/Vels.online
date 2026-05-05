@@ -16,6 +16,7 @@ import VulnerabilityDashboard from './pages/VulnerabilityDashboard';
 import CveDetail from './pages/CveDetail';
 import EnrollmentPage from './pages/EnrollmentPage';
 import AgentDetail from './pages/AgentDetail';
+import DashboardPage from './pages/DashboardPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
       </Route>
 
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin/posts" element={<AdminPostList />} />
         <Route path="/admin/posts/new" element={<AdminPostForm />} />
