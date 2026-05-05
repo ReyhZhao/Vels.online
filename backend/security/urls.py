@@ -8,6 +8,7 @@ from .views import (
     AgentVulnerabilityDetailView,
     CveDetailView,
     DashboardView,
+    DownloadDeleteView,
     DownloadListView,
     DownloadPresignedView,
     DownloadUploadView,
@@ -34,6 +35,7 @@ urlpatterns = [
     path("vulnerabilities/<str:cve_id>/", CveDetailView.as_view()),
     path("enrollment/", EnrollmentView.as_view()),
     path("downloads/", DownloadListView.as_view()),
+    path("downloads/<int:pk>/", DownloadDeleteView.as_view()),
     path("downloads/<int:pk>/presigned/", DownloadPresignedView.as_view()),
     path("downloads/<int:pk>/upload/", DownloadUploadView.as_view()),
 ]

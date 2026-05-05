@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Upload, Download } from 'lucide-react';
+import { Upload, Download, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -65,6 +65,8 @@ function DownloadManagement() {
   const [form, setForm] = useState({ label: '', platform: 'all', category: 'agent', organization_slug: '' });
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -104,6 +106,17 @@ function DownloadManagement() {
 
   function handleUploaded(updated) {
     setDownloads((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+  }
+
+  async function handleDelete(id) {
+    setDeleting(true);
+    try {
+      await api.delete(`/api/security/downloads/${id}/`);
+      setDownloads((prev) => prev.filter((d) => d.id !== id));
+    } finally {
+      setDeleting(false);
+      setConfirmDeleteId(null);
+    }
   }
 
   return (
@@ -209,6 +222,7 @@ function DownloadManagement() {
                   <th className="pb-2 font-medium">Category</th>
                   <th className="pb-2 font-medium">Organisation</th>
                   <th className="pb-2 font-medium">File</th>
+                  <th className="pb-2 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
@@ -222,6 +236,40 @@ function DownloadManagement() {
                     </td>
                     <td className="py-3">
                       <UploadCell download={dl} onUploaded={handleUploaded} />
+                    </td>
+                    <td className="py-3 text-right">
+                      {confirmDeleteId === dl.id ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <span className="text-xs text-muted-foreground">Remove?</span>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={deleting}
+                            onClick={() => handleDelete(dl.id)}
+                            className="text-xs"
+                          >
+                            {deleting ? 'Removing…' : 'Yes'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={deleting}
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="text-xs"
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setConfirmDeleteId(dl.id)}
+                          className="text-xs text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ))}

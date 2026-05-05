@@ -22,3 +22,6 @@ class StorageClient:
             Params={"Bucket": self._bucket, "Key": key},
             ExpiresIn=expiry_seconds,
         )
+
+    def delete_file(self, key):
+        self._s3.delete_object(Bucket=self._bucket, Key=key)

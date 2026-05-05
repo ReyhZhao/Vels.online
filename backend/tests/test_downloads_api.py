@@ -277,3 +277,50 @@ def test_upload_missing_file_returns_400(admin_client, global_download):
         content_type="application/json",
     )
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------- DELETE /api/security/downloads/<id>/
+
+
+@pytest.mark.django_db
+def test_delete_requires_authentication(client, global_download):
+    response = client.delete(f"/api/security/downloads/{global_download.id}/")
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_delete_non_admin_gets_403(client, regular_user, global_download):
+    client.force_login(regular_user)
+    response = client.delete(f"/api/security/downloads/{global_download.id}/")
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_deletes_download(admin_client, global_download):
+    response = admin_client.delete(f"/api/security/downloads/{global_download.id}/")
+    assert response.status_code == 204
+    assert not Download.objects.filter(pk=global_download.id).exists()
+
+
+@pytest.mark.django_db
+def test_delete_nonexistent_returns_404(admin_client):
+    response = admin_client.delete("/api/security/downloads/99999/")
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+@patch("security.views.StorageClient")
+def test_delete_removes_s3_file_when_present(mock_storage_cls, admin_client, global_download):
+    global_download.s3_key = "downloads/1/agent.deb"
+    global_download.save()
+    response = admin_client.delete(f"/api/security/downloads/{global_download.id}/")
+    assert response.status_code == 204
+    mock_storage_cls.return_value.delete_file.assert_called_once_with("downloads/1/agent.deb")
+
+
+@pytest.mark.django_db
+@patch("security.views.StorageClient")
+def test_delete_no_s3_call_when_no_file(mock_storage_cls, admin_client, global_download):
+    response = admin_client.delete(f"/api/security/downloads/{global_download.id}/")
+    assert response.status_code == 204
+    mock_storage_cls.return_value.delete_file.assert_not_called()

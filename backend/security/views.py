@@ -770,6 +770,20 @@ class DownloadListView(APIView):
         return Response(DownloadSerializer(download).data, status=201)
 
 
+class DownloadDeleteView(APIView):
+    def delete(self, request, pk):
+        if not request.user.is_staff:
+            return Response(status=403)
+        try:
+            download = Download.objects.get(pk=pk)
+        except Download.DoesNotExist:
+            return Response(status=404)
+        if download.s3_key:
+            StorageClient().delete_file(download.s3_key)
+        download.delete()
+        return Response(status=204)
+
+
 class DownloadPresignedView(APIView):
     def get(self, request, pk):
         try:
