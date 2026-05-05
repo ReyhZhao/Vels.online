@@ -1,4 +1,5 @@
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -79,3 +80,74 @@ class VulnerabilitySnapshot(models.Model):
 
     def __str__(self):
         return f"{self.organization} snapshot {self.date}"
+
+
+class WorkPackage(models.Model):
+    STATUS_ACTIVE = "active"
+    STATUS_ARCHIVED = "archived"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_ARCHIVED, "Archived"),
+    ]
+
+    org = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="work_packages")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    generated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="generated_work_packages"
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org"],
+                condition=models.Q(status="active"),
+                name="unique_active_work_package_per_org",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.org} work package ({self.status}) {self.created_at:%Y-%m-%d}"
+
+
+class WorkPackageItem(models.Model):
+    SEVERITY_CRITICAL = "critical"
+    SEVERITY_HIGH = "high"
+    SEVERITY_MEDIUM = "medium"
+    SEVERITY_LOW = "low"
+    SEVERITY_CHOICES = [
+        (SEVERITY_CRITICAL, "Critical"),
+        (SEVERITY_HIGH, "High"),
+        (SEVERITY_MEDIUM, "Medium"),
+        (SEVERITY_LOW, "Low"),
+    ]
+
+    STATUS_OPEN = "open"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_RESOLVED = "resolved"
+    STATUS_ACCEPTED_RISK = "accepted_risk"
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_PROGRESS, "In Progress"),
+        (STATUS_RESOLVED, "Resolved"),
+        (STATUS_ACCEPTED_RISK, "Accepted Risk"),
+    ]
+
+    work_package = models.ForeignKey(WorkPackage, on_delete=models.CASCADE, related_name="items")
+    cve_id = models.CharField(max_length=50)
+    severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES)
+    cvss_score = models.FloatField()
+    description = models.TextField()
+    references = models.JSONField(default=list)
+    affected_agent_count = models.IntegerField()
+    impact_score = models.FloatField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    note = models.TextField(blank=True, default="")
+    affected_agents = models.JSONField(default=list)
+
+    def clean(self):
+        if self.note and self.status != self.STATUS_ACCEPTED_RISK:
+            raise ValidationError({"note": "Notes are only allowed when status is accepted_risk."})
+
+    def __str__(self):
+        return f"{self.cve_id} ({self.work_package})"
