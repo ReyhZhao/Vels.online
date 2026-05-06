@@ -6,7 +6,7 @@ from django.utils.text import slugify
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from django.db.models import Q
+from django.db.models import Count, Q
 from security.models import Download, Organization, OrganizationMembership, VulnerabilitySnapshot, WorkPackage, WorkPackageItem
 from security.serializers import (
     AgentSerializer,
@@ -19,6 +19,7 @@ from security.serializers import (
     PaginatedEventsSerializer,
     PaginatedVulnerabilitiesSerializer,
     VulnerabilitySnapshotSerializer,
+    WorkPackageArchiveListSerializer,
     WorkPackageItemSerializer,
     WorkPackageItemUpdateSerializer,
     WorkPackageSerializer,
@@ -900,3 +901,38 @@ class WorkPackageItemPatchView(APIView):
         item.save(update_fields=["status", "note"])
 
         return Response(WorkPackageItemSerializer(item).data)
+
+
+class WorkPackageArchiveListView(APIView):
+    def get(self, request):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        packages = (
+            WorkPackage.objects
+            .filter(org=org, status=WorkPackage.STATUS_ARCHIVED)
+            .annotate(item_count=Count("items"))
+            .order_by("-created_at")
+        )
+        return Response(WorkPackageArchiveListSerializer(packages, many=True).data)
+
+
+class WorkPackageDetailView(APIView):
+    def get(self, request, package_id):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        try:
+            package = (
+                WorkPackage.objects
+                .prefetch_related("items")
+                .get(pk=package_id, org=org)
+            )
+        except WorkPackage.DoesNotExist:
+            return Response(status=404)
+
+        return Response({"package": WorkPackageSerializer(package).data})

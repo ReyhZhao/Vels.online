@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 import { useAuth } from '../context/AuthContext';
@@ -42,7 +43,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function CveItem({ item, onUpdate }) {
+function CveItem({ item, onUpdate, readOnly = false }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -83,9 +84,7 @@ function CveItem({ item, onUpdate }) {
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
-      {/* Header row — always visible */}
       <div className="flex items-start gap-4 px-5 py-4">
-        {/* Expand toggle + CVE info */}
         <button
           onClick={() => setOpen(o => !o)}
           className="flex-1 min-w-0 text-left"
@@ -93,11 +92,11 @@ function CveItem({ item, onUpdate }) {
           <div className="flex flex-wrap items-center gap-2 mb-1">
             <span className="font-mono text-sm font-semibold text-foreground">{item.cve_id}</span>
             <SeverityBadge severity={item.severity} />
+            {readOnly && <StatusBadge status={item.status} />}
           </div>
           <p className="text-sm text-muted-foreground line-clamp-2">{item.description || 'No description available.'}</p>
         </button>
 
-        {/* Right-side: scores + inline status selector */}
         <div className="shrink-0 flex flex-col items-end gap-2">
           <div className="text-right text-xs text-muted-foreground space-y-0.5">
             <div>CVSS <span className="font-semibold text-foreground">{item.cvss_score?.toFixed(1) ?? '—'}</span></div>
@@ -105,29 +104,29 @@ function CveItem({ item, onUpdate }) {
             <div>Score <span className="font-semibold text-foreground">{item.impact_score}</span></div>
           </div>
 
-          {/* Status selector */}
-          <div className="flex items-center gap-2">
-            {saving && <span className="text-xs text-muted-foreground">Saving…</span>}
-            {saveError && <span className="text-xs text-red-500">{saveError}</span>}
-            <select
-              value={item.status}
-              onChange={handleStatusChange}
-              disabled={saving}
-              onClick={e => e.stopPropagation()}
-              className={`rounded-full px-3 py-0.5 text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 ${STATUS_CLASSES[item.status] ?? STATUS_CLASSES.open}`}
-            >
-              {STATUS_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-          </div>
+          {!readOnly && (
+            <div className="flex items-center gap-2">
+              {saving && <span className="text-xs text-muted-foreground">Saving…</span>}
+              {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+              <select
+                value={item.status}
+                onChange={handleStatusChange}
+                disabled={saving}
+                onClick={e => e.stopPropagation()}
+                className={`rounded-full px-3 py-0.5 text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 ${STATUS_CLASSES[item.status] ?? STATUS_CLASSES.open}`}
+              >
+                {STATUS_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Expanded detail */}
       {open && (
         <div className="border-t border-border px-5 py-4 space-y-4 bg-card">
-          {item.status === 'accepted_risk' && (
+          {!readOnly && item.status === 'accepted_risk' && (
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">
                 Risk Acceptance Note <span className="normal-case font-normal">(optional)</span>
@@ -142,7 +141,7 @@ function CveItem({ item, onUpdate }) {
             </div>
           )}
 
-          {item.note && item.status !== 'accepted_risk' && (
+          {item.note && (readOnly || item.status !== 'accepted_risk') && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Note</p>
               <p className="text-sm text-foreground">{item.note}</p>
@@ -162,12 +161,8 @@ function CveItem({ item, onUpdate }) {
               <ul className="space-y-0.5">
                 {item.references.map((ref, i) => (
                   <li key={i}>
-                    <a
-                      href={ref}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline break-all"
-                    >
+                    <a href={ref} target="_blank" rel="noreferrer"
+                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline break-all">
                       {ref}
                     </a>
                   </li>
@@ -221,20 +216,115 @@ function ConfirmDialog({ onConfirm, onCancel }) {
           vulnerability data. This cannot be undone.
         </p>
         <div className="mt-6 flex justify-end gap-3">
-          <button
-            onClick={onCancel}
-            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
-          >
+          <button onClick={onCancel}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent">
             Cancel
           </button>
-          <button
-            onClick={onConfirm}
-            className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
-          >
+          <button onClick={onConfirm}
+            className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90">
             Generate
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ArchiveSection({ orgSlug }) {
+  const [archiveList, setArchiveList] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [selectedPkg, setSelectedPkg] = useState(null);
+  const [loadingPkg, setLoadingPkg] = useState(false);
+
+  useEffect(() => {
+    if (!orgSlug) return;
+    api.get(`/api/security/work-packages/archive/?org=${orgSlug}`)
+      .then(res => setArchiveList(res.data))
+      .catch(() => setArchiveList([]));
+  }, [orgSlug]);
+
+  async function selectArchive(entry) {
+    if (selectedPkg?.id === entry.id) {
+      setSelectedPkg(null);
+      return;
+    }
+    setLoadingPkg(true);
+    try {
+      const res = await api.get(`/api/security/work-packages/${entry.id}/?org=${orgSlug}`);
+      setSelectedPkg(res.data.package);
+    } catch {
+      setSelectedPkg(null);
+    } finally {
+      setLoadingPkg(false);
+    }
+  }
+
+  if (!archiveList || archiveList.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex w-full items-center justify-between px-5 py-4 text-left hover:bg-accent/40 transition-colors"
+      >
+        <div>
+          <span className="text-sm font-semibold text-foreground">Past Packages</span>
+          <span className="ml-2 text-xs text-muted-foreground">{archiveList.length} archived</span>
+        </div>
+        {open
+          ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          : <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        }
+      </button>
+
+      {open && (
+        <div className="border-t border-border divide-y divide-border">
+          {archiveList.map(entry => {
+            const isSelected = selectedPkg?.id === entry.id;
+            return (
+              <div key={entry.id}>
+                <button
+                  onClick={() => selectArchive(entry)}
+                  className={`flex w-full items-center justify-between px-5 py-3 text-left text-sm transition-colors hover:bg-accent/40 ${isSelected ? 'bg-accent/60' : ''}`}
+                >
+                  <div>
+                    <span className="font-medium text-foreground">
+                      {new Date(entry.created_at).toLocaleDateString(undefined, {
+                        year: 'numeric', month: 'short', day: 'numeric',
+                      })}
+                    </span>
+                    {entry.generated_by && (
+                      <span className="ml-2 text-xs text-muted-foreground">by {entry.generated_by}</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground">{entry.item_count} items</span>
+                </button>
+
+                {isSelected && (
+                  <div className="bg-muted/30 px-5 py-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                        Archived
+                      </span>
+                      <span className="text-xs text-muted-foreground">Read-only — historical snapshot</span>
+                    </div>
+
+                    {loadingPkg ? (
+                      <p className="text-sm text-muted-foreground">Loading…</p>
+                    ) : selectedPkg?.items?.length > 0 ? (
+                      selectedPkg.items.map(item => (
+                        <CveItem key={item.id} item={item} onUpdate={() => {}} readOnly />
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No items in this package.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -296,10 +386,7 @@ export default function WorkPackagePage() {
   return (
     <div className="space-y-6 p-6">
       {showConfirm && (
-        <ConfirmDialog
-          onConfirm={handleGenerate}
-          onCancel={() => setShowConfirm(false)}
-        />
+        <ConfirmDialog onConfirm={handleGenerate} onCancel={() => setShowConfirm(false)} />
       )}
 
       <div className="flex items-start justify-between gap-4">
@@ -341,14 +428,21 @@ export default function WorkPackagePage() {
 
       {!loading && packageData && (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            {packageData.items.length} prioritised {packageData.items.length === 1 ? 'vulnerability' : 'vulnerabilities'}
-          </p>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
+              Active
+            </span>
+            <p className="text-sm text-muted-foreground">
+              {packageData.items.length} prioritised {packageData.items.length === 1 ? 'vulnerability' : 'vulnerabilities'}
+            </p>
+          </div>
           {packageData.items.map(item => (
             <CveItem key={item.id} item={item} onUpdate={handleItemUpdate} />
           ))}
         </div>
       )}
+
+      <ArchiveSection orgSlug={selectedOrg.slug} key={selectedOrg.slug + String(packageData?.id)} />
     </div>
   );
 }

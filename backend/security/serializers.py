@@ -171,7 +171,16 @@ class WorkPackageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WorkPackage
-        fields = ["id", "created_at", "generated_by", "items"]
+        fields = ["id", "status", "created_at", "generated_by", "items"]
+
+
+class WorkPackageArchiveListSerializer(serializers.ModelSerializer):
+    generated_by = serializers.StringRelatedField()
+    item_count = serializers.IntegerField()
+
+    class Meta:
+        model = WorkPackage
+        fields = ["id", "created_at", "generated_by", "item_count"]
 
 
 class WorkPackageItemUpdateSerializer(serializers.Serializer):
