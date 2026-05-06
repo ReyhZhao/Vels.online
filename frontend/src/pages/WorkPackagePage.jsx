@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 import { useAuth } from '../context/AuthContext';
@@ -43,7 +43,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function CveItem({ item, onUpdate, readOnly = false }) {
+function CveItem({ item, onUpdate, onRemove, readOnly = false, isStaff = false }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -119,6 +119,16 @@ function CveItem({ item, onUpdate, readOnly = false }) {
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
+
+              {isStaff && onRemove && (
+                <button
+                  onClick={e => { e.stopPropagation(); onRemove(item.id); }}
+                  title="Remove from package"
+                  className="rounded-md p-1 text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -244,10 +254,7 @@ function ArchiveSection({ orgSlug }) {
   }, [orgSlug]);
 
   async function selectArchive(entry) {
-    if (selectedPkg?.id === entry.id) {
-      setSelectedPkg(null);
-      return;
-    }
+    if (selectedPkg?.id === entry.id) { setSelectedPkg(null); return; }
     setLoadingPkg(true);
     try {
       const res = await api.get(`/api/security/work-packages/${entry.id}/?org=${orgSlug}`);
@@ -271,10 +278,7 @@ function ArchiveSection({ orgSlug }) {
           <span className="text-sm font-semibold text-foreground">Past Packages</span>
           <span className="ml-2 text-xs text-muted-foreground">{archiveList.length} archived</span>
         </div>
-        {open
-          ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
-          : <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        }
+        {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
       </button>
 
       {open && (
@@ -308,7 +312,6 @@ function ArchiveSection({ orgSlug }) {
                       </span>
                       <span className="text-xs text-muted-foreground">Read-only — historical snapshot</span>
                     </div>
-
                     {loadingPkg ? (
                       <p className="text-sm text-muted-foreground">Loading…</p>
                     ) : selectedPkg?.items?.length > 0 ? (
@@ -334,7 +337,9 @@ export default function WorkPackagePage() {
   const isStaff = user?.is_staff;
   const { selectedOrg, isLoading: orgLoading } = useOrganization();
   const [packageData, setPackageData] = useState(undefined);
+  const [exhausted, setExhausted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [addingMore, setAddingMore] = useState(false);
   const [error, setError] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -345,6 +350,7 @@ export default function WorkPackagePage() {
     try {
       const res = await api.get(`/api/security/work-package/?org=${slug}`);
       setPackageData(res.data.package);
+      setExhausted(false);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load work package.');
     } finally {
@@ -363,6 +369,7 @@ export default function WorkPackagePage() {
     try {
       const res = await api.post(`/api/security/work-package/generate/?org=${selectedOrg.slug}`);
       setPackageData(res.data.package);
+      setExhausted(false);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to generate work package.');
     } finally {
@@ -370,13 +377,40 @@ export default function WorkPackagePage() {
     }
   }
 
+  async function handleAddMore() {
+    if (addingMore) return;
+    setAddingMore(true);
+    setError(null);
+    try {
+      const res = await api.post(`/api/security/work-package/add-more/?org=${selectedOrg.slug}`);
+      const { items: newItems, exhausted: isExhausted } = res.data;
+      setExhausted(isExhausted);
+      if (newItems.length > 0) {
+        setPackageData(prev => prev ? { ...prev, items: [...prev.items, ...newItems] } : prev);
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to add more items.');
+    } finally {
+      setAddingMore(false);
+    }
+  }
+
+  async function handleRemoveItem(itemId) {
+    try {
+      await api.delete(`/api/security/work-package/items/${itemId}/`);
+      setPackageData(prev => prev ? {
+        ...prev,
+        items: prev.items.filter(i => i.id !== itemId),
+      } : prev);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to remove item.');
+    }
+  }
+
   function handleItemUpdate(updatedItem) {
     setPackageData(prev => {
       if (!prev) return prev;
-      return {
-        ...prev,
-        items: prev.items.map(i => i.id === updatedItem.id ? updatedItem : i),
-      };
+      return { ...prev, items: prev.items.map(i => i.id === updatedItem.id ? updatedItem : i) };
     });
   }
 
@@ -414,7 +448,6 @@ export default function WorkPackagePage() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
-
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
 
       {!loading && packageData === null && (
@@ -436,9 +469,32 @@ export default function WorkPackagePage() {
               {packageData.items.length} prioritised {packageData.items.length === 1 ? 'vulnerability' : 'vulnerabilities'}
             </p>
           </div>
+
           {packageData.items.map(item => (
-            <CveItem key={item.id} item={item} onUpdate={handleItemUpdate} />
+            <CveItem
+              key={item.id}
+              item={item}
+              onUpdate={handleItemUpdate}
+              onRemove={handleRemoveItem}
+              isStaff={isStaff}
+            />
           ))}
+
+          {isStaff && (
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                onClick={handleAddMore}
+                disabled={exhausted || addingMore}
+                title={exhausted ? 'No more CVEs available to add' : undefined}
+                className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {addingMore ? 'Adding…' : '+5 Add More'}
+              </button>
+              {exhausted && (
+                <span className="text-xs text-muted-foreground">All available CVEs are already in the package.</span>
+              )}
+            </div>
+          )}
         </div>
       )}
 

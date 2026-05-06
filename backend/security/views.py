@@ -25,7 +25,7 @@ from security.serializers import (
     WorkPackageSerializer,
 )
 from security.storage import StorageClient
-from security.work_package_service import generate_work_package
+from security.work_package_service import add_more_items, generate_work_package
 from security.opensearch import OpenSearchClient, OpenSearchError
 from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
 
@@ -901,6 +901,47 @@ class WorkPackageItemPatchView(APIView):
         item.save(update_fields=["status", "note"])
 
         return Response(WorkPackageItemSerializer(item).data)
+
+    def delete(self, request, item_id):
+        if not request.user.is_staff:
+            return Response(status=403)
+
+        try:
+            item = WorkPackageItem.objects.select_related("work_package").get(pk=item_id)
+        except WorkPackageItem.DoesNotExist:
+            return Response(status=404)
+
+        if item.work_package.status != WorkPackage.STATUS_ACTIVE:
+            return Response({"detail": "Cannot remove items from an archived work package."}, status=400)
+
+        item.delete()
+        return Response(status=204)
+
+
+class WorkPackageAddMoreView(APIView):
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response(status=403)
+
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        package = (
+            WorkPackage.objects
+            .prefetch_related("items")
+            .filter(org=org, status=WorkPackage.STATUS_ACTIVE)
+            .first()
+        )
+        if package is None:
+            return Response({"detail": "No active work package for this organisation."}, status=404)
+
+        new_items, exhausted = add_more_items(package)
+        return Response({
+            "items": WorkPackageItemSerializer(new_items, many=True).data,
+            "exhausted": exhausted,
+        })
 
 
 class WorkPackageArchiveListView(APIView):
