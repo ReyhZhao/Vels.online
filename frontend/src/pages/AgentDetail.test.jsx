@@ -108,8 +108,10 @@ function setupMocks({
   vulnsTotal = 3,
   eventDetail = EVENT_DETAIL_FULL,
   vulnDetail = VULN_DETAIL_FULL,
+  acceptances = [],
 } = {}) {
   api.get.mockImplementation((url) => {
+    if (url.includes('/risk-acceptances/'))       return Promise.resolve({ data: acceptances });
     // Detail URL: /events/<id>/ — has a non-empty segment after /events/
     if (/\/events\/[^?/]+\//.test(url))          return Promise.resolve({ data: eventDetail });
     if (url.includes('/events/'))                 return Promise.resolve({ data: { events, total: eventsTotal } });
@@ -662,5 +664,67 @@ describe('AgentDetail — VulnerabilitySlideOver', () => {
     await waitFor(() =>
       expect(screen.queryByText('Summary')).not.toBeInTheDocument()
     );
+  });
+});
+
+describe('AgentDetail — vulnerabilities tab — risk acceptance', () => {
+  const ACCEPTANCES = [
+    { id: 1, cve_id: 'CVE-2024-0001', org_slug: 'acme', accepted_by: 'alice', accepted_at: '2024-01-15T10:00:00Z', note: 'Mitigated', severity: 'critical', cvss_score: 9.8 },
+  ];
+
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('shows Accepted badge on a CVE that has been accepted', async () => {
+    setupMocks({ acceptances: ACCEPTANCES });
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await user.click(screen.getByRole('button', { name: /vulnerabilities/i }));
+    // CVE-2024-0001 is hidden by default; toggle to reveal it
+    await waitFor(() => screen.getByRole('button', { name: /hide accepted/i }));
+    await user.click(screen.getByRole('button', { name: /hide accepted/i }));
+    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    expect(screen.getAllByText('Accepted').length).toBeGreaterThan(0);
+  });
+
+  it('does not show Accepted badge when no acceptances exist', async () => {
+    setupMocks({ acceptances: [] });
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await user.click(screen.getByRole('button', { name: /vulnerabilities/i }));
+    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    expect(screen.queryByText('Accepted')).not.toBeInTheDocument();
+  });
+
+  it('hides accepted CVEs by default', async () => {
+    setupMocks({ acceptances: ACCEPTANCES });
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await user.click(screen.getByRole('button', { name: /vulnerabilities/i }));
+    // CVE-2024-0002 is not accepted — it should be visible
+    await waitFor(() => screen.getByText('CVE-2024-0002'));
+    expect(screen.queryByText('CVE-2024-0001')).not.toBeInTheDocument();
+  });
+
+  it('shows accepted CVEs after toggling Hide accepted off', async () => {
+    setupMocks({ acceptances: ACCEPTANCES });
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await user.click(screen.getByRole('button', { name: /vulnerabilities/i }));
+    await waitFor(() => screen.getByText('CVE-2024-0002'));
+    expect(screen.queryByText('CVE-2024-0001')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /hide accepted/i }));
+
+    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    expect(screen.getAllByText('Accepted').length).toBeGreaterThan(0);
+  });
+
+  it('Hide accepted button is highlighted (aria-pressed) by default', async () => {
+    setupMocks({ acceptances: [] });
+    const user = userEvent.setup();
+    renderAgentDetail();
+    await user.click(screen.getByRole('button', { name: /vulnerabilities/i }));
+    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    expect(screen.getByRole('button', { name: /hide accepted/i })).toHaveAttribute('aria-pressed', 'true');
   });
 });

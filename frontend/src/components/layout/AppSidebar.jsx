@@ -13,6 +13,7 @@ import {
   UserPlus,
   BarChart2,
   ClipboardList,
+  ShieldOff,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -151,6 +152,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 </SidebarLink>
                 <SidebarLink to="/security/work-package" icon={ClipboardList} collapsed={collapsed}>
                   Work Package
+                </SidebarLink>
+                <SidebarLink to="/security/risk-acceptances" icon={ShieldOff} collapsed={collapsed}>
+                  Accepted Risks
                 </SidebarLink>
                 <SidebarLink to="/security/enroll" icon={UserPlus} collapsed={collapsed}>
                   Enroll

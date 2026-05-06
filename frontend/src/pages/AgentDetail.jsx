@@ -24,6 +24,14 @@ function SeverityBadge({ severity }) {
   );
 }
 
+function AcceptedBadge() {
+  return (
+    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
+      Accepted
+    </span>
+  );
+}
+
 const LIMIT = 50;
 
 function Section({ title, children }) {
@@ -60,6 +68,9 @@ function FilterBar({
   onClear,
   showTimeRange = true,
   showFixAvailable = false,
+  showHideAccepted = false,
+  hideAccepted = false,
+  onToggleHideAccepted,
   searchPlaceholder = "Search rules…",
 }) {
   const hasActive = filters.severities.length > 0
@@ -112,6 +123,19 @@ function FilterBar({
           }`}
         >
           Fix available
+        </button>
+      )}
+      {showHideAccepted && (
+        <button
+          onClick={onToggleHideAccepted}
+          aria-pressed={hideAccepted}
+          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border transition-colors ${
+            hideAccepted
+              ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-current'
+              : 'border-border text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Hide accepted
         </button>
       )}
       <input
@@ -369,9 +393,19 @@ function VulnerabilitiesTab({ agentId, orgSlug }) {
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [acceptedCveIds, setAcceptedCveIds] = useState(new Set());
+  const [hideAccepted, setHideAccepted] = useState(true);
 
   // Reset to page 0 when filters change
   useEffect(() => { setPage(0); }, [severitiesStr, fixAvailableParam, search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get(`/api/security/risk-acceptances/?org=${orgSlug}`)
+      .then(res => { if (!cancelled) setAcceptedCveIds(new Set(res.data.map(a => a.cve_id))); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [orgSlug]);
 
   useEffect(() => {
     let cancelled = false;
@@ -415,6 +449,7 @@ function VulnerabilitiesTab({ agentId, orgSlug }) {
   }
 
   const filters = { severities, fixAvailable, search };
+  const displayedVulns = hideAccepted ? vulns.filter(v => !acceptedCveIds.has(v.cve)) : vulns;
 
   if (loading) return <p className="py-4 text-sm text-muted-foreground">Loading…</p>;
   if (error) return <p className="text-sm text-red-600">{error}</p>;
@@ -427,6 +462,9 @@ function VulnerabilitiesTab({ agentId, orgSlug }) {
         onClear={handleClearFilters}
         showTimeRange={false}
         showFixAvailable={true}
+        showHideAccepted={true}
+        hideAccepted={hideAccepted}
+        onToggleHideAccepted={() => setHideAccepted(h => !h)}
         searchPlaceholder="Search CVE or package…"
       />
       {total > 0 && (
@@ -446,20 +484,25 @@ function VulnerabilitiesTab({ agentId, orgSlug }) {
             </tr>
           </thead>
           <tbody>
-            {vulns.length === 0 ? (
+            {displayedVulns.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                   No vulnerabilities found.
                 </td>
               </tr>
             ) : (
-              vulns.map((vuln) => (
+              displayedVulns.map((vuln) => (
                 <tr
                   key={vuln.cve}
                   onClick={() => setSelectedVulnId(vuln.id)}
                   className="border-b border-border last:border-0 cursor-pointer hover:bg-accent/40 transition-colors"
                 >
-                  <td className="px-4 py-3 font-mono text-xs text-foreground">{vuln.cve}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-foreground">
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      {vuln.cve}
+                      {acceptedCveIds.has(vuln.cve) && <AcceptedBadge />}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <SeverityBadge severity={vuln.severity} />
                   </td>

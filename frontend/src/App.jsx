@@ -19,6 +19,7 @@ import AgentDetail from './pages/AgentDetail';
 import FleetEventsPage from './pages/FleetEventsPage';
 import DashboardPage from './pages/DashboardPage';
 import WorkPackagePage from './pages/WorkPackagePage';
+import RiskAcceptancePage from './pages/RiskAcceptancePage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -48,6 +49,7 @@ function App() {
         <Route path="/security/enroll" element={<EnrollmentPage />} />
         <Route path="/security/agents/:agentId" element={<AgentDetail />} />
         <Route path="/security/work-package" element={<WorkPackagePage />} />
+        <Route path="/security/risk-acceptances" element={<RiskAcceptancePage />} />
       </Route>
     </Routes>
   );
