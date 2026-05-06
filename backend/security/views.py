@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from django.db.models import Count, Q
-from security.models import Download, Organization, OrganizationMembership, VulnerabilitySnapshot, WorkPackage, WorkPackageItem
+from security.models import Download, Organization, OrganizationMembership, RiskAcceptance, VulnerabilitySnapshot, WorkPackage, WorkPackageItem
 from security.serializers import (
     AgentSerializer,
     CveDetailSerializer,
@@ -18,6 +18,7 @@ from security.serializers import (
     OrganizationSerializer,
     PaginatedEventsSerializer,
     PaginatedVulnerabilitiesSerializer,
+    RiskAcceptanceSerializer,
     VulnerabilitySnapshotSerializer,
     WorkPackageArchiveListSerializer,
     WorkPackageItemSerializer,
@@ -896,9 +897,34 @@ class WorkPackageItemPatchView(APIView):
         if new_status != WorkPackageItem.STATUS_ACCEPTED_RISK:
             note = ""
 
-        item.status = new_status
-        item.note = note
-        item.save(update_fields=["status", "note"])
+        prev_status = item.status
+
+        with transaction.atomic():
+            if new_status == WorkPackageItem.STATUS_ACCEPTED_RISK:
+                RiskAcceptance.objects.update_or_create(
+                    org=org,
+                    cve_id=item.cve_id,
+                    defaults={
+                        "accepted_by": request.user,
+                        "note": note,
+                        "severity": item.severity,
+                        "cvss_score": item.cvss_score,
+                    },
+                )
+                item.status = new_status
+                item.note = note
+                item.save(update_fields=["status", "note"])
+            elif prev_status == WorkPackageItem.STATUS_ACCEPTED_RISK:
+                RiskAcceptance.objects.filter(org=org, cve_id=item.cve_id).delete()
+                WorkPackageItem.objects.filter(
+                    work_package__org=org,
+                    cve_id=item.cve_id,
+                ).update(status=WorkPackageItem.STATUS_OPEN, note="")
+                item.refresh_from_db()
+            else:
+                item.status = new_status
+                item.note = note
+                item.save(update_fields=["status", "note"])
 
         return Response(WorkPackageItemSerializer(item).data)
 
@@ -977,3 +1003,37 @@ class WorkPackageDetailView(APIView):
             return Response(status=404)
 
         return Response({"package": WorkPackageSerializer(package).data})
+
+
+class RiskAcceptanceListView(APIView):
+    def get(self, request):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        acceptances = RiskAcceptance.objects.filter(org=org).select_related("accepted_by").order_by("-accepted_at")
+        return Response(RiskAcceptanceSerializer(acceptances, many=True).data)
+
+
+class RiskAcceptanceDeleteView(APIView):
+    def delete(self, request, pk):
+        try:
+            ra = RiskAcceptance.objects.select_related("org").get(pk=pk)
+        except RiskAcceptance.DoesNotExist:
+            return Response(status=404)
+
+        org = ra.org
+        if not request.user.is_staff:
+            if not OrganizationMembership.objects.filter(user=request.user, organization=org).exists():
+                return Response(status=403)
+
+        with transaction.atomic():
+            cve_id = ra.cve_id
+            ra.delete()
+            WorkPackageItem.objects.filter(
+                work_package__org=org,
+                cve_id=cve_id,
+            ).update(status=WorkPackageItem.STATUS_OPEN, note="")
+
+        return Response(status=204)

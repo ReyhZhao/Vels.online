@@ -17,6 +17,8 @@ from .views import (
     FleetVulnerabilitiesView,
     FleetVulnerabilityTrendView,
     OrganizationListView,
+    RiskAcceptanceDeleteView,
+    RiskAcceptanceListView,
     SecurityRefreshView,
     WorkPackageAddMoreView,
     WorkPackageArchiveListView,
@@ -50,4 +52,6 @@ urlpatterns = [
     path("work-package/items/<int:item_id>/", WorkPackageItemPatchView.as_view()),
     path("work-packages/archive/", WorkPackageArchiveListView.as_view()),
     path("work-packages/<int:package_id>/", WorkPackageDetailView.as_view()),
+    path("risk-acceptances/", RiskAcceptanceListView.as_view()),
+    path("risk-acceptances/<int:pk>/", RiskAcceptanceDeleteView.as_view()),
 ]

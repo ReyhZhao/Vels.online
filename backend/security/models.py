@@ -151,3 +151,21 @@ class WorkPackageItem(models.Model):
 
     def __str__(self):
         return f"{self.cve_id} ({self.work_package})"
+
+
+class RiskAcceptance(models.Model):
+    org = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="risk_acceptances")
+    cve_id = models.CharField(max_length=50)
+    accepted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="risk_acceptances"
+    )
+    accepted_at = models.DateTimeField(auto_now_add=True)
+    note = models.TextField(blank=True, default="")
+    severity = models.CharField(max_length=20, blank=True, default="")
+    cvss_score = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        unique_together = [("org", "cve_id")]
+
+    def __str__(self):
+        return f"{self.cve_id} accepted for {self.org}"

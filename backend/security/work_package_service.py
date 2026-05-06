@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
-from security.models import WorkPackage, WorkPackageItem
+from security.models import RiskAcceptance, WorkPackage, WorkPackageItem
 from security.opensearch import OpenSearchClient, OpenSearchError
 from security.scoring import score_vulnerabilities
 from security.wazuh import WazuhClient, WazuhAPIError, WazuhAuthError
@@ -43,7 +43,11 @@ def generate_work_package(org, generated_by=None):
         {"cve_id": v["cve"], "severity": v["severity"], "agent_count": v["affected_agents"]}
         for v in all_vulns
     ])
-    top = scored[:_MAX_ITEMS]
+
+    accepted_cve_ids = set(
+        RiskAcceptance.objects.filter(org=org).values_list("cve_id", flat=True)
+    )
+    top = [e for e in scored if e["cve_id"] not in accepted_cve_ids][:_MAX_ITEMS]
 
     vuln_by_cve = {v["cve"]: v for v in all_vulns}
 
@@ -138,7 +142,10 @@ def add_more_items(package):
         for v in all_vulns
     ])
 
-    candidates = [e for e in scored if e["cve_id"] not in existing_cve_ids]
+    accepted_cve_ids = set(
+        RiskAcceptance.objects.filter(org=org).values_list("cve_id", flat=True)
+    )
+    candidates = [e for e in scored if e["cve_id"] not in existing_cve_ids and e["cve_id"] not in accepted_cve_ids]
     exhausted = len(candidates) <= _ADD_MORE_BATCH
     batch = candidates[:_ADD_MORE_BATCH]
 

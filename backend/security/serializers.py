@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Download, Organization, WorkPackage, WorkPackageItem
+from .models import Download, Organization, RiskAcceptance, WorkPackage, WorkPackageItem
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -186,3 +186,12 @@ class WorkPackageArchiveListSerializer(serializers.ModelSerializer):
 class WorkPackageItemUpdateSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=WorkPackageItem.STATUS_CHOICES)
     note = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class RiskAcceptanceSerializer(serializers.ModelSerializer):
+    org_slug = serializers.SlugRelatedField(source="org", slug_field="slug", read_only=True)
+    accepted_by = serializers.StringRelatedField()
+
+    class Meta:
+        model = RiskAcceptance
+        fields = ["id", "org_slug", "cve_id", "accepted_by", "accepted_at", "note", "severity", "cvss_score"]
