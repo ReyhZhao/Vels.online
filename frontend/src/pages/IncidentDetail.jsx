@@ -43,6 +43,14 @@ const ALLOWED_TRANSITIONS = {
   closed:      [{ state: 'in_progress', label: 'Reopen' }],
 };
 
+const TRANSITION_BTN_CLASSES = {
+  triaged:     'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600',
+  in_progress: 'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600',
+  on_hold:     'bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500',
+  resolved:    'bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600',
+  closed:      'bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600',
+};
+
 const CLOSURE_REASONS = [
   { value: 'resolved',       label: 'Resolved' },
   { value: 'false_positive', label: 'False Positive' },
@@ -330,7 +338,7 @@ export default function IncidentDetail() {
                 key={state}
                 onClick={() => handleActionClick(state)}
                 disabled={transitioning}
-                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+                className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 transition-colors ${TRANSITION_BTN_CLASSES[state] ?? 'border border-border bg-background text-foreground hover:bg-accent'}`}
               >
                 {label}
               </button>
@@ -339,7 +347,7 @@ export default function IncidentDetail() {
               <button
                 onClick={handleOpenTransfer}
                 disabled={transitioning || transferring}
-                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+                className="rounded-md border border-slate-400 bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50 transition-colors dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
               >
                 Transfer
               </button>
