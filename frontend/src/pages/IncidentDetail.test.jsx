@@ -7,9 +7,8 @@ vi.mock('../lib/axios', () => ({
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }));
 
-vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false }),
-}));
+const mockUseAuth = vi.fn(() => ({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => mockUseAuth() }));
 
 import api from '../lib/axios';
 import IncidentDetail from './IncidentDetail';
@@ -62,8 +61,16 @@ function renderPage(id = '1') {
   );
 }
 
+const STAFF_USERS = [
+  { id: 2, username: 'bob' },
+  { id: 3, username: 'carol' },
+];
+
 describe('IncidentDetail', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false });
+  });
 
   it('shows loading state while fetching', () => {
     api.get.mockReturnValue(new Promise(() => {}));
@@ -216,5 +223,80 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByLabelText('Subject'));
     await user.selectOptions(screen.getByLabelText('Subject'), '1');
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/incidents/1/', { subject: 1 }));
+  });
+
+  // ── transfer ──────────────────────────────────────────────────────────────
+
+  it('does not show Transfer button for non-staff users', async () => {
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    expect(screen.queryByRole('button', { name: 'Transfer' })).not.toBeInTheDocument();
+  });
+
+  it('shows Transfer button for staff users', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Transfer' }));
+  });
+
+  it('opens transfer dialog with staff users when Transfer is clicked', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    mockGet();
+    api.get.mockImplementation(url => {
+      if (url === '/api/incidents/staff-users/') return Promise.resolve({ data: STAFF_USERS });
+      if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
+      if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: INCIDENT });
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Transfer' }));
+    await user.click(screen.getByRole('button', { name: 'Transfer' }));
+    await waitFor(() => screen.getByRole('heading', { name: 'Transfer incident' }));
+    expect(screen.getByRole('option', { name: 'bob' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'carol' })).toBeInTheDocument();
+  });
+
+  it('calls transfer API with selected user and updates incident', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    const TRANSFERRED = { ...INCIDENT, assignee: 2, assignee_username: 'bob' };
+    api.get.mockImplementation(url => {
+      if (url === '/api/incidents/staff-users/') return Promise.resolve({ data: STAFF_USERS });
+      if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
+      if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: INCIDENT });
+    });
+    api.post.mockResolvedValue({ data: TRANSFERRED });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Transfer' }));
+    await user.click(screen.getByRole('button', { name: 'Transfer' }));
+    await waitFor(() => screen.getByRole('heading', { name: 'Transfer incident' }));
+    await user.selectOptions(screen.getByLabelText('New assignee'), '2');
+    await user.click(screen.getByRole('button', { name: 'Transfer' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/incidents/1/transfer/', { assignee_id: 2 }));
+  });
+
+  it('cancels transfer dialog without calling API', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    api.get.mockImplementation(url => {
+      if (url === '/api/incidents/staff-users/') return Promise.resolve({ data: STAFF_USERS });
+      if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
+      if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: INCIDENT });
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Transfer' }));
+    await user.click(screen.getByRole('button', { name: 'Transfer' }));
+    await waitFor(() => screen.getByRole('heading', { name: 'Transfer incident' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(api.post).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: 'Transfer incident' })).not.toBeInTheDocument();
   });
 });

@@ -111,6 +111,49 @@ function ClosureReasonDialog({ onConfirm, onCancel, transitioning }) {
   );
 }
 
+function TransferDialog({ onConfirm, onCancel, transferring, staffUsers }) {
+  const [selectedId, setSelectedId] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Transfer incident</h2>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-foreground" htmlFor="transfer-assignee">
+            New assignee
+          </label>
+          <select
+            id="transfer-assignee"
+            value={selectedId}
+            onChange={e => setSelectedId(e.target.value)}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">Select a staff user…</option>
+            {staffUsers.map(u => (
+              <option key={u.id} value={u.id}>{u.username}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            disabled={transferring}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => selectedId && onConfirm(Number(selectedId))}
+            disabled={!selectedId || transferring}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {transferring ? 'Transferring…' : 'Transfer'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SubjectDropdown({ incident, subjects, onSubjectChange, saving }) {
   const locked = !TRIAGE_STATES.has(incident.state);
   const value = incident.subject ?? '';
@@ -149,6 +192,10 @@ export default function IncidentDetail() {
   const [savingSubject, setSavingSubject] = useState(false);
   const [subjectError, setSubjectError] = useState(null);
   const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
+  const [staffUsers, setStaffUsers] = useState([]);
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState(null);
 
   useEffect(() => {
     async function load() {
@@ -169,6 +216,34 @@ export default function IncidentDetail() {
     }
     load();
   }, [incidentId]);
+
+  async function handleOpenTransfer() {
+    if (staffUsers.length === 0) {
+      try {
+        const res = await api.get('/api/incidents/staff-users/');
+        setStaffUsers(res.data);
+      } catch {
+        setTransferError('Failed to load staff users.');
+        return;
+      }
+    }
+    setTransferError(null);
+    setShowTransferDialog(true);
+  }
+
+  async function handleTransfer(assigneeId) {
+    setTransferring(true);
+    setTransferError(null);
+    try {
+      const res = await api.post(`/api/incidents/${incidentId}/transfer/`, { assignee_id: assigneeId });
+      setIncident(res.data);
+      setShowTransferDialog(false);
+    } catch (err) {
+      setTransferError(err.response?.data?.detail || 'Transfer failed.');
+    } finally {
+      setTransferring(false);
+    }
+  }
 
   const handleSubjectChange = useCallback(async (subjectId) => {
     setSavingSubject(true);
@@ -224,6 +299,15 @@ export default function IncidentDetail() {
         />
       )}
 
+      {showTransferDialog && (
+        <TransferDialog
+          staffUsers={staffUsers}
+          transferring={transferring}
+          onConfirm={handleTransfer}
+          onCancel={() => setShowTransferDialog(false)}
+        />
+      )}
+
       <div className="flex items-center gap-3">
         <Link to="/incidents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
           ← Incidents
@@ -237,23 +321,31 @@ export default function IncidentDetail() {
             <h1 className="mt-1 text-2xl font-semibold text-foreground">{incident.title}</h1>
           </div>
 
-          {nextStates.length > 0 && (
-            <div className="flex shrink-0 flex-wrap gap-2">
-              {nextStates.map(({ state, label }) => (
-                <button
-                  key={state}
-                  onClick={() => handleActionClick(state)}
-                  disabled={transitioning}
-                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {nextStates.map(({ state, label }) => (
+              <button
+                key={state}
+                onClick={() => handleActionClick(state)}
+                disabled={transitioning}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+              >
+                {label}
+              </button>
+            ))}
+            {user?.is_staff && (
+              <button
+                onClick={handleOpenTransfer}
+                disabled={transitioning || transferring}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+              >
+                Transfer
+              </button>
+            )}
+          </div>
         </div>
 
         {transitionError && <p className="text-sm text-red-600">{transitionError}</p>}
+        {transferError && <p className="text-sm text-red-600">{transferError}</p>}
 
         <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
           <Badge

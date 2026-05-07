@@ -10,6 +10,8 @@ from rest_framework.views import APIView
 
 from security.models import Organization, OrganizationMembership
 
+from django.contrib.auth.models import User
+
 from .models import Comment, Incident, Subject, Task, TaskTemplate, TaskTemplateItem
 from .serializers import (
     CommentCreateSerializer,
@@ -34,6 +36,7 @@ from .services.events import record_event
 from .services.identifiers import next_display_id
 from .services.promote import build_promote_payload, find_open_incidents
 from .services.templates import apply_template, auto_apply_for_subject, cancel_template_tasks_on_subject_change
+from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
 from .services.visibility import can_view_incident, filter_comments_for_user, filter_incidents_for_user
 
@@ -399,6 +402,47 @@ class IncidentTransitionView(APIView):
             return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(IncidentSerializer(incident).data)
+
+
+class IncidentTransferView(APIView):
+    def post(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            incident = Incident.objects.select_related(
+                "organization", "created_by", "assignee", "subject"
+            ).get(pk=pk)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        assignee_id = request.data.get("assignee_id")
+        if not assignee_id:
+            return Response({"detail": "assignee_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            new_assignee = User.objects.get(pk=assignee_id)
+        except User.DoesNotExist:
+            return Response({"detail": "User not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            incident = transfer_incident(incident, new_assignee, actor=request.user)
+        except ValidationError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(IncidentSerializer(incident).data)
+
+
+class StaffUserListView(APIView):
+    def get(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+        users = User.objects.filter(is_staff=True, is_active=True).order_by("username")
+        data = [{"id": u.id, "username": u.username} for u in users]
+        return Response(data)
 
 
 # ── Task views ───────────────────────────────────────────────────────────────
