@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Auto approve changes",
+      "Edit",
+      "Bash"
+    ]
+  }
+}

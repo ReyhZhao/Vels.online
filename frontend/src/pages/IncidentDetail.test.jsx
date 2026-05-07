@@ -7,6 +7,10 @@ vi.mock('../lib/axios', () => ({
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }));
 
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false }),
+}));
+
 import api from '../lib/axios';
 import IncidentDetail from './IncidentDetail';
 
@@ -43,6 +47,7 @@ function mockGet(incident = INCIDENT, subjects = SUBJECTS) {
   api.get.mockImplementation(url => {
     if (url === '/api/subjects/') return Promise.resolve({ data: subjects });
     if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
+    if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
     return Promise.resolve({ data: incident });
   });
 }

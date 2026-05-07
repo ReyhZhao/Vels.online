@@ -10,8 +10,11 @@ from rest_framework.views import APIView
 
 from security.models import Organization, OrganizationMembership
 
-from .models import Incident, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Comment, Incident, Subject, Task, TaskTemplate, TaskTemplateItem
 from .serializers import (
+    CommentCreateSerializer,
+    CommentPatchSerializer,
+    CommentSerializer,
     IncidentCreateSerializer,
     IncidentSerializer,
     IncidentUpdateSerializer,
@@ -32,7 +35,7 @@ from .services.identifiers import next_display_id
 from .services.promote import build_promote_payload, find_open_incidents
 from .services.templates import apply_template, auto_apply_for_subject, cancel_template_tasks_on_subject_change
 from .services.transitions import transition_incident
-from .services.visibility import can_view_incident, filter_incidents_for_user
+from .services.visibility import can_view_incident, filter_comments_for_user, filter_incidents_for_user
 
 TRIAGE_STATES = {"new", "triaged"}
 
@@ -585,3 +588,124 @@ class PromoteView(APIView):
             record_event(incident, "incident_created", actor=request.user)
 
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)
+
+
+# ── Comment views ─────────────────────────────────────────────────────────────
+
+class IncidentCommentListView(APIView):
+    def get(self, request, pk):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+        qs = (
+            Comment.objects
+            .filter(incident=incident, task__isnull=True)
+            .select_related("author")
+        )
+        qs = filter_comments_for_user(qs, request.user, incident)
+        return Response(CommentSerializer(qs, many=True, context={"request": request}).data)
+
+    def post(self, request, pk):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+        ser = CommentCreateSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        comment = ser.save(incident=incident, author=request.user)
+        record_event(
+            incident, "comment_added", actor=request.user,
+            payload={"target_type": "comment", "target_id": comment.id, "is_internal": comment.is_internal},
+        )
+        return Response(CommentSerializer(comment, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+class TaskCommentListView(APIView):
+    def _get_task(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return None, err
+        try:
+            task = Task.objects.select_related("incident__organization").get(pk=pk)
+        except Task.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, task.incident):
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return task, None
+
+    def get(self, request, pk):
+        task, err = self._get_task(request, pk)
+        if err:
+            return err
+        qs = Comment.objects.filter(task=task).select_related("author")
+        qs = filter_comments_for_user(qs, request.user, task.incident)
+        return Response(CommentSerializer(qs, many=True, context={"request": request}).data)
+
+    def post(self, request, pk):
+        task, err = self._get_task(request, pk)
+        if err:
+            return err
+        ser = CommentCreateSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        comment = ser.save(incident=task.incident, task=task, author=request.user)
+        record_event(
+            task.incident, "comment_added", actor=request.user,
+            payload={"target_type": "comment", "target_id": comment.id, "is_internal": comment.is_internal},
+        )
+        return Response(CommentSerializer(comment, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+class CommentDetailView(APIView):
+    def _get_comment(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return None, err
+        try:
+            comment = Comment.objects.select_related("incident__organization", "author").get(pk=pk)
+        except Comment.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, comment.incident):
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return comment, None
+
+    def patch(self, request, pk):
+        comment, err = self._get_comment(request, pk)
+        if err:
+            return err
+        if comment.deleted_at:
+            return Response({"detail": "Cannot edit a deleted comment."}, status=status.HTTP_400_BAD_REQUEST)
+        if comment.author_id != request.user.id:
+            return Response({"detail": "Only the author may edit this comment."}, status=status.HTTP_403_FORBIDDEN)
+        if (timezone.now() - comment.created_at).total_seconds() >= 900:
+            return Response({"detail": "Edit window has closed."}, status=status.HTTP_403_FORBIDDEN)
+        ser = CommentPatchSerializer(comment, data=request.data, partial=True)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        updated = ser.save()
+        record_event(
+            comment.incident, "comment_edited", actor=request.user,
+            payload={"target_type": "comment", "target_id": comment.id, "is_internal": comment.is_internal},
+        )
+        return Response(CommentSerializer(updated, context={"request": request}).data)
+
+    def delete(self, request, pk):
+        comment, err = self._get_comment(request, pk)
+        if err:
+            return err
+        if comment.deleted_at:
+            return Response({"detail": "Already deleted."}, status=status.HTTP_400_BAD_REQUEST)
+        now = timezone.now()
+        is_author_in_window = (
+            comment.author_id == request.user.id and
+            (now - comment.created_at).total_seconds() < 900
+        )
+        if not is_author_in_window and not request.user.is_staff:
+            return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
+        comment.deleted_at = now
+        comment.save(update_fields=["deleted_at"])
+        record_event(
+            comment.incident, "comment_deleted", actor=request.user,
+            payload={"target_type": "comment", "target_id": comment.id, "is_internal": comment.is_internal},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)

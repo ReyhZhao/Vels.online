@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../lib/axios';
+import { useAuth } from '../context/AuthContext';
+import IncidentComments from '../components/IncidentComments';
 
 const TASK_STATE_LABELS = {
   new: 'New',
@@ -15,8 +17,9 @@ const TASK_STATE_CLASSES = {
   cancelled: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
 
-function TaskRow({ task, onUpdate }) {
+function TaskRow({ task, onUpdate, currentUserId, isStaff }) {
   const [saving, setSaving] = useState(false);
+  const [showComments, setShowComments] = useState(false);
 
   async function changeState(newState) {
     setSaving(true);
@@ -33,41 +36,62 @@ function TaskRow({ task, onUpdate }) {
   const nextStates = ['new', 'in_progress', 'done', 'cancelled'].filter(s => s !== task.state);
 
   return (
-    <tr className={`border-b border-border last:border-0 ${isCancelled ? 'opacity-60' : 'hover:bg-accent/20'}`}>
-      <td className="px-3 py-2 text-xs text-muted-foreground w-8">{task.display_order}</td>
-      <td className="px-3 py-2 text-sm font-medium text-foreground">
-        <span
-          className={isCancelled ? 'line-through text-muted-foreground' : ''}
-          title={isCancelled && isTemplateDerived ? 'Auto-cancelled when subject changed' : undefined}
-        >
-          {task.title}
-        </span>
-      </td>
-      <td className="px-3 py-2 text-sm text-muted-foreground max-w-xs truncate">{task.description || '—'}</td>
-      <td className="px-3 py-2">
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TASK_STATE_CLASSES[task.state] ?? ''}`}>
-          {TASK_STATE_LABELS[task.state] ?? task.state}
-        </span>
-      </td>
-      <td className="px-3 py-2">
-        <div className="flex gap-1 flex-wrap">
-          {nextStates.map(s => (
+    <>
+      <tr className={`border-b border-border ${showComments ? '' : 'last:border-0'} ${isCancelled ? 'opacity-60' : 'hover:bg-accent/20'}`}>
+        <td className="px-3 py-2 text-xs text-muted-foreground w-8">{task.display_order}</td>
+        <td className="px-3 py-2 text-sm font-medium text-foreground">
+          <span
+            className={isCancelled ? 'line-through text-muted-foreground' : ''}
+            title={isCancelled && isTemplateDerived ? 'Auto-cancelled when subject changed' : undefined}
+          >
+            {task.title}
+          </span>
+        </td>
+        <td className="px-3 py-2 text-sm text-muted-foreground max-w-xs truncate">{task.description || '—'}</td>
+        <td className="px-3 py-2">
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TASK_STATE_CLASSES[task.state] ?? ''}`}>
+            {TASK_STATE_LABELS[task.state] ?? task.state}
+          </span>
+        </td>
+        <td className="px-3 py-2">
+          <div className="flex gap-1 flex-wrap items-center">
+            {nextStates.map(s => (
+              <button
+                key={s}
+                onClick={() => changeState(s)}
+                disabled={saving}
+                className="rounded px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 transition-colors"
+              >
+                {TASK_STATE_LABELS[s]}
+              </button>
+            ))}
             <button
-              key={s}
-              onClick={() => changeState(s)}
-              disabled={saving}
-              className="rounded px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 transition-colors"
+              onClick={() => setShowComments(v => !v)}
+              className="rounded px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              aria-label="Toggle task comments"
             >
-              {TASK_STATE_LABELS[s]}
+              {showComments ? 'Hide comments' : 'Comments'}
             </button>
-          ))}
-        </div>
-      </td>
-    </tr>
+          </div>
+        </td>
+      </tr>
+      {showComments && (
+        <tr className="border-b border-border last:border-0 bg-muted/20">
+          <td colSpan={5} className="px-4 py-3">
+            <IncidentComments
+              incidentId={task.incident}
+              taskId={task.id}
+              currentUserId={currentUserId}
+              isStaff={isStaff}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
-function TaskGroup({ groupName, tasks, onUpdate }) {
+function TaskGroup({ groupName, tasks, onUpdate, currentUserId, isStaff }) {
   return (
     <div className="space-y-1">
       <p className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -86,7 +110,7 @@ function TaskGroup({ groupName, tasks, onUpdate }) {
           </thead>
           <tbody>
             {tasks.map(task => (
-              <TaskRow key={task.id} task={task} onUpdate={onUpdate} />
+              <TaskRow key={task.id} task={task} onUpdate={onUpdate} currentUserId={currentUserId} isStaff={isStaff} />
             ))}
           </tbody>
         </table>
@@ -199,6 +223,7 @@ function TemplatePicker({ incidentId, subjectId, onApplied }) {
 }
 
 export default function IncidentTasks({ incidentId, subjectId, refreshKey }) {
+  const { user } = useAuth();
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -257,6 +282,8 @@ export default function IncidentTasks({ incidentId, subjectId, refreshKey }) {
               groupName={groupName}
               tasks={groupTasks}
               onUpdate={handleTaskUpdate}
+              currentUserId={user?.id}
+              isStaff={user?.is_staff ?? false}
             />
           ))}
         </div>

@@ -1,4 +1,5 @@
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
 
@@ -230,3 +231,35 @@ class IncidentEvent(models.Model):
 
     def __str__(self):
         return f"{self.kind} on {self.incident} at {self.created_at}"
+
+
+class Comment(models.Model):
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="comments")
+    task = models.ForeignKey(
+        Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="comments"
+    )
+    author = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="comments"
+    )
+    body = models.TextField()
+    is_internal = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(incident__isnull=False),
+                name="comment_incident_not_null",
+            )
+        ]
+
+    def clean(self):
+        if self.task_id and self.incident_id:
+            if self.task.incident_id != self.incident_id:
+                raise ValidationError("task.incident must match comment.incident")
+
+    def __str__(self):
+        return f"Comment {self.id} on {self.incident}"

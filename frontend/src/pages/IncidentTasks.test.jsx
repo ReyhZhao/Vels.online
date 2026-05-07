@@ -6,6 +6,10 @@ vi.mock('../lib/axios', () => ({
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }));
 
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false }),
+}));
+
 import api from '../lib/axios';
 import IncidentTasks from './IncidentTasks';
 

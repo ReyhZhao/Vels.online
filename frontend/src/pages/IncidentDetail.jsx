@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/axios';
+import { useAuth } from '../context/AuthContext';
+import IncidentComments from '../components/IncidentComments';
 import IncidentTasks from './IncidentTasks';
 
 const TRIAGE_STATES = new Set(['new', 'triaged']);
@@ -136,6 +138,7 @@ function SubjectDropdown({ incident, subjects, onSubjectChange, saving }) {
 
 export default function IncidentDetail() {
   const { incidentId } = useParams();
+  const { user } = useAuth();
   const [incident, setIncident] = useState(null);
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -305,6 +308,15 @@ export default function IncidentDetail() {
 
       <div className="rounded-lg border border-border bg-card p-6">
         <IncidentTasks incidentId={incidentId} subjectId={incident.subject} refreshKey={tasksRefreshKey} />
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-6 space-y-3">
+        <h2 className="text-base font-semibold text-foreground">Comments</h2>
+        <IncidentComments
+          incidentId={incidentId}
+          currentUserId={user?.id}
+          isStaff={user?.is_staff ?? false}
+        />
       </div>
     </div>
   );

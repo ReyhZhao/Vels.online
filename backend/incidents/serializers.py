@@ -1,6 +1,7 @@
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Incident, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Comment, Incident, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 
 
 class SubjectSerializer(serializers.ModelSerializer):
@@ -187,3 +188,41 @@ class IncidentEventSerializer(serializers.ModelSerializer):
 
     def get_actor_username(self, obj):
         return obj.actor.username if obj.actor else None
+
+
+class CommentSerializer(serializers.ModelSerializer):
+    author_username = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Comment
+        fields = [
+            "id", "incident", "task", "author", "author_username",
+            "body", "is_internal", "created_at", "updated_at", "deleted_at", "can_edit",
+        ]
+        read_only_fields = ["id", "incident", "task", "author", "created_at", "updated_at"]
+
+    def get_author_username(self, obj):
+        return obj.author.username if obj.author else None
+
+    def get_can_edit(self, obj):
+        if obj.deleted_at:
+            return False
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        if obj.author_id != request.user.id:
+            return False
+        return (timezone.now() - obj.created_at).total_seconds() < 900
+
+
+class CommentCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Comment
+        fields = ["body", "is_internal"]
+
+
+class CommentPatchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Comment
+        fields = ["body"]
