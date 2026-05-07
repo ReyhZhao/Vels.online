@@ -145,6 +145,7 @@ export default function IncidentDetail() {
   const [pendingClose, setPendingClose] = useState(false);
   const [savingSubject, setSavingSubject] = useState(false);
   const [subjectError, setSubjectError] = useState(null);
+  const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
 
   useEffect(() => {
     async function load() {
@@ -172,6 +173,7 @@ export default function IncidentDetail() {
     try {
       const res = await api.patch(`/api/incidents/${incidentId}/`, { subject: subjectId });
       setIncident(res.data);
+      setTasksRefreshKey(k => k + 1);
     } catch (err) {
       setSubjectError(err.response?.data?.detail || 'Failed to update subject.');
     } finally {
@@ -302,7 +304,7 @@ export default function IncidentDetail() {
       </div>
 
       <div className="rounded-lg border border-border bg-card p-6">
-        <IncidentTasks incidentId={incidentId} subjectId={incident.subject} />
+        <IncidentTasks incidentId={incidentId} subjectId={incident.subject} refreshKey={tasksRefreshKey} />
       </div>
     </div>
   );

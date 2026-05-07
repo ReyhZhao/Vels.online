@@ -184,4 +184,38 @@ describe('IncidentTasks', () => {
     await user.click(screen.getByRole('button', { name: /Apply Phishing Playbook/ }));
     await waitFor(() => screen.getByText('Template already applied.'));
   });
+
+  it('re-fetches tasks when refreshKey changes', async () => {
+    mockGet([], []);
+    const { rerender } = render(<IncidentTasks incidentId="10" subjectId={null} refreshKey={0} />);
+    await waitFor(() => screen.getByText('No tasks yet.'));
+
+    // Update mock to return tasks, then bump refreshKey
+    api.get.mockImplementation(url => {
+      if (url.includes('/tasks/')) return Promise.resolve({ data: [TASKS[0]] });
+      return Promise.resolve({ data: [] });
+    });
+    rerender(<IncidentTasks incidentId="10" subjectId={null} refreshKey={1} />);
+    await waitFor(() => screen.getByText('Step 1'));
+  });
+
+  it('renders cancelled template task with strikethrough and tooltip', async () => {
+    const cancelledTask = { ...TASKS[0], state: 'cancelled' };
+    mockGet([cancelledTask], []);
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    const titleEl = screen.getByText('Step 1');
+    expect(titleEl).toHaveClass('line-through');
+    expect(titleEl).toHaveAttribute('title', 'Auto-cancelled when subject changed');
+  });
+
+  it('renders cancelled ad-hoc task with strikethrough but no tooltip', async () => {
+    const cancelledAdhoc = { ...ADHOC_TASK, state: 'cancelled' };
+    mockGet([cancelledAdhoc], []);
+    renderTasks();
+    await waitFor(() => screen.getByText('Check logs'));
+    const titleEl = screen.getByText('Check logs');
+    expect(titleEl).toHaveClass('line-through');
+    expect(titleEl).not.toHaveAttribute('title');
+  });
 });

@@ -27,7 +27,7 @@ from .serializers import (
 )
 from .services.events import record_event
 from .services.identifiers import next_display_id
-from .services.templates import apply_template
+from .services.templates import apply_template, auto_apply_for_subject, cancel_template_tasks_on_subject_change
 from .services.transitions import transition_incident
 from .services.visibility import can_view_incident, filter_incidents_for_user
 
@@ -323,6 +323,8 @@ class IncidentDetailView(APIView):
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        old_subject = incident.subject
+
         changes = {}
         for field, value in ser.validated_data.items():
             if field == "subject":
@@ -336,6 +338,11 @@ class IncidentDetailView(APIView):
         with transaction.atomic():
             incident = ser.save()
             record_event(incident, "incident_updated", actor=request.user, payload={"changes": changes})
+            if "subject" in ser.validated_data and old_subject != incident.subject:
+                if old_subject is not None:
+                    cancel_template_tasks_on_subject_change(incident, old_subject, actor=request.user)
+                if incident.subject is not None:
+                    auto_apply_for_subject(incident, actor=request.user)
 
         return Response(IncidentSerializer(incident).data)
 

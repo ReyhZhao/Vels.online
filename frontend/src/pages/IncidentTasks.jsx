@@ -28,12 +28,21 @@ function TaskRow({ task, onUpdate }) {
     }
   }
 
+  const isCancelled = task.state === 'cancelled';
+  const isTemplateDerived = task.template_name !== null;
   const nextStates = ['new', 'in_progress', 'done', 'cancelled'].filter(s => s !== task.state);
 
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-accent/20">
+    <tr className={`border-b border-border last:border-0 ${isCancelled ? 'opacity-60' : 'hover:bg-accent/20'}`}>
       <td className="px-3 py-2 text-xs text-muted-foreground w-8">{task.display_order}</td>
-      <td className="px-3 py-2 text-sm font-medium text-foreground">{task.title}</td>
+      <td className="px-3 py-2 text-sm font-medium text-foreground">
+        <span
+          className={isCancelled ? 'line-through text-muted-foreground' : ''}
+          title={isCancelled && isTemplateDerived ? 'Auto-cancelled when subject changed' : undefined}
+        >
+          {task.title}
+        </span>
+      </td>
       <td className="px-3 py-2 text-sm text-muted-foreground max-w-xs truncate">{task.description || '—'}</td>
       <td className="px-3 py-2">
         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TASK_STATE_CLASSES[task.state] ?? ''}`}>
@@ -189,7 +198,7 @@ function TemplatePicker({ incidentId, subjectId, onApplied }) {
   );
 }
 
-export default function IncidentTasks({ incidentId, subjectId }) {
+export default function IncidentTasks({ incidentId, subjectId, refreshKey }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -202,7 +211,7 @@ export default function IncidentTasks({ incidentId, subjectId }) {
       .finally(() => setLoading(false));
   }, [incidentId]);
 
-  useEffect(() => { loadTasks(); }, [loadTasks]);
+  useEffect(() => { loadTasks(); }, [loadTasks, refreshKey]);
 
   function handleTaskUpdate(updated) {
     setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
