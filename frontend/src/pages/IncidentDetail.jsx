@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import DelegationPanel from '../components/DelegationPanel';
+import IncidentAttachments from '../components/IncidentAttachments';
 import IncidentComments from '../components/IncidentComments';
 import IncidentTimeline from '../components/IncidentTimeline';
 import IncidentTasks from './IncidentTasks';
@@ -415,6 +416,10 @@ export default function IncidentDetail() {
 
       <div className="rounded-lg border border-border bg-card p-6">
         <IncidentTimeline incidentId={incidentId} />
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-6">
+        <IncidentAttachments incidentId={incidentId} />
       </div>
 
       <div className="rounded-lg border border-border bg-card p-6 space-y-3">

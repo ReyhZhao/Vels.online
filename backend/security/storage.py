@@ -23,5 +23,20 @@ class StorageClient:
             ExpiresIn=expiry_seconds,
         )
 
+    def generate_presigned_put_url(self, key, content_type, expiry_seconds=300):
+        return self._s3.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": self._bucket, "Key": key, "ContentType": content_type},
+            ExpiresIn=expiry_seconds,
+        )
+
+    def head_object(self, key):
+        return self._s3.head_object(Bucket=self._bucket, Key=key)
+
+    def list_objects(self, prefix):
+        paginator = self._s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+            yield from page.get("Contents", [])
+
     def delete_file(self, key):
         self._s3.delete_object(Bucket=self._bucket, Key=key)

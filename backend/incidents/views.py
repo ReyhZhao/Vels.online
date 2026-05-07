@@ -12,8 +12,9 @@ from security.models import Organization, OrganizationMembership
 
 from django.contrib.auth.models import User
 
-from .models import Comment, Incident, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Attachment, Comment, Incident, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 from .serializers import (
+    AttachmentSerializer,
     CommentCreateSerializer,
     CommentPatchSerializer,
     CommentSerializer,
@@ -37,6 +38,7 @@ from .services.events import record_event
 from .services.identifiers import next_display_id
 from .services.promote import build_promote_payload, find_open_incidents
 from .services.templates import apply_template, auto_apply_for_subject, cancel_template_tasks_on_subject_change
+from .services.attachments import confirm_upload, delete_attachment, issue_download_url, issue_upload_url
 from .services.delegation import delegate, return_delegation
 from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
@@ -862,4 +864,123 @@ class CommentDetailView(APIView):
             comment.incident, "comment_deleted", actor=request.user,
             payload={"target_type": "comment", "target_id": comment.id, "is_internal": comment.is_internal},
         )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Attachment views ──────────────────────────────────────────────────────────
+
+class IncidentAttachmentListView(APIView):
+    def get(self, request, pk):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+        qs = (
+            Attachment.objects
+            .filter(incident=incident, confirmed_at__isnull=False, deleted_at__isnull=True)
+            .select_related("uploader")
+        )
+        if not request.user.is_staff:
+            qs = qs.filter(is_internal=False)
+        return Response(AttachmentSerializer(qs, many=True).data)
+
+    def post(self, request, pk):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+
+        filename = request.data.get("filename", "").strip()
+        content_type = request.data.get("content_type", "application/octet-stream").strip()
+        if not filename:
+            return Response({"detail": "filename is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_internal = request.data.get("is_internal", True)
+        if isinstance(is_internal, str):
+            is_internal = is_internal.lower() not in ("false", "0", "no")
+
+        try:
+            attachment, upload_url = issue_upload_url(
+                incident, filename, content_type, uploader=request.user, is_internal=bool(is_internal)
+            )
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(
+            {"attachment": AttachmentSerializer(attachment).data, "upload_url": upload_url},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class IncidentAttachmentConfirmView(APIView):
+    def post(self, request, pk, attachment_id):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+
+        try:
+            attachment = Attachment.objects.select_related("uploader", "incident").get(
+                pk=attachment_id, incident=incident, deleted_at__isnull=True
+            )
+        except Attachment.DoesNotExist:
+            return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if attachment.confirmed_at is not None:
+            return Response({"detail": "Already confirmed."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if attachment.uploader_id != request.user.id and not request.user.is_staff:
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            attachment = confirm_upload(attachment)
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(AttachmentSerializer(attachment).data)
+
+
+class IncidentAttachmentDownloadView(APIView):
+    def get(self, request, pk, attachment_id):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+
+        try:
+            attachment = Attachment.objects.get(
+                pk=attachment_id, incident=incident,
+                confirmed_at__isnull=False, deleted_at__isnull=True,
+            )
+        except Attachment.DoesNotExist:
+            return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if attachment.is_internal and not request.user.is_staff:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            url = issue_download_url(attachment)
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"url": url})
+
+
+class IncidentAttachmentDeleteView(APIView):
+    def delete(self, request, pk, attachment_id):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            attachment = Attachment.objects.get(
+                pk=attachment_id, incident=incident, deleted_at__isnull=True
+            )
+        except Attachment.DoesNotExist:
+            return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            delete_attachment(attachment, actor=request.user)
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         return Response(status=status.HTTP_204_NO_CONTENT)

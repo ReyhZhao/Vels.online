@@ -51,6 +51,7 @@ function mockGet(incident = INCIDENT, subjects = SUBJECTS) {
     if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
     if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
     if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
+    if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
     return Promise.resolve({ data: incident });
   });
 }
@@ -254,6 +255,7 @@ describe('IncidentDetail', () => {
       if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
       if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
+      if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
       return Promise.resolve({ data: INCIDENT });
     });
     const user = userEvent.setup();
@@ -274,6 +276,7 @@ describe('IncidentDetail', () => {
       if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
       if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
+      if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
       return Promise.resolve({ data: INCIDENT });
     });
     api.post.mockResolvedValue({ data: TRANSFERRED });
@@ -295,6 +298,7 @@ describe('IncidentDetail', () => {
       if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
       if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
+      if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
       return Promise.resolve({ data: INCIDENT });
     });
     const user = userEvent.setup();

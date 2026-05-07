@@ -141,6 +141,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "security.tasks.generate_work_packages",
         "schedule": _parse_crontab(_WORK_PACKAGE_CRON),
     },
+    "cleanup-orphaned-attachments-daily": {
+        "task": "incidents.tasks.cleanup_orphaned_attachments",
+        "schedule": 86400,  # every 24 hours
+    },
 }
 
 REST_FRAMEWORK = {

@@ -289,3 +289,25 @@ class Comment(models.Model):
 
     def __str__(self):
         return f"Comment {self.id} on {self.incident}"
+
+
+class Attachment(models.Model):
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="attachments")
+    uploader = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="uploaded_attachments"
+    )
+    s3_key = models.CharField(max_length=500, unique=True)
+    filename = models.CharField(max_length=255)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    content_type = models.CharField(max_length=100, default="application/octet-stream")
+    sha256 = models.CharField(max_length=64, blank=True, default="")
+    is_internal = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.filename} on {self.incident}"

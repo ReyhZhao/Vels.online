@@ -1,7 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Comment, Incident, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Attachment, Comment, Incident, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 
 
 class SubjectSerializer(serializers.ModelSerializer):
@@ -250,3 +250,18 @@ class CommentPatchSerializer(serializers.ModelSerializer):
     class Meta:
         model = Comment
         fields = ["body"]
+
+
+class AttachmentSerializer(serializers.ModelSerializer):
+    uploader_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Attachment
+        fields = [
+            "id", "filename", "size_bytes", "content_type", "sha256",
+            "is_internal", "uploader", "uploader_username", "created_at", "confirmed_at",
+        ]
+        read_only_fields = fields
+
+    def get_uploader_username(self, obj):
+        return obj.uploader.username if obj.uploader else None
