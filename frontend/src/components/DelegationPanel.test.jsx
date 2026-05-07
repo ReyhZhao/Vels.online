@@ -75,7 +75,7 @@ describe('DelegationPanel', () => {
     await waitFor(() => screen.getByRole('heading', { name: 'Delegate incident' }));
     await user.selectOptions(screen.getByLabelText('Delegate to'), '2');
     await user.type(screen.getByLabelText(/Note/), 'please handle');
-    await user.click(screen.getByRole('button', { name: 'Delegate' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm delegation' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/incidents/1/delegate/',
       { user_id: 2, note: 'please handle' }
@@ -115,7 +115,7 @@ describe('DelegationPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Delegate' }));
     await waitFor(() => screen.getByRole('heading', { name: 'Delegate incident' }));
     await user.selectOptions(screen.getByLabelText('Delegate to'), '2');
-    await user.click(screen.getByRole('button', { name: 'Delegate' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm delegation' }));
     await waitFor(() => screen.getByText('Cannot delegate to self.'));
   });
 });

@@ -286,7 +286,7 @@ describe('IncidentDetail', () => {
     await user.click(screen.getByRole('button', { name: 'Transfer' }));
     await waitFor(() => screen.getByRole('heading', { name: 'Transfer incident' }));
     await user.selectOptions(screen.getByLabelText('New assignee'), '2');
-    await user.click(screen.getByRole('button', { name: 'Transfer' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm transfer' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/incidents/1/transfer/', { assignee_id: 2 }));
   });
 
