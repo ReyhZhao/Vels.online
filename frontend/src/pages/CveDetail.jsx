@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
+import PromoteToIncidentButton from '../components/PromoteToIncidentButton';
+import LinkedIncidents from '../components/LinkedIncidents';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -83,12 +85,19 @@ export default function CveDetail() {
             )}
           </div>
         </div>
-        <button
-          onClick={() => navigate(-1)}
-          className="shrink-0 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-        >
-          ← Back
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <PromoteToIncidentButton
+            sourceKind="vulnerability"
+            sourceRef={{ cve_id: detail.cve, cvss_score: detail.cvss_score, description: detail.description }}
+            orgSlug={orgSlug}
+          />
+          <button
+            onClick={() => navigate(-1)}
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            ← Back
+          </button>
+        </div>
       </div>
 
       {/* CVE details */}
@@ -126,6 +135,11 @@ export default function CveDetail() {
           </div>
         )}
       </div>
+
+      <LinkedIncidents
+        sourceKind="vulnerability"
+        sourceRef={{ cve_id: detail.cve }}
+      />
 
       {/* Affected agents table */}
       <div>

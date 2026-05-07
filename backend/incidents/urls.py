@@ -6,10 +6,12 @@ from .views import (
     IncidentListView,
     IncidentTaskListView,
     IncidentTransitionView,
+    PromoteView,
 )
 
 urlpatterns = [
     path("", IncidentListView.as_view()),
+    path("promote/", PromoteView.as_view()),
     path("<int:pk>/", IncidentDetailView.as_view()),
     path("<int:pk>/transition/", IncidentTransitionView.as_view()),
     path("<int:pk>/tasks/", IncidentTaskListView.as_view()),

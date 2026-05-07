@@ -4,6 +4,8 @@ import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 import SlideOver from '../components/SlideOver';
 import EventSlideOver from '../components/EventSlideOver';
+import PromoteToIncidentButton from '../components/PromoteToIncidentButton';
+import LinkedIncidents from '../components/LinkedIncidents';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -372,6 +374,24 @@ function VulnerabilitySlideOver({ agentId, orgSlug, vulnId, onClose }) {
               </ul>
             </Section>
           )}
+
+          <LinkedIncidents
+            sourceKind="agent_finding"
+            sourceRef={{ agent_id: agentId, cve_id: detail.cve }}
+          />
+
+          <div className="pt-2">
+            <PromoteToIncidentButton
+              sourceKind="agent_finding"
+              sourceRef={{
+                agent_id: agentId,
+                agent_name: detail.agent_name,
+                cve_id: detail.cve,
+                cvss_score: detail.cvss_score,
+              }}
+              orgSlug={orgSlug}
+            />
+          </div>
         </div>
       ) : null}
     </SlideOver>

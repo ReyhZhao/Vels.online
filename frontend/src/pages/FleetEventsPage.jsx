@@ -3,6 +3,7 @@ import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 import { useSearchParams } from 'react-router-dom';
 import EventSlideOver from '../components/EventSlideOver';
+import PromoteToIncidentButton from '../components/PromoteToIncidentButton';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -246,6 +247,7 @@ export default function FleetEventsPage() {
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Rule ID</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Description</th>
+              <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
@@ -261,18 +263,31 @@ export default function FleetEventsPage() {
               events.map((event, idx) => (
                 <tr
                   key={`${event.id}-${idx}`}
-                  onClick={() => handleRowClick(event)}
-                  className="cursor-pointer border-b border-border last:border-0 hover:bg-accent/50 transition-colors"
+                  className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors"
                 >
-                  <td className="px-4 py-3 text-muted-foreground">{event.agent_name}</td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                  <td className="px-4 py-3 text-muted-foreground cursor-pointer" onClick={() => handleRowClick(event)}>{event.agent_name}</td>
+                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap cursor-pointer" onClick={() => handleRowClick(event)}>
                     {event.timestamp ? new Date(event.timestamp).toLocaleString() : '—'}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 cursor-pointer" onClick={() => handleRowClick(event)}>
                     <SeverityBadge severity={event.severity} />
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{event.rule_id}</td>
-                  <td className="px-4 py-3 text-foreground">{event.rule_description}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground cursor-pointer" onClick={() => handleRowClick(event)}>{event.rule_id}</td>
+                  <td className="px-4 py-3 text-foreground cursor-pointer" onClick={() => handleRowClick(event)}>{event.rule_description}</td>
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    <PromoteToIncidentButton
+                      sourceKind="wazuh_event"
+                      sourceRef={{
+                        event_id: event.id,
+                        agent_id: event.agent_id,
+                        agent_name: event.agent_name,
+                        rule_id: event.rule_id,
+                        rule_description: event.rule_description,
+                        level: event.level,
+                      }}
+                      orgSlug={selectedOrg?.slug}
+                    />
+                  </td>
                 </tr>
               ))
             )}

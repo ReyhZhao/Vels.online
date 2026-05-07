@@ -1,3 +1,5 @@
+import json
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -27,6 +29,7 @@ from .serializers import (
 )
 from .services.events import record_event
 from .services.identifiers import next_display_id
+from .services.promote import build_promote_payload, find_open_incidents
 from .services.templates import apply_template, auto_apply_for_subject, cancel_template_tasks_on_subject_change
 from .services.transitions import transition_incident
 from .services.visibility import can_view_incident, filter_incidents_for_user
@@ -240,6 +243,18 @@ class IncidentListView(APIView):
             Incident.objects.select_related("organization", "created_by", "assignee", "subject"),
             request.user,
         )
+        source_kind = request.query_params.get("source_kind")
+        if source_kind:
+            qs = qs.filter(source_kind=source_kind)
+        source_ref_contains = request.query_params.get("source_ref_contains")
+        if source_ref_contains:
+            try:
+                ref = json.loads(source_ref_contains)
+                if isinstance(ref, dict):
+                    for key, value in ref.items():
+                        qs = qs.filter(**{f"source_ref__{key}": value})
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
         return Response(IncidentSerializer(qs, many=True).data)
 
     def post(self, request):
@@ -515,3 +530,58 @@ class TaskDetailView(APIView):
                              "old": old_assignee_id, "new": task.assignee_id},
                 )
         return Response(TaskSerializer(task).data)
+
+
+# ── Promote view ─────────────────────────────────────────────────────────────
+
+class PromoteView(APIView):
+    def post(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+
+        source_kind = request.data.get("source_kind")
+        source_ref = request.data.get("source_ref") or {}
+
+        if not source_kind:
+            return Response({"detail": "source_kind is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        form_payload = build_promote_payload(source_kind, source_ref)
+        open_incidents_qs = find_open_incidents(source_kind, source_ref)
+
+        if not request.data.get("commit", False):
+            return Response({
+                "form_payload": form_payload,
+                "open_incidents": IncidentSerializer(open_incidents_qs, many=True).data,
+            })
+
+        org_slug = request.data.get("org")
+        if not org_slug:
+            return Response({"detail": "org is required when commit=true."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            org = Organization.objects.get(slug=org_slug)
+        except Organization.DoesNotExist:
+            return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        create_data = dict(form_payload)
+        for field in ["title", "description", "severity", "tlp", "pap", "subject", "assignee"]:
+            if field in request.data:
+                create_data[field] = request.data[field]
+
+        ser = IncidentCreateSerializer(data=create_data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            display_id = next_display_id()
+            incident = ser.save(
+                organization=org,
+                display_id=display_id,
+                created_by=request.user,
+            )
+            record_event(incident, "incident_created", actor=request.user)
+
+        return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)

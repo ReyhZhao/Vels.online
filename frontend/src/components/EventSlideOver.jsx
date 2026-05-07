@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/axios';
 import SlideOver from './SlideOver';
+import PromoteToIncidentButton from './PromoteToIncidentButton';
+import LinkedIncidents from './LinkedIncidents';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -97,6 +99,26 @@ export default function EventSlideOver({ agentId, orgSlug, eventId, onClose }) {
               {detail.network.protocol && <Field label="Protocol">{detail.network.protocol}</Field>}
             </Section>
           )}
+
+          <LinkedIncidents
+            sourceKind="wazuh_event"
+            sourceRef={{ event_id: eventId }}
+          />
+
+          <div className="pt-2">
+            <PromoteToIncidentButton
+              sourceKind="wazuh_event"
+              sourceRef={{
+                event_id: eventId,
+                agent_id: agentId,
+                agent_name: detail.agent_name,
+                rule_id: detail.rule_id,
+                rule_description: detail.rule_description,
+                level: detail.level,
+              }}
+              orgSlug={orgSlug}
+            />
+          </div>
 
           <details>
             <summary className="cursor-pointer text-sm font-medium text-foreground py-2">Advanced</summary>
