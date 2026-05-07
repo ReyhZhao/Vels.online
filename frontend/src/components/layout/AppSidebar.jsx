@@ -85,10 +85,12 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   const isStaff = user?.is_staff;
 
   const [collapsed, setCollapsed] = useState(() => readLS('sidebar:collapsed', false));
+  const [incidentsOpen, setIncidentsOpen] = useState(() => readLS('sidebar:incidents:open', true));
   const [securityOpen, setSecurityOpen] = useState(() => readLS('sidebar:security:open', true));
   const [adminOpen, setAdminOpen] = useState(() => readLS('sidebar:admin:open', true));
 
   useEffect(() => { writeLS('sidebar:collapsed', collapsed); }, [collapsed]);
+  useEffect(() => { writeLS('sidebar:incidents:open', incidentsOpen); }, [incidentsOpen]);
   useEffect(() => { writeLS('sidebar:security:open', securityOpen); }, [securityOpen]);
   useEffect(() => { writeLS('sidebar:admin:open', adminOpen); }, [adminOpen]);
 
@@ -137,6 +139,33 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
           <div className="space-y-1">
             {showItems && (
               <SectionToggle
+                label="Incidents"
+                open={incidentsOpen}
+                onToggle={() => setIncidentsOpen((o) => !o)}
+              />
+            )}
+            {(incidentsOpen || collapsed) && (
+              <>
+                <SidebarLink to="/incidents" icon={AlertTriangle} collapsed={collapsed}>
+                  Incidents
+                </SidebarLink>
+                {isStaff && (
+                  <>
+                    <SidebarLink to="/admin/incidents/subjects" icon={Tag} collapsed={collapsed}>
+                      Subjects
+                    </SidebarLink>
+                    <SidebarLink to="/admin/incidents/task-templates" icon={ListChecks} collapsed={collapsed}>
+                      Task Templates
+                    </SidebarLink>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            {showItems && (
+              <SectionToggle
                 label="Security"
                 open={securityOpen}
                 onToggle={() => setSecurityOpen((o) => !o)}
@@ -158,9 +187,6 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 </SidebarLink>
                 <SidebarLink to="/security/risk-acceptances" icon={ShieldOff} collapsed={collapsed}>
                   Accepted Risks
-                </SidebarLink>
-                <SidebarLink to="/incidents" icon={AlertTriangle} collapsed={collapsed}>
-                  Incidents
                 </SidebarLink>
                 <SidebarLink to="/security/enroll" icon={UserPlus} collapsed={collapsed}>
                   Enroll
@@ -194,12 +220,6 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                   </SidebarLink>
                   <SidebarLink to="/admin/security/downloads" icon={Download} collapsed={collapsed}>
                     Downloads
-                  </SidebarLink>
-                  <SidebarLink to="/admin/incidents/subjects" icon={Tag} collapsed={collapsed}>
-                    Subjects
-                  </SidebarLink>
-                  <SidebarLink to="/admin/incidents/task-templates" icon={ListChecks} collapsed={collapsed}>
-                    Task Templates
                   </SidebarLink>
                   <div
                     className={cn(
