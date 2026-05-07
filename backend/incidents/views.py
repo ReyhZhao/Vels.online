@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
@@ -9,6 +10,7 @@ from .models import Incident
 from .serializers import IncidentCreateSerializer, IncidentSerializer, IncidentUpdateSerializer
 from .services.events import record_event
 from .services.identifiers import next_display_id
+from .services.transitions import transition_incident
 from .services.visibility import can_view_incident, filter_incidents_for_user
 
 
@@ -89,6 +91,12 @@ class IncidentDetailView(APIView):
             if not membership:
                 return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
 
+        if "state" in request.data:
+            return Response(
+                {"detail": "Use /transition/ to change state."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         ser = IncidentUpdateSerializer(incident, data=request.data, partial=True)
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -98,5 +106,39 @@ class IncidentDetailView(APIView):
         with transaction.atomic():
             incident = ser.save()
             record_event(incident, "incident_updated", actor=request.user, payload={"changes": changes})
+
+        return Response(IncidentSerializer(incident).data)
+
+
+class IncidentTransitionView(APIView):
+    def post(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            incident = Incident.objects.select_related("organization", "created_by", "assignee").get(pk=pk)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_incident(request.user, incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not request.user.is_staff:
+            membership = OrganizationMembership.objects.filter(
+                user=request.user, organization=incident.organization
+            ).exists()
+            if not membership:
+                return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        target_state = request.data.get("state")
+        if not target_state:
+            return Response({"detail": "state is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        closure_reason = request.data.get("closure_reason")
+
+        try:
+            incident = transition_incident(incident, target_state, actor=request.user, closure_reason=closure_reason)
+        except ValidationError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(IncidentSerializer(incident).data)

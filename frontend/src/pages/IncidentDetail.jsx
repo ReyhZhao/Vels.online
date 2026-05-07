@@ -17,6 +17,32 @@ const TLP_CLASSES = {
   red:   'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
 };
 
+const STATE_CLASSES = {
+  new:         'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  triaged:     'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
+  in_progress: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+  on_hold:     'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+  resolved:    'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+  closed:      'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+};
+
+const ALLOWED_TRANSITIONS = {
+  new:         [{ state: 'triaged', label: 'Triage' }, { state: 'in_progress', label: 'Start work' }],
+  triaged:     [{ state: 'in_progress', label: 'Start work' }, { state: 'on_hold', label: 'Put on hold' }],
+  in_progress: [{ state: 'on_hold', label: 'Put on hold' }, { state: 'resolved', label: 'Mark resolved' }, { state: 'closed', label: 'Close' }],
+  on_hold:     [{ state: 'in_progress', label: 'Resume' }, { state: 'resolved', label: 'Mark resolved' }, { state: 'closed', label: 'Close' }],
+  resolved:    [{ state: 'in_progress', label: 'Reopen' }, { state: 'closed', label: 'Close' }],
+  closed:      [{ state: 'in_progress', label: 'Reopen' }],
+};
+
+const CLOSURE_REASONS = [
+  { value: 'resolved',       label: 'Resolved' },
+  { value: 'false_positive', label: 'False Positive' },
+  { value: 'duplicate',      label: 'Duplicate' },
+  { value: 'informational',  label: 'Informational' },
+  { value: 'accepted_risk',  label: 'Accepted Risk' },
+];
+
 function Badge({ label, value, badgeClass }) {
   return (
     <div className="flex flex-col gap-1">
@@ -37,14 +63,60 @@ function Field({ label, value }) {
   );
 }
 
+function ClosureReasonDialog({ onConfirm, onCancel, transitioning }) {
+  const [reason, setReason] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Close incident</h2>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-foreground" htmlFor="closure-reason">
+            Closure reason
+          </label>
+          <select
+            id="closure-reason"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">Select a reason…</option>
+            {CLOSURE_REASONS.map(r => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            disabled={transitioning}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => reason && onConfirm(reason)}
+            disabled={!reason || transitioning}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {transitioning ? 'Closing…' : 'Close incident'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function IncidentDetail() {
   const { incidentId } = useParams();
   const [incident, setIncident] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [transitioning, setTransitioning] = useState(false);
+  const [transitionError, setTransitionError] = useState(null);
+  const [pendingClose, setPendingClose] = useState(false);
 
   useEffect(() => {
-    async function fetch() {
+    async function load() {
       setLoading(true);
       setError(null);
       try {
@@ -56,15 +128,49 @@ export default function IncidentDetail() {
         setLoading(false);
       }
     }
-    fetch();
+    load();
   }, [incidentId]);
+
+  async function handleTransition(targetState, closureReason = undefined) {
+    setTransitioning(true);
+    setTransitionError(null);
+    try {
+      const payload = { state: targetState };
+      if (closureReason) payload.closure_reason = closureReason;
+      const res = await api.post(`/api/incidents/${incidentId}/transition/`, payload);
+      setIncident(res.data);
+    } catch (err) {
+      setTransitionError(err.response?.data?.detail || 'Transition failed.');
+    } finally {
+      setTransitioning(false);
+      setPendingClose(false);
+    }
+  }
+
+  function handleActionClick(targetState) {
+    if (targetState === 'closed') {
+      setPendingClose(true);
+    } else {
+      handleTransition(targetState);
+    }
+  }
 
   if (loading) return <p className="text-sm text-muted-foreground p-6">Loading…</p>;
   if (error) return <p className="text-sm text-red-600 p-6">{error}</p>;
   if (!incident) return null;
 
+  const nextStates = ALLOWED_TRANSITIONS[incident.state] ?? [];
+
   return (
     <div className="space-y-6 p-6">
+      {pendingClose && (
+        <ClosureReasonDialog
+          transitioning={transitioning}
+          onConfirm={reason => handleTransition('closed', reason)}
+          onCancel={() => setPendingClose(false)}
+        />
+      )}
+
       <div className="flex items-center gap-3">
         <Link to="/incidents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
           ← Incidents
@@ -72,12 +178,36 @@ export default function IncidentDetail() {
       </div>
 
       <div className="rounded-lg border border-border bg-card p-6 space-y-6">
-        <div>
-          <p className="font-mono text-xs text-muted-foreground">{incident.display_id}</p>
-          <h1 className="mt-1 text-2xl font-semibold text-foreground">{incident.title}</h1>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="font-mono text-xs text-muted-foreground">{incident.display_id}</p>
+            <h1 className="mt-1 text-2xl font-semibold text-foreground">{incident.title}</h1>
+          </div>
+
+          {nextStates.length > 0 && (
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {nextStates.map(({ state, label }) => (
+                <button
+                  key={state}
+                  onClick={() => handleActionClick(state)}
+                  disabled={transitioning}
+                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
+        {transitionError && <p className="text-sm text-red-600">{transitionError}</p>}
+
         <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
+          <Badge
+            label="State"
+            value={incident.state.replace('_', ' ')}
+            badgeClass={STATE_CLASSES[incident.state] ?? ''}
+          />
           <Badge
             label="Severity"
             value={incident.severity}
@@ -93,11 +223,13 @@ export default function IncidentDetail() {
             value={`PAP:${incident.pap.toUpperCase()}`}
             badgeClass={TLP_CLASSES[incident.pap] ?? ''}
           />
-          <Field label="State" value={incident.state} />
           <Field label="Organisation" value={incident.org_slug} />
           <Field label="Source" value={incident.source_kind} />
           <Field label="Assignee" value={incident.assignee_username} />
           <Field label="Created By" value={incident.created_by_username} />
+          {incident.closure_reason && (
+            <Field label="Closure Reason" value={incident.closure_reason.replace('_', ' ')} />
+          )}
         </div>
 
         {incident.description && (

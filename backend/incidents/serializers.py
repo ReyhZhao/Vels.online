@@ -19,6 +19,7 @@ class IncidentSerializer(serializers.ModelSerializer):
             "tlp",
             "pap",
             "state",
+            "closure_reason",
             "source_kind",
             "source_ref",
             "org_slug",

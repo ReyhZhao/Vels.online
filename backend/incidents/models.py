@@ -54,8 +54,31 @@ class Incident(models.Model):
     ]
 
     STATE_NEW = "new"
+    STATE_TRIAGED = "triaged"
+    STATE_IN_PROGRESS = "in_progress"
+    STATE_ON_HOLD = "on_hold"
+    STATE_RESOLVED = "resolved"
+    STATE_CLOSED = "closed"
     STATE_CHOICES = [
         (STATE_NEW, "New"),
+        (STATE_TRIAGED, "Triaged"),
+        (STATE_IN_PROGRESS, "In Progress"),
+        (STATE_ON_HOLD, "On Hold"),
+        (STATE_RESOLVED, "Resolved"),
+        (STATE_CLOSED, "Closed"),
+    ]
+
+    CLOSURE_RESOLVED = "resolved"
+    CLOSURE_FALSE_POSITIVE = "false_positive"
+    CLOSURE_DUPLICATE = "duplicate"
+    CLOSURE_INFORMATIONAL = "informational"
+    CLOSURE_ACCEPTED_RISK = "accepted_risk"
+    CLOSURE_REASON_CHOICES = [
+        (CLOSURE_RESOLVED, "Resolved"),
+        (CLOSURE_FALSE_POSITIVE, "False Positive"),
+        (CLOSURE_DUPLICATE, "Duplicate"),
+        (CLOSURE_INFORMATIONAL, "Informational"),
+        (CLOSURE_ACCEPTED_RISK, "Accepted Risk"),
     ]
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="incidents")
@@ -68,6 +91,9 @@ class Incident(models.Model):
     tlp = models.CharField(max_length=10, choices=TLP_CHOICES, default=TLP_AMBER)
     pap = models.CharField(max_length=10, choices=PAP_CHOICES, default=PAP_AMBER)
     state = models.CharField(max_length=20, choices=STATE_CHOICES, default=STATE_NEW)
+    closure_reason = models.CharField(
+        max_length=20, choices=CLOSURE_REASON_CHOICES, null=True, blank=True
+    )
     assignee = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_incidents"
     )

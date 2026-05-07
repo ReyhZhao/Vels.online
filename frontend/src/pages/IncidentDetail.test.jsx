@@ -1,9 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 vi.mock('../lib/axios', () => ({
-  default: { get: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn() },
 }));
 
 import api from '../lib/axios';
@@ -18,6 +19,7 @@ const INCIDENT = {
   tlp: 'amber',
   pap: 'amber',
   state: 'new',
+  closure_reason: null,
   org_slug: 'acme',
   source_kind: 'manual',
   source_ref: {},
@@ -85,5 +87,79 @@ describe('IncidentDetail', () => {
     api.get.mockResolvedValue({ data: INCIDENT });
     renderPage('42');
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/incidents/42/'));
+  });
+
+  // ── state transition controls ─────────────────────────────────────────────
+
+  it('shows legal next-state actions for new incident', async () => {
+    api.get.mockResolvedValue({ data: INCIDENT });
+    renderPage();
+    await waitFor(() => screen.getByText('Triage'));
+    expect(screen.getByText('Start work')).toBeInTheDocument();
+  });
+
+  it('shows no actions for closed incident', async () => {
+    api.get.mockResolvedValue({ data: { ...INCIDENT, state: 'closed', closure_reason: 'resolved' } });
+    renderPage();
+    await waitFor(() => screen.getByText('Reopen'));
+  });
+
+  it('calls transition API when action button clicked', async () => {
+    api.get.mockResolvedValue({ data: INCIDENT });
+    api.post.mockResolvedValue({ data: { ...INCIDENT, state: 'triaged' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Triage'));
+    await user.click(screen.getByRole('button', { name: 'Triage' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/incidents/1/transition/',
+      { state: 'triaged' }
+    ));
+  });
+
+  it('shows closure reason dialog when Close is clicked', async () => {
+    api.get.mockResolvedValue({ data: { ...INCIDENT, state: 'in_progress' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Close'));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.getByRole('heading', { name: 'Close incident' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Closure reason')).toBeInTheDocument();
+  });
+
+  it('submits closure reason when closing', async () => {
+    api.get.mockResolvedValue({ data: { ...INCIDENT, state: 'in_progress' } });
+    api.post.mockResolvedValue({ data: { ...INCIDENT, state: 'closed', closure_reason: 'resolved' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Close'));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.selectOptions(screen.getByLabelText('Closure reason'), 'resolved');
+    await user.click(screen.getByRole('button', { name: 'Close incident' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/incidents/1/transition/',
+      { state: 'closed', closure_reason: 'resolved' }
+    ));
+  });
+
+  it('cancels closure dialog without calling API', async () => {
+    api.get.mockResolvedValue({ data: { ...INCIDENT, state: 'in_progress' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Close'));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(api.post).not.toHaveBeenCalled();
+    expect(screen.queryByText('Close incident')).not.toBeInTheDocument();
+  });
+
+  it('shows transition error on failure', async () => {
+    api.get.mockResolvedValue({ data: INCIDENT });
+    api.post.mockRejectedValue({ response: { data: { detail: 'Invalid transition.' } } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Triage'));
+    await user.click(screen.getByRole('button', { name: 'Triage' }));
+    await waitFor(() => screen.getByText('Invalid transition.'));
   });
 });
