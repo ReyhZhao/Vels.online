@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 
 from security.models import Organization, OrganizationMembership
 
-from .models import Incident, Subject
+from .models import Incident, Subject, TaskTemplate, TaskTemplateItem
 from .serializers import (
     IncidentCreateSerializer,
     IncidentSerializer,
@@ -15,6 +15,11 @@ from .serializers import (
     SubjectCreateSerializer,
     SubjectSerializer,
     SubjectUpdateSerializer,
+    TaskTemplateItemSerializer,
+    TaskTemplateItemWriteSerializer,
+    TaskTemplatePatchSerializer,
+    TaskTemplateSerializer,
+    TaskTemplateWriteSerializer,
 )
 from .services.events import record_event
 from .services.identifiers import next_display_id
@@ -87,6 +92,136 @@ class SubjectDetailView(APIView):
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
         ser.save()
         return Response(SubjectSerializer(subject).data)
+
+
+# ── TaskTemplate views ───────────────────────────────────────────────────────
+
+class TaskTemplateListView(APIView):
+    def get(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+        qs = TaskTemplate.objects.select_related("subject", "created_by").prefetch_related("items")
+        subject_id = request.query_params.get("subject")
+        if subject_id:
+            qs = qs.filter(subject_id=subject_id)
+        return Response(TaskTemplateSerializer(qs, many=True).data)
+
+    def post(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        ser = TaskTemplateWriteSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        template = ser.save(created_by=request.user)
+        template.refresh_from_db()
+        return Response(
+            TaskTemplateSerializer(TaskTemplate.objects.prefetch_related("items").get(pk=template.pk)).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class TaskTemplateDetailView(APIView):
+    def _get_template(self, pk):
+        try:
+            return TaskTemplate.objects.select_related("subject", "created_by").prefetch_related("items").get(pk=pk), None
+        except TaskTemplate.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    def get(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return err
+        template, err = self._get_template(pk)
+        if err:
+            return err
+        return Response(TaskTemplateSerializer(template).data)
+
+    def patch(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        template, err = self._get_template(pk)
+        if err:
+            return err
+        ser = TaskTemplatePatchSerializer(template, data=request.data, partial=True)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        ser.save()
+        return Response(TaskTemplateSerializer(
+            TaskTemplate.objects.prefetch_related("items").get(pk=pk)
+        ).data)
+
+    def delete(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        template, err = self._get_template(pk)
+        if err:
+            return err
+        template.archived = True
+        template.save(update_fields=["archived", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class TaskTemplateItemListView(APIView):
+    def _get_template(self, pk, request):
+        err = _require_auth(request)
+        if err:
+            return None, err
+        if not request.user.is_staff:
+            return None, Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            return TaskTemplate.objects.get(pk=pk), None
+        except TaskTemplate.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    def post(self, request, pk):
+        template, err = self._get_template(pk, request)
+        if err:
+            return err
+        ser = TaskTemplateItemWriteSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        item = ser.save(template=template)
+        return Response(TaskTemplateItemSerializer(item).data, status=status.HTTP_201_CREATED)
+
+
+class TaskTemplateItemDetailView(APIView):
+    def _get_item(self, template_pk, item_pk, request):
+        err = _require_auth(request)
+        if err:
+            return None, err
+        if not request.user.is_staff:
+            return None, Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            return TaskTemplateItem.objects.get(pk=item_pk, template_id=template_pk), None
+        except TaskTemplateItem.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    def patch(self, request, pk, item_pk):
+        item, err = self._get_item(pk, item_pk, request)
+        if err:
+            return err
+        ser = TaskTemplateItemWriteSerializer(item, data=request.data, partial=True)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        ser.save()
+        return Response(TaskTemplateItemSerializer(item).data)
+
+    def delete(self, request, pk, item_pk):
+        item, err = self._get_item(pk, item_pk, request)
+        if err:
+            return err
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ── Incident views ───────────────────────────────────────────────────────────

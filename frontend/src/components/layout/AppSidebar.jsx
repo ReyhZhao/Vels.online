@@ -16,6 +16,7 @@ import {
   ShieldOff,
   AlertTriangle,
   Tag,
+  ListChecks,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -196,6 +197,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                   </SidebarLink>
                   <SidebarLink to="/admin/incidents/subjects" icon={Tag} collapsed={collapsed}>
                     Subjects
+                  </SidebarLink>
+                  <SidebarLink to="/admin/incidents/task-templates" icon={ListChecks} collapsed={collapsed}>
+                    Task Templates
                   </SidebarLink>
                   <div
                     className={cn(

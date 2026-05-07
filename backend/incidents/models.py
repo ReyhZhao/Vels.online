@@ -24,6 +24,38 @@ class Subject(models.Model):
         return self.name
 
 
+class TaskTemplate(models.Model):
+    name = models.CharField(max_length=255)
+    subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name="task_templates")
+    description = models.TextField(blank=True, default="")
+    is_auto_apply = models.BooleanField(default=False)
+    archived = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_task_templates"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["subject__name", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.subject})"
+
+
+class TaskTemplateItem(models.Model):
+    template = models.ForeignKey(TaskTemplate, on_delete=models.CASCADE, related_name="items")
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    display_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["display_order", "id"]
+
+    def __str__(self):
+        return f"{self.template}: {self.title}"
+
+
 class Incident(models.Model):
     SOURCE_MANUAL = "manual"
     SOURCE_API = "api"

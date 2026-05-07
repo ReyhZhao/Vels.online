@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Incident, IncidentEvent, Subject
+from .models import Incident, IncidentEvent, Subject, TaskTemplate, TaskTemplateItem
 
 
 class SubjectSerializer(serializers.ModelSerializer):
@@ -97,6 +97,50 @@ class IncidentUpdateSerializer(serializers.ModelSerializer):
             "subject",
             "assignee",
         ]
+
+
+class TaskTemplateItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskTemplateItem
+        fields = ["id", "title", "description", "display_order"]
+
+
+class TaskTemplateItemWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskTemplateItem
+        fields = ["title", "description", "display_order"]
+
+
+class TaskTemplateSerializer(serializers.ModelSerializer):
+    items = TaskTemplateItemSerializer(many=True, read_only=True)
+    subject_slug = serializers.CharField(source="subject.slug", read_only=True)
+    subject_name = serializers.CharField(source="subject.name", read_only=True)
+    created_by_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TaskTemplate
+        fields = [
+            "id", "name", "subject", "subject_slug", "subject_name",
+            "description", "is_auto_apply", "archived",
+            "created_by", "created_by_username", "created_at", "updated_at",
+            "items",
+        ]
+        read_only_fields = ["id", "subject_slug", "subject_name", "created_by", "created_at", "updated_at"]
+
+    def get_created_by_username(self, obj):
+        return obj.created_by.username if obj.created_by else None
+
+
+class TaskTemplateWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskTemplate
+        fields = ["name", "subject", "description", "is_auto_apply"]
+
+
+class TaskTemplatePatchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskTemplate
+        fields = ["name", "description", "is_auto_apply", "archived"]
 
 
 class IncidentEventSerializer(serializers.ModelSerializer):

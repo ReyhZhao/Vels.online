@@ -12,6 +12,7 @@ import StatusSettings from './pages/admin/StatusSettings';
 import OrgManagement from './pages/admin/OrgManagement';
 import DownloadManagement from './pages/admin/DownloadManagement';
 import SubjectsAdmin from './pages/admin/SubjectsAdmin';
+import TaskTemplatesAdmin from './pages/admin/TaskTemplatesAdmin';
 import SecurityDashboard from './pages/SecurityDashboard';
 import VulnerabilityDashboard from './pages/VulnerabilityDashboard';
 import CveDetail from './pages/CveDetail';
@@ -45,6 +46,7 @@ function App() {
         <Route path="/admin/security/organizations" element={<OrgManagement />} />
         <Route path="/admin/security/downloads" element={<DownloadManagement />} />
         <Route path="/admin/incidents/subjects" element={<SubjectsAdmin />} />
+        <Route path="/admin/incidents/task-templates" element={<TaskTemplatesAdmin />} />
 
         <Route path="/security" element={<SecurityDashboard />} />
         <Route path="/security/vulnerabilities" element={<VulnerabilityDashboard />} />
