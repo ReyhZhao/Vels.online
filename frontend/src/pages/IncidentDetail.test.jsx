@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 vi.mock('../lib/axios', () => ({
-  default: { get: vi.fn(), post: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }));
 
 import api from '../lib/axios';
@@ -20,6 +20,9 @@ const INCIDENT = {
   pap: 'amber',
   state: 'new',
   closure_reason: null,
+  subject: null,
+  subject_slug: null,
+  subject_name: null,
   org_slug: 'acme',
   source_kind: 'manual',
   source_ref: {},
@@ -30,6 +33,18 @@ const INCIDENT = {
   created_at: '2026-01-15T10:00:00Z',
   updated_at: '2026-01-15T10:00:00Z',
 };
+
+const SUBJECTS = [
+  { id: 1, name: 'Phishing', slug: 'phishing', description: '', archived: false },
+  { id: 2, name: 'Malware', slug: 'malware', description: '', archived: false },
+];
+
+function mockGet(incident = INCIDENT, subjects = SUBJECTS) {
+  api.get.mockImplementation(url => {
+    if (url === '/api/subjects/') return Promise.resolve({ data: subjects });
+    return Promise.resolve({ data: incident });
+  });
+}
 
 function renderPage(id = '1') {
   return render(
@@ -51,14 +66,14 @@ describe('IncidentDetail', () => {
   });
 
   it('renders incident header', async () => {
-    api.get.mockResolvedValue({ data: INCIDENT });
+    mockGet();
     renderPage();
     await waitFor(() => screen.getByText('INC-2026-0001'));
     expect(screen.getByText('Suspicious login attempt')).toBeInTheDocument();
   });
 
   it('renders severity and TLP badges', async () => {
-    api.get.mockResolvedValue({ data: INCIDENT });
+    mockGet();
     renderPage();
     await waitFor(() => screen.getByText('high'));
     expect(screen.getByText('TLP:AMBER')).toBeInTheDocument();
@@ -66,7 +81,7 @@ describe('IncidentDetail', () => {
   });
 
   it('renders description', async () => {
-    api.get.mockResolvedValue({ data: INCIDENT });
+    mockGet();
     renderPage();
     await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
   });
@@ -78,13 +93,13 @@ describe('IncidentDetail', () => {
   });
 
   it('shows back link to incidents list', async () => {
-    api.get.mockResolvedValue({ data: INCIDENT });
+    mockGet();
     renderPage();
     await waitFor(() => screen.getByText('← Incidents'));
   });
 
   it('fetches the correct incident by id', async () => {
-    api.get.mockResolvedValue({ data: INCIDENT });
+    mockGet();
     renderPage('42');
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/incidents/42/'));
   });
@@ -92,20 +107,20 @@ describe('IncidentDetail', () => {
   // ── state transition controls ─────────────────────────────────────────────
 
   it('shows legal next-state actions for new incident', async () => {
-    api.get.mockResolvedValue({ data: INCIDENT });
+    mockGet();
     renderPage();
     await waitFor(() => screen.getByText('Triage'));
     expect(screen.getByText('Start work')).toBeInTheDocument();
   });
 
-  it('shows no actions for closed incident', async () => {
-    api.get.mockResolvedValue({ data: { ...INCIDENT, state: 'closed', closure_reason: 'resolved' } });
+  it('shows reopen action for closed incident', async () => {
+    mockGet({ ...INCIDENT, state: 'closed', closure_reason: 'resolved' });
     renderPage();
     await waitFor(() => screen.getByText('Reopen'));
   });
 
   it('calls transition API when action button clicked', async () => {
-    api.get.mockResolvedValue({ data: INCIDENT });
+    mockGet();
     api.post.mockResolvedValue({ data: { ...INCIDENT, state: 'triaged' } });
     const user = userEvent.setup();
     renderPage();
@@ -118,7 +133,7 @@ describe('IncidentDetail', () => {
   });
 
   it('shows closure reason dialog when Close is clicked', async () => {
-    api.get.mockResolvedValue({ data: { ...INCIDENT, state: 'in_progress' } });
+    mockGet({ ...INCIDENT, state: 'in_progress' });
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => screen.getByText('Close'));
@@ -128,7 +143,7 @@ describe('IncidentDetail', () => {
   });
 
   it('submits closure reason when closing', async () => {
-    api.get.mockResolvedValue({ data: { ...INCIDENT, state: 'in_progress' } });
+    mockGet({ ...INCIDENT, state: 'in_progress' });
     api.post.mockResolvedValue({ data: { ...INCIDENT, state: 'closed', closure_reason: 'resolved' } });
     const user = userEvent.setup();
     renderPage();
@@ -143,7 +158,7 @@ describe('IncidentDetail', () => {
   });
 
   it('cancels closure dialog without calling API', async () => {
-    api.get.mockResolvedValue({ data: { ...INCIDENT, state: 'in_progress' } });
+    mockGet({ ...INCIDENT, state: 'in_progress' });
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => screen.getByText('Close'));
@@ -154,12 +169,46 @@ describe('IncidentDetail', () => {
   });
 
   it('shows transition error on failure', async () => {
-    api.get.mockResolvedValue({ data: INCIDENT });
+    mockGet();
     api.post.mockRejectedValue({ response: { data: { detail: 'Invalid transition.' } } });
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => screen.getByText('Triage'));
     await user.click(screen.getByRole('button', { name: 'Triage' }));
     await waitFor(() => screen.getByText('Invalid transition.'));
+  });
+
+  // ── subject dropdown ──────────────────────────────────────────────────────
+
+  it('renders subject dropdown', async () => {
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Subject'));
+    expect(screen.getByLabelText('Subject')).not.toBeDisabled();
+  });
+
+  it('subject dropdown is disabled when state is past triage', async () => {
+    mockGet({ ...INCIDENT, state: 'in_progress' });
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Subject'));
+    expect(screen.getByLabelText('Subject')).toBeDisabled();
+  });
+
+  it('subject dropdown lists active subjects', async () => {
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Subject'));
+    expect(screen.getByRole('option', { name: 'Phishing' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Malware' })).toBeInTheDocument();
+  });
+
+  it('calls patch when subject is selected', async () => {
+    mockGet();
+    api.patch.mockResolvedValue({ data: { ...INCIDENT, subject: 1, subject_slug: 'phishing', subject_name: 'Phishing' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Subject'));
+    await user.selectOptions(screen.getByLabelText('Subject'), '1');
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/incidents/1/', { subject: 1 }));
   });
 });

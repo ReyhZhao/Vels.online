@@ -1,12 +1,33 @@
 from rest_framework import serializers
 
-from .models import Incident, IncidentEvent
+from .models import Incident, IncidentEvent, Subject
+
+
+class SubjectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subject
+        fields = ["id", "name", "slug", "description", "archived", "created_at"]
+        read_only_fields = ["id", "slug", "created_at"]
+
+
+class SubjectCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subject
+        fields = ["name", "description"]
+
+
+class SubjectUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subject
+        fields = ["name", "description", "archived"]
 
 
 class IncidentSerializer(serializers.ModelSerializer):
     created_by_username = serializers.SerializerMethodField()
     assignee_username = serializers.SerializerMethodField()
     org_slug = serializers.CharField(source="organization.slug", read_only=True)
+    subject_slug = serializers.SerializerMethodField()
+    subject_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Incident
@@ -20,6 +41,9 @@ class IncidentSerializer(serializers.ModelSerializer):
             "pap",
             "state",
             "closure_reason",
+            "subject",
+            "subject_slug",
+            "subject_name",
             "source_kind",
             "source_ref",
             "org_slug",
@@ -38,6 +62,12 @@ class IncidentSerializer(serializers.ModelSerializer):
     def get_assignee_username(self, obj):
         return obj.assignee.username if obj.assignee else None
 
+    def get_subject_slug(self, obj):
+        return obj.subject.slug if obj.subject else None
+
+    def get_subject_name(self, obj):
+        return obj.subject.name if obj.subject else None
+
 
 class IncidentCreateSerializer(serializers.ModelSerializer):
     class Meta:
@@ -50,6 +80,7 @@ class IncidentCreateSerializer(serializers.ModelSerializer):
             "pap",
             "source_kind",
             "source_ref",
+            "subject",
             "assignee",
         ]
 
@@ -63,6 +94,7 @@ class IncidentUpdateSerializer(serializers.ModelSerializer):
             "severity",
             "tlp",
             "pap",
+            "subject",
             "assignee",
         ]
 

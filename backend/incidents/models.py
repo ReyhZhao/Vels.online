@@ -1,7 +1,27 @@
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils.text import slugify
 
 from security.models import Organization
+
+
+class Subject(models.Model):
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=100, unique=True)
+    description = models.TextField(blank=True, default="")
+    archived = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
 
 
 class Incident(models.Model):
@@ -93,6 +113,9 @@ class Incident(models.Model):
     state = models.CharField(max_length=20, choices=STATE_CHOICES, default=STATE_NEW)
     closure_reason = models.CharField(
         max_length=20, choices=CLOSURE_REASON_CHOICES, null=True, blank=True
+    )
+    subject = models.ForeignKey(
+        Subject, on_delete=models.SET_NULL, null=True, blank=True, related_name="incidents"
     )
     assignee = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_incidents"

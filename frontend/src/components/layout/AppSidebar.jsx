@@ -15,6 +15,7 @@ import {
   ClipboardList,
   ShieldOff,
   AlertTriangle,
+  Tag,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -192,6 +193,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                   </SidebarLink>
                   <SidebarLink to="/admin/security/downloads" icon={Download} collapsed={collapsed}>
                     Downloads
+                  </SidebarLink>
+                  <SidebarLink to="/admin/incidents/subjects" icon={Tag} collapsed={collapsed}>
+                    Subjects
                   </SidebarLink>
                   <div
                     className={cn(

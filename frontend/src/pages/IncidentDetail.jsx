@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/axios';
+
+const TRIAGE_STATES = new Set(['new', 'triaged']);
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -106,22 +108,54 @@ function ClosureReasonDialog({ onConfirm, onCancel, transitioning }) {
   );
 }
 
+function SubjectDropdown({ incident, subjects, onSubjectChange, saving }) {
+  const locked = !TRIAGE_STATES.has(incident.state);
+  const value = incident.subject ?? '';
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Subject</span>
+      <div title={locked ? 'Subject is locked once the incident leaves triage.' : undefined}>
+        <select
+          value={value}
+          onChange={e => !locked && onSubjectChange(e.target.value ? Number(e.target.value) : null)}
+          disabled={locked || saving}
+          aria-label="Subject"
+          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="">— None —</option>
+          {subjects.filter(s => !s.archived || s.id === incident.subject).map(s => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 export default function IncidentDetail() {
   const { incidentId } = useParams();
   const [incident, setIncident] = useState(null);
+  const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [transitioning, setTransitioning] = useState(false);
   const [transitionError, setTransitionError] = useState(null);
   const [pendingClose, setPendingClose] = useState(false);
+  const [savingSubject, setSavingSubject] = useState(false);
+  const [subjectError, setSubjectError] = useState(null);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
       setError(null);
       try {
-        const res = await api.get(`/api/incidents/${incidentId}/`);
-        setIncident(res.data);
+        const [incRes, subRes] = await Promise.all([
+          api.get(`/api/incidents/${incidentId}/`),
+          api.get('/api/subjects/'),
+        ]);
+        setIncident(incRes.data);
+        setSubjects(subRes.data);
       } catch (err) {
         setError(err.response?.status === 404 ? 'Incident not found.' : 'Failed to load incident.');
       } finally {
@@ -129,6 +163,19 @@ export default function IncidentDetail() {
       }
     }
     load();
+  }, [incidentId]);
+
+  const handleSubjectChange = useCallback(async (subjectId) => {
+    setSavingSubject(true);
+    setSubjectError(null);
+    try {
+      const res = await api.patch(`/api/incidents/${incidentId}/`, { subject: subjectId });
+      setIncident(res.data);
+    } catch (err) {
+      setSubjectError(err.response?.data?.detail || 'Failed to update subject.');
+    } finally {
+      setSavingSubject(false);
+    }
   }, [incidentId]);
 
   async function handleTransition(targetState, closureReason = undefined) {
@@ -230,7 +277,15 @@ export default function IncidentDetail() {
           {incident.closure_reason && (
             <Field label="Closure Reason" value={incident.closure_reason.replace('_', ' ')} />
           )}
+          <SubjectDropdown
+            incident={incident}
+            subjects={subjects}
+            onSubjectChange={handleSubjectChange}
+            saving={savingSubject}
+          />
         </div>
+
+        {subjectError && <p className="text-sm text-red-600">{subjectError}</p>}
 
         {incident.description && (
           <div className="flex flex-col gap-1">

@@ -12,5 +12,6 @@ urlpatterns = [
     path("status/", include("status.urls")),
     path("security/", include("security.urls")),
     path("incidents/", include("incidents.urls")),
+    path("subjects/", include("incidents.subject_urls")),
     path("", include(blog_router.urls)),
 ]

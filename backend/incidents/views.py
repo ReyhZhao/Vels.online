@@ -1,17 +1,27 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils.text import slugify
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from security.models import Organization, OrganizationMembership
 
-from .models import Incident
-from .serializers import IncidentCreateSerializer, IncidentSerializer, IncidentUpdateSerializer
+from .models import Incident, Subject
+from .serializers import (
+    IncidentCreateSerializer,
+    IncidentSerializer,
+    IncidentUpdateSerializer,
+    SubjectCreateSerializer,
+    SubjectSerializer,
+    SubjectUpdateSerializer,
+)
 from .services.events import record_event
 from .services.identifiers import next_display_id
 from .services.transitions import transition_incident
 from .services.visibility import can_view_incident, filter_incidents_for_user
+
+TRIAGE_STATES = {"new", "triaged"}
 
 
 def _require_auth(request):
@@ -20,12 +30,76 @@ def _require_auth(request):
     return None
 
 
+# ── Subject views ────────────────────────────────────────────────────────────
+
+class SubjectListView(APIView):
+    def get(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+        qs = Subject.objects.all()
+        return Response(SubjectSerializer(qs, many=True).data)
+
+    def post(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        ser = SubjectCreateSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        name = ser.validated_data["name"]
+        slug = slugify(name)
+        if Subject.objects.filter(slug=slug).exists():
+            return Response({"detail": "A subject with this name already exists."}, status=status.HTTP_400_BAD_REQUEST)
+        subject = ser.save(slug=slug)
+        return Response(SubjectSerializer(subject).data, status=status.HTTP_201_CREATED)
+
+
+class SubjectDetailView(APIView):
+    def _get_subject(self, pk):
+        try:
+            return Subject.objects.get(pk=pk), None
+        except Subject.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    def get(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return err
+        subject, err = self._get_subject(pk)
+        if err:
+            return err
+        return Response(SubjectSerializer(subject).data)
+
+    def patch(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        subject, err = self._get_subject(pk)
+        if err:
+            return err
+        ser = SubjectUpdateSerializer(subject, data=request.data, partial=True)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        ser.save()
+        return Response(SubjectSerializer(subject).data)
+
+
+# ── Incident views ───────────────────────────────────────────────────────────
+
 class IncidentListView(APIView):
     def get(self, request):
         err = _require_auth(request)
         if err:
             return err
-        qs = filter_incidents_for_user(Incident.objects.select_related("organization", "created_by", "assignee"), request.user)
+        qs = filter_incidents_for_user(
+            Incident.objects.select_related("organization", "created_by", "assignee", "subject"),
+            request.user,
+        )
         return Response(IncidentSerializer(qs, many=True).data)
 
     def post(self, request):
@@ -66,7 +140,9 @@ class IncidentDetailView(APIView):
         if not request.user.is_authenticated:
             return None, Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
         try:
-            incident = Incident.objects.select_related("organization", "created_by", "assignee").get(pk=pk)
+            incident = Incident.objects.select_related(
+                "organization", "created_by", "assignee", "subject"
+            ).get(pk=pk)
         except Incident.DoesNotExist:
             return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_incident(request.user, incident):
@@ -97,11 +173,25 @@ class IncidentDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        if "subject" in request.data and incident.state not in TRIAGE_STATES:
+            return Response(
+                {"detail": "Subject can only be changed while the incident is in new or triaged state."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         ser = IncidentUpdateSerializer(incident, data=request.data, partial=True)
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        changes = {field: {"old": getattr(incident, field), "new": value} for field, value in ser.validated_data.items()}
+        changes = {}
+        for field, value in ser.validated_data.items():
+            if field == "subject":
+                changes[field] = {
+                    "old": incident.subject.slug if incident.subject else None,
+                    "new": value.slug if value else None,
+                }
+            else:
+                changes[field] = {"old": getattr(incident, field), "new": value}
 
         with transaction.atomic():
             incident = ser.save()
@@ -116,7 +206,9 @@ class IncidentTransitionView(APIView):
             return Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            incident = Incident.objects.select_related("organization", "created_by", "assignee").get(pk=pk)
+            incident = Incident.objects.select_related(
+                "organization", "created_by", "assignee", "subject"
+            ).get(pk=pk)
         except Incident.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
