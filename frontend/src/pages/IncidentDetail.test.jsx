@@ -42,6 +42,7 @@ const SUBJECTS = [
 function mockGet(incident = INCIDENT, subjects = SUBJECTS) {
   api.get.mockImplementation(url => {
     if (url === '/api/subjects/') return Promise.resolve({ data: subjects });
+    if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
     return Promise.resolve({ data: incident });
   });
 }

@@ -1,9 +1,17 @@
 from django.urls import path
 
-from .views import IncidentDetailView, IncidentListView, IncidentTransitionView
+from .views import (
+    ApplyTemplateView,
+    IncidentDetailView,
+    IncidentListView,
+    IncidentTaskListView,
+    IncidentTransitionView,
+)
 
 urlpatterns = [
     path("", IncidentListView.as_view()),
     path("<int:pk>/", IncidentDetailView.as_view()),
     path("<int:pk>/transition/", IncidentTransitionView.as_view()),
+    path("<int:pk>/tasks/", IncidentTaskListView.as_view()),
+    path("<int:pk>/apply-template/", ApplyTemplateView.as_view()),
 ]

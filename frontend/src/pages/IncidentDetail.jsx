@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/axios';
+import IncidentTasks from './IncidentTasks';
 
 const TRIAGE_STATES = new Set(['new', 'triaged']);
 
@@ -298,6 +299,10 @@ export default function IncidentDetail() {
           <span>Created: {incident.created_at ? new Date(incident.created_at).toLocaleString() : '—'}</span>
           <span>Updated: {incident.updated_at ? new Date(incident.updated_at).toLocaleString() : '—'}</span>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-6">
+        <IncidentTasks incidentId={incidentId} subjectId={incident.subject} />
       </div>
     </div>
   );

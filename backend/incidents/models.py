@@ -165,6 +165,54 @@ class Incident(models.Model):
         return f"{self.display_id}: {self.title}"
 
 
+class Task(models.Model):
+    STATE_NEW = "new"
+    STATE_IN_PROGRESS = "in_progress"
+    STATE_DONE = "done"
+    STATE_CANCELLED = "cancelled"
+    STATE_CHOICES = [
+        (STATE_NEW, "New"),
+        (STATE_IN_PROGRESS, "In Progress"),
+        (STATE_DONE, "Done"),
+        (STATE_CANCELLED, "Cancelled"),
+    ]
+
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="tasks")
+    template_item = models.ForeignKey(
+        TaskTemplateItem, on_delete=models.SET_NULL, null=True, blank=True, related_name="tasks"
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    state = models.CharField(max_length=20, choices=STATE_CHOICES, default=STATE_NEW)
+    assignee = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_tasks"
+    )
+    display_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["display_order", "created_at"]
+
+    def __str__(self):
+        return f"{self.incident}: {self.title}"
+
+
+class IncidentTemplateApplication(models.Model):
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="template_applications")
+    template = models.ForeignKey(TaskTemplate, on_delete=models.CASCADE, related_name="applications")
+    applied_at = models.DateTimeField(auto_now_add=True)
+    applied_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="template_applications"
+    )
+
+    class Meta:
+        ordering = ["-applied_at"]
+
+    def __str__(self):
+        return f"{self.template} applied to {self.incident}"
+
+
 class IncidentEvent(models.Model):
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="events")
     kind = models.CharField(max_length=50)

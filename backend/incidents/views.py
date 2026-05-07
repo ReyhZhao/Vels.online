@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import status
 from rest_framework.response import Response
@@ -7,7 +8,7 @@ from rest_framework.views import APIView
 
 from security.models import Organization, OrganizationMembership
 
-from .models import Incident, Subject, TaskTemplate, TaskTemplateItem
+from .models import Incident, Subject, Task, TaskTemplate, TaskTemplateItem
 from .serializers import (
     IncidentCreateSerializer,
     IncidentSerializer,
@@ -15,6 +16,9 @@ from .serializers import (
     SubjectCreateSerializer,
     SubjectSerializer,
     SubjectUpdateSerializer,
+    TaskCreateSerializer,
+    TaskPatchSerializer,
+    TaskSerializer,
     TaskTemplateItemSerializer,
     TaskTemplateItemWriteSerializer,
     TaskTemplatePatchSerializer,
@@ -23,6 +27,7 @@ from .serializers import (
 )
 from .services.events import record_event
 from .services.identifiers import next_display_id
+from .services.templates import apply_template
 from .services.transitions import transition_incident
 from .services.visibility import can_view_incident, filter_incidents_for_user
 
@@ -369,3 +374,137 @@ class IncidentTransitionView(APIView):
             return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(IncidentSerializer(incident).data)
+
+
+# ── Task views ───────────────────────────────────────────────────────────────
+
+def _get_incident_for_user(request, pk):
+    if not request.user.is_authenticated:
+        return None, Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        incident = Incident.objects.select_related("organization", "subject").get(pk=pk)
+    except Incident.DoesNotExist:
+        return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+    if not can_view_incident(request.user, incident):
+        return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+    return incident, None
+
+
+class IncidentTaskListView(APIView):
+    def get(self, request, pk):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+        tasks = (
+            Task.objects
+            .filter(incident=incident)
+            .select_related("template_item__template", "assignee")
+        )
+        return Response(TaskSerializer(tasks, many=True).data)
+
+    def post(self, request, pk):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+        if not request.user.is_staff:
+            membership = OrganizationMembership.objects.filter(
+                user=request.user, organization=incident.organization
+            ).exists()
+            if not membership:
+                return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+        ser = TaskCreateSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            task = ser.save(incident=incident)
+            record_event(
+                incident, "task_created", actor=request.user,
+                payload={"task_id": task.id, "title": task.title},
+            )
+        return Response(TaskSerializer(task).data, status=status.HTTP_201_CREATED)
+
+
+class ApplyTemplateView(APIView):
+    def post(self, request, pk):
+        incident, err = _get_incident_for_user(request, pk)
+        if err:
+            return err
+        if not request.user.is_staff:
+            membership = OrganizationMembership.objects.filter(
+                user=request.user, organization=incident.organization
+            ).exists()
+            if not membership:
+                return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+        template_id = request.data.get("template_id")
+        if not template_id:
+            return Response({"detail": "template_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            template = TaskTemplate.objects.get(pk=template_id)
+        except TaskTemplate.DoesNotExist:
+            return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            apply_template(incident, template, actor=request.user)
+        except ValidationError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+        tasks = (
+            Task.objects
+            .filter(incident=incident)
+            .select_related("template_item__template", "assignee")
+        )
+        return Response(TaskSerializer(tasks, many=True).data, status=status.HTTP_201_CREATED)
+
+
+class TaskDetailView(APIView):
+    def _get_task(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return None, err
+        try:
+            task = Task.objects.select_related(
+                "incident__organization", "template_item__template", "assignee"
+            ).get(pk=pk)
+        except Task.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, task.incident):
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return task, None
+
+    def get(self, request, pk):
+        task, err = self._get_task(request, pk)
+        if err:
+            return err
+        return Response(TaskSerializer(task).data)
+
+    def patch(self, request, pk):
+        task, err = self._get_task(request, pk)
+        if err:
+            return err
+        if not request.user.is_staff:
+            membership = OrganizationMembership.objects.filter(
+                user=request.user, organization=task.incident.organization
+            ).exists()
+            if not membership:
+                return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+        old_state = task.state
+        old_assignee_id = task.assignee_id
+        ser = TaskPatchSerializer(task, data=request.data, partial=True)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            task = ser.save()
+            closed_states = {Task.STATE_DONE, Task.STATE_CANCELLED}
+            if task.state in closed_states and old_state not in closed_states:
+                Task.objects.filter(pk=task.pk).update(closed_at=timezone.now())
+                task.refresh_from_db()
+            if old_state != task.state:
+                record_event(
+                    task.incident, "task_state_changed", actor=request.user,
+                    payload={"task_id": task.id, "title": task.title, "old": old_state, "new": task.state},
+                )
+            if old_assignee_id != task.assignee_id:
+                record_event(
+                    task.incident, "task_assignee_changed", actor=request.user,
+                    payload={"task_id": task.id, "title": task.title,
+                             "old": old_assignee_id, "new": task.assignee_id},
+                )
+        return Response(TaskSerializer(task).data)

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Incident, IncidentEvent, Subject, TaskTemplate, TaskTemplateItem
+from .models import Incident, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 
 
 class SubjectSerializer(serializers.ModelSerializer):
@@ -141,6 +141,41 @@ class TaskTemplatePatchSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskTemplate
         fields = ["name", "description", "is_auto_apply", "archived"]
+
+
+class TaskSerializer(serializers.ModelSerializer):
+    template_name = serializers.SerializerMethodField()
+    assignee_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Task
+        fields = [
+            "id", "incident", "template_item", "template_name",
+            "title", "description", "state",
+            "assignee", "assignee_username", "display_order",
+            "created_at", "closed_at",
+        ]
+        read_only_fields = ["id", "incident", "created_at"]
+
+    def get_template_name(self, obj):
+        if obj.template_item_id and obj.template_item and obj.template_item.template:
+            return obj.template_item.template.name
+        return None
+
+    def get_assignee_username(self, obj):
+        return obj.assignee.username if obj.assignee else None
+
+
+class TaskCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Task
+        fields = ["title", "description", "display_order", "assignee"]
+
+
+class TaskPatchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Task
+        fields = ["title", "description", "state", "assignee", "display_order"]
 
 
 class IncidentEventSerializer(serializers.ModelSerializer):

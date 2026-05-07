@@ -14,5 +14,6 @@ urlpatterns = [
     path("incidents/", include("incidents.urls")),
     path("subjects/", include("incidents.subject_urls")),
     path("task-templates/", include("incidents.task_template_urls")),
+    path("tasks/", include("incidents.task_urls")),
     path("", include(blog_router.urls)),
 ]
