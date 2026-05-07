@@ -4,6 +4,7 @@ import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import DelegationPanel from '../components/DelegationPanel';
 import IncidentComments from '../components/IncidentComments';
+import IncidentTimeline from '../components/IncidentTimeline';
 import IncidentTasks from './IncidentTasks';
 
 const TRIAGE_STATES = new Set(['new', 'triaged']);
@@ -410,6 +411,10 @@ export default function IncidentDetail() {
           isStaff={user?.is_staff ?? false}
           onIncidentUpdate={setIncident}
         />
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-6">
+        <IncidentTimeline incidentId={incidentId} />
       </div>
 
       <div className="rounded-lg border border-border bg-card p-6 space-y-3">

@@ -12,12 +12,13 @@ from security.models import Organization, OrganizationMembership
 
 from django.contrib.auth.models import User
 
-from .models import Comment, Incident, IncidentDelegation, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Comment, Incident, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 from .serializers import (
     CommentCreateSerializer,
     CommentPatchSerializer,
     CommentSerializer,
     IncidentCreateSerializer,
+    IncidentEventSerializer,
     IncidentSerializer,
     IncidentUpdateSerializer,
     SubjectCreateSerializer,
@@ -39,7 +40,7 @@ from .services.templates import apply_template, auto_apply_for_subject, cancel_t
 from .services.delegation import delegate, return_delegation
 from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
-from .services.visibility import can_view_incident, filter_comments_for_user, filter_incidents_for_user
+from .services.visibility import can_view_incident, filter_comments_for_user, filter_events_for_user, filter_incidents_for_user
 
 TRIAGE_STATES = {"new", "triaged"}
 
@@ -444,6 +445,49 @@ class StaffUserListView(APIView):
         users = User.objects.filter(is_staff=True, is_active=True).order_by("username")
         data = [{"id": u.id, "username": u.username} for u in users]
         return Response(data)
+
+
+class IncidentTimelineView(APIView):
+    PAGE_SIZE = 50
+
+    def get(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            incident = Incident.objects.select_related("organization", "assignee").get(pk=pk)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_incident(request.user, incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not request.user.is_staff and incident.tlp == "amber":
+            return Response({"detail": "Timeline not available at TLP:AMBER."}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = (
+            IncidentEvent.objects
+            .filter(incident=incident)
+            .select_related("actor")
+            .order_by("created_at", "id")
+        )
+        qs = filter_events_for_user(qs, request.user, incident)
+
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+        except (TypeError, ValueError):
+            page = 1
+
+        total = qs.count()
+        start = (page - 1) * self.PAGE_SIZE
+        events = qs[start: start + self.PAGE_SIZE]
+
+        return Response({
+            "count": total,
+            "page": page,
+            "page_size": self.PAGE_SIZE,
+            "results": IncidentEventSerializer(events, many=True).data,
+        })
 
 
 class IncidentDelegateView(APIView):

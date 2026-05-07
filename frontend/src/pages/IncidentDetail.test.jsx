@@ -43,11 +43,14 @@ const SUBJECTS = [
   { id: 2, name: 'Malware', slug: 'malware', description: '', archived: false },
 ];
 
+const EMPTY_TIMELINE = { count: 0, page: 1, page_size: 50, results: [] };
+
 function mockGet(incident = INCIDENT, subjects = SUBJECTS) {
   api.get.mockImplementation(url => {
     if (url === '/api/subjects/') return Promise.resolve({ data: subjects });
     if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
     if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+    if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
     return Promise.resolve({ data: incident });
   });
 }
@@ -250,6 +253,7 @@ describe('IncidentDetail', () => {
       if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
       if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
       return Promise.resolve({ data: INCIDENT });
     });
     const user = userEvent.setup();
@@ -269,6 +273,7 @@ describe('IncidentDetail', () => {
       if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
       if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
       return Promise.resolve({ data: INCIDENT });
     });
     api.post.mockResolvedValue({ data: TRANSFERRED });
@@ -289,6 +294,7 @@ describe('IncidentDetail', () => {
       if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
       if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
       return Promise.resolve({ data: INCIDENT });
     });
     const user = userEvent.setup();
