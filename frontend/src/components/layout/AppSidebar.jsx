@@ -14,6 +14,7 @@ import {
   BarChart2,
   ClipboardList,
   ShieldOff,
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -155,6 +156,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 </SidebarLink>
                 <SidebarLink to="/security/risk-acceptances" icon={ShieldOff} collapsed={collapsed}>
                   Accepted Risks
+                </SidebarLink>
+                <SidebarLink to="/incidents" icon={AlertTriangle} collapsed={collapsed}>
+                  Incidents
                 </SidebarLink>
                 <SidebarLink to="/security/enroll" icon={UserPlus} collapsed={collapsed}>
                   Enroll

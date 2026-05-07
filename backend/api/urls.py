@@ -11,5 +11,6 @@ urlpatterns = [
     path("logout/", views.LogoutView.as_view()),
     path("status/", include("status.urls")),
     path("security/", include("security.urls")),
+    path("incidents/", include("incidents.urls")),
     path("", include(blog_router.urls)),
 ]

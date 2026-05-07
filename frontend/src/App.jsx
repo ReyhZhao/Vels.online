@@ -20,6 +20,8 @@ import FleetEventsPage from './pages/FleetEventsPage';
 import DashboardPage from './pages/DashboardPage';
 import WorkPackagePage from './pages/WorkPackagePage';
 import RiskAcceptancePage from './pages/RiskAcceptancePage';
+import IncidentList from './pages/IncidentList';
+import IncidentDetail from './pages/IncidentDetail';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -50,6 +52,9 @@ function App() {
         <Route path="/security/agents/:agentId" element={<AgentDetail />} />
         <Route path="/security/work-package" element={<WorkPackagePage />} />
         <Route path="/security/risk-acceptances" element={<RiskAcceptancePage />} />
+
+        <Route path="/incidents" element={<IncidentList />} />
+        <Route path="/incidents/:incidentId" element={<IncidentDetail />} />
       </Route>
     </Routes>
   );

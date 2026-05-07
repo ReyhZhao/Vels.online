@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "blog",
     "status",
     "security",
+    "incidents",
 ]
 
 SITE_ID = 1
