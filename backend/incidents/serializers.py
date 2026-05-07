@@ -1,7 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Comment, Incident, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Comment, Incident, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 
 
 class SubjectSerializer(serializers.ModelSerializer):
@@ -23,12 +23,31 @@ class SubjectUpdateSerializer(serializers.ModelSerializer):
         fields = ["name", "description", "archived"]
 
 
+class IncidentDelegationSerializer(serializers.ModelSerializer):
+    delegate_username = serializers.SerializerMethodField()
+    delegated_by_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IncidentDelegation
+        fields = [
+            "id", "user", "delegate_username", "delegated_by", "delegated_by_username",
+            "delegated_at", "note",
+        ]
+
+    def get_delegate_username(self, obj):
+        return obj.user.username if obj.user else None
+
+    def get_delegated_by_username(self, obj):
+        return obj.delegated_by.username if obj.delegated_by else None
+
+
 class IncidentSerializer(serializers.ModelSerializer):
     created_by_username = serializers.SerializerMethodField()
     assignee_username = serializers.SerializerMethodField()
     org_slug = serializers.CharField(source="organization.slug", read_only=True)
     subject_slug = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
+    active_delegations = serializers.SerializerMethodField()
 
     class Meta:
         model = Incident
@@ -50,12 +69,17 @@ class IncidentSerializer(serializers.ModelSerializer):
             "org_slug",
             "assignee",
             "assignee_username",
+            "active_delegations",
             "created_by",
             "created_by_username",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "display_id", "org_slug", "created_by", "created_at", "updated_at"]
+
+    def get_active_delegations(self, obj):
+        qs = obj.delegations.filter(returned_at__isnull=True).select_related("user", "delegated_by")
+        return IncidentDelegationSerializer(qs, many=True).data
 
     def get_created_by_username(self, obj):
         return obj.created_by.username if obj.created_by else None

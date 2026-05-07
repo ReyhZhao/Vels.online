@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
+import DelegationPanel from '../components/DelegationPanel';
 import IncidentComments from '../components/IncidentComments';
 import IncidentTasks from './IncidentTasks';
 
@@ -400,6 +401,15 @@ export default function IncidentDetail() {
 
       <div className="rounded-lg border border-border bg-card p-6">
         <IncidentTasks incidentId={incidentId} subjectId={incident.subject} refreshKey={tasksRefreshKey} />
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-6">
+        <DelegationPanel
+          incidentId={incidentId}
+          activeDelegations={incident.active_delegations ?? []}
+          isStaff={user?.is_staff ?? false}
+          onIncidentUpdate={setIncident}
+        />
       </div>
 
       <div className="rounded-lg border border-border bg-card p-6 space-y-3">

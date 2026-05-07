@@ -233,6 +233,32 @@ class IncidentEvent(models.Model):
         return f"{self.kind} on {self.incident} at {self.created_at}"
 
 
+class IncidentDelegation(models.Model):
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="delegations")
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="incident_delegations"
+    )
+    delegated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="delegations_created"
+    )
+    delegated_at = models.DateTimeField(auto_now_add=True)
+    returned_at = models.DateTimeField(null=True, blank=True)
+    returned_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="delegations_returned"
+    )
+    note = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["delegated_at"]
+
+    def __str__(self):
+        return f"{self.incident} delegated to {self.user}"
+
+    @property
+    def is_active(self):
+        return self.returned_at is None
+
+
 class Comment(models.Model):
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="comments")
     task = models.ForeignKey(

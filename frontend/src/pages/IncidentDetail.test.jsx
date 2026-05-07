@@ -31,6 +31,7 @@ const INCIDENT = {
   source_ref: {},
   assignee: null,
   assignee_username: null,
+  active_delegations: [],
   created_by: 1,
   created_by_username: 'alice',
   created_at: '2026-01-15T10:00:00Z',
