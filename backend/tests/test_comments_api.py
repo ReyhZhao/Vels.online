@@ -338,7 +338,7 @@ def test_cannot_delete_already_deleted(client, acme, staff):
 def test_unauthenticated_cannot_list_comments(client, acme):
     inc = make_incident(acme)
     resp = client.get(f"/api/incidents/{inc.id}/comments/")
-    assert resp.status_code == 403
+    assert resp.status_code == 401
 
 
 @pytest.mark.django_db
@@ -349,4 +349,4 @@ def test_unauthenticated_cannot_post_comment(client, acme):
         {"body": "hi"},
         content_type="application/json",
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 401

@@ -38,7 +38,7 @@ def malware(db):
 @pytest.mark.django_db
 def test_list_subjects_requires_auth(client):
     response = client.get("/api/subjects/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -100,7 +100,7 @@ def test_create_subject_missing_name_rejected(admin_client):
 @pytest.mark.django_db
 def test_get_subject_requires_auth(client, phishing):
     response = client.get(f"/api/subjects/{phishing.id}/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

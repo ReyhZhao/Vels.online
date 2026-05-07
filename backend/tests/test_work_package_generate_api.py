@@ -44,7 +44,7 @@ def post_generate(client, org_slug="acme"):
 @pytest.mark.django_db
 def test_generate_requires_authentication(client, acme):
     response = post_generate(client)
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

@@ -141,7 +141,7 @@ def test_promote_form_requires_auth(client, acme):
         {"source_kind": "vulnerability", "source_ref": {"cve_id": "CVE-2025-12345"}},
         content_type="application/json",
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

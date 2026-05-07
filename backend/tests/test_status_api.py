@@ -119,9 +119,9 @@ def test_me_sets_csrf_cookie(django_user_model):
 
 
 @pytest.mark.django_db
-def test_refresh_returns_403_for_anonymous(client):
+def test_refresh_returns_401_for_anonymous(client):
     response = client.post("/api/status/refresh/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

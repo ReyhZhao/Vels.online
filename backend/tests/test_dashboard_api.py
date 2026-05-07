@@ -61,7 +61,7 @@ def acme_member(regular_user, acme):
 @pytest.mark.django_db
 def test_agents_requires_authentication(client, acme):
     response = client.get("/api/security/agents/?org=acme")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -120,7 +120,7 @@ def test_agents_missing_org_param_returns_400(client, acme_member):
 @pytest.mark.django_db
 def test_dashboard_requires_authentication(client, acme):
     response = client.get("/api/security/dashboard/?org=acme")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -181,7 +181,7 @@ def test_dashboard_admin_can_query_any_org(mock_wazuh_cls, mock_os_cls, admin_cl
 @pytest.mark.django_db
 def test_refresh_requires_authentication(client, acme):
     response = client.post("/api/security/dashboard/refresh/", {"org": "acme"}, content_type="application/json")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

@@ -52,7 +52,7 @@ def contoso_download(contoso):
 @pytest.mark.django_db
 def test_downloads_requires_authentication(client, acme):
     response = client.get("/api/security/downloads/?org=acme")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -125,7 +125,7 @@ def test_downloads_serialised_correctly(client, acme_member, global_download, ac
 @pytest.mark.django_db
 def test_create_download_requires_authentication(client):
     response = client.post("/api/security/downloads/", {"label": "Test"}, content_type="application/json")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -178,7 +178,7 @@ def test_create_download_unknown_org_returns_404(admin_client):
 @pytest.mark.django_db
 def test_presigned_requires_authentication(client, global_download):
     response = client.get(f"/api/security/downloads/{global_download.id}/presigned/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -232,7 +232,7 @@ def test_presigned_no_file_returns_404(client, acme_member, global_download):
 @pytest.mark.django_db
 def test_upload_requires_authentication(client, global_download):
     response = client.post(f"/api/security/downloads/{global_download.id}/upload/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -285,7 +285,7 @@ def test_upload_missing_file_returns_400(admin_client, global_download):
 @pytest.mark.django_db
 def test_delete_requires_authentication(client, global_download):
     response = client.delete(f"/api/security/downloads/{global_download.id}/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

@@ -27,7 +27,7 @@ def regular_user(db, django_user_model):
 @pytest.mark.django_db
 def test_get_orgs_requires_authentication(client):
     response = client.get("/api/security/organizations/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -68,7 +68,7 @@ def test_regular_user_with_no_orgs_sees_empty_list(client, regular_user, acme):
 @pytest.mark.django_db
 def test_post_org_requires_authentication(client):
     response = client.post("/api/security/organizations/", {"name": "New Org"}, content_type="application/json")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

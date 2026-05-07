@@ -52,7 +52,7 @@ def template(db, phishing, django_user_model):
 @pytest.mark.django_db
 def test_list_tasks_requires_auth(client, incident):
     response = client.get(f"/api/incidents/{incident.id}/tasks/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -83,7 +83,7 @@ def test_create_adhoc_task_requires_auth(client, incident):
         {"title": "Check logs"},
         content_type="application/json",
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -135,7 +135,7 @@ def test_apply_template_requires_auth(client, incident, template):
         {"template_id": template.id},
         content_type="application/json",
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -259,7 +259,7 @@ def test_apply_template_not_found(client, member, incident):
 def test_get_task_requires_auth(client, incident):
     task = Task.objects.create(incident=incident, title="Adhoc", display_order=1)
     response = client.get(f"/api/tasks/{task.id}/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -354,7 +354,7 @@ def test_patch_task_requires_auth(client, incident):
         {"state": "done"},
         content_type="application/json",
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

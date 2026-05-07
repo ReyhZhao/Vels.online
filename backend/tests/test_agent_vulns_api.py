@@ -62,7 +62,7 @@ def acme_member(regular_user, acme):
 @pytest.mark.django_db
 def test_vulns_requires_authentication(client, acme):
     response = client.get("/api/security/agents/001/vulnerabilities/?org=acme")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

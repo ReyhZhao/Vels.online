@@ -40,7 +40,7 @@ def make_incident(org, tlp="amber", title="Test Incident", display_id=None):
 @pytest.mark.django_db
 def test_list_requires_auth(client):
     response = client.get("/api/incidents/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -87,7 +87,7 @@ def test_create_requires_auth(client, acme):
         {"org": "acme", "title": "New incident"},
         content_type="application/json",
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -163,7 +163,7 @@ def test_create_missing_title_returns_400(admin_client, acme):
 def test_detail_requires_auth(client, acme):
     incident = make_incident(acme)
     response = client.get(f"/api/incidents/{incident.id}/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -216,7 +216,7 @@ def test_patch_requires_auth(client, acme):
         {"title": "Updated"},
         content_type="application/json",
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

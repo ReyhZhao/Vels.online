@@ -197,7 +197,7 @@ def test_transition_endpoint_requires_auth(client, acme):
         {"state": "triaged"},
         content_type="application/json",
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

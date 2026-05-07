@@ -43,7 +43,7 @@ def _make_archived(acme, cve_id="CVE-2024-0001", n_items=2):
 
 @pytest.mark.django_db
 def test_archive_list_requires_authentication(client, acme):
-    assert client.get("/api/security/work-packages/archive/?org=acme").status_code == 403
+    assert client.get("/api/security/work-packages/archive/?org=acme").status_code == 401
 
 
 @pytest.mark.django_db
@@ -123,7 +123,7 @@ def test_archive_list_staff_can_access_any_org(admin_client, acme):
 @pytest.mark.django_db
 def test_package_detail_requires_authentication(client, acme):
     pkg = _make_archived(acme)
-    assert client.get(f"/api/security/work-packages/{pkg.id}/?org=acme").status_code == 403
+    assert client.get(f"/api/security/work-packages/{pkg.id}/?org=acme").status_code == 401
 
 
 @pytest.mark.django_db
@@ -179,8 +179,6 @@ def test_package_detail_not_found_returns_404(client, acme_member, acme):
 @pytest.mark.django_db
 def test_package_detail_package_from_other_org_returns_404(client, acme_member, contoso):
     contoso_pkg = _make_archived(contoso)
-    # acme_member tries to access contoso's package via acme's org scope
-    # _resolve_org returns 403 before we even get to the package lookup since
-    # acme_member is not a member of contoso
+    # unauthenticated client gets 401 before org resolution
     response = client.get(f"/api/security/work-packages/{contoso_pkg.id}/?org=acme")
-    assert response.status_code == 403
+    assert response.status_code == 401

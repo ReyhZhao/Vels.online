@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "allauth.socialaccount",
     "allauth.socialaccount.providers.openid_connect",
     "rest_framework",
+    "rest_framework.authtoken",
     "drf_spectacular",
     "api",
     "blog",
@@ -144,6 +145,7 @@ CELERY_BEAT_SCHEDULE = {
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [

@@ -46,29 +46,29 @@ def test_public_detail_returns_404_for_draft(client, draft_post):
 # --- Write permission tests ---
 
 @pytest.mark.django_db
-def test_unauthenticated_create_returns_403(client):
+def test_unauthenticated_create_returns_401(client):
     response = client.post(
         "/api/posts/",
         {"title": "New", "content": "body", "status": "draft"},
         content_type="application/json",
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
-def test_unauthenticated_update_returns_403(client, published_post):
+def test_unauthenticated_update_returns_401(client, published_post):
     response = client.patch(
         f"/api/posts/{published_post.slug}/",
         {"title": "Hacked"},
         content_type="application/json",
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
-def test_unauthenticated_delete_returns_403(client, published_post):
+def test_unauthenticated_delete_returns_401(client, published_post):
     response = client.delete(f"/api/posts/{published_post.slug}/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

@@ -47,7 +47,7 @@ def template(db, phishing, django_user_model):
 @pytest.mark.django_db
 def test_list_requires_auth(client):
     response = client.get("/api/task-templates/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -126,7 +126,7 @@ def test_create_missing_name_returns_400(admin_client, phishing):
 @pytest.mark.django_db
 def test_detail_requires_auth(client, template):
     response = client.get(f"/api/task-templates/{template.id}/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

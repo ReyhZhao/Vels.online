@@ -64,7 +64,7 @@ def _make_item(pkg, cve_id):
 
 @pytest.mark.django_db
 def test_delete_item_requires_authentication(client, item):
-    assert client.delete(f"/api/security/work-package/items/{item.id}/").status_code == 403
+    assert client.delete(f"/api/security/work-package/items/{item.id}/").status_code == 401
 
 
 @pytest.mark.django_db
@@ -98,7 +98,7 @@ def test_delete_item_not_found_returns_404(admin_client):
 
 @pytest.mark.django_db
 def test_add_more_requires_authentication(client, acme):
-    assert client.post("/api/security/work-package/add-more/?org=acme").status_code == 403
+    assert client.post("/api/security/work-package/add-more/?org=acme").status_code == 401
 
 
 @pytest.mark.django_db

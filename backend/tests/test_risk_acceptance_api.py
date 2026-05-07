@@ -170,7 +170,7 @@ def test_patch_away_does_not_affect_other_cves(client, acme_member, active_packa
 @pytest.mark.django_db
 def test_list_risk_acceptances_requires_authentication(client, acme):
     response = client.get("/api/security/risk-acceptances/?org=acme")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -233,7 +233,7 @@ def test_list_risk_acceptances_staff_can_access_any_org(admin_client, acme, alic
 def test_delete_risk_acceptance_requires_authentication(client, acme, acme_member):
     ra = RiskAcceptance.objects.create(org=acme, cve_id="CVE-2024-0001", accepted_by=acme_member, severity="high", cvss_score=7.0)
     response = client.delete(f"/api/security/risk-acceptances/{ra.id}/")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

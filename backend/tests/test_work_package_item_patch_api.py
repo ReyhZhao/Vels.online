@@ -69,7 +69,7 @@ def patch(client, item_id, data):
 @pytest.mark.django_db
 def test_patch_requires_authentication(client, item):
     response = patch(client, item.id, {"status": "in_progress"})
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

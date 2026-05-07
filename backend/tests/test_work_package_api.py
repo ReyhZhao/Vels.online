@@ -66,7 +66,7 @@ def active_package(acme):
 @pytest.mark.django_db
 def test_work_package_requires_authentication(client, acme):
     response = client.get("/api/security/work-package/?org=acme")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

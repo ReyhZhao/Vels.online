@@ -25,7 +25,7 @@ def acme_member(regular_user, acme):
 @pytest.mark.django_db
 def test_enrollment_requires_authentication(client, acme):
     response = client.get("/api/security/enrollment/?org=acme")
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
