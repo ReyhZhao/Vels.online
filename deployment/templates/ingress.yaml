@@ -22,6 +22,14 @@ spec:
                 name: backend
                 port:
                   number: 8000
+          - path: /admin/
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+
           - path: /auth/
             pathType: Prefix
             backend:
