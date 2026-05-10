@@ -59,11 +59,17 @@ const CLOSURE_REASONS = [
   { value: 'accepted_risk',  label: 'Accepted Risk' },
 ];
 
-function Badge({ label, value, badgeClass }) {
+const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
+
+function Badge({ label, value, badgeClass, onEdit }) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
-      <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
+      <span
+        className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ${badgeClass} ${onEdit ? 'cursor-pointer hover:brightness-90 active:brightness-80' : ''}`}
+        onClick={onEdit}
+        title={onEdit ? 'Click to change' : undefined}
+      >
         {value}
       </span>
     </div>
@@ -75,6 +81,48 @@ function Field({ label, value }) {
     <div className="flex flex-col gap-1">
       <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
       <span className="text-sm text-foreground">{value || '—'}</span>
+    </div>
+  );
+}
+
+function SeverityEditor({ incident, value, saving, onChange, onConfirm, onCancel }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Severity</span>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          disabled={saving}
+          aria-label="Severity"
+          className="w-full appearance-none rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          {SEVERITIES.map(s => (
+            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+          ))}
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+          <svg className="h-4 w-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
+      <div className="flex justify-end gap-2">
+        <button
+          onClick={onCancel}
+          disabled={saving}
+          className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={saving || !value}
+          className="text-xs font-medium text-primary hover:text-foreground disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -207,6 +255,9 @@ export default function IncidentDetail() {
   const [staffUsers, setStaffUsers] = useState([]);
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState(null);
+  const [editingSeverity, setEditingSeverity] = useState(false);
+  const [severityDraft, setSeverityDraft] = useState(incident?.severity ?? 'medium');
+  const [savingSeverity, setSavingSeverity] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -294,6 +345,32 @@ export default function IncidentDetail() {
     }
   }
 
+  async function handleSeverityClick() {
+    setSeverityDraft(incident.severity);
+    setEditingSeverity(true);
+  }
+
+  async function handleSeveritySave() {
+    if (severityDraft === incident.severity) {
+      setEditingSeverity(false);
+      return;
+    }
+    setSavingSeverity(true);
+    try {
+      const res = await api.patch(`/api/incidents/${incidentId}/`, { severity: severityDraft });
+      setIncident(res.data);
+      setEditingSeverity(false);
+    } catch (err) {
+      // keep editing state open so user can try again
+    } finally {
+      setSavingSeverity(false);
+    }
+  }
+
+  function handleSeverityCancel() {
+    setEditingSeverity(false);
+  }
+
   if (loading) return <p className="text-sm text-muted-foreground p-6">Loading…</p>;
   if (error) return <p className="text-sm text-red-600 p-6">{error}</p>;
   if (!incident) return null;
@@ -368,6 +445,7 @@ export default function IncidentDetail() {
             label="Severity"
             value={incident.severity}
             badgeClass={SEVERITY_CLASSES[incident.severity] ?? ''}
+            onEdit={user?.is_staff ? handleSeverityClick : undefined}
           />
           <Badge
             label="TLP"
@@ -395,6 +473,17 @@ export default function IncidentDetail() {
         </div>
 
         {subjectError && <p className="text-sm text-red-600">{subjectError}</p>}
+
+        {editingSeverity && (
+          <SeverityEditor
+            incident={incident}
+            value={severityDraft}
+            saving={savingSeverity}
+            onChange={setSeverityDraft}
+            onConfirm={handleSeveritySave}
+            onCancel={handleSeverityCancel}
+          />
+        )}
 
         {incident.description && (
           <div className="flex flex-col gap-1">
