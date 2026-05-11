@@ -67,6 +67,7 @@ const SECONDARY_TABS = [
   { key: 'timeline',    label: 'Timeline' },
   { key: 'attachments', label: 'Attachments' },
   { key: 'tasks',       label: 'Tasks' },
+  { key: 'delegations', label: 'Delegations' },
 ];
 
 const EXCEPTION_STATUS_CLASSES = {
@@ -558,16 +559,6 @@ export default function IncidentDetail() {
         </div>
       </div>
 
-      {/* ── Delegation panel ── */}
-      <div className="rounded-lg border border-border bg-card p-6">
-        <DelegationPanel
-          incidentId={displayId}
-          activeDelegations={incident.active_delegations ?? []}
-          isStaff={user?.is_staff ?? false}
-          onIncidentUpdate={setIncident}
-        />
-      </div>
-
       {/* ── Exceptions sidebar ── */}
       <IncidentExceptionsSection displayId={displayId} />
 
@@ -600,6 +591,14 @@ export default function IncidentDetail() {
               incidentId={displayId}
               subjectId={incident.subject}
               refreshKey={tasksRefreshKey}
+            />
+          )}
+          {activeTab === 'delegations' && (
+            <DelegationPanel
+              incidentId={displayId}
+              activeDelegations={incident.active_delegations ?? []}
+              isStaff={user?.is_staff ?? false}
+              onIncidentUpdate={setIncident}
             />
           )}
         </div>

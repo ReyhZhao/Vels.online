@@ -324,13 +324,30 @@ describe('IncidentDetail', () => {
 
   // ── tabs ──────────────────────────────────────────────────────────────────
 
-  it('renders Timeline, Attachments, and Tasks tab buttons', async () => {
+  it('renders Timeline, Attachments, Tasks, and Delegations tab buttons', async () => {
     mockGet();
     renderPage();
     await waitFor(() => screen.getByText('INC-2026-0001'));
     expect(screen.getByRole('button', { name: 'Timeline' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Attachments' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delegations' })).toBeInTheDocument();
+  });
+
+  it('clicking Delegations tab renders DelegationPanel', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Delegations' }));
+    await user.click(screen.getByRole('button', { name: 'Delegations' }));
+    expect(screen.getByText('No active delegations.')).toBeInTheDocument();
+  });
+
+  it('delegation panel is not rendered outside the tab area', async () => {
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    expect(screen.queryByText('No active delegations.')).not.toBeInTheDocument();
   });
 
   it('shows Timeline content by default', async () => {
