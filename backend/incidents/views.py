@@ -434,27 +434,27 @@ class IncidentListView(APIView):
 
 
 class IncidentDetailView(APIView):
-    def _get_incident(self, request, pk):
+    def _get_incident(self, request, display_id):
         if not request.user.is_authenticated:
             return None, Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
         try:
             incident = Incident.objects.select_related(
                 "organization", "created_by", "assignee", "subject"
-            ).get(pk=pk)
+            ).get(display_id=display_id)
         except Incident.DoesNotExist:
             return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_incident(request.user, incident):
             return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         return incident, None
 
-    def get(self, request, pk):
-        incident, err = self._get_incident(request, pk)
+    def get(self, request, display_id):
+        incident, err = self._get_incident(request, display_id)
         if err:
             return err
         return Response(IncidentSerializer(incident).data)
 
-    def patch(self, request, pk):
-        incident, err = self._get_incident(request, pk)
+    def patch(self, request, display_id):
+        incident, err = self._get_incident(request, display_id)
         if err:
             return err
 
@@ -510,14 +510,14 @@ class IncidentDetailView(APIView):
 
 
 class IncidentTransitionView(APIView):
-    def post(self, request, pk):
+    def post(self, request, display_id):
         if not request.user.is_authenticated:
             return Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             incident = Incident.objects.select_related(
                 "organization", "created_by", "assignee", "subject"
-            ).get(pk=pk)
+            ).get(display_id=display_id)
         except Incident.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -546,7 +546,7 @@ class IncidentTransitionView(APIView):
 
 
 class IncidentTransferView(APIView):
-    def post(self, request, pk):
+    def post(self, request, display_id):
         if not request.user.is_authenticated:
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
         if not request.user.is_staff:
@@ -555,7 +555,7 @@ class IncidentTransferView(APIView):
         try:
             incident = Incident.objects.select_related(
                 "organization", "created_by", "assignee", "subject"
-            ).get(pk=pk)
+            ).get(display_id=display_id)
         except Incident.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -589,12 +589,12 @@ class StaffUserListView(APIView):
 class IncidentTimelineView(APIView):
     PAGE_SIZE = 50
 
-    def get(self, request, pk):
+    def get(self, request, display_id):
         if not request.user.is_authenticated:
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
-            incident = Incident.objects.select_related("organization", "assignee").get(pk=pk)
+            incident = Incident.objects.select_related("organization", "assignee").get(display_id=display_id)
         except Incident.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -630,7 +630,7 @@ class IncidentTimelineView(APIView):
 
 
 class IncidentDelegateView(APIView):
-    def post(self, request, pk):
+    def post(self, request, display_id):
         if not request.user.is_authenticated:
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
         if not request.user.is_staff:
@@ -639,7 +639,7 @@ class IncidentDelegateView(APIView):
         try:
             incident = Incident.objects.select_related(
                 "organization", "created_by", "assignee", "subject"
-            ).get(pk=pk)
+            ).get(display_id=display_id)
         except Incident.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -664,14 +664,14 @@ class IncidentDelegateView(APIView):
 
 
 class IncidentDelegationReturnView(APIView):
-    def post(self, request, pk, delegation_id):
+    def post(self, request, display_id, delegation_id):
         if not request.user.is_authenticated:
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
             incident = Incident.objects.select_related(
                 "organization", "created_by", "assignee", "subject"
-            ).get(pk=pk)
+            ).get(display_id=display_id)
         except Incident.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -696,11 +696,11 @@ class IncidentDelegationReturnView(APIView):
 
 # ── Task views ───────────────────────────────────────────────────────────────
 
-def _get_incident_for_user(request, pk):
+def _get_incident_for_user(request, display_id):
     if not request.user.is_authenticated:
         return None, Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
     try:
-        incident = Incident.objects.select_related("organization", "subject").get(pk=pk)
+        incident = Incident.objects.select_related("organization", "subject").get(display_id=display_id)
     except Incident.DoesNotExist:
         return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
     if not can_view_incident(request.user, incident):
@@ -709,8 +709,8 @@ def _get_incident_for_user(request, pk):
 
 
 class IncidentTaskListView(APIView):
-    def get(self, request, pk):
-        incident, err = _get_incident_for_user(request, pk)
+    def get(self, request, display_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
         tasks = (
@@ -720,8 +720,8 @@ class IncidentTaskListView(APIView):
         )
         return Response(TaskSerializer(tasks, many=True).data)
 
-    def post(self, request, pk):
-        incident, err = _get_incident_for_user(request, pk)
+    def post(self, request, display_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
         if not request.user.is_staff:
@@ -743,8 +743,8 @@ class IncidentTaskListView(APIView):
 
 
 class ApplyTemplateView(APIView):
-    def post(self, request, pk):
-        incident, err = _get_incident_for_user(request, pk)
+    def post(self, request, display_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
         if not request.user.is_staff:
@@ -886,8 +886,8 @@ class PromoteView(APIView):
 # ── Comment views ─────────────────────────────────────────────────────────────
 
 class IncidentCommentListView(APIView):
-    def get(self, request, pk):
-        incident, err = _get_incident_for_user(request, pk)
+    def get(self, request, display_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
         qs = (
@@ -898,8 +898,8 @@ class IncidentCommentListView(APIView):
         qs = filter_comments_for_user(qs, request.user, incident)
         return Response(CommentSerializer(qs, many=True, context={"request": request}).data)
 
-    def post(self, request, pk):
-        incident, err = _get_incident_for_user(request, pk)
+    def post(self, request, display_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
         ser = CommentCreateSerializer(data=request.data)
@@ -1008,8 +1008,8 @@ class CommentDetailView(APIView):
 # ── Attachment views ──────────────────────────────────────────────────────────
 
 class IncidentAttachmentListView(APIView):
-    def get(self, request, pk):
-        incident, err = _get_incident_for_user(request, pk)
+    def get(self, request, display_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
         qs = (
@@ -1021,8 +1021,8 @@ class IncidentAttachmentListView(APIView):
             qs = qs.filter(is_internal=False)
         return Response(AttachmentSerializer(qs, many=True).data)
 
-    def post(self, request, pk):
-        incident, err = _get_incident_for_user(request, pk)
+    def post(self, request, display_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
 
@@ -1049,8 +1049,8 @@ class IncidentAttachmentListView(APIView):
 
 
 class IncidentAttachmentConfirmView(APIView):
-    def post(self, request, pk, attachment_id):
-        incident, err = _get_incident_for_user(request, pk)
+    def post(self, request, display_id, attachment_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
 
@@ -1076,8 +1076,8 @@ class IncidentAttachmentConfirmView(APIView):
 
 
 class IncidentAttachmentDownloadView(APIView):
-    def get(self, request, pk, attachment_id):
-        incident, err = _get_incident_for_user(request, pk)
+    def get(self, request, display_id, attachment_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
 
@@ -1101,8 +1101,8 @@ class IncidentAttachmentDownloadView(APIView):
 
 
 class IncidentAttachmentDeleteView(APIView):
-    def delete(self, request, pk, attachment_id):
-        incident, err = _get_incident_for_user(request, pk)
+    def delete(self, request, display_id, attachment_id):
+        incident, err = _get_incident_for_user(request, display_id)
         if err:
             return err
 

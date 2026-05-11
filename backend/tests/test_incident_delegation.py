@@ -151,7 +151,7 @@ def test_return_delegation_writes_event(acme, assignee, delegate_user):
 @pytest.mark.django_db
 def test_delegate_endpoint_requires_auth(client, acme):
     incident = make_incident(acme)
-    response = client.post(f"/api/incidents/{incident.id}/delegate/", {"user_id": 1}, content_type="application/json")
+    response = client.post(f"/api/incidents/{incident.display_id}/delegate/", {"user_id": 1}, content_type="application/json")
     assert response.status_code == 401
 
 
@@ -159,7 +159,7 @@ def test_delegate_endpoint_requires_auth(client, acme):
 def test_delegate_endpoint_requires_staff(client, acme, non_staff):
     incident = make_incident(acme)
     client.force_login(non_staff)
-    response = client.post(f"/api/incidents/{incident.id}/delegate/", {"user_id": 1}, content_type="application/json")
+    response = client.post(f"/api/incidents/{incident.display_id}/delegate/", {"user_id": 1}, content_type="application/json")
     assert response.status_code == 403
 
 
@@ -168,7 +168,7 @@ def test_delegate_endpoint_creates_delegation(client, acme, assignee, delegate_u
     incident = make_incident(acme, assignee=assignee)
     client.force_login(assignee)
     response = client.post(
-        f"/api/incidents/{incident.id}/delegate/",
+        f"/api/incidents/{incident.display_id}/delegate/",
         {"user_id": delegate_user.id, "note": "please help"},
         content_type="application/json",
     )
@@ -183,7 +183,7 @@ def test_delegate_endpoint_rejects_non_staff_delegate(client, acme, assignee, no
     incident = make_incident(acme, assignee=assignee)
     client.force_login(assignee)
     response = client.post(
-        f"/api/incidents/{incident.id}/delegate/",
+        f"/api/incidents/{incident.display_id}/delegate/",
         {"user_id": non_staff.id},
         content_type="application/json",
     )
@@ -194,9 +194,9 @@ def test_delegate_endpoint_rejects_non_staff_delegate(client, acme, assignee, no
 def test_delegate_endpoint_returns_active_delegations_in_incident(client, acme, assignee, delegate_user, other_staff):
     incident = make_incident(acme, assignee=assignee)
     client.force_login(assignee)
-    client.post(f"/api/incidents/{incident.id}/delegate/", {"user_id": delegate_user.id}, content_type="application/json")
-    client.post(f"/api/incidents/{incident.id}/delegate/", {"user_id": other_staff.id}, content_type="application/json")
-    response = client.get(f"/api/incidents/{incident.id}/")
+    client.post(f"/api/incidents/{incident.display_id}/delegate/", {"user_id": delegate_user.id}, content_type="application/json")
+    client.post(f"/api/incidents/{incident.display_id}/delegate/", {"user_id": other_staff.id}, content_type="application/json")
+    response = client.get(f"/api/incidents/{incident.display_id}/")
     assert response.status_code == 200
     assert len(response.json()["active_delegations"]) == 2
 
@@ -207,7 +207,7 @@ def test_delegate_endpoint_returns_active_delegations_in_incident(client, acme, 
 def test_return_endpoint_requires_auth(client, acme, assignee, delegate_user):
     incident = make_incident(acme, assignee=assignee)
     d = delegate(incident, delegate_user, by=assignee)
-    response = client.post(f"/api/incidents/{incident.id}/delegations/{d.id}/return/")
+    response = client.post(f"/api/incidents/{incident.display_id}/delegations/{d.id}/return/")
     assert response.status_code == 401
 
 
@@ -216,7 +216,7 @@ def test_return_endpoint_by_delegate(client, acme, assignee, delegate_user):
     incident = make_incident(acme, assignee=assignee)
     d = delegate(incident, delegate_user, by=assignee)
     client.force_login(delegate_user)
-    response = client.post(f"/api/incidents/{incident.id}/delegations/{d.id}/return/")
+    response = client.post(f"/api/incidents/{incident.display_id}/delegations/{d.id}/return/")
     assert response.status_code == 200
     assert response.json()["active_delegations"] == []
 
@@ -226,7 +226,7 @@ def test_return_endpoint_by_assignee(client, acme, assignee, delegate_user):
     incident = make_incident(acme, assignee=assignee)
     d = delegate(incident, delegate_user, by=assignee)
     client.force_login(assignee)
-    response = client.post(f"/api/incidents/{incident.id}/delegations/{d.id}/return/")
+    response = client.post(f"/api/incidents/{incident.display_id}/delegations/{d.id}/return/")
     assert response.status_code == 200
 
 
@@ -235,7 +235,7 @@ def test_return_endpoint_by_unrelated_rejected(client, acme, assignee, delegate_
     incident = make_incident(acme, assignee=assignee)
     d = delegate(incident, delegate_user, by=assignee)
     client.force_login(other_staff)
-    response = client.post(f"/api/incidents/{incident.id}/delegations/{d.id}/return/")
+    response = client.post(f"/api/incidents/{incident.display_id}/delegations/{d.id}/return/")
     assert response.status_code == 400
 
 
@@ -245,5 +245,5 @@ def test_return_endpoint_already_returned_gives_400(client, acme, assignee, dele
     d = delegate(incident, delegate_user, by=assignee)
     return_delegation(d, by=delegate_user)
     client.force_login(assignee)
-    response = client.post(f"/api/incidents/{incident.id}/delegations/{d.id}/return/")
+    response = client.post(f"/api/incidents/{incident.display_id}/delegations/{d.id}/return/")
     assert response.status_code == 400

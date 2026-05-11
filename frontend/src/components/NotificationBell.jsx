@@ -35,7 +35,7 @@ function NotificationItem({ notification, onRead }) {
       onRead(notification.id);
     }
     if (notification.incident_id) {
-      navigate(`/incidents/${notification.incident_id}`);
+      navigate(`/incidents/${notification.incident_display_id}`);
     }
   }
 

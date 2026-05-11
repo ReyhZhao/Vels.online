@@ -51,7 +51,7 @@ export default function LinkedIncidents({ sourceKind, sourceRef }) {
         {incidents.map(inc => (
           <Link
             key={inc.id}
-            to={`/incidents/${inc.id}`}
+            to={`/incidents/${inc.display_id}`}
             className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
           >
             <span className="font-mono text-xs text-muted-foreground shrink-0">{inc.display_id}</span>

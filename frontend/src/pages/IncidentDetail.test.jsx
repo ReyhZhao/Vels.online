@@ -56,11 +56,11 @@ function mockGet(incident = INCIDENT, subjects = SUBJECTS) {
   });
 }
 
-function renderPage(id = '1') {
+function renderPage(id = 'INC-2026-0001') {
   return render(
     <MemoryRouter initialEntries={[`/incidents/${id}`]}>
       <Routes>
-        <Route path="/incidents/:incidentId" element={<IncidentDetail />} />
+        <Route path="/incidents/:displayId" element={<IncidentDetail />} />
       </Routes>
     </MemoryRouter>
   );
@@ -117,10 +117,10 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByText('← Incidents'));
   });
 
-  it('fetches the correct incident by id', async () => {
+  it('fetches the correct incident by display id', async () => {
     mockGet();
-    renderPage('42');
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/incidents/42/'));
+    renderPage('INC-2026-0042');
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/incidents/INC-2026-0042/'));
   });
 
   // ── state transition controls ─────────────────────────────────────────────
@@ -146,7 +146,7 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByText('Triage'));
     await user.click(screen.getByRole('button', { name: 'Triage' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
-      '/api/incidents/1/transition/',
+      '/api/incidents/INC-2026-0001/transition/',
       { state: 'triaged' }
     ));
   });
@@ -171,7 +171,7 @@ describe('IncidentDetail', () => {
     await user.selectOptions(screen.getByLabelText('Closure reason'), 'resolved');
     await user.click(screen.getByRole('button', { name: 'Close incident' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
-      '/api/incidents/1/transition/',
+      '/api/incidents/INC-2026-0001/transition/',
       { state: 'closed', closure_reason: 'resolved' }
     ));
   });
@@ -228,7 +228,7 @@ describe('IncidentDetail', () => {
     renderPage();
     await waitFor(() => screen.getByLabelText('Subject'));
     await user.selectOptions(screen.getByLabelText('Subject'), '1');
-    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/incidents/1/', { subject: 1 }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/incidents/INC-2026-0001/', { subject: 1 }));
   });
 
   // ── transfer ──────────────────────────────────────────────────────────────
@@ -288,7 +288,7 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByRole('heading', { name: 'Transfer incident' }));
     await user.selectOptions(screen.getByLabelText('New assignee'), '2');
     await user.click(screen.getByRole('button', { name: 'Confirm transfer' }));
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/incidents/1/transfer/', { assignee_id: 2 }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/incidents/INC-2026-0001/transfer/', { assignee_id: 2 }));
   });
 
   it('cancels transfer dialog without calling API', async () => {
@@ -355,7 +355,7 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByLabelText('Severity'));
     await user.selectOptions(screen.getByLabelText('Severity'), 'critical');
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
-      '/api/incidents/1/',
+      '/api/incidents/INC-2026-0001/',
       { severity: 'critical' }
     ));
   });
@@ -368,7 +368,7 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByLabelText('TLP'));
     await user.selectOptions(screen.getByLabelText('TLP'), 'green');
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
-      '/api/incidents/1/',
+      '/api/incidents/INC-2026-0001/',
       { tlp: 'green' }
     ));
   });
@@ -381,7 +381,7 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByLabelText('PAP'));
     await user.selectOptions(screen.getByLabelText('PAP'), 'red');
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
-      '/api/incidents/1/',
+      '/api/incidents/INC-2026-0001/',
       { pap: 'red' }
     ));
   });

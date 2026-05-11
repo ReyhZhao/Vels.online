@@ -193,7 +193,7 @@ def test_transition_event_actor_is_set(acme, actor):
 def test_transition_endpoint_requires_auth(client, acme):
     incident = make_incident(acme)
     response = client.post(
-        f"/api/incidents/{incident.id}/transition/",
+        f"/api/incidents/{incident.display_id}/transition/",
         {"state": "triaged"},
         content_type="application/json",
     )
@@ -204,7 +204,7 @@ def test_transition_endpoint_requires_auth(client, acme):
 def test_transition_endpoint_staff_can_transition(admin_client, acme):
     incident = make_incident(acme)
     response = admin_client.post(
-        f"/api/incidents/{incident.id}/transition/",
+        f"/api/incidents/{incident.display_id}/transition/",
         {"state": "triaged"},
         content_type="application/json",
     )
@@ -217,7 +217,7 @@ def test_transition_endpoint_member_can_transition(client, member, acme):
     incident = make_incident(acme)
     client.force_login(member)
     response = client.post(
-        f"/api/incidents/{incident.id}/transition/",
+        f"/api/incidents/{incident.display_id}/transition/",
         {"state": "triaged"},
         content_type="application/json",
     )
@@ -229,7 +229,7 @@ def test_transition_endpoint_member_can_transition(client, member, acme):
 def test_transition_endpoint_illegal_transition_returns_400(admin_client, acme):
     incident = make_incident(acme, state="new")
     response = admin_client.post(
-        f"/api/incidents/{incident.id}/transition/",
+        f"/api/incidents/{incident.display_id}/transition/",
         {"state": "closed"},
         content_type="application/json",
     )
@@ -240,7 +240,7 @@ def test_transition_endpoint_illegal_transition_returns_400(admin_client, acme):
 def test_transition_endpoint_close_requires_closure_reason(admin_client, acme):
     incident = make_incident(acme, state="in_progress")
     response = admin_client.post(
-        f"/api/incidents/{incident.id}/transition/",
+        f"/api/incidents/{incident.display_id}/transition/",
         {"state": "closed"},
         content_type="application/json",
     )
@@ -252,7 +252,7 @@ def test_transition_endpoint_close_requires_closure_reason(admin_client, acme):
 def test_transition_endpoint_close_with_reason(admin_client, acme):
     incident = make_incident(acme, state="in_progress")
     response = admin_client.post(
-        f"/api/incidents/{incident.id}/transition/",
+        f"/api/incidents/{incident.display_id}/transition/",
         {"state": "closed", "closure_reason": "resolved"},
         content_type="application/json",
     )
@@ -266,7 +266,7 @@ def test_transition_endpoint_close_with_reason(admin_client, acme):
 def test_transition_endpoint_missing_state_returns_400(admin_client, acme):
     incident = make_incident(acme)
     response = admin_client.post(
-        f"/api/incidents/{incident.id}/transition/",
+        f"/api/incidents/{incident.display_id}/transition/",
         {},
         content_type="application/json",
     )
@@ -277,7 +277,7 @@ def test_transition_endpoint_missing_state_returns_400(admin_client, acme):
 def test_patch_rejects_state_change(admin_client, acme):
     incident = make_incident(acme)
     response = admin_client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         {"state": "triaged"},
         content_type="application/json",
     )
@@ -291,7 +291,7 @@ def test_transition_endpoint_non_member_forbidden(client, acme, django_user_mode
     incident = make_incident(acme)
     client.force_login(outsider)
     response = client.post(
-        f"/api/incidents/{incident.id}/transition/",
+        f"/api/incidents/{incident.display_id}/transition/",
         {"state": "triaged"},
         content_type="application/json",
     )

@@ -107,12 +107,12 @@ export default function IncidentList() {
     });
   }
 
-  async function openPreview(incidentId) {
-    setPreview({ id: incidentId, incident: null });
+  async function openPreview(displayId) {
+    setPreview({ id: displayId, incident: null });
     setPreviewLoading(true);
     try {
-      const res = await api.get(`/api/incidents/${incidentId}/`);
-      setPreview({ id: incidentId, incident: res.data });
+      const res = await api.get(`/api/incidents/${displayId}/`);
+      setPreview({ id: displayId, incident: res.data });
     } catch {
       setPreview(null);
     } finally {
@@ -223,7 +223,7 @@ export default function IncidentList() {
                 <tr
                   key={inc.id}
                   className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
-                  onClick={() => openPreview(inc.id)}
+                  onClick={() => openPreview(inc.display_id)}
                 >
                   <td className="px-4 py-3 font-mono text-xs font-medium text-foreground">{inc.display_id}</td>
                   <td className="px-4 py-3 text-foreground max-w-xs truncate">{inc.title}</td>
@@ -320,7 +320,7 @@ export default function IncidentList() {
               </div>
             </div>
             <Link
-              to={`/incidents/${preview.incident.id}`}
+              to={`/incidents/${preview.incident.display_id}`}
               className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               Open incident →

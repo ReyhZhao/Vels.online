@@ -197,7 +197,7 @@ def test_comment_author_excluded_from_comment_notification(client, acme, staff, 
     client.force_login(staff)
     # staff is NOT the assignee; staff2 is. Staff comments → staff2 gets notified, staff does not.
     client.post(
-        f"/api/incidents/{incident.id}/comments/",
+        f"/api/incidents/{incident.display_id}/comments/",
         {"body": "hello"},
         content_type="application/json",
     )
@@ -210,7 +210,7 @@ def test_assignee_who_comments_excluded(client, acme, staff):
     incident = make_incident(acme, assignee=staff)
     client.force_login(staff)
     client.post(
-        f"/api/incidents/{incident.id}/comments/",
+        f"/api/incidents/{incident.display_id}/comments/",
         {"body": "self-note"},
         content_type="application/json",
     )

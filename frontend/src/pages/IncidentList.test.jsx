@@ -142,7 +142,7 @@ describe('IncidentList', () => {
     await waitFor(() => screen.getByText('INC-2026-0001'));
     fireEvent.click(screen.getByText('Suspicious login'));
     await waitFor(() =>
-      expect(api.get).toHaveBeenCalledWith('/api/incidents/1/')
+      expect(api.get).toHaveBeenCalledWith('/api/incidents/INC-2026-0001/')
     );
   });
 

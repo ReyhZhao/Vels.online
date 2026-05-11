@@ -162,7 +162,7 @@ def test_create_missing_title_returns_400(admin_client, acme):
 @pytest.mark.django_db
 def test_detail_requires_auth(client, acme):
     incident = make_incident(acme)
-    response = client.get(f"/api/incidents/{incident.id}/")
+    response = client.get(f"/api/incidents/{incident.display_id}/")
     assert response.status_code == 401
 
 
@@ -170,7 +170,7 @@ def test_detail_requires_auth(client, acme):
 def test_detail_member_can_view_own_org(client, acme_member, acme):
     incident = make_incident(acme, tlp="amber")
     client.force_login(acme_member)
-    response = client.get(f"/api/incidents/{incident.id}/")
+    response = client.get(f"/api/incidents/{incident.display_id}/")
     assert response.status_code == 200
     assert response.json()["id"] == incident.id
 
@@ -179,7 +179,7 @@ def test_detail_member_can_view_own_org(client, acme_member, acme):
 def test_detail_member_cannot_view_tlp_red(client, acme_member, acme):
     incident = make_incident(acme, tlp="red")
     client.force_login(acme_member)
-    response = client.get(f"/api/incidents/{incident.id}/")
+    response = client.get(f"/api/incidents/{incident.display_id}/")
     assert response.status_code == 404
 
 
@@ -187,21 +187,21 @@ def test_detail_member_cannot_view_tlp_red(client, acme_member, acme):
 def test_detail_member_cannot_view_other_org(client, acme_member, contoso):
     incident = make_incident(contoso)
     client.force_login(acme_member)
-    response = client.get(f"/api/incidents/{incident.id}/")
+    response = client.get(f"/api/incidents/{incident.display_id}/")
     assert response.status_code == 404
 
 
 @pytest.mark.django_db
 def test_detail_staff_can_view_red(admin_client, acme):
     incident = make_incident(acme, tlp="red")
-    response = admin_client.get(f"/api/incidents/{incident.id}/")
+    response = admin_client.get(f"/api/incidents/{incident.display_id}/")
     assert response.status_code == 200
 
 
 @pytest.mark.django_db
 def test_detail_not_found_returns_404(client, acme_member):
     client.force_login(acme_member)
-    response = client.get("/api/incidents/99999/")
+    response = client.get("/api/incidents/INC-DOES-NOT-EXIST/")
     assert response.status_code == 404
 
 
@@ -212,7 +212,7 @@ def test_detail_not_found_returns_404(client, acme_member):
 def test_patch_requires_auth(client, acme):
     incident = make_incident(acme)
     response = client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         {"title": "Updated"},
         content_type="application/json",
     )
@@ -224,7 +224,7 @@ def test_patch_member_can_update_own_incident(client, acme_member, acme):
     incident = make_incident(acme, tlp="amber")
     client.force_login(acme_member)
     response = client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         {"title": "Updated Title"},
         content_type="application/json",
     )
@@ -237,7 +237,7 @@ def test_patch_writes_incident_updated_event(client, acme_member, acme):
     incident = make_incident(acme, tlp="amber")
     client.force_login(acme_member)
     client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         {"title": "Changed"},
         content_type="application/json",
     )
@@ -249,7 +249,7 @@ def test_patch_event_payload_contains_changes(client, acme_member, acme):
     incident = make_incident(acme, tlp="amber", title="Original")
     client.force_login(acme_member)
     client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         {"title": "New Title"},
         content_type="application/json",
     )
@@ -263,7 +263,7 @@ def test_patch_non_member_forbidden(client, alice, acme):
     incident = make_incident(acme)
     client.force_login(alice)
     response = client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         {"title": "Hacked"},
         content_type="application/json",
     )
@@ -274,7 +274,7 @@ def test_patch_non_member_forbidden(client, alice, acme):
 def test_patch_staff_can_update_any(admin_client, acme):
     incident = make_incident(acme, tlp="red")
     response = admin_client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         {"severity": "critical"},
         content_type="application/json",
     )

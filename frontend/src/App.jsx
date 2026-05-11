@@ -63,7 +63,7 @@ function App() {
         <Route path="/security/risk-acceptances" element={<RiskAcceptancePage />} />
 
         <Route path="/incidents" element={<IncidentList />} />
-        <Route path="/incidents/:incidentId" element={<IncidentDetail />} />
+        <Route path="/incidents/:displayId" element={<IncidentDetail />} />
 
         <Route path="/account/notifications" element={<NotificationPreferences />} />
       </Route>

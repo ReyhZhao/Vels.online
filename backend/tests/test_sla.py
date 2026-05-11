@@ -30,7 +30,7 @@ def make_incident(org, **kwargs):
 
 
 def sla(client, inc, field):
-    r = client.get(f"/api/incidents/{inc.id}/")
+    r = client.get(f"/api/incidents/{inc.display_id}/")
     assert r.status_code == 200
     return r.json()[field]
 
@@ -41,7 +41,7 @@ def sla(client, inc, field):
 def test_serializer_returns_sla_shape(client, staff, acme):
     inc = make_incident(acme)
     client.force_login(staff)
-    r = client.get(f"/api/incidents/{inc.id}/")
+    r = client.get(f"/api/incidents/{inc.display_id}/")
     data = r.json()
     for field in ("response_sla", "resolve_sla"):
         s = data[field]
@@ -70,7 +70,7 @@ def test_target_lookup_per_severity(client, staff, acme, severity, response_s, r
 def test_sla_none_for_info_severity(client, staff, acme):
     inc = make_incident(acme, severity="info", state="new")
     client.force_login(staff)
-    r = client.get(f"/api/incidents/{inc.id}/")
+    r = client.get(f"/api/incidents/{inc.display_id}/")
     assert r.json()["response_sla"] is None
     assert r.json()["resolve_sla"] is None
 

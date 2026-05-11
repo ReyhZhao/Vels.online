@@ -45,7 +45,7 @@ def make_incident(acme, state="new", subject=None):
 
 def patch_incident(client, incident, data):
     return client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         data,
         content_type="application/json",
     )
@@ -125,7 +125,7 @@ def test_subject_cleared_writes_event(client, acme_member, acme, phishing):
 def test_incident_response_includes_subject_fields(client, acme_member, acme, phishing):
     incident = make_incident(acme, state="new", subject=phishing)
     client.force_login(acme_member)
-    response = client.get(f"/api/incidents/{incident.id}/")
+    response = client.get(f"/api/incidents/{incident.display_id}/")
     data = response.json()
     assert data["subject"] == phishing.id
     assert data["subject_slug"] == "phishing"
@@ -136,7 +136,7 @@ def test_incident_response_includes_subject_fields(client, acme_member, acme, ph
 def test_incident_with_no_subject_returns_nulls(client, acme_member, acme):
     incident = make_incident(acme, state="new")
     client.force_login(acme_member)
-    response = client.get(f"/api/incidents/{incident.id}/")
+    response = client.get(f"/api/incidents/{incident.display_id}/")
     data = response.json()
     assert data["subject"] is None
     assert data["subject_slug"] is None

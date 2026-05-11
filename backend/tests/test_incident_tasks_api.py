@@ -51,14 +51,14 @@ def template(db, phishing, django_user_model):
 
 @pytest.mark.django_db
 def test_list_tasks_requires_auth(client, incident):
-    response = client.get(f"/api/incidents/{incident.id}/tasks/")
+    response = client.get(f"/api/incidents/{incident.display_id}/tasks/")
     assert response.status_code == 401
 
 
 @pytest.mark.django_db
 def test_list_tasks_empty(client, member, incident):
     client.force_login(member)
-    response = client.get(f"/api/incidents/{incident.id}/tasks/")
+    response = client.get(f"/api/incidents/{incident.display_id}/tasks/")
     assert response.status_code == 200
     assert response.json() == []
 
@@ -67,7 +67,7 @@ def test_list_tasks_empty(client, member, incident):
 def test_list_tasks_returns_tasks(client, member, incident, template):
     Task.objects.create(incident=incident, title="Adhoc", display_order=1)
     client.force_login(member)
-    response = client.get(f"/api/incidents/{incident.id}/tasks/")
+    response = client.get(f"/api/incidents/{incident.display_id}/tasks/")
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["title"] == "Adhoc"
@@ -79,7 +79,7 @@ def test_list_tasks_returns_tasks(client, member, incident, template):
 @pytest.mark.django_db
 def test_create_adhoc_task_requires_auth(client, incident):
     response = client.post(
-        f"/api/incidents/{incident.id}/tasks/",
+        f"/api/incidents/{incident.display_id}/tasks/",
         {"title": "Check logs"},
         content_type="application/json",
     )
@@ -90,7 +90,7 @@ def test_create_adhoc_task_requires_auth(client, incident):
 def test_create_adhoc_task_member_allowed(client, member, incident):
     client.force_login(member)
     response = client.post(
-        f"/api/incidents/{incident.id}/tasks/",
+        f"/api/incidents/{incident.display_id}/tasks/",
         {"title": "Check logs", "display_order": 1},
         content_type="application/json",
     )
@@ -107,7 +107,7 @@ def test_create_adhoc_task_member_allowed(client, member, incident):
 def test_create_adhoc_task_emits_event(client, member, incident):
     client.force_login(member)
     client.post(
-        f"/api/incidents/{incident.id}/tasks/",
+        f"/api/incidents/{incident.display_id}/tasks/",
         {"title": "Check logs", "display_order": 1},
         content_type="application/json",
     )
@@ -118,7 +118,7 @@ def test_create_adhoc_task_emits_event(client, member, incident):
 def test_create_adhoc_task_missing_title(client, member, incident):
     client.force_login(member)
     response = client.post(
-        f"/api/incidents/{incident.id}/tasks/",
+        f"/api/incidents/{incident.display_id}/tasks/",
         {"display_order": 1},
         content_type="application/json",
     )
@@ -131,7 +131,7 @@ def test_create_adhoc_task_missing_title(client, member, incident):
 @pytest.mark.django_db
 def test_apply_template_requires_auth(client, incident, template):
     response = client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": template.id},
         content_type="application/json",
     )
@@ -142,7 +142,7 @@ def test_apply_template_requires_auth(client, incident, template):
 def test_apply_template_creates_tasks(client, member, incident, template):
     client.force_login(member)
     response = client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": template.id},
         content_type="application/json",
     )
@@ -159,7 +159,7 @@ def test_apply_template_creates_tasks(client, member, incident, template):
 def test_apply_template_creates_application_record(client, member, incident, template):
     client.force_login(member)
     client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": template.id},
         content_type="application/json",
     )
@@ -170,7 +170,7 @@ def test_apply_template_creates_application_record(client, member, incident, tem
 def test_apply_template_emits_event(client, member, incident, template):
     client.force_login(member)
     client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": template.id},
         content_type="application/json",
     )
@@ -181,12 +181,12 @@ def test_apply_template_emits_event(client, member, incident, template):
 def test_apply_template_idempotency_rejected_when_active(client, member, incident, template):
     client.force_login(member)
     client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": template.id},
         content_type="application/json",
     )
     response = client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": template.id},
         content_type="application/json",
     )
@@ -197,14 +197,14 @@ def test_apply_template_idempotency_rejected_when_active(client, member, inciden
 def test_apply_template_reapply_allowed_after_completion(client, member, incident, template):
     client.force_login(member)
     client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": template.id},
         content_type="application/json",
     )
     # Cancel all tasks from this template
     Task.objects.filter(incident=incident, template_item__template=template).update(state="cancelled")
     response = client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": template.id},
         content_type="application/json",
     )
@@ -217,7 +217,7 @@ def test_apply_template_snapshot_semantics(client, member, incident, template):
     """Editing template item after apply does not mutate already-created tasks."""
     client.force_login(member)
     client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": template.id},
         content_type="application/json",
     )
@@ -234,7 +234,7 @@ def test_apply_template_snapshot_semantics(client, member, incident, template):
 def test_apply_template_missing_template_id(client, member, incident):
     client.force_login(member)
     response = client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {},
         content_type="application/json",
     )
@@ -245,7 +245,7 @@ def test_apply_template_missing_template_id(client, member, incident):
 def test_apply_template_not_found(client, member, incident):
     client.force_login(member)
     response = client.post(
-        f"/api/incidents/{incident.id}/apply-template/",
+        f"/api/incidents/{incident.display_id}/apply-template/",
         {"template_id": 99999},
         content_type="application/json",
     )

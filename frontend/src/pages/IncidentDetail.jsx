@@ -219,7 +219,7 @@ function SubjectDropdown({ incident, subjects, onSubjectChange, saving }) {
 }
 
 export default function IncidentDetail() {
-  const { incidentId } = useParams();
+  const { displayId } = useParams();
   const { user } = useAuth();
   const [incident, setIncident]           = useState(null);
   const [subjects, setSubjects]           = useState([]);
@@ -246,7 +246,7 @@ export default function IncidentDetail() {
       setError(null);
       try {
         const [incRes, subRes] = await Promise.all([
-          api.get(`/api/incidents/${incidentId}/`),
+          api.get(`/api/incidents/${displayId}/`),
           api.get('/api/subjects/'),
         ]);
         setIncident(incRes.data);
@@ -262,13 +262,13 @@ export default function IncidentDetail() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => {
       if (document.visibilityState !== 'hidden') {
-        api.get(`/api/incidents/${incidentId}/`)
+        api.get(`/api/incidents/${displayId}/`)
           .then(res => setIncident(prev => prev ? res.data : prev))
           .catch(() => {});
       }
     }, 30000);
     return () => clearInterval(pollRef.current);
-  }, [incidentId]);
+  }, [displayId]);
 
   async function handleOpenTransfer() {
     if (staffUsers.length === 0) {
@@ -288,7 +288,7 @@ export default function IncidentDetail() {
     setTransferring(true);
     setTransferError(null);
     try {
-      const res = await api.post(`/api/incidents/${incidentId}/transfer/`, { assignee_id: assigneeId });
+      const res = await api.post(`/api/incidents/${displayId}/transfer/`, { assignee_id: assigneeId });
       setIncident(res.data);
       setShowTransferDialog(false);
     } catch (err) {
@@ -302,7 +302,7 @@ export default function IncidentDetail() {
     setSavingSubject(true);
     setSubjectError(null);
     try {
-      const res = await api.patch(`/api/incidents/${incidentId}/`, { subject: subjectId });
+      const res = await api.patch(`/api/incidents/${displayId}/`, { subject: subjectId });
       setIncident(res.data);
       setTasksRefreshKey(k => k + 1);
     } catch (err) {
@@ -310,20 +310,20 @@ export default function IncidentDetail() {
     } finally {
       setSavingSubject(false);
     }
-  }, [incidentId]);
+  }, [displayId]);
 
   const handleBadgeChange = useCallback(async (field, value) => {
     setSavingBadge(true);
     setBadgeError(null);
     try {
-      const res = await api.patch(`/api/incidents/${incidentId}/`, { [field]: value });
+      const res = await api.patch(`/api/incidents/${displayId}/`, { [field]: value });
       setIncident(res.data);
     } catch (err) {
       setBadgeError(err.response?.data?.detail || `Failed to update ${field}.`);
     } finally {
       setSavingBadge(false);
     }
-  }, [incidentId]);
+  }, [displayId]);
 
   async function handleTransition(targetState, closureReason = undefined) {
     setTransitioning(true);
@@ -331,7 +331,7 @@ export default function IncidentDetail() {
     try {
       const payload = { state: targetState };
       if (closureReason) payload.closure_reason = closureReason;
-      const res = await api.post(`/api/incidents/${incidentId}/transition/`, payload);
+      const res = await api.post(`/api/incidents/${displayId}/transition/`, payload);
       setIncident(res.data);
     } catch (err) {
       setTransitionError(err.response?.data?.detail || 'Transition failed.');
@@ -495,7 +495,7 @@ export default function IncidentDetail() {
           </div>
           <div>
             <IncidentComments
-              incidentId={incidentId}
+              incidentId={displayId}
               currentUserId={user?.id}
               isStaff={user?.is_staff ?? false}
             />
@@ -506,7 +506,7 @@ export default function IncidentDetail() {
       {/* ── Delegation panel ── */}
       <div className="rounded-lg border border-border bg-card p-6">
         <DelegationPanel
-          incidentId={incidentId}
+          incidentId={displayId}
           activeDelegations={incident.active_delegations ?? []}
           isStaff={user?.is_staff ?? false}
           onIncidentUpdate={setIncident}
@@ -532,14 +532,14 @@ export default function IncidentDetail() {
         </div>
         <div className="p-6">
           {activeTab === 'timeline' && (
-            <IncidentTimeline incidentId={incidentId} />
+            <IncidentTimeline incidentId={displayId} />
           )}
           {activeTab === 'attachments' && (
-            <IncidentAttachments incidentId={incidentId} />
+            <IncidentAttachments incidentId={displayId} />
           )}
           {activeTab === 'tasks' && (
             <IncidentTasks
-              incidentId={incidentId}
+              incidentId={displayId}
               subjectId={incident.subject}
               refreshKey={tasksRefreshKey}
             />

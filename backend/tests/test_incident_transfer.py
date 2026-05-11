@@ -79,7 +79,7 @@ def test_transfer_from_no_assignee_records_null_from(acme, staff_actor, staff_ta
 @pytest.mark.django_db
 def test_transfer_endpoint_requires_auth(client, acme):
     incident = make_incident(acme)
-    response = client.post(f"/api/incidents/{incident.id}/transfer/", {"assignee_id": 1}, content_type="application/json")
+    response = client.post(f"/api/incidents/{incident.display_id}/transfer/", {"assignee_id": 1}, content_type="application/json")
     assert response.status_code == 401
 
 
@@ -87,7 +87,7 @@ def test_transfer_endpoint_requires_auth(client, acme):
 def test_transfer_endpoint_requires_staff(client, acme, non_staff):
     incident = make_incident(acme)
     client.force_login(non_staff)
-    response = client.post(f"/api/incidents/{incident.id}/transfer/", {"assignee_id": 1}, content_type="application/json")
+    response = client.post(f"/api/incidents/{incident.display_id}/transfer/", {"assignee_id": 1}, content_type="application/json")
     assert response.status_code == 403
 
 
@@ -96,7 +96,7 @@ def test_transfer_endpoint_succeeds_for_staff_target(client, acme, staff_actor, 
     incident = make_incident(acme, assignee=staff_actor)
     client.force_login(staff_actor)
     response = client.post(
-        f"/api/incidents/{incident.id}/transfer/",
+        f"/api/incidents/{incident.display_id}/transfer/",
         {"assignee_id": staff_target.id},
         content_type="application/json",
     )
@@ -109,7 +109,7 @@ def test_transfer_endpoint_rejects_non_staff_target(client, acme, staff_actor, n
     incident = make_incident(acme, assignee=staff_actor)
     client.force_login(staff_actor)
     response = client.post(
-        f"/api/incidents/{incident.id}/transfer/",
+        f"/api/incidents/{incident.display_id}/transfer/",
         {"assignee_id": non_staff.id},
         content_type="application/json",
     )
@@ -121,7 +121,7 @@ def test_transfer_endpoint_rejects_nonexistent_user(client, acme, staff_actor):
     incident = make_incident(acme, assignee=staff_actor)
     client.force_login(staff_actor)
     response = client.post(
-        f"/api/incidents/{incident.id}/transfer/",
+        f"/api/incidents/{incident.display_id}/transfer/",
         {"assignee_id": 99999},
         content_type="application/json",
     )
@@ -131,7 +131,7 @@ def test_transfer_endpoint_rejects_nonexistent_user(client, acme, staff_actor):
 @pytest.mark.django_db
 def test_transfer_endpoint_returns_404_for_missing_incident(client, staff_actor):
     client.force_login(staff_actor)
-    response = client.post("/api/incidents/99999/transfer/", {"assignee_id": staff_actor.id}, content_type="application/json")
+    response = client.post("/api/incidents/INC-DOES-NOT-EXIST/transfer/", {"assignee_id": staff_actor.id}, content_type="application/json")
     assert response.status_code == 404
 
 

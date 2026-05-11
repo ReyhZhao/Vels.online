@@ -76,7 +76,7 @@ def make_incident(acme, state="new", subject=None):
 
 def patch_subject(client, incident, subject):
     return client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         {"subject": subject.id if subject else None},
         content_type="application/json",
     )
@@ -271,7 +271,7 @@ def test_clearing_subject_cancels_new_tasks(client, member, acme, phishing, phis
     )
     client.force_login(member)
     response = client.patch(
-        f"/api/incidents/{incident.id}/",
+        f"/api/incidents/{incident.display_id}/",
         {"subject": None},
         content_type="application/json",
     )

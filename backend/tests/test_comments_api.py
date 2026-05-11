@@ -102,7 +102,7 @@ def test_incident_comments_lists_all_including_deleted(admin_client, acme, staff
     deleted.deleted_at = timezone.now()
     deleted.save()
 
-    resp = admin_client.get(f"/api/incidents/{inc.id}/comments/")
+    resp = admin_client.get(f"/api/incidents/{inc.display_id}/comments/")
     assert resp.status_code == 200
     assert len(resp.json()) == 2
     # deleted row is present (UI renders [deleted]), body preserved server-side
@@ -117,7 +117,7 @@ def test_incident_comments_deleted_shows_placeholder(admin_client, acme, staff):
     deleted.deleted_at = timezone.now()
     deleted.save()
 
-    resp = admin_client.get(f"/api/incidents/{inc.id}/comments/")
+    resp = admin_client.get(f"/api/incidents/{inc.display_id}/comments/")
     assert resp.status_code == 200
     # deleted_at is set; body not exposed but deleted_at is truthy
     entries = resp.json()
@@ -135,7 +135,7 @@ def test_member_sees_noninternal_at_green(client, acme, member, staff):
     make_comment(inc, staff, body="secret", is_internal=True)
 
     client.force_login(member)
-    resp = client.get(f"/api/incidents/{inc.id}/comments/")
+    resp = client.get(f"/api/incidents/{inc.display_id}/comments/")
     assert resp.status_code == 200
     bodies = [c["body"] for c in resp.json()]
     assert "public" in bodies
@@ -149,7 +149,7 @@ def test_member_sees_noninternal_at_white(client, acme, member, staff):
     make_comment(inc, staff, body="secret", is_internal=True)
 
     client.force_login(member)
-    resp = client.get(f"/api/incidents/{inc.id}/comments/")
+    resp = client.get(f"/api/incidents/{inc.display_id}/comments/")
     assert resp.status_code == 200
     bodies = [c["body"] for c in resp.json()]
     assert "public" in bodies
@@ -162,7 +162,7 @@ def test_member_sees_no_comments_at_amber(client, acme, member, staff):
     make_comment(inc, staff, body="public", is_internal=False)
 
     client.force_login(member)
-    resp = client.get(f"/api/incidents/{inc.id}/comments/")
+    resp = client.get(f"/api/incidents/{inc.display_id}/comments/")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -173,7 +173,7 @@ def test_staff_sees_all_comments_including_internal(admin_client, acme, staff):
     make_comment(inc, staff, body="public", is_internal=False)
     make_comment(inc, staff, body="secret", is_internal=True)
 
-    resp = admin_client.get(f"/api/incidents/{inc.id}/comments/")
+    resp = admin_client.get(f"/api/incidents/{inc.display_id}/comments/")
     assert resp.status_code == 200
     bodies = [c["body"] for c in resp.json()]
     assert "public" in bodies
@@ -187,7 +187,7 @@ def test_staff_sees_all_comments_including_internal(admin_client, acme, staff):
 def test_post_comment_creates_event(admin_client, acme, staff):
     inc = make_incident(acme)
     resp = admin_client.post(
-        f"/api/incidents/{inc.id}/comments/",
+        f"/api/incidents/{inc.display_id}/comments/",
         {"body": "Test comment", "is_internal": False},
         content_type="application/json",
     )
@@ -199,7 +199,7 @@ def test_post_comment_creates_event(admin_client, acme, staff):
 def test_post_comment_internal_flag(admin_client, acme, staff):
     inc = make_incident(acme)
     resp = admin_client.post(
-        f"/api/incidents/{inc.id}/comments/",
+        f"/api/incidents/{inc.display_id}/comments/",
         {"body": "Internal note", "is_internal": True},
         content_type="application/json",
     )
@@ -337,7 +337,7 @@ def test_cannot_delete_already_deleted(client, acme, staff):
 @pytest.mark.django_db
 def test_unauthenticated_cannot_list_comments(client, acme):
     inc = make_incident(acme)
-    resp = client.get(f"/api/incidents/{inc.id}/comments/")
+    resp = client.get(f"/api/incidents/{inc.display_id}/comments/")
     assert resp.status_code == 401
 
 
@@ -345,7 +345,7 @@ def test_unauthenticated_cannot_list_comments(client, acme):
 def test_unauthenticated_cannot_post_comment(client, acme):
     inc = make_incident(acme)
     resp = client.post(
-        f"/api/incidents/{inc.id}/comments/",
+        f"/api/incidents/{inc.display_id}/comments/",
         {"body": "hi"},
         content_type="application/json",
     )

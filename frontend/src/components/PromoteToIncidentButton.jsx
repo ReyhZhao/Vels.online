@@ -55,7 +55,7 @@ export default function PromoteToIncidentButton({ sourceKind, sourceRef, orgSlug
         org: orgSlug,
       });
       setOpen(false);
-      navigate(`/incidents/${res.data.id}`);
+      navigate(`/incidents/${res.data.display_id}`);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to create incident.');
     } finally {
@@ -107,7 +107,7 @@ export default function PromoteToIncidentButton({ sourceKind, sourceRef, orgSlug
                 {openIncidents.map(inc => (
                   <a
                     key={inc.id}
-                    href={`/incidents/${inc.id}`}
+                    href={`/incidents/${inc.display_id}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block text-sm text-blue-600 dark:text-blue-400 hover:underline"

@@ -92,7 +92,7 @@ def test_outsider_sees_no_events(acme, outsider):
 @pytest.mark.django_db
 def test_timeline_requires_auth(client, acme):
     incident = make_incident(acme)
-    response = client.get(f"/api/incidents/{incident.id}/timeline/")
+    response = client.get(f"/api/incidents/{incident.display_id}/timeline/")
     assert response.status_code == 401
 
 
@@ -103,7 +103,7 @@ def test_timeline_returns_events_in_order(client, acme, staff):
     record_event(incident, "incident_updated", payload={"changes": {"state": {"old": "new", "new": "triaged"}}})
     record_event(incident, "comment_added", payload={"is_internal": False})
     client.force_login(staff)
-    response = client.get(f"/api/incidents/{incident.id}/timeline/")
+    response = client.get(f"/api/incidents/{incident.display_id}/timeline/")
     assert response.status_code == 200
     results = response.json()["results"]
     assert len(results) == 3
@@ -117,7 +117,7 @@ def test_timeline_staff_sees_internal_events(client, acme, staff):
     incident = make_incident(acme, tlp="green")
     record_event(incident, "comment_added", payload={"is_internal": True})
     client.force_login(staff)
-    response = client.get(f"/api/incidents/{incident.id}/timeline/")
+    response = client.get(f"/api/incidents/{incident.display_id}/timeline/")
     assert response.status_code == 200
     assert response.json()["count"] == 1
 
@@ -128,7 +128,7 @@ def test_timeline_member_at_green_excludes_internal(client, acme, member):
     record_event(incident, "comment_added", payload={"is_internal": True})
     record_event(incident, "incident_created")
     client.force_login(member)
-    response = client.get(f"/api/incidents/{incident.id}/timeline/")
+    response = client.get(f"/api/incidents/{incident.display_id}/timeline/")
     assert response.status_code == 200
     data = response.json()
     assert data["count"] == 1
@@ -139,7 +139,7 @@ def test_timeline_member_at_green_excludes_internal(client, acme, member):
 def test_timeline_member_at_amber_returns_403(client, acme, member):
     incident = make_incident(acme, tlp="amber")
     client.force_login(member)
-    response = client.get(f"/api/incidents/{incident.id}/timeline/")
+    response = client.get(f"/api/incidents/{incident.display_id}/timeline/")
     assert response.status_code == 403
 
 
@@ -147,7 +147,7 @@ def test_timeline_member_at_amber_returns_403(client, acme, member):
 def test_timeline_outsider_returns_404(client, acme, outsider):
     incident = make_incident(acme, tlp="green")
     client.force_login(outsider)
-    response = client.get(f"/api/incidents/{incident.id}/timeline/")
+    response = client.get(f"/api/incidents/{incident.display_id}/timeline/")
     assert response.status_code == 404
 
 
@@ -157,14 +157,14 @@ def test_timeline_pagination(client, acme, staff):
     for i in range(55):
         record_event(incident, "incident_created")
     client.force_login(staff)
-    response = client.get(f"/api/incidents/{incident.id}/timeline/")
+    response = client.get(f"/api/incidents/{incident.display_id}/timeline/")
     data = response.json()
     assert data["count"] == 55
     assert data["page"] == 1
     assert data["page_size"] == 50
     assert len(data["results"]) == 50
 
-    response2 = client.get(f"/api/incidents/{incident.id}/timeline/?page=2")
+    response2 = client.get(f"/api/incidents/{incident.display_id}/timeline/?page=2")
     data2 = response2.json()
     assert data2["page"] == 2
     assert len(data2["results"]) == 5
@@ -173,5 +173,5 @@ def test_timeline_pagination(client, acme, staff):
 @pytest.mark.django_db
 def test_timeline_returns_404_for_unknown_incident(client, staff):
     client.force_login(staff)
-    response = client.get("/api/incidents/99999/timeline/")
+    response = client.get("/api/incidents/INC-DOES-NOT-EXIST/timeline/")
     assert response.status_code == 404

@@ -177,7 +177,7 @@ def test_delete_attachment_records_event(confirmed_attachment, staff):
 @pytest.mark.django_db
 def test_list_attachments_returns_confirmed_public(client, incident, confirmed_attachment, member):
     auth(client, member)
-    res = client.get(f"/api/incidents/{incident.id}/attachments/")
+    res = client.get(f"/api/incidents/{incident.display_id}/attachments/")
     assert res.status_code == 200
     assert len(res.json()) == 1
     assert res.json()[0]["filename"] == "report.pdf"
@@ -186,7 +186,7 @@ def test_list_attachments_returns_confirmed_public(client, incident, confirmed_a
 @pytest.mark.django_db
 def test_list_attachments_hides_internal_from_non_staff(client, incident, confirmed_attachment, internal_attachment, member):
     auth(client, member)
-    res = client.get(f"/api/incidents/{incident.id}/attachments/")
+    res = client.get(f"/api/incidents/{incident.display_id}/attachments/")
     assert res.status_code == 200
     filenames = [a["filename"] for a in res.json()]
     assert "report.pdf" in filenames
@@ -196,7 +196,7 @@ def test_list_attachments_hides_internal_from_non_staff(client, incident, confir
 @pytest.mark.django_db
 def test_list_attachments_shows_internal_to_staff(client, incident, confirmed_attachment, internal_attachment, staff):
     auth(client, staff)
-    res = client.get(f"/api/incidents/{incident.id}/attachments/")
+    res = client.get(f"/api/incidents/{incident.display_id}/attachments/")
     assert res.status_code == 200
     assert len(res.json()) == 2
 
@@ -209,7 +209,7 @@ def test_list_attachments_hides_unconfirmed(client, incident, staff):
         content_type="application/pdf", is_internal=False,
     )
     auth(client, staff)
-    res = client.get(f"/api/incidents/{incident.id}/attachments/")
+    res = client.get(f"/api/incidents/{incident.display_id}/attachments/")
     assert res.status_code == 200
     assert len(res.json()) == 0
 
@@ -220,7 +220,7 @@ def test_initiate_upload_returns_attachment_and_url(client, incident, member):
         MockClient.return_value.generate_presigned_put_url.return_value = "https://s3.example.com/put"
         auth(client, member)
         res = client.post(
-            f"/api/incidents/{incident.id}/attachments/",
+            f"/api/incidents/{incident.display_id}/attachments/",
             {"filename": "report.pdf", "content_type": "application/pdf"},
             content_type="application/json",
         )
@@ -236,7 +236,7 @@ def test_initiate_upload_returns_attachment_and_url(client, incident, member):
 def test_initiate_upload_requires_filename(client, incident, member):
     auth(client, member)
     res = client.post(
-        f"/api/incidents/{incident.id}/attachments/",
+        f"/api/incidents/{incident.display_id}/attachments/",
         {"content_type": "application/pdf"},
         content_type="application/json",
     )
@@ -249,7 +249,7 @@ def test_initiate_upload_default_is_internal(client, incident, member):
         MockClient.return_value.generate_presigned_put_url.return_value = "https://put"
         auth(client, member)
         client.post(
-            f"/api/incidents/{incident.id}/attachments/",
+            f"/api/incidents/{incident.display_id}/attachments/",
             {"filename": "f.pdf", "content_type": "application/pdf"},
             content_type="application/json",
         )
@@ -267,7 +267,7 @@ def test_confirm_upload_marks_confirmed(client, incident, staff):
     with patch("incidents.services.attachments.StorageClient") as MockClient:
         MockClient.return_value.head_object.return_value = {"ContentLength": 500}
         auth(client, staff)
-        res = client.post(f"/api/incidents/{incident.id}/attachments/{att.id}/confirm/")
+        res = client.post(f"/api/incidents/{incident.display_id}/attachments/{att.id}/confirm/")
     assert res.status_code == 200
     assert res.json()["confirmed_at"] is not None
 
@@ -275,7 +275,7 @@ def test_confirm_upload_marks_confirmed(client, incident, staff):
 @pytest.mark.django_db
 def test_confirm_upload_rejects_double_confirm(client, incident, confirmed_attachment, staff):
     auth(client, staff)
-    res = client.post(f"/api/incidents/{incident.id}/attachments/{confirmed_attachment.id}/confirm/")
+    res = client.post(f"/api/incidents/{incident.display_id}/attachments/{confirmed_attachment.id}/confirm/")
     assert res.status_code == 400
 
 
@@ -287,7 +287,7 @@ def test_confirm_upload_forbidden_for_non_uploader(client, incident, member, sta
         content_type="application/pdf",
     )
     auth(client, member)
-    res = client.post(f"/api/incidents/{incident.id}/attachments/{att.id}/confirm/")
+    res = client.post(f"/api/incidents/{incident.display_id}/attachments/{att.id}/confirm/")
     assert res.status_code == 403
 
 
@@ -296,7 +296,7 @@ def test_download_returns_presigned_url(client, incident, confirmed_attachment, 
     with patch("incidents.services.attachments.StorageClient") as MockClient:
         MockClient.return_value.generate_presigned_url.return_value = "https://s3.example.com/get"
         auth(client, member)
-        res = client.get(f"/api/incidents/{incident.id}/attachments/{confirmed_attachment.id}/download/")
+        res = client.get(f"/api/incidents/{incident.display_id}/attachments/{confirmed_attachment.id}/download/")
     assert res.status_code == 200
     assert res.json()["url"] == "https://s3.example.com/get"
 
@@ -304,7 +304,7 @@ def test_download_returns_presigned_url(client, incident, confirmed_attachment, 
 @pytest.mark.django_db
 def test_download_internal_forbidden_for_non_staff(client, incident, internal_attachment, member):
     auth(client, member)
-    res = client.get(f"/api/incidents/{incident.id}/attachments/{internal_attachment.id}/download/")
+    res = client.get(f"/api/incidents/{incident.display_id}/attachments/{internal_attachment.id}/download/")
     assert res.status_code == 404
 
 
@@ -313,14 +313,14 @@ def test_download_internal_allowed_for_staff(client, incident, internal_attachme
     with patch("incidents.services.attachments.StorageClient") as MockClient:
         MockClient.return_value.generate_presigned_url.return_value = "https://s3.example.com/get"
         auth(client, staff)
-        res = client.get(f"/api/incidents/{incident.id}/attachments/{internal_attachment.id}/download/")
+        res = client.get(f"/api/incidents/{incident.display_id}/attachments/{internal_attachment.id}/download/")
     assert res.status_code == 200
 
 
 @pytest.mark.django_db
 def test_delete_attachment_staff_only(client, incident, confirmed_attachment, member):
     auth(client, member)
-    res = client.delete(f"/api/incidents/{incident.id}/attachments/{confirmed_attachment.id}/")
+    res = client.delete(f"/api/incidents/{incident.display_id}/attachments/{confirmed_attachment.id}/")
     assert res.status_code == 403
 
 
@@ -328,7 +328,7 @@ def test_delete_attachment_staff_only(client, incident, confirmed_attachment, me
 def test_delete_attachment_soft_deletes(client, incident, confirmed_attachment, staff):
     with patch("incidents.services.attachments.StorageClient"):
         auth(client, staff)
-        res = client.delete(f"/api/incidents/{incident.id}/attachments/{confirmed_attachment.id}/")
+        res = client.delete(f"/api/incidents/{incident.display_id}/attachments/{confirmed_attachment.id}/")
     assert res.status_code == 204
     confirmed_attachment.refresh_from_db()
     assert confirmed_attachment.deleted_at is not None
@@ -338,8 +338,8 @@ def test_delete_attachment_soft_deletes(client, incident, confirmed_attachment, 
 def test_delete_attachment_not_in_list_after_deletion(client, incident, confirmed_attachment, staff):
     with patch("incidents.services.attachments.StorageClient"):
         auth(client, staff)
-        client.delete(f"/api/incidents/{incident.id}/attachments/{confirmed_attachment.id}/")
-        res = client.get(f"/api/incidents/{incident.id}/attachments/")
+        client.delete(f"/api/incidents/{incident.display_id}/attachments/{confirmed_attachment.id}/")
+        res = client.get(f"/api/incidents/{incident.display_id}/attachments/")
     assert res.status_code == 200
     assert res.json() == []
 
@@ -347,13 +347,13 @@ def test_delete_attachment_not_in_list_after_deletion(client, incident, confirme
 @pytest.mark.django_db
 def test_outsider_cannot_list_attachments(client, incident, outsider):
     auth(client, outsider)
-    res = client.get(f"/api/incidents/{incident.id}/attachments/")
+    res = client.get(f"/api/incidents/{incident.display_id}/attachments/")
     assert res.status_code == 404
 
 
 @pytest.mark.django_db
 def test_unauthenticated_cannot_list_attachments(client, incident):
-    res = client.get(f"/api/incidents/{incident.id}/attachments/")
+    res = client.get(f"/api/incidents/{incident.display_id}/attachments/")
     assert res.status_code in (401, 403)
 
 
