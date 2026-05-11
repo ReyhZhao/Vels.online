@@ -202,6 +202,12 @@ CSRF_COOKIE_SAMESITE = "Lax"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+EXCEPTION_LLM_PROVIDER = os.environ.get(
+    "EXCEPTION_LLM_PROVIDER",
+    "exceptions.llm.gemini.GeminiFlashProvider",
+)
+
 INCIDENT_SLA_TARGETS = {
     "critical": {"response_seconds": 15 * 60,       "resolve_seconds": 4 * 3600},
     "high":     {"response_seconds": 1 * 3600,       "resolve_seconds": 24 * 3600},
