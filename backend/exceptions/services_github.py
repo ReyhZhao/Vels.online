@@ -50,6 +50,41 @@ def _upsert_rule_element(xml_content: str, rule_xml: str, rule_id: int) -> str:
     return ET.tostring(root, encoding="unicode", xml_declaration=False)
 
 
+def _remove_rule_element(xml_content: str, rule_id: int) -> str:
+    """Remove the <rule id="{rule_id}"> element from xml_content."""
+    root = ET.fromstring(xml_content.strip() or _EMPTY_FILE)
+    for existing in root.findall(f"rule[@id='{rule_id}']"):
+        root.remove(existing)
+    ET.indent(root, space="  ")
+    return ET.tostring(root, encoding="unicode", xml_declaration=False)
+
+
+def remove_rule(rule) -> None:
+    """Remove the rule's XML element from the security-monitoring repo."""
+    path = rule_file_path(rule)
+    content, sha = _get_file(path)
+    if content is None or sha is None:
+        return  # File doesn't exist — nothing to remove
+
+    updated = _remove_rule_element(content, rule.wazuh_rule_id)
+    encoded = base64.b64encode(updated.encode()).decode()
+
+    payload = {
+        "message": f"exception: remove rule {rule.wazuh_rule_id} — {rule.description[:60]}",
+        "content": encoded,
+        "branch": BRANCH,
+        "sha": sha,
+    }
+
+    resp = requests.put(
+        f"{API_BASE}/{path}",
+        json=payload,
+        headers=_headers(),
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
 def push_rule(rule) -> None:
     """Commit the rule's XML element to the security-monitoring repo."""
     path    = rule_file_path(rule)

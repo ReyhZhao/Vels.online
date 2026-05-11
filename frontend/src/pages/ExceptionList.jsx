@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
+import EditExceptionModal from '../components/EditExceptionModal';
 
 const STATUS_OPTIONS = ['pending', 'applied', 'disabled'];
 
@@ -24,6 +25,8 @@ export default function ExceptionList() {
   const [error, setError]         = useState(null);
   const [statusFilter, setStatus] = useState('');
   const [orgFilter, setOrg]       = useState('');
+  const [editRule, setEditRule]   = useState(null);
+  const [actionErrors, setActionErrors] = useState({});
 
   useEffect(() => {
     setLoading(true);
@@ -36,6 +39,36 @@ export default function ExceptionList() {
       .catch(err => setError(err.response?.data?.detail || 'Failed to load exception rules.'))
       .finally(() => setLoading(false));
   }, [statusFilter, orgFilter]);
+
+  function updateRule(updated) {
+    setRules(rs => rs.map(r => r.id === updated.id ? updated : r));
+  }
+
+  function clearActionError(id) {
+    setActionErrors(e => { const n = { ...e }; delete n[id]; return n; });
+  }
+
+  async function handleApprove(rule) {
+    clearActionError(rule.id);
+    try {
+      const res = await api.post(`/api/exceptions/${rule.id}/approve/`);
+      updateRule(res.data);
+    } catch (err) {
+      setActionErrors(e => ({ ...e, [rule.id]: err.response?.data?.detail || 'Approve failed.' }));
+    }
+  }
+
+  async function handleDisable(rule) {
+    clearActionError(rule.id);
+    try {
+      const res = await api.post(`/api/exceptions/${rule.id}/disable/`);
+      updateRule(res.data);
+    } catch (err) {
+      setActionErrors(e => ({ ...e, [rule.id]: err.response?.data?.detail || 'Disable failed.' }));
+    }
+  }
+
+  const colCount = isStaff ? 7 : 5;
 
   return (
     <div className="space-y-4 p-6">
@@ -79,57 +112,101 @@ export default function ExceptionList() {
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
               {isStaff && <th className="px-4 py-3 text-left font-medium text-muted-foreground">Organisation</th>}
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Incident</th>
+              {isStaff && <th className="px-4 py-3 text-left font-medium text-muted-foreground">Actions</th>}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={isStaff ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={colCount} className="px-4 py-8 text-center text-muted-foreground">
                   Loading…
                 </td>
               </tr>
             ) : rules.length === 0 ? (
               <tr>
-                <td colSpan={isStaff ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={colCount} className="px-4 py-8 text-center text-muted-foreground">
                   No exception rules.
                 </td>
               </tr>
             ) : (
               rules.map(rule => (
-                <tr key={rule.id} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs text-foreground">
-                    {rule.wazuh_rule_id ?? '—'}
-                  </td>
-                  <td className="px-4 py-3 text-foreground max-w-xs truncate">
-                    {rule.description || '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SCOPE_CLASSES[rule.scope] ?? ''}`}>
-                      {rule.scope}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[rule.status] ?? ''}`}>
-                      {rule.status}
-                    </span>
-                  </td>
-                  {isStaff && (
-                    <td className="px-4 py-3 text-muted-foreground text-xs">
-                      {rule.org_slug || '—'}
+                <>
+                  <tr key={rule.id} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs text-foreground">
+                      {rule.wazuh_rule_id ?? '—'}
                     </td>
+                    <td className="px-4 py-3 text-foreground max-w-xs truncate">
+                      {rule.description || '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SCOPE_CLASSES[rule.scope] ?? ''}`}>
+                        {rule.scope}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[rule.status] ?? ''}`}>
+                        {rule.status}
+                      </span>
+                    </td>
+                    {isStaff && (
+                      <td className="px-4 py-3 text-muted-foreground text-xs">
+                        {rule.org_slug || '—'}
+                      </td>
+                    )}
+                    <td className="px-4 py-3 text-xs">
+                      {rule.incident_display_id
+                        ? <a href={`/incidents/${rule.incident_display_id}`} className="text-primary hover:underline">{rule.incident_display_id}</a>
+                        : <span className="text-muted-foreground">—</span>
+                      }
+                    </td>
+                    {isStaff && (
+                      <td className="px-4 py-3">
+                        <div className="flex gap-2">
+                          {rule.status === 'pending' && (
+                            <button
+                              onClick={() => handleApprove(rule)}
+                              className="rounded px-2 py-1 text-xs font-medium bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400"
+                            >
+                              Approve
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setEditRule(rule)}
+                            className="rounded px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400"
+                          >
+                            Edit
+                          </button>
+                          {rule.status === 'applied' && (
+                            <button
+                              onClick={() => handleDisable(rule)}
+                              className="rounded px-2 py-1 text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400"
+                            >
+                              Disable
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                  {actionErrors[rule.id] && (
+                    <tr key={`err-${rule.id}`} className="border-b border-border last:border-0">
+                      <td colSpan={colCount} className="px-4 py-1 text-xs text-red-600">
+                        {actionErrors[rule.id]}
+                      </td>
+                    </tr>
                   )}
-                  <td className="px-4 py-3 text-xs">
-                    {rule.incident_display_id
-                      ? <a href={`/incidents/${rule.incident_display_id}`} className="text-primary hover:underline">{rule.incident_display_id}</a>
-                      : <span className="text-muted-foreground">—</span>
-                    }
-                  </td>
-                </tr>
+                </>
               ))
             )}
           </tbody>
         </table>
       </div>
+
+      <EditExceptionModal
+        rule={editRule}
+        onClose={() => setEditRule(null)}
+        onSaved={updated => { updateRule(updated); setEditRule(null); }}
+      />
     </div>
   );
 }
