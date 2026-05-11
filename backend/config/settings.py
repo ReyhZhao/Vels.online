@@ -212,6 +212,7 @@ CSRF_COOKIE_SAMESITE = "Lax"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 
+WAZUH_RULES_GITHUB_TOKEN = os.environ.get("WAZUH_RULES_GITHUB_TOKEN", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 EXCEPTION_LLM_PROVIDER = os.environ.get(
     "EXCEPTION_LLM_PROVIDER",
