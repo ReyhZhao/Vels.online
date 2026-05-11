@@ -6,6 +6,11 @@ vi.mock('../lib/axios', () => ({
   default: { get: vi.fn() },
 }));
 
+vi.mock('../components/CreateIncidentModal', () => ({
+  default: ({ open, onClose }) =>
+    open ? <div data-testid="create-modal"><button onClick={onClose}>close-modal</button></div> : null,
+}));
+
 import api from '../lib/axios';
 import IncidentList from './IncidentList';
 
@@ -88,6 +93,29 @@ describe('IncidentList', () => {
     api.get.mockRejectedValue({ response: { data: { detail: 'Permission denied.' } } });
     renderPage();
     await waitFor(() => expect(screen.getByText('Permission denied.')).toBeInTheDocument());
+  });
+
+  it('renders the New Incident button', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('button', { name: /new incident/i })).toBeInTheDocument());
+  });
+
+  it('opens the create modal when New Incident is clicked', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /new incident/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new incident/i }));
+    expect(screen.getByTestId('create-modal')).toBeInTheDocument();
+  });
+
+  it('closes the create modal when onClose is called', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /new incident/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new incident/i }));
+    fireEvent.click(screen.getByText('close-modal'));
+    expect(screen.queryByTestId('create-modal')).not.toBeInTheDocument();
   });
 
   it('renders three tab buttons', async () => {

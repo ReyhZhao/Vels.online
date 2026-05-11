@@ -91,14 +91,28 @@ def test_create_requires_auth(client, acme):
 
 
 @pytest.mark.django_db
-def test_create_non_staff_forbidden(client, acme_member, acme):
-    client.force_login(acme_member)
+def test_create_non_member_forbidden(client, alice, acme):
+    """Non-staff user with no org membership cannot create an incident."""
+    client.force_login(alice)
     response = client.post(
         "/api/incidents/",
         {"org": "acme", "title": "New"},
         content_type="application/json",
     )
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_create_member_creates_incident(client, acme_member, acme):
+    """Non-staff user who is a member of the org can create an incident."""
+    client.force_login(acme_member)
+    response = client.post(
+        "/api/incidents/",
+        {"org": "acme", "title": "Member incident", "severity": "medium", "tlp": "amber", "pap": "amber"},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    assert response.json()["org_slug"] == "acme"
 
 
 @pytest.mark.django_db

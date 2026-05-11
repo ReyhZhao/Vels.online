@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import api from '../lib/axios';
 import SlideOver from '../components/SlideOver';
 import SLAPill from '../components/SLAPill';
+import CreateIncidentModal from '../components/CreateIncidentModal';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -49,6 +50,7 @@ export default function IncidentList() {
   const [error, setError]       = useState(null);
   const [preview, setPreview]   = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const pollRef = useRef(null);
 
   const activeTab = searchParams.get('tab') || '';
@@ -128,8 +130,18 @@ export default function IncidentList() {
     <div className="space-y-4 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Incidents</h1>
-        {!loading && <span className="text-sm text-muted-foreground">{count} total</span>}
+        <div className="flex items-center gap-3">
+          {!loading && <span className="text-sm text-muted-foreground">{count} total</span>}
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            New Incident
+          </button>
+        </div>
       </div>
+
+      <CreateIncidentModal open={createOpen} onClose={() => setCreateOpen(false)} />
 
       <div className="flex gap-0 border-b border-border">
         {TABS.map(tab => (

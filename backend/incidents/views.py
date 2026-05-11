@@ -404,9 +404,6 @@ class IncidentListView(APIView):
         if err:
             return err
 
-        if not request.user.is_staff:
-            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
-
         org_slug = request.data.get("org")
         if not org_slug:
             return Response({"detail": "org is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -415,6 +412,10 @@ class IncidentListView(APIView):
             org = Organization.objects.get(slug=org_slug)
         except Organization.DoesNotExist:
             return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not request.user.is_staff:
+            if not OrganizationMembership.objects.filter(user=request.user, organization=org).exists():
+                return Response({"detail": "You are not a member of this organisation."}, status=status.HTTP_403_FORBIDDEN)
 
         ser = IncidentCreateSerializer(data=request.data)
         if not ser.is_valid():
