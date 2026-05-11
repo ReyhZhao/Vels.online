@@ -1,5 +1,7 @@
+import { createPortal } from 'react-dom';
+
 export default function SlideOver({ open, onClose, title, loading, children }) {
-  return (
+  return createPortal(
     <>
       <div
         data-testid="slideover-backdrop"
@@ -38,6 +40,7 @@ export default function SlideOver({ open, onClose, title, loading, children }) {
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

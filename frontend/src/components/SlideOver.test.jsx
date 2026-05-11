@@ -63,4 +63,10 @@ describe('SlideOver', () => {
 
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('renders into document.body via portal (not inside the render container)', () => {
+    const { container } = renderSlideOver({ open: true });
+    expect(container.firstChild).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeInTheDocument();
+  });
 });
