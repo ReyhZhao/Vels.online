@@ -20,6 +20,7 @@ import IncidentTimeline, {
   renderTaskCreated,
   renderTaskStateChanged,
   renderTaskAutoCancelled,
+  renderExceptionCreated,
 } from './IncidentTimeline';
 
 // ── renderer unit tests ───────────────────────────────────────────────────────
@@ -142,6 +143,23 @@ describe('renderTaskAutoCancelled', () => {
 
   it('handles missing count', () => {
     expect(renderTaskAutoCancelled({})).toContain('auto-cancelled');
+  });
+});
+
+describe('renderExceptionCreated', () => {
+  it('includes description when present', () => {
+    const result = renderExceptionCreated({ description: 'Suppress brute force', wazuh_rule_id: 200001 });
+    expect(result).toContain('Suppress brute force');
+  });
+
+  it('falls back to rule id when description missing', () => {
+    const result = renderExceptionCreated({ wazuh_rule_id: 200001 });
+    expect(result).toContain('200001');
+  });
+
+  it('renderEvent dispatches exception_created', () => {
+    const result = renderEvent('exception_created', { description: 'Block SSH' });
+    expect(result).toContain('Block SSH');
   });
 });
 

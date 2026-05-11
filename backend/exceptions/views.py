@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from incidents.models import Incident
+from incidents.services.events import record_event
 from security.models import OrganizationMembership
 
 from .llm.factory import get_llm_provider
@@ -54,10 +55,17 @@ class ExceptionRuleListView(APIView):
             wazuh_rule_id=allocate_rule_id(),
         )
 
+        if incident:
+            record_event(
+                incident,
+                "exception_created",
+                actor=request.user,
+                payload={"rule_id": rule.id, "wazuh_rule_id": rule.wazuh_rule_id, "description": rule.description},
+            )
+
         try:
             push_rule(rule)
         except Exception as exc:
-            # Log but don't fail — rule is saved; push can be retried
             import logging
             logging.getLogger(__name__).error("GitHub push failed for rule %s: %s", rule.id, exc)
 
@@ -81,6 +89,10 @@ class ExceptionRuleListView(APIView):
         org_filter = request.query_params.get("organisation")
         if org_filter:
             qs = qs.filter(organisation__slug=org_filter)
+
+        incident_filter = request.query_params.get("incident")
+        if incident_filter:
+            qs = qs.filter(incident__display_id=incident_filter)
 
         return Response(ExceptionRuleSerializer(qs, many=True).data)
 

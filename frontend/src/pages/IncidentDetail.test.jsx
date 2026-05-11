@@ -10,6 +10,15 @@ vi.mock('../lib/axios', () => ({
 const mockUseAuth = vi.fn(() => ({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => mockUseAuth() }));
 
+vi.mock('../context/OrgContext', () => ({
+  useOrganization: () => ({ selectedOrg: { slug: 'acme', name: 'Acme' } }),
+}));
+
+vi.mock('../components/SlideOver', () => ({
+  default: ({ open, children, title }) =>
+    open ? <div data-testid="slide-over"><h2>{title}</h2>{children}</div> : null,
+}));
+
 import api from '../lib/axios';
 import IncidentDetail from './IncidentDetail';
 
@@ -45,13 +54,14 @@ const SUBJECTS = [
 
 const EMPTY_TIMELINE = { count: 0, page: 1, page_size: 50, results: [] };
 
-function mockGet(incident = INCIDENT, subjects = SUBJECTS) {
-  api.get.mockImplementation(url => {
+function mockGet(incident = INCIDENT, subjects = SUBJECTS, exceptions = []) {
+  api.get.mockImplementation((url, config) => {
     if (url === '/api/subjects/') return Promise.resolve({ data: subjects });
     if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
     if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
     if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
     if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
+    if (url === '/api/exceptions/') return Promise.resolve({ data: exceptions });
     return Promise.resolve({ data: incident });
   });
 }
@@ -402,5 +412,38 @@ describe('IncidentDetail', () => {
     mockGet();
     renderPage();
     await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
+  });
+
+  // ── IncidentExceptionsSection ─────────────────────────────────────────────
+
+  it('exceptions section hidden when no exceptions', async () => {
+    mockGet(INCIDENT, SUBJECTS, []);
+    renderPage();
+    await waitFor(() => screen.getByText('Suspicious login attempt'));
+    expect(screen.queryByText('Exceptions')).not.toBeInTheDocument();
+  });
+
+  it('exceptions section shows linked rules', async () => {
+    const exceptions = [
+      { id: 1, wazuh_rule_id: 200001, description: 'Suppress brute force', scope: 'org', status: 'applied' },
+      { id: 2, wazuh_rule_id: 200002, description: 'Block SSH noise', scope: 'global', status: 'pending' },
+    ];
+    mockGet(INCIDENT, SUBJECTS, exceptions);
+    renderPage();
+    await waitFor(() => screen.getByText('Exceptions'));
+    expect(screen.getByText('Suppress brute force')).toBeInTheDocument();
+    expect(screen.getByText('Block SSH noise')).toBeInTheDocument();
+    expect(screen.getAllByText('applied').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('pending').length).toBeGreaterThan(0);
+  });
+
+  it('exceptions section shows View links to /exceptions', async () => {
+    const exceptions = [
+      { id: 1, wazuh_rule_id: 200001, description: 'Suppress brute force', scope: 'org', status: 'applied' },
+    ];
+    mockGet(INCIDENT, SUBJECTS, exceptions);
+    renderPage();
+    await waitFor(() => screen.getByText('Exceptions'));
+    expect(screen.getByRole('link', { name: /view/i })).toHaveAttribute('href', '/exceptions');
   });
 });

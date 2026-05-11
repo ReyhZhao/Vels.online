@@ -67,6 +67,11 @@ export function renderTaskAutoCancelled(payload) {
   return count != null ? `${count} task(s) auto-cancelled.` : 'Tasks auto-cancelled.';
 }
 
+export function renderExceptionCreated(payload) {
+  const desc = payload?.description ? `"${payload.description}"` : `rule #${payload?.wazuh_rule_id ?? '?'}`;
+  return `Exception rule created: ${desc}.`;
+}
+
 const KIND_RENDERERS = {
   incident_updated: renderIncidentUpdated,
   incident_created: () => 'Incident created.',
@@ -81,6 +86,7 @@ const KIND_RENDERERS = {
   task_created: renderTaskCreated,
   task_state_changed: renderTaskStateChanged,
   task_auto_cancelled: renderTaskAutoCancelled,
+  exception_created: renderExceptionCreated,
 };
 
 export function renderEvent(kind, payload) {

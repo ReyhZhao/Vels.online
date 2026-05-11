@@ -69,6 +69,45 @@ const SECONDARY_TABS = [
   { key: 'tasks',       label: 'Tasks' },
 ];
 
+const EXCEPTION_STATUS_CLASSES = {
+  pending:  'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+  applied:  'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+  disabled: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+};
+
+function IncidentExceptionsSection({ displayId }) {
+  const [exceptions, setExceptions] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/exceptions/', { params: { incident: displayId } })
+      .then(res => { setExceptions(Array.isArray(res.data) ? res.data : []); setLoaded(true); })
+      .catch(() => setLoaded(true));
+  }, [displayId]);
+
+  if (!loaded || exceptions.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-6 space-y-3">
+      <h2 className="text-base font-semibold text-foreground">Exceptions</h2>
+      <ul className="divide-y divide-border">
+        {exceptions.map(ex => (
+          <li key={ex.id} className="flex items-center justify-between gap-3 py-2">
+            <span className="text-sm text-foreground truncate flex-1">{ex.description || '—'}</span>
+            <span className="text-xs text-muted-foreground shrink-0">{ex.scope}</span>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${EXCEPTION_STATUS_CLASSES[ex.status] ?? ''}`}>
+              {ex.status}
+            </span>
+            <Link to="/exceptions" className="text-xs text-primary hover:underline shrink-0">
+              View
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Badge({ label, value, badgeClass }) {
   return (
     <div className="flex flex-col gap-1">
@@ -528,6 +567,9 @@ export default function IncidentDetail() {
           onIncidentUpdate={setIncident}
         />
       </div>
+
+      {/* ── Exceptions sidebar ── */}
+      <IncidentExceptionsSection displayId={displayId} />
 
       {/* ── Tabbed secondary content ── */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
