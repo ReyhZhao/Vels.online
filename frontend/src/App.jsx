@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Outlet } from 'react-router-dom';
 import PublicLayout from './components/layout/PublicLayout';
 import AppLayout from './components/layout/AppLayout';
 import LandingPage from './pages/LandingPage';
@@ -26,6 +26,7 @@ import IncidentList from './pages/IncidentList';
 import IncidentDetail from './pages/IncidentDetail';
 import NotificationPreferences from './pages/account/NotificationPreferences';
 import ProtectedRoute from './components/ProtectedRoute';
+import StaffOnlyRoute from './components/StaffOnlyRoute';
 
 function App() {
   return (
@@ -39,15 +40,18 @@ function App() {
 
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
         <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/admin" element={<AdminDashboard />} />
-        <Route path="/admin/posts" element={<AdminPostList />} />
-        <Route path="/admin/posts/new" element={<AdminPostForm />} />
-        <Route path="/admin/posts/:slug/edit" element={<AdminPostForm />} />
-        <Route path="/admin/status-settings" element={<StatusSettings />} />
-        <Route path="/admin/security/organizations" element={<OrgManagement />} />
-        <Route path="/admin/security/downloads" element={<DownloadManagement />} />
-        <Route path="/admin/incidents/subjects" element={<SubjectsAdmin />} />
-        <Route path="/admin/incidents/task-templates" element={<TaskTemplatesAdmin />} />
+
+        <Route element={<StaffOnlyRoute><Outlet /></StaffOnlyRoute>}>
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/posts" element={<AdminPostList />} />
+          <Route path="/admin/posts/new" element={<AdminPostForm />} />
+          <Route path="/admin/posts/:slug/edit" element={<AdminPostForm />} />
+          <Route path="/admin/status-settings" element={<StatusSettings />} />
+          <Route path="/admin/security/organizations" element={<OrgManagement />} />
+          <Route path="/admin/security/downloads" element={<DownloadManagement />} />
+          <Route path="/admin/incidents/subjects" element={<SubjectsAdmin />} />
+          <Route path="/admin/incidents/task-templates" element={<TaskTemplatesAdmin />} />
+        </Route>
 
         <Route path="/security" element={<SecurityDashboard />} />
         <Route path="/security/vulnerabilities" element={<VulnerabilityDashboard />} />
