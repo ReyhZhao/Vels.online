@@ -90,12 +90,13 @@ describe('IncidentDetail', () => {
     expect(screen.getByText('Suspicious login attempt')).toBeInTheDocument();
   });
 
-  it('renders severity and TLP badges', async () => {
+  it('renders severity, TLP, and PAP as editable selects', async () => {
     mockGet();
     renderPage();
-    await waitFor(() => screen.getByText('high'));
-    expect(screen.getByText('TLP:AMBER')).toBeInTheDocument();
-    expect(screen.getByText('PAP:AMBER')).toBeInTheDocument();
+    await waitFor(() => screen.getByLabelText('Severity'));
+    expect(screen.getByLabelText('Severity')).toHaveValue('high');
+    expect(screen.getByLabelText('TLP')).toHaveValue('amber');
+    expect(screen.getByLabelText('PAP')).toHaveValue('amber');
   });
 
   it('renders description', async () => {
@@ -309,5 +310,97 @@ describe('IncidentDetail', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(api.post).not.toHaveBeenCalled();
     expect(screen.queryByRole('heading', { name: 'Transfer incident' })).not.toBeInTheDocument();
+  });
+
+  // ── tabs ──────────────────────────────────────────────────────────────────
+
+  it('renders Timeline, Attachments, and Tasks tab buttons', async () => {
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    expect(screen.getByRole('button', { name: 'Timeline' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Attachments' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument();
+  });
+
+  it('shows Timeline content by default', async () => {
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Timeline' }));
+    // Timeline tab is active; attachments and tasks are not rendered
+    expect(screen.queryByRole('button', { name: 'Tasks' })).toBeInTheDocument();
+    // The timeline tab button should carry the active style (primary text)
+    const timelineBtn = screen.getByRole('button', { name: 'Timeline' });
+    expect(timelineBtn.className).toMatch(/text-primary/);
+  });
+
+  it('switching to Tasks tab does not navigate', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Tasks' }));
+    await user.click(screen.getByRole('button', { name: 'Tasks' }));
+    // Still on the same page — title still visible
+    expect(screen.getByText('Suspicious login attempt')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tasks' }).className).toMatch(/text-primary/);
+  });
+
+  // ── inline badge editing ──────────────────────────────────────────────────
+
+  it('PATCHes incident when severity is changed', async () => {
+    mockGet();
+    api.patch.mockResolvedValue({ data: { ...INCIDENT, severity: 'critical' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Severity'));
+    await user.selectOptions(screen.getByLabelText('Severity'), 'critical');
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
+      '/api/incidents/1/',
+      { severity: 'critical' }
+    ));
+  });
+
+  it('PATCHes incident when TLP is changed', async () => {
+    mockGet();
+    api.patch.mockResolvedValue({ data: { ...INCIDENT, tlp: 'green' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByLabelText('TLP'));
+    await user.selectOptions(screen.getByLabelText('TLP'), 'green');
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
+      '/api/incidents/1/',
+      { tlp: 'green' }
+    ));
+  });
+
+  it('PATCHes incident when PAP is changed', async () => {
+    mockGet();
+    api.patch.mockResolvedValue({ data: { ...INCIDENT, pap: 'red' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByLabelText('PAP'));
+    await user.selectOptions(screen.getByLabelText('PAP'), 'red');
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
+      '/api/incidents/1/',
+      { pap: 'red' }
+    ));
+  });
+
+  it('shows inline error when badge PATCH fails', async () => {
+    mockGet();
+    api.patch.mockRejectedValue({ response: { data: { detail: 'Permission denied.' } } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Severity'));
+    await user.selectOptions(screen.getByLabelText('Severity'), 'critical');
+    await waitFor(() => screen.getByText('Permission denied.'));
+  });
+
+  // ── description / comments split ─────────────────────────────────────────
+
+  it('renders description in the split layout', async () => {
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
   });
 });

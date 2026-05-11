@@ -60,6 +60,12 @@ const CLOSURE_REASONS = [
   { value: 'accepted_risk',  label: 'Accepted Risk' },
 ];
 
+const SECONDARY_TABS = [
+  { key: 'timeline',    label: 'Timeline' },
+  { key: 'attachments', label: 'Attachments' },
+  { key: 'tasks',       label: 'Tasks' },
+];
+
 function Badge({ label, value, badgeClass }) {
   return (
     <div className="flex flex-col gap-1">
@@ -76,6 +82,25 @@ function Field({ label, value }) {
     <div className="flex flex-col gap-1">
       <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
       <span className="text-sm text-foreground">{value || '—'}</span>
+    </div>
+  );
+}
+
+function InlineSelect({ label, value, options, colorClasses, onChange, saving }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        disabled={saving}
+        aria-label={label}
+        className={`w-fit cursor-pointer rounded-full border-0 px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${colorClasses[value] ?? ''}`}
+      >
+        {options.map(opt => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -194,20 +219,23 @@ function SubjectDropdown({ incident, subjects, onSubjectChange, saving }) {
 export default function IncidentDetail() {
   const { incidentId } = useParams();
   const { user } = useAuth();
-  const [incident, setIncident] = useState(null);
-  const [subjects, setSubjects] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [incident, setIncident]           = useState(null);
+  const [subjects, setSubjects]           = useState([]);
+  const [loading, setLoading]             = useState(true);
+  const [error, setError]                 = useState(null);
   const [transitioning, setTransitioning] = useState(false);
   const [transitionError, setTransitionError] = useState(null);
-  const [pendingClose, setPendingClose] = useState(false);
+  const [pendingClose, setPendingClose]   = useState(false);
   const [savingSubject, setSavingSubject] = useState(false);
-  const [subjectError, setSubjectError] = useState(null);
+  const [subjectError, setSubjectError]   = useState(null);
   const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
   const [showTransferDialog, setShowTransferDialog] = useState(false);
-  const [staffUsers, setStaffUsers] = useState([]);
-  const [transferring, setTransferring] = useState(false);
+  const [staffUsers, setStaffUsers]       = useState([]);
+  const [transferring, setTransferring]   = useState(false);
   const [transferError, setTransferError] = useState(null);
+  const [savingBadge, setSavingBadge]     = useState(false);
+  const [badgeError, setBadgeError]       = useState(null);
+  const [activeTab, setActiveTab]         = useState('timeline');
   const pollRef = useRef(null);
 
   useEffect(() => {
@@ -282,6 +310,19 @@ export default function IncidentDetail() {
     }
   }, [incidentId]);
 
+  const handleBadgeChange = useCallback(async (field, value) => {
+    setSavingBadge(true);
+    setBadgeError(null);
+    try {
+      const res = await api.patch(`/api/incidents/${incidentId}/`, { [field]: value });
+      setIncident(res.data);
+    } catch (err) {
+      setBadgeError(err.response?.data?.detail || `Failed to update ${field}.`);
+    } finally {
+      setSavingBadge(false);
+    }
+  }, [incidentId]);
+
   async function handleTransition(targetState, closureReason = undefined) {
     setTransitioning(true);
     setTransitionError(null);
@@ -307,7 +348,7 @@ export default function IncidentDetail() {
   }
 
   if (loading) return <p className="text-sm text-muted-foreground p-6">Loading…</p>;
-  if (error) return <p className="text-sm text-red-600 p-6">{error}</p>;
+  if (error)   return <p className="text-sm text-red-600 p-6">{error}</p>;
   if (!incident) return null;
 
   const nextStates = ALLOWED_TRANSITIONS[incident.state] ?? [];
@@ -337,6 +378,7 @@ export default function IncidentDetail() {
         </Link>
       </div>
 
+      {/* ── Header card ── */}
       <div className="rounded-lg border border-border bg-card p-6 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -368,33 +410,44 @@ export default function IncidentDetail() {
         </div>
 
         {transitionError && <p className="text-sm text-red-600">{transitionError}</p>}
-        {transferError && <p className="text-sm text-red-600">{transferError}</p>}
+        {transferError   && <p className="text-sm text-red-600">{transferError}</p>}
+        {badgeError      && <p className="text-sm text-red-600">{badgeError}</p>}
 
+        {/* Metadata grid */}
         <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
           <Badge
             label="State"
             value={incident.state.replace('_', ' ')}
             badgeClass={STATE_CLASSES[incident.state] ?? ''}
           />
-          <Badge
+          <InlineSelect
             label="Severity"
             value={incident.severity}
-            badgeClass={SEVERITY_CLASSES[incident.severity] ?? ''}
+            options={['critical', 'high', 'medium', 'low', 'info']}
+            colorClasses={SEVERITY_CLASSES}
+            onChange={v => handleBadgeChange('severity', v)}
+            saving={savingBadge}
           />
-          <Badge
+          <InlineSelect
             label="TLP"
-            value={`TLP:${incident.tlp.toUpperCase()}`}
-            badgeClass={TLP_CLASSES[incident.tlp] ?? ''}
+            value={incident.tlp}
+            options={['white', 'green', 'amber', 'red']}
+            colorClasses={TLP_CLASSES}
+            onChange={v => handleBadgeChange('tlp', v)}
+            saving={savingBadge}
           />
-          <Badge
+          <InlineSelect
             label="PAP"
-            value={`PAP:${incident.pap.toUpperCase()}`}
-            badgeClass={TLP_CLASSES[incident.pap] ?? ''}
+            value={incident.pap}
+            options={['white', 'green', 'amber', 'red']}
+            colorClasses={TLP_CLASSES}
+            onChange={v => handleBadgeChange('pap', v)}
+            saving={savingBadge}
           />
           <Field label="Organisation" value={incident.org_slug} />
-          <Field label="Source" value={incident.source_kind} />
-          <Field label="Assignee" value={incident.assignee_username} />
-          <Field label="Created By" value={incident.created_by_username} />
+          <Field label="Source"       value={incident.source_kind} />
+          <Field label="Assignee"     value={incident.assignee_username} />
+          <Field label="Created By"   value={incident.created_by_username} />
           {incident.closure_reason && (
             <Field label="Closure Reason" value={incident.closure_reason.replace('_', ' ')} />
           )}
@@ -420,23 +473,33 @@ export default function IncidentDetail() {
 
         {subjectError && <p className="text-sm text-red-600">{subjectError}</p>}
 
-        {incident.description && (
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</span>
-            <p className="text-sm text-foreground whitespace-pre-wrap">{incident.description}</p>
+        {/* Description + Comments split */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <div>
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</span>
+              {incident.description ? (
+                <p className="mt-1 text-sm text-foreground whitespace-pre-wrap">{incident.description}</p>
+              ) : (
+                <p className="mt-1 text-sm text-muted-foreground italic">No description provided.</p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+              <span>Created: {incident.created_at ? new Date(incident.created_at).toLocaleString() : '—'}</span>
+              <span>Updated: {incident.updated_at ? new Date(incident.updated_at).toLocaleString() : '—'}</span>
+            </div>
           </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
-          <span>Created: {incident.created_at ? new Date(incident.created_at).toLocaleString() : '—'}</span>
-          <span>Updated: {incident.updated_at ? new Date(incident.updated_at).toLocaleString() : '—'}</span>
+          <div>
+            <IncidentComments
+              incidentId={incidentId}
+              currentUserId={user?.id}
+              isStaff={user?.is_staff ?? false}
+            />
+          </div>
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-6">
-        <IncidentTasks incidentId={incidentId} subjectId={incident.subject} refreshKey={tasksRefreshKey} />
-      </div>
-
+      {/* ── Delegation panel ── */}
       <div className="rounded-lg border border-border bg-card p-6">
         <DelegationPanel
           incidentId={incidentId}
@@ -446,21 +509,38 @@ export default function IncidentDetail() {
         />
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-6">
-        <IncidentTimeline incidentId={incidentId} />
-      </div>
-
-      <div className="rounded-lg border border-border bg-card p-6">
-        <IncidentAttachments incidentId={incidentId} />
-      </div>
-
-      <div className="rounded-lg border border-border bg-card p-6 space-y-3">
-        <h2 className="text-base font-semibold text-foreground">Comments</h2>
-        <IncidentComments
-          incidentId={incidentId}
-          currentUserId={user?.id}
-          isStaff={user?.is_staff ?? false}
-        />
+      {/* ── Tabbed secondary content ── */}
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <div className="flex border-b border-border">
+          {SECONDARY_TABS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                activeTab === tab.key
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="p-6">
+          {activeTab === 'timeline' && (
+            <IncidentTimeline incidentId={incidentId} />
+          )}
+          {activeTab === 'attachments' && (
+            <IncidentAttachments incidentId={incidentId} />
+          )}
+          {activeTab === 'tasks' && (
+            <IncidentTasks
+              incidentId={incidentId}
+              subjectId={incident.subject}
+              refreshKey={tasksRefreshKey}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
