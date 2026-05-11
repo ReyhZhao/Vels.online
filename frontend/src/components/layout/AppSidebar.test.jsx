@@ -269,4 +269,31 @@ describe('AppSidebar', () => {
 
     expect(JSON.parse(store['sidebar:security:open'])).toBe(false);
   });
+
+  // ── mobile positioning ────────────────────────────────────────────────────
+
+  it('mobile-open aside starts at top-28 not at the top of the viewport', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AuthContext.Provider value={{ user: regularUser, isAuthenticated: true, isLoading: false }}>
+          <AppSidebar mobileOpen onMobileClose={() => {}} />
+        </AuthContext.Provider>
+      </MemoryRouter>
+    );
+    const aside = container.querySelector('aside');
+    expect(aside.className).toContain('top-28');
+    expect(aside.className).not.toContain('inset-y-0');
+  });
+
+  it('backdrop covers full viewport when mobile sidebar is open', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AuthContext.Provider value={{ user: regularUser, isAuthenticated: true, isLoading: false }}>
+          <AppSidebar mobileOpen onMobileClose={() => {}} />
+        </AuthContext.Provider>
+      </MemoryRouter>
+    );
+    const backdrop = container.querySelector('[aria-hidden="true"]');
+    expect(backdrop.className).toContain('inset-0');
+  });
 });

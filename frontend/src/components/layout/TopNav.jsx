@@ -31,20 +31,20 @@ function TopNav() {
           <NavLink
             to="/blog"
             className={({ isActive }) =>
-              `text-sm font-medium transition-colors hover:text-foreground ${
+              `hidden md:inline-flex text-sm font-medium transition-colors hover:text-foreground ${
                 isActive ? 'text-foreground' : 'text-muted-foreground'
               }`
             }
           >
             Blog
           </NavLink>
-          <StatusIndicator />
+          <span className="hidden md:flex"><StatusIndicator /></span>
           {isAuthenticated ? (
             <>
               <NavLink
                 to="/dashboard"
                 className={({ isActive }) =>
-                  `text-sm font-medium transition-colors hover:text-foreground ${
+                  `hidden md:inline-flex text-sm font-medium transition-colors hover:text-foreground ${
                     isActive ? 'text-foreground' : 'text-muted-foreground'
                   }`
                 }
@@ -56,14 +56,14 @@ function TopNav() {
               {user?.is_staff && (
                 <button
                   onClick={() => setReportOpen(true)}
-                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
+                  className="hidden md:inline-flex rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
                   aria-label="Report issue"
                 >
                   Report issue
                 </button>
               )}
               <div className="flex items-center gap-3">
-                <span className="text-sm text-muted-foreground" data-testid="nav-username">
+                <span className="hidden md:inline text-sm text-muted-foreground" data-testid="nav-username">
                   {user.username}
                 </span>
                 <button

@@ -158,6 +158,69 @@ describe('TopNav', () => {
     expect(screen.queryByRole('button', { name: /report issue/i })).not.toBeInTheDocument();
   });
 
+  // ── responsive visibility ─────────────────────────────────────────────────
+
+  it('Blog link carries hidden md:inline-flex for mobile hiding', () => {
+    renderTopNav();
+    const blogLink = screen.getByRole('link', { name: 'Blog' });
+    expect(blogLink.className).toContain('hidden');
+    expect(blogLink.className).toContain('md:inline-flex');
+  });
+
+  it('StatusIndicator is wrapped in a hidden md:flex container', () => {
+    renderTopNav();
+    const statusLink = screen.getByRole('link', { name: /site status/i });
+    expect(statusLink.closest('span').className).toContain('hidden');
+    expect(statusLink.closest('span').className).toContain('md:flex');
+  });
+
+  it('Dashboard link carries hidden md:inline-flex for mobile hiding', () => {
+    useAuth.mockReturnValue({
+      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    renderTopNav();
+    const dashboardLink = screen.getByRole('link', { name: 'Dashboard' });
+    expect(dashboardLink.className).toContain('hidden');
+    expect(dashboardLink.className).toContain('md:inline-flex');
+  });
+
+  it('Report issue button carries hidden md:inline-flex for mobile hiding', () => {
+    useAuth.mockReturnValue({
+      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    renderTopNav();
+    const reportBtn = screen.getByRole('button', { name: /report issue/i });
+    expect(reportBtn.className).toContain('hidden');
+    expect(reportBtn.className).toContain('md:inline-flex');
+  });
+
+  it('username span carries hidden md:inline for mobile hiding', () => {
+    useAuth.mockReturnValue({
+      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    renderTopNav();
+    const usernameEl = screen.getByTestId('nav-username');
+    expect(usernameEl.className).toContain('hidden');
+    expect(usernameEl.className).toContain('md:inline');
+  });
+
+  it('Logout button has no hidden class — always visible', () => {
+    useAuth.mockReturnValue({
+      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    renderTopNav();
+    const logoutBtn = screen.getByRole('button', { name: /logout/i });
+    expect(logoutBtn.className).not.toContain('hidden');
+  });
+
   it('calls POST /api/logout/ when Logout is clicked', async () => {
     useAuth.mockReturnValue({
       user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },

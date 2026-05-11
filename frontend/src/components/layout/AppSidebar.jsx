@@ -110,7 +110,7 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
         className={cn(
           'flex-col border-r border-border bg-card transition-all duration-200',
           mobileOpen
-            ? 'fixed inset-y-0 left-0 z-50 w-56 flex'
+            ? 'fixed top-28 bottom-0 left-0 z-50 w-56 flex'
             : cn('hidden md:flex', collapsed ? 'w-14' : 'w-56')
         )}
       >
