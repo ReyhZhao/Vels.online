@@ -12,6 +12,7 @@ urlpatterns = [
     path("status/", include("status.urls")),
     path("security/", include("security.urls")),
     path("incidents/", include("incidents.urls")),
+    path("exceptions/", include("exceptions.urls")),
     path("subjects/", include("incidents.subject_urls")),
     path("task-templates/", include("incidents.task_template_urls")),
     path("tasks/", include("incidents.task_urls")),

@@ -24,6 +24,7 @@ import WorkPackagePage from './pages/WorkPackagePage';
 import RiskAcceptancePage from './pages/RiskAcceptancePage';
 import IncidentList from './pages/IncidentList';
 import IncidentDetail from './pages/IncidentDetail';
+import ExceptionList from './pages/ExceptionList';
 import NotificationPreferences from './pages/account/NotificationPreferences';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
@@ -64,6 +65,7 @@ function App() {
 
         <Route path="/incidents" element={<IncidentList />} />
         <Route path="/incidents/:displayId" element={<IncidentDetail />} />
+        <Route path="/exceptions" element={<ExceptionList />} />
 
         <Route path="/account/notifications" element={<NotificationPreferences />} />
       </Route>

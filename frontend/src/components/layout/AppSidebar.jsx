@@ -20,6 +20,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  Filter,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -187,6 +188,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 </SidebarLink>
                 <SidebarLink to="/security/risk-acceptances" icon={ShieldOff} collapsed={collapsed}>
                   Accepted Risks
+                </SidebarLink>
+                <SidebarLink to="/exceptions" icon={Filter} collapsed={collapsed}>
+                  Exception Rules
                 </SidebarLink>
                 <SidebarLink to="/security/enroll" icon={UserPlus} collapsed={collapsed}>
                   Enroll

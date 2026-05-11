@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "status",
     "security",
     "incidents",
+    "exceptions",
     "notifications",
     "feedback",
 ]
