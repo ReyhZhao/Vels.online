@@ -36,6 +36,7 @@ from .serializers import (
 )
 from .services.events import record_event
 from .services.identifiers import next_display_id
+from .services.notifications_wiring import notify_comment, notify_incident_alert_if_needed, notify_severity_bump_if_needed
 from .services.promote import build_promote_payload, find_open_incidents
 from .services.templates import apply_template, auto_apply_for_subject, cancel_template_tasks_on_subject_change
 from .services.attachments import confirm_upload, delete_attachment, issue_download_url, issue_upload_url
@@ -297,6 +298,7 @@ class IncidentListView(APIView):
             )
             record_event(incident, "incident_created", actor=request.user)
 
+        notify_incident_alert_if_needed(incident)
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)
 
 
@@ -349,6 +351,7 @@ class IncidentDetailView(APIView):
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
 
         old_subject = incident.subject
+        old_severity = incident.severity
 
         changes = {}
         for field, value in ser.validated_data.items():
@@ -368,6 +371,9 @@ class IncidentDetailView(APIView):
                     cancel_template_tasks_on_subject_change(incident, old_subject, actor=request.user)
                 if incident.subject is not None:
                     auto_apply_for_subject(incident, actor=request.user)
+
+        if "severity" in ser.validated_data:
+            notify_severity_bump_if_needed(incident, old_severity)
 
         return Response(IncidentSerializer(incident).data)
 
@@ -773,6 +779,7 @@ class IncidentCommentListView(APIView):
             incident, "comment_added", actor=request.user,
             payload={"target_type": "comment", "target_id": comment.id, "is_internal": comment.is_internal},
         )
+        notify_comment(incident, comment, actor=request.user)
         return Response(CommentSerializer(comment, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 

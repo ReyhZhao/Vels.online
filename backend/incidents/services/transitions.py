@@ -1,3 +1,4 @@
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
@@ -42,4 +43,35 @@ def transition_incident(incident, target_state, actor, closure_reason=None):
         incident.save()
         record_event(incident, "incident_updated", actor=actor, payload={"changes": changes})
 
+    _notify_state_change(incident, old_state, target_state)
     return incident
+
+
+def _notify_state_change(incident, old_state, target_state):
+    from incidents.models import IncidentDelegation
+    from notifications.services.notifications import notify
+
+    recipients = []
+    if incident.assignee_id:
+        try:
+            recipients.append(User.objects.get(pk=incident.assignee_id))
+        except User.DoesNotExist:
+            pass
+
+    delegate_ids = IncidentDelegation.objects.filter(
+        incident=incident, returned_at__isnull=True
+    ).values_list("user_id", flat=True)
+    delegate_users = list(User.objects.filter(id__in=delegate_ids))
+    all_recipients = list({u.id: u for u in recipients + delegate_users}.values())
+
+    if all_recipients:
+        notify(
+            "state_change",
+            all_recipients,
+            incident=incident,
+            payload={
+                "title": f"{incident.display_id} state changed to {target_state}",
+                "body": f"State changed from {old_state} to {target_state}.",
+                "link": f"/incidents/{incident.id}",
+            },
+        )

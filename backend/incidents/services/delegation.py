@@ -1,3 +1,4 @@
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -26,7 +27,23 @@ def delegate(incident, user, by, note=""):
             payload={"delegate_id": user.id, "by_id": by.id, "note": note},
         )
 
+    _notify_delegate(incident, user, note)
     return delegation
+
+
+def _notify_delegate(incident, delegate_user, note):
+    from notifications.services.notifications import notify
+
+    notify(
+        "delegation",
+        [delegate_user],
+        incident=incident,
+        payload={
+            "title": f"{incident.display_id} delegated to you",
+            "body": note or "You have been delegated this incident.",
+            "link": f"/incidents/{incident.id}",
+        },
+    )
 
 
 def return_delegation(delegation, by):
@@ -48,4 +65,28 @@ def return_delegation(delegation, by):
             payload={"delegate_id": delegation.user_id, "by_id": by.id},
         )
 
+    _notify_delegation_returned(incident)
     return delegation
+
+
+def _notify_delegation_returned(incident):
+    from notifications.services.notifications import notify
+
+    if not incident.assignee_id:
+        return
+
+    try:
+        assignee = User.objects.get(pk=incident.assignee_id)
+    except User.DoesNotExist:
+        return
+
+    notify(
+        "assignment",
+        [assignee],
+        incident=incident,
+        payload={
+            "title": f"{incident.display_id} delegation returned",
+            "body": "A delegation on this incident has been returned to you.",
+            "link": f"/incidents/{incident.id}",
+        },
+    )

@@ -16,5 +16,6 @@ urlpatterns = [
     path("task-templates/", include("incidents.task_template_urls")),
     path("tasks/", include("incidents.task_urls")),
     path("comments/", include("incidents.comment_urls")),
+    path("me/", include("notifications.urls")),
     path("", include(blog_router.urls)),
 ]

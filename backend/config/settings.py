@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "status",
     "security",
     "incidents",
+    "notifications",
 ]
 
 SITE_ID = 1

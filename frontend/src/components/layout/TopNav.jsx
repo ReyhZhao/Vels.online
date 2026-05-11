@@ -2,6 +2,7 @@ import { Link, NavLink } from 'react-router-dom';
 import StatusIndicator from './StatusIndicator';
 import { useAuth } from '../../context/AuthContext';
 import OrgSwitcher from '../OrgSwitcher';
+import NotificationBell from '../NotificationBell';
 import api from '../../lib/axios';
 
 function TopNav() {
@@ -46,6 +47,7 @@ function TopNav() {
                 Dashboard
               </NavLink>
               <OrgSwitcher />
+              <NotificationBell />
               <div className="flex items-center gap-3">
                 <span className="text-sm text-muted-foreground" data-testid="nav-username">
                   {user.username}

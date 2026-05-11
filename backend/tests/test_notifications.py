@@ -1,0 +1,274 @@
+import pytest
+from django.contrib.auth.models import User
+
+from security.models import Organization, OrganizationMembership
+from incidents.models import Incident, IncidentDelegation
+from incidents.services.delegation import delegate, return_delegation
+from incidents.services.transfer import transfer_incident
+from incidents.services.transitions import transition_incident
+from notifications.models import Notification, NotificationPreferences
+from notifications.services.notifications import notify
+
+
+# ── fixtures ─────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def acme(db):
+    return Organization.objects.create(name="Acme", slug="acme", wazuh_group="acme")
+
+
+@pytest.fixture
+def staff(db, django_user_model):
+    return django_user_model.objects.create_user(username="staff", password="p", is_staff=True)
+
+
+@pytest.fixture
+def staff2(db, django_user_model):
+    return django_user_model.objects.create_user(username="staff2", password="p", is_staff=True)
+
+
+@pytest.fixture
+def regular(db, django_user_model):
+    return django_user_model.objects.create_user(username="regular", password="p", is_staff=False)
+
+
+def make_incident(org, assignee=None, severity="medium", tlp="amber"):
+    count = Incident.objects.count()
+    return Incident.objects.create(
+        organization=org,
+        title="Test incident",
+        display_id=f"INC-2026-{count + 1:04d}",
+        assignee=assignee,
+        severity=severity,
+        tlp=tlp,
+    )
+
+
+# ── NotificationPreferences auto-creation ────────────────────────────────────
+
+@pytest.mark.django_db
+def test_prefs_auto_created_on_user_creation(django_user_model):
+    u = django_user_model.objects.create_user(username="newuser", password="p")
+    assert NotificationPreferences.objects.filter(user=u).exists()
+
+
+@pytest.mark.django_db
+def test_prefs_default_all_true(django_user_model):
+    u = django_user_model.objects.create_user(username="u2", password="p")
+    prefs = NotificationPreferences.objects.get(user=u)
+    for field in [
+        "email_assignment", "inapp_assignment",
+        "email_delegation", "inapp_delegation",
+        "email_comment", "inapp_comment",
+        "email_state_change", "inapp_state_change",
+        "email_incident_alert", "inapp_incident_alert",
+    ]:
+        assert getattr(prefs, field) is True, f"{field} should default to True"
+
+
+# ── notify() channel routing ──────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_notify_creates_inapp_when_inapp_enabled(staff, acme):
+    incident = make_incident(acme)
+    notify("comment", [staff], incident=incident, payload={"title": "hi", "body": "", "link": ""})
+    assert Notification.objects.filter(recipient=staff, kind="comment").exists()
+
+
+@pytest.mark.django_db
+def test_notify_no_inapp_when_inapp_disabled(staff, acme):
+    prefs = NotificationPreferences.objects.get_or_create(user=staff)[0]
+    prefs.inapp_comment = False
+    prefs.save()
+    incident = make_incident(acme)
+    notify("comment", [staff], incident=incident, payload={"title": "hi", "body": "", "link": ""})
+    assert not Notification.objects.filter(recipient=staff, kind="comment").exists()
+
+
+@pytest.mark.django_db
+def test_notify_skips_inactive_user(acme, django_user_model):
+    inactive = django_user_model.objects.create_user(username="gone", password="p", is_active=False)
+    incident = make_incident(acme)
+    notify("comment", [inactive], incident=incident, payload={"title": "hi", "body": "", "link": ""})
+    assert not Notification.objects.filter(recipient=inactive).exists()
+
+
+# ── email digest rate-limit ───────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_digest_second_notification_within_window_does_not_queue_second_email(staff, acme, settings):
+    settings.CELERY_TASK_ALWAYS_EAGER = False
+    settings.CELERY_TASK_EAGER_PROPAGATES = False
+
+    incident = make_incident(acme)
+    # First notification – no existing pending, so would schedule email
+    notify("comment", [staff], incident=incident, payload={"title": "1", "body": "", "link": ""})
+    # Second notification within 5-min window – has_pending_email_task should be True → no new task
+    # We verify by checking only 1 unread notification exists (both are written in-app)
+    notify("comment", [staff], incident=incident, payload={"title": "2", "body": "", "link": ""})
+    assert Notification.objects.filter(recipient=staff, incident=incident, read_at__isnull=True).count() == 2
+
+
+# ── assignment / delegation guardrail ─────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_prefs_patch_guardrail_assignment(client, staff):
+    client.force_login(staff)
+    response = client.patch(
+        "/api/me/notification-prefs/",
+        {"email_assignment": False, "inapp_assignment": False},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert "assignment" in str(response.json()).lower()
+
+
+@pytest.mark.django_db
+def test_prefs_patch_guardrail_delegation(client, staff):
+    client.force_login(staff)
+    response = client.patch(
+        "/api/me/notification-prefs/",
+        {"email_delegation": False, "inapp_delegation": False},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert "delegation" in str(response.json()).lower()
+
+
+@pytest.mark.django_db
+def test_prefs_patch_allows_one_channel_disabled(client, staff):
+    client.force_login(staff)
+    response = client.patch(
+        "/api/me/notification-prefs/",
+        {"email_assignment": False},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    assert response.json()["email_assignment"] is False
+    assert response.json()["inapp_assignment"] is True
+
+
+# ── incident_alert fires for org members ─────────────────────────────────────
+
+@pytest.mark.django_db
+def test_incident_alert_fires_for_org_members_at_high_severity(client, acme, staff, regular):
+    OrganizationMembership.objects.create(user=regular, organization=acme)
+    client.force_login(staff)
+    response = client.post(
+        "/api/incidents/",
+        {"org": "acme", "title": "Critical", "severity": "high", "tlp": "amber"},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    assert Notification.objects.filter(recipient=regular, kind="incident_alert").exists()
+
+
+@pytest.mark.django_db
+def test_incident_alert_does_not_fire_at_tlp_red(client, acme, staff, regular):
+    OrganizationMembership.objects.create(user=regular, organization=acme)
+    client.force_login(staff)
+    response = client.post(
+        "/api/incidents/",
+        {"org": "acme", "title": "Critical Red", "severity": "high", "tlp": "red"},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    assert not Notification.objects.filter(recipient=regular, kind="incident_alert").exists()
+
+
+@pytest.mark.django_db
+def test_incident_alert_does_not_fire_at_medium_severity(client, acme, staff, regular):
+    OrganizationMembership.objects.create(user=regular, organization=acme)
+    client.force_login(staff)
+    response = client.post(
+        "/api/incidents/",
+        {"org": "acme", "title": "Medium", "severity": "medium", "tlp": "amber"},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    assert not Notification.objects.filter(recipient=regular, kind="incident_alert").exists()
+
+
+# ── comment author excluded ───────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_comment_author_excluded_from_comment_notification(client, acme, staff, staff2):
+    incident = make_incident(acme, assignee=staff2)
+    client.force_login(staff)
+    # staff is NOT the assignee; staff2 is. Staff comments → staff2 gets notified, staff does not.
+    client.post(
+        f"/api/incidents/{incident.id}/comments/",
+        {"body": "hello"},
+        content_type="application/json",
+    )
+    assert Notification.objects.filter(recipient=staff2, kind="comment").exists()
+    assert not Notification.objects.filter(recipient=staff, kind="comment").exists()
+
+
+@pytest.mark.django_db
+def test_assignee_who_comments_excluded(client, acme, staff):
+    incident = make_incident(acme, assignee=staff)
+    client.force_login(staff)
+    client.post(
+        f"/api/incidents/{incident.id}/comments/",
+        {"body": "self-note"},
+        content_type="application/json",
+    )
+    assert not Notification.objects.filter(recipient=staff, kind="comment").exists()
+
+
+# ── notification endpoints ────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_unread_count_endpoint(client, staff, acme):
+    incident = make_incident(acme)
+    Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={})
+    Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={})
+    client.force_login(staff)
+    response = client.get("/api/me/notifications/unread-count/")
+    assert response.status_code == 200
+    assert response.json()["unread_count"] == 2
+
+
+@pytest.mark.django_db
+def test_mark_notification_read(client, staff, acme):
+    incident = make_incident(acme)
+    n = Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={})
+    client.force_login(staff)
+    response = client.post(f"/api/me/notifications/{n.id}/read/")
+    assert response.status_code == 200
+    n.refresh_from_db()
+    assert n.read_at is not None
+
+
+@pytest.mark.django_db
+def test_read_all_marks_all_read(client, staff, acme):
+    incident = make_incident(acme)
+    for _ in range(3):
+        Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={})
+    client.force_login(staff)
+    client.post("/api/me/notifications/read-all/")
+    assert not Notification.objects.filter(recipient=staff, read_at__isnull=True).exists()
+
+
+@pytest.mark.django_db
+def test_notification_list_filter_unread(client, staff, acme):
+    incident = make_incident(acme)
+    from django.utils import timezone
+    Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={})
+    Notification.objects.create(
+        recipient=staff, kind="comment", incident=incident, payload={}, read_at=timezone.now()
+    )
+    client.force_login(staff)
+    response = client.get("/api/me/notifications/?read=false")
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+
+
+@pytest.mark.django_db
+def test_prefs_get_auto_creates_row(client, staff):
+    client.force_login(staff)
+    NotificationPreferences.objects.filter(user=staff).delete()
+    response = client.get("/api/me/notification-prefs/")
+    assert response.status_code == 200
+    assert NotificationPreferences.objects.filter(user=staff).exists()

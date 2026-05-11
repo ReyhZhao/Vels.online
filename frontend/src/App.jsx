@@ -24,6 +24,7 @@ import WorkPackagePage from './pages/WorkPackagePage';
 import RiskAcceptancePage from './pages/RiskAcceptancePage';
 import IncidentList from './pages/IncidentList';
 import IncidentDetail from './pages/IncidentDetail';
+import NotificationPreferences from './pages/account/NotificationPreferences';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -59,6 +60,8 @@ function App() {
 
         <Route path="/incidents" element={<IncidentList />} />
         <Route path="/incidents/:incidentId" element={<IncidentDetail />} />
+
+        <Route path="/account/notifications" element={<NotificationPreferences />} />
       </Route>
     </Routes>
   );
