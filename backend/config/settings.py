@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "security",
     "incidents",
     "notifications",
+    "feedback",
 ]
 
 SITE_ID = 1
@@ -196,6 +197,9 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
+
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 
 INCIDENT_SLA_TARGETS = {
     "critical": {"response_seconds": 15 * 60,       "resolve_seconds": 4 * 3600},

@@ -138,6 +138,26 @@ describe('TopNav', () => {
     expect(screen.queryByTestId('org-switcher')).not.toBeInTheDocument();
   });
 
+  it('shows Report issue button for staff users', () => {
+    useAuth.mockReturnValue({
+      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    renderTopNav();
+    expect(screen.getByRole('button', { name: /report issue/i })).toBeInTheDocument();
+  });
+
+  it('does not show Report issue button for non-staff users', () => {
+    useAuth.mockReturnValue({
+      user: { id: 2, username: 'member', email: 'member@vels.online', is_staff: false },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    renderTopNav();
+    expect(screen.queryByRole('button', { name: /report issue/i })).not.toBeInTheDocument();
+  });
+
   it('calls POST /api/logout/ when Logout is clicked', async () => {
     useAuth.mockReturnValue({
       user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
