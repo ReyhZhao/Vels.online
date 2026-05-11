@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../lib/axios';
 import SlideOver from '../components/SlideOver';
+import SLAPill from '../components/SLAPill';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -201,6 +202,7 @@ export default function IncidentList() {
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">TLP</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">State</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">SLA</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Assignee</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Created</th>
             </tr>
@@ -208,11 +210,11 @@ export default function IncidentList() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
             ) : results.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No incidents.</td>
+                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No incidents.</td>
               </tr>
             ) : (
               results.map(inc => (
@@ -237,6 +239,10 @@ export default function IncidentList() {
                     <span className={`text-xs font-medium ${STATE_CLASSES[inc.state] ?? 'text-muted-foreground'}`}>
                       {inc.state?.replace('_', ' ')}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <SLAPill sla={inc.response_sla} label="Response SLA" />
+                    <SLAPill sla={inc.resolve_sla} label="Resolve SLA" />
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-xs">{inc.assignee_username || '—'}</td>
                   <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">

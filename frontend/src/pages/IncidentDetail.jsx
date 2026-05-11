@@ -7,6 +7,7 @@ import IncidentAttachments from '../components/IncidentAttachments';
 import IncidentComments from '../components/IncidentComments';
 import IncidentTimeline from '../components/IncidentTimeline';
 import IncidentTasks from './IncidentTasks';
+import SLAPill from '../components/SLAPill';
 
 const TRIAGE_STATES = new Set(['new', 'triaged']);
 
@@ -396,6 +397,18 @@ export default function IncidentDetail() {
           <Field label="Created By" value={incident.created_by_username} />
           {incident.closure_reason && (
             <Field label="Closure Reason" value={incident.closure_reason.replace('_', ' ')} />
+          )}
+          {incident.response_sla?.applies && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Response SLA</span>
+              <SLAPill sla={incident.response_sla} label="Response SLA" />
+            </div>
+          )}
+          {incident.resolve_sla?.applies && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Resolve SLA</span>
+              <SLAPill sla={incident.resolve_sla} label="Resolve SLA" />
+            </div>
           )}
           <SubjectDropdown
             incident={incident}

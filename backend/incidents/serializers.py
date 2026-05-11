@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -41,6 +42,31 @@ class IncidentDelegationSerializer(serializers.ModelSerializer):
         return obj.delegated_by.username if obj.delegated_by else None
 
 
+def _compute_sla(incident, kind):
+    targets = getattr(settings, "INCIDENT_SLA_TARGETS", {})
+    sev_targets = targets.get(incident.severity)
+    if not sev_targets:
+        return None
+    target = sev_targets.get(f"{kind}_seconds")
+    if target is None:
+        return None
+
+    if kind == "response":
+        applies = incident.state == "new"
+    else:
+        applies = incident.state not in ("resolved", "closed")
+
+    elapsed = int((timezone.now() - incident.created_at).total_seconds())
+    remaining = target - elapsed
+    return {
+        "target_seconds": target,
+        "elapsed_seconds": elapsed,
+        "remaining_seconds": remaining,
+        "breached": elapsed > target,
+        "applies": applies,
+    }
+
+
 class IncidentSerializer(serializers.ModelSerializer):
     created_by_username = serializers.SerializerMethodField()
     assignee_username = serializers.SerializerMethodField()
@@ -48,6 +74,8 @@ class IncidentSerializer(serializers.ModelSerializer):
     subject_slug = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
     active_delegations = serializers.SerializerMethodField()
+    response_sla = serializers.SerializerMethodField()
+    resolve_sla = serializers.SerializerMethodField()
 
     class Meta:
         model = Incident
@@ -74,6 +102,8 @@ class IncidentSerializer(serializers.ModelSerializer):
             "created_by_username",
             "created_at",
             "updated_at",
+            "response_sla",
+            "resolve_sla",
         ]
         read_only_fields = ["id", "display_id", "org_slug", "created_by", "created_at", "updated_at"]
 
@@ -92,6 +122,12 @@ class IncidentSerializer(serializers.ModelSerializer):
 
     def get_subject_name(self, obj):
         return obj.subject.name if obj.subject else None
+
+    def get_response_sla(self, obj):
+        return _compute_sla(obj, "response")
+
+    def get_resolve_sla(self, obj):
+        return _compute_sla(obj, "resolve")
 
 
 class IncidentCreateSerializer(serializers.ModelSerializer):

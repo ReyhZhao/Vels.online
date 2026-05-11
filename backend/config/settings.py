@@ -196,3 +196,10 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
+
+INCIDENT_SLA_TARGETS = {
+    "critical": {"response_seconds": 15 * 60,       "resolve_seconds": 4 * 3600},
+    "high":     {"response_seconds": 1 * 3600,       "resolve_seconds": 24 * 3600},
+    "medium":   {"response_seconds": 4 * 3600,       "resolve_seconds": 3 * 24 * 3600},
+    "low":      {"response_seconds": 24 * 3600,      "resolve_seconds": 7 * 24 * 3600},
+}
