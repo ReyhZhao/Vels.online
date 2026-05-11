@@ -4,94 +4,159 @@ import { useAuth } from '../context/AuthContext';
 import IncidentComments from '../components/IncidentComments';
 
 const TASK_STATE_LABELS = {
-  new: 'New',
+  new:         'New',
   in_progress: 'In Progress',
-  done: 'Done',
-  cancelled: 'Cancelled',
+  done:        'Done',
+  cancelled:   'Cancelled',
 };
 
 const TASK_STATE_CLASSES = {
-  new: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  new:         'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
   in_progress: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-  done: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-  cancelled: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+  done:        'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+  cancelled:   'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
 
-function TaskRow({ task, onUpdate, currentUserId, isStaff }) {
+const ALL_STATES = ['new', 'in_progress', 'done', 'cancelled'];
+
+// ── Task modal ────────────────────────────────────────────────────────────────
+
+function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
+  const [currentTask, setCurrentTask] = useState(task);
   const [saving, setSaving] = useState(false);
-  const [showComments, setShowComments] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    function handleKey(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
 
   async function changeState(newState) {
     setSaving(true);
+    setError(null);
     try {
-      const res = await api.patch(`/api/tasks/${task.id}/`, { state: newState });
+      const res = await api.patch(`/api/tasks/${currentTask.id}/`, { state: newState });
+      setCurrentTask(res.data);
       onUpdate(res.data);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to update task.');
     } finally {
       setSaving(false);
     }
   }
 
-  const isCancelled = task.state === 'cancelled';
-  const isTemplateDerived = task.template_name !== null;
-  const nextStates = ['new', 'in_progress', 'done', 'cancelled'].filter(s => s !== task.state);
+  const nextStates = ALL_STATES.filter(s => s !== currentTask.state);
 
   return (
-    <>
-      <tr className={`border-b border-border ${showComments ? '' : 'last:border-0'} ${isCancelled ? 'opacity-60' : 'hover:bg-accent/20'}`}>
-        <td className="px-3 py-2 text-xs text-muted-foreground w-8">{task.display_order}</td>
-        <td className="px-3 py-2 text-sm font-medium text-foreground">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="flex w-full max-w-2xl max-h-[90vh] flex-col rounded-lg border border-border bg-card shadow-xl">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+          <div className="flex flex-col gap-1.5 min-w-0">
+            <h2 className="text-base font-semibold text-foreground">{currentTask.title}</h2>
+            {currentTask.template_name && (
+              <span className="inline-flex w-fit items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                {currentTask.template_name}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {/* Description */}
+          {currentTask.description ? (
+            <p className="text-sm text-foreground whitespace-pre-wrap">{currentTask.description}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground italic">No description.</p>
+          )}
+
+          {/* State badge + action buttons */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TASK_STATE_CLASSES[currentTask.state] ?? ''}`}>
+              {TASK_STATE_LABELS[currentTask.state] ?? currentTask.state}
+            </span>
+            {nextStates.map(s => (
+              <button
+                key={s}
+                onClick={() => changeState(s)}
+                disabled={saving}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+              >
+                {TASK_STATE_LABELS[s]}
+              </button>
+            ))}
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          {/* Task-scoped comments */}
+          <div className="border-t border-border pt-4">
+            <IncidentComments
+              incidentId={currentTask.incident}
+              taskId={currentTask.id}
+              currentUserId={currentUserId}
+              isStaff={isStaff}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Task row (read-only, clickable) ───────────────────────────────────────────
+
+function TaskRow({ task, onSelect }) {
+  const isCancelled     = task.state === 'cancelled';
+  const isTemplateDerived = task.template_name !== null;
+
+  return (
+    <tr
+      className={`border-b border-border last:border-0 cursor-pointer transition-colors ${
+        isCancelled ? 'opacity-60' : 'hover:bg-accent/20'
+      }`}
+      onClick={() => onSelect(task)}
+    >
+      <td className="px-3 py-2 text-xs text-muted-foreground w-8">{task.display_order}</td>
+      <td className="px-3 py-2 text-sm font-medium text-foreground">
+        <div className="flex items-center gap-2">
           <span
             className={isCancelled ? 'line-through text-muted-foreground' : ''}
             title={isCancelled && isTemplateDerived ? 'Auto-cancelled when subject changed' : undefined}
           >
             {task.title}
           </span>
-        </td>
-        <td className="px-3 py-2 text-sm text-muted-foreground max-w-xs truncate">{task.description || '—'}</td>
-        <td className="px-3 py-2">
-          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TASK_STATE_CLASSES[task.state] ?? ''}`}>
-            {TASK_STATE_LABELS[task.state] ?? task.state}
-          </span>
-        </td>
-        <td className="px-3 py-2">
-          <div className="flex gap-1 flex-wrap items-center">
-            {nextStates.map(s => (
-              <button
-                key={s}
-                onClick={() => changeState(s)}
-                disabled={saving}
-                className="rounded px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 transition-colors"
-              >
-                {TASK_STATE_LABELS[s]}
-              </button>
-            ))}
-            <button
-              onClick={() => setShowComments(v => !v)}
-              className="rounded px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              aria-label="Toggle task comments"
-            >
-              {showComments ? 'Hide comments' : 'Comments'}
-            </button>
-          </div>
-        </td>
-      </tr>
-      {showComments && (
-        <tr className="border-b border-border last:border-0 bg-muted/20">
-          <td colSpan={5} className="px-4 py-3">
-            <IncidentComments
-              incidentId={task.incident}
-              taskId={task.id}
-              currentUserId={currentUserId}
-              isStaff={isStaff}
-            />
-          </td>
-        </tr>
-      )}
-    </>
+          {isTemplateDerived && (
+            <span className="shrink-0 inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+              template
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-2">
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TASK_STATE_CLASSES[task.state] ?? ''}`}>
+          {TASK_STATE_LABELS[task.state] ?? task.state}
+        </span>
+      </td>
+    </tr>
   );
 }
 
-function TaskGroup({ groupName, tasks, onUpdate, currentUserId, isStaff }) {
+function TaskGroup({ groupName, tasks, onSelect }) {
   return (
     <div className="space-y-1">
       <p className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -103,14 +168,12 @@ function TaskGroup({ groupName, tasks, onUpdate, currentUserId, isStaff }) {
             <tr className="border-b border-border bg-muted/30">
               <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-8">#</th>
               <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Title</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Description</th>
               <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">State</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Actions</th>
             </tr>
           </thead>
           <tbody>
             {tasks.map(task => (
-              <TaskRow key={task.id} task={task} onUpdate={onUpdate} currentUserId={currentUserId} isStaff={isStaff} />
+              <TaskRow key={task.id} task={task} onSelect={onSelect} />
             ))}
           </tbody>
         </table>
@@ -118,6 +181,8 @@ function TaskGroup({ groupName, tasks, onUpdate, currentUserId, isStaff }) {
     </div>
   );
 }
+
+// ── Add-hoc form (unchanged) ──────────────────────────────────────────────────
 
 function AddAdHocForm({ incidentId, onAdded }) {
   const [title, setTitle] = useState('');
@@ -164,11 +229,13 @@ function AddAdHocForm({ incidentId, onAdded }) {
   );
 }
 
+// ── Template picker (unchanged) ───────────────────────────────────────────────
+
 function TemplatePicker({ incidentId, subjectId, onApplied }) {
   const [templates, setTemplates] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [applying, setApplying] = useState(null);
-  const [error, setError] = useState(null);
+  const [loading, setLoading]     = useState(true);
+  const [applying, setApplying]   = useState(null);
+  const [error, setError]         = useState(null);
 
   useEffect(() => {
     if (!subjectId) {
@@ -195,7 +262,7 @@ function TemplatePicker({ incidentId, subjectId, onApplied }) {
   }
 
   if (!subjectId) return null;
-  if (loading) return <p className="text-xs text-muted-foreground">Loading templates…</p>;
+  if (loading)    return <p className="text-xs text-muted-foreground">Loading templates…</p>;
   if (templates.length === 0) return null;
 
   return (
@@ -222,11 +289,14 @@ function TemplatePicker({ incidentId, subjectId, onApplied }) {
   );
 }
 
+// ── IncidentTasks ─────────────────────────────────────────────────────────────
+
 export default function IncidentTasks({ incidentId, subjectId, refreshKey }) {
   const { user } = useAuth();
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [tasks, setTasks]               = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState(null);
+  const [selectedTask, setSelectedTask] = useState(null);
 
   const loadTasks = useCallback(() => {
     setLoading(true);
@@ -250,7 +320,7 @@ export default function IncidentTasks({ incidentId, subjectId, refreshKey }) {
     setTasks(newTasks);
   }
 
-  // Group tasks by template name (null → "Ad-hoc")
+  // Group by template name (null → "Ad-hoc")
   const groups = {};
   for (const task of tasks) {
     const key = task.template_name ?? 'Ad-hoc';
@@ -281,15 +351,23 @@ export default function IncidentTasks({ incidentId, subjectId, refreshKey }) {
               key={groupName}
               groupName={groupName}
               tasks={groupTasks}
-              onUpdate={handleTaskUpdate}
-              currentUserId={user?.id}
-              isStaff={user?.is_staff ?? false}
+              onSelect={setSelectedTask}
             />
           ))}
         </div>
       )}
 
       <AddAdHocForm incidentId={incidentId} onAdded={handleTaskAdded} />
+
+      {selectedTask && (
+        <TaskModal
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onUpdate={handleTaskUpdate}
+          currentUserId={user?.id}
+          isStaff={user?.is_staff ?? false}
+        />
+      )}
     </div>
   );
 }

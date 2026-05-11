@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -74,6 +74,7 @@ const ADHOC_TASK = {
 
 function mockGet(tasks = [], templates = []) {
   api.get.mockImplementation(url => {
+    if (url.includes('/comments/')) return Promise.resolve({ data: [] });
     if (url.includes('/tasks/')) return Promise.resolve({ data: tasks });
     if (url.includes('task-templates')) return Promise.resolve({ data: templates });
     return Promise.resolve({ data: [] });
@@ -86,6 +87,8 @@ function renderTasks(incidentId = '10', subjectId = null) {
 
 describe('IncidentTasks', () => {
   beforeEach(() => { vi.clearAllMocks(); });
+
+  // ── list rendering ────────────────────────────────────────────────────────
 
   it('shows loading state initially', () => {
     api.get.mockReturnValue(new Promise(() => {}));
@@ -122,6 +125,24 @@ describe('IncidentTasks', () => {
     expect(screen.getAllByText('Done').length).toBeGreaterThan(0);
   });
 
+  it('rows are clickable (cursor-pointer style)', async () => {
+    mockGet(TASKS, []);
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    const row = screen.getByText('Step 1').closest('tr');
+    expect(row.className).toMatch(/cursor-pointer/);
+  });
+
+  it('no inline state buttons in the table rows', async () => {
+    mockGet(TASKS, []);
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    expect(screen.queryByRole('button', { name: 'In Progress' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
+  });
+
+  // ── template picker ───────────────────────────────────────────────────────
+
   it('shows template picker when subjectId provided', async () => {
     mockGet([], TEMPLATES);
     renderTasks('10', 1);
@@ -150,19 +171,17 @@ describe('IncidentTasks', () => {
     await waitFor(() => screen.getByText('Step 1'));
   });
 
-  it('changes task state via button click', async () => {
-    mockGet(TASKS, []);
-    api.patch.mockResolvedValue({ data: { ...TASKS[0], state: 'in_progress' } });
+  it('shows apply error on template apply failure', async () => {
+    mockGet([], TEMPLATES);
+    api.post.mockRejectedValue({ response: { data: { detail: 'Template already applied.' } } });
     const user = userEvent.setup();
-    renderTasks();
-    await waitFor(() => screen.getByText('Step 1'));
-    const inProgressBtn = screen.getAllByRole('button', { name: 'In Progress' })[0];
-    await user.click(inProgressBtn);
-    await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
-      '/api/tasks/1/',
-      { state: 'in_progress' }
-    ));
+    renderTasks('10', 1);
+    await waitFor(() => screen.getByRole('button', { name: /Apply Phishing Playbook/ }));
+    await user.click(screen.getByRole('button', { name: /Apply Phishing Playbook/ }));
+    await waitFor(() => screen.getByText('Template already applied.'));
   });
+
+  // ── add-hoc form ──────────────────────────────────────────────────────────
 
   it('adds an ad-hoc task', async () => {
     mockGet([], []);
@@ -179,22 +198,11 @@ describe('IncidentTasks', () => {
     await waitFor(() => screen.getByText('Check logs'));
   });
 
-  it('shows apply error on template apply failure', async () => {
-    mockGet([], TEMPLATES);
-    api.post.mockRejectedValue({ response: { data: { detail: 'Template already applied.' } } });
-    const user = userEvent.setup();
-    renderTasks('10', 1);
-    await waitFor(() => screen.getByRole('button', { name: /Apply Phishing Playbook/ }));
-    await user.click(screen.getByRole('button', { name: /Apply Phishing Playbook/ }));
-    await waitFor(() => screen.getByText('Template already applied.'));
-  });
-
   it('re-fetches tasks when refreshKey changes', async () => {
     mockGet([], []);
     const { rerender } = render(<IncidentTasks incidentId="10" subjectId={null} refreshKey={0} />);
     await waitFor(() => screen.getByText('No tasks yet.'));
 
-    // Update mock to return tasks, then bump refreshKey
     api.get.mockImplementation(url => {
       if (url.includes('/tasks/')) return Promise.resolve({ data: [TASKS[0]] });
       return Promise.resolve({ data: [] });
@@ -202,6 +210,8 @@ describe('IncidentTasks', () => {
     rerender(<IncidentTasks incidentId="10" subjectId={null} refreshKey={1} />);
     await waitFor(() => screen.getByText('Step 1'));
   });
+
+  // ── cancelled task styling ────────────────────────────────────────────────
 
   it('renders cancelled template task with strikethrough and tooltip', async () => {
     const cancelledTask = { ...TASKS[0], state: 'cancelled' };
@@ -221,5 +231,128 @@ describe('IncidentTasks', () => {
     const titleEl = screen.getByText('Check logs');
     expect(titleEl).toHaveClass('line-through');
     expect(titleEl).not.toHaveAttribute('title');
+  });
+
+  // ── task modal ────────────────────────────────────────────────────────────
+
+  it('clicking a task row opens the modal', async () => {
+    mockGet(TASKS, []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    expect(screen.getByRole('heading', { name: 'Step 1' })).toBeInTheDocument();
+  });
+
+  it('modal shows full description', async () => {
+    mockGet(TASKS, []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    expect(screen.getByText('Do step 1')).toBeInTheDocument();
+  });
+
+  it('modal shows placeholder when description is empty', async () => {
+    mockGet(TASKS, []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 2'));
+    await user.click(screen.getByText('Step 2').closest('tr'));
+    expect(screen.getByText('No description.')).toBeInTheDocument();
+  });
+
+  it('modal shows template name badge for template tasks', async () => {
+    mockGet(TASKS, []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    // template_name badge appears in the modal header
+    const badges = screen.getAllByText('Phishing Playbook');
+    expect(badges.length).toBeGreaterThan(0);
+  });
+
+  it('modal shows state action buttons (excluding current state)', async () => {
+    mockGet(TASKS, []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    // Task is 'new'; should show In Progress, Done, Cancelled buttons
+    expect(screen.getByRole('button', { name: 'In Progress' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancelled' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New' })).not.toBeInTheDocument();
+  });
+
+  it('state button in modal PATCHes the task', async () => {
+    mockGet(TASKS, []);
+    api.patch.mockResolvedValue({ data: { ...TASKS[0], state: 'in_progress' } });
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await user.click(screen.getByRole('button', { name: 'In Progress' }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
+      '/api/tasks/1/',
+      { state: 'in_progress' }
+    ));
+  });
+
+  it('state change in modal updates the task badge without closing the modal', async () => {
+    mockGet(TASKS, []);
+    api.patch.mockResolvedValue({ data: { ...TASKS[0], state: 'in_progress' } });
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await user.click(screen.getByRole('button', { name: 'In Progress' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Step 1' })).toBeInTheDocument());
+  });
+
+  it('modal closes when × button is clicked', async () => {
+    mockGet(TASKS, []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await waitFor(() => screen.getByRole('heading', { name: 'Step 1' }));
+    await user.click(screen.getByLabelText('Close'));
+    expect(screen.queryByRole('heading', { name: 'Step 1' })).not.toBeInTheDocument();
+  });
+
+  it('modal closes when Escape is pressed', async () => {
+    mockGet(TASKS, []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await waitFor(() => screen.getByRole('heading', { name: 'Step 1' }));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('heading', { name: 'Step 1' })).not.toBeInTheDocument();
+  });
+
+  it('modal closes when backdrop is clicked', async () => {
+    mockGet(TASKS, []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await waitFor(() => screen.getByRole('heading', { name: 'Step 1' }));
+    const backdrop = document.querySelector('.fixed.inset-0.z-50');
+    fireEvent.click(backdrop, { target: backdrop });
+    expect(screen.queryByRole('heading', { name: 'Step 1' })).not.toBeInTheDocument();
+  });
+
+  it('only one modal is open at a time', async () => {
+    mockGet(TASKS, []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getAllByRole('row').length > 1);
+    // Click first task
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await waitFor(() => screen.getByRole('heading', { name: 'Step 1' }));
+    expect(screen.queryByRole('heading', { name: 'Step 2' })).not.toBeInTheDocument();
   });
 });
