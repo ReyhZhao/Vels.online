@@ -23,6 +23,7 @@ import {
   ChevronRight,
   ChevronDown,
   Filter,
+  Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -265,6 +266,17 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
               )}
             </div>
           )}
+
+          <div className="space-y-1">
+            {showItems && (
+              <span className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Account
+              </span>
+            )}
+            <SidebarLink to="/account/notifications" icon={Bell} collapsed={collapsed}>
+              Notifications
+            </SidebarLink>
+          </div>
         </nav>
       </aside>
     </>
