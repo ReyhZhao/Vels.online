@@ -3,6 +3,16 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../../context/AuthContext';
+
+vi.mock('../OrgSwitcher', () => ({
+  default: () => <div data-testid="org-switcher" />,
+}));
+
+vi.mock('../ReportIssueModal', () => ({
+  default: ({ open, onClose }) =>
+    open ? <div data-testid="report-modal"><button onClick={onClose}>close-modal</button></div> : null,
+}));
+
 import AppSidebar from './AppSidebar';
 
 let store = {};
@@ -295,5 +305,51 @@ describe('AppSidebar', () => {
     );
     const backdrop = container.querySelector('[aria-hidden="true"]');
     expect(backdrop.className).toContain('inset-0');
+  });
+
+  // ── OrgSwitcher + Report Issue in sidebar ─────────────────────────────────
+
+  it('renders OrgSwitcher in expanded sidebar', () => {
+    renderSidebar(regularUser);
+    expect(screen.getByTestId('org-switcher')).toBeInTheDocument();
+  });
+
+  it('hides OrgSwitcher when sidebar is collapsed to icon-only mode', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }));
+    expect(screen.queryByTestId('org-switcher')).not.toBeInTheDocument();
+  });
+
+  it('shows Report issue button in expanded sidebar for staff', () => {
+    renderSidebar(staffUser);
+    expect(screen.getByRole('button', { name: /report issue/i })).toBeInTheDocument();
+  });
+
+  it('does not show Report issue button for non-staff users', () => {
+    renderSidebar(regularUser);
+    expect(screen.queryByRole('button', { name: /report issue/i })).not.toBeInTheDocument();
+  });
+
+  it('hides Report issue button when sidebar is collapsed to icon-only mode', async () => {
+    const user = userEvent.setup();
+    renderSidebar(staffUser);
+    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }));
+    expect(screen.queryByRole('button', { name: /report issue/i })).not.toBeInTheDocument();
+  });
+
+  it('opens ReportIssueModal when Report issue button is clicked', async () => {
+    const user = userEvent.setup();
+    renderSidebar(staffUser);
+    await user.click(screen.getByRole('button', { name: /report issue/i }));
+    expect(screen.getByTestId('report-modal')).toBeInTheDocument();
+  });
+
+  it('closes ReportIssueModal when modal requests close', async () => {
+    const user = userEvent.setup();
+    renderSidebar(staffUser);
+    await user.click(screen.getByRole('button', { name: /report issue/i }));
+    await user.click(screen.getByRole('button', { name: /close-modal/i }));
+    expect(screen.queryByTestId('report-modal')).not.toBeInTheDocument();
   });
 });

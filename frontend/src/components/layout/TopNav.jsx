@@ -1,15 +1,11 @@
-import { useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import StatusIndicator from './StatusIndicator';
 import { useAuth } from '../../context/AuthContext';
-import OrgSwitcher from '../OrgSwitcher';
 import NotificationBell from '../NotificationBell';
-import ReportIssueModal from '../ReportIssueModal';
 import api from '../../lib/axios';
 
 function TopNav() {
   const { user, isAuthenticated } = useAuth();
-  const [reportOpen, setReportOpen] = useState(false);
 
   async function handleLogout() {
     await api.post('/api/logout/');
@@ -17,8 +13,6 @@ function TopNav() {
   }
 
   return (
-    <>
-    <ReportIssueModal open={reportOpen} onClose={() => setReportOpen(false)} />
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <Link
@@ -44,24 +38,14 @@ function TopNav() {
               <NavLink
                 to="/dashboard"
                 className={({ isActive }) =>
-                  `hidden md:inline-flex text-sm font-medium transition-colors hover:text-foreground ${
+                  `text-sm font-medium transition-colors hover:text-foreground ${
                     isActive ? 'text-foreground' : 'text-muted-foreground'
                   }`
                 }
               >
                 Dashboard
               </NavLink>
-              <OrgSwitcher />
               <NotificationBell />
-              {user?.is_staff && (
-                <button
-                  onClick={() => setReportOpen(true)}
-                  className="hidden md:inline-flex rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
-                  aria-label="Report issue"
-                >
-                  Report issue
-                </button>
-              )}
               <div className="flex items-center gap-3">
                 <span className="hidden md:inline text-sm text-muted-foreground" data-testid="nav-username">
                   {user.username}
@@ -85,7 +69,6 @@ function TopNav() {
         </nav>
       </div>
     </header>
-    </>
   );
 }
 

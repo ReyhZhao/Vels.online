@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import OrgSwitcher from '../OrgSwitcher';
+import ReportIssueModal from '../ReportIssueModal';
 import {
   LayoutDashboard,
   FileText,
@@ -89,6 +91,7 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   const [incidentsOpen, setIncidentsOpen] = useState(() => readLS('sidebar:incidents:open', true));
   const [securityOpen, setSecurityOpen] = useState(() => readLS('sidebar:security:open', true));
   const [adminOpen, setAdminOpen] = useState(() => readLS('sidebar:admin:open', true));
+  const [reportOpen, setReportOpen] = useState(false);
 
   useEffect(() => { writeLS('sidebar:collapsed', collapsed); }, [collapsed]);
   useEffect(() => { writeLS('sidebar:incidents:open', incidentsOpen); }, [incidentsOpen]);
@@ -99,6 +102,8 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
 
   return (
     <>
+      <ReportIssueModal open={reportOpen} onClose={() => setReportOpen(false)} />
+
       {mobileOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/40 md:hidden"
@@ -133,6 +138,21 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
         </div>
 
         <nav className="flex flex-col gap-2 p-3">
+          {!collapsed && (
+            <div className="space-y-2 pb-2 border-b border-border">
+              <OrgSwitcher />
+              {isStaff && (
+                <button
+                  onClick={() => setReportOpen(true)}
+                  className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors text-left"
+                  aria-label="Report issue"
+                >
+                  Report issue
+                </button>
+              )}
+            </div>
+          )}
+
           <SidebarLink to="/admin" end icon={LayoutDashboard} collapsed={collapsed}>
             Dashboard
           </SidebarLink>

@@ -15,10 +15,6 @@ vi.mock('../../lib/axios', () => ({
   default: { get: vi.fn(), post: vi.fn() },
 }));
 
-vi.mock('../OrgSwitcher', () => ({
-  default: () => <div data-testid="org-switcher" />,
-}));
-
 import { useAuth } from '../../context/AuthContext';
 import api from '../../lib/axios';
 import TopNav from './TopNav';
@@ -122,35 +118,19 @@ describe('TopNav', () => {
     expect(screen.queryByRole('link', { name: 'Dashboard' })).not.toBeInTheDocument();
   });
 
-  it('renders OrgSwitcher when authenticated', () => {
+  it('does not render OrgSwitcher in TopNav (moved to sidebar)', () => {
     useAuth.mockReturnValue({
       user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: false },
       isAuthenticated: true,
       isLoading: false,
     });
-
-    renderTopNav();
-    expect(screen.getByTestId('org-switcher')).toBeInTheDocument();
-  });
-
-  it('does not render OrgSwitcher when not authenticated', () => {
     renderTopNav();
     expect(screen.queryByTestId('org-switcher')).not.toBeInTheDocument();
   });
 
-  it('shows Report issue button for staff users', () => {
+  it('does not render Report issue button in TopNav (moved to sidebar)', () => {
     useAuth.mockReturnValue({
       user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
-      isAuthenticated: true,
-      isLoading: false,
-    });
-    renderTopNav();
-    expect(screen.getByRole('button', { name: /report issue/i })).toBeInTheDocument();
-  });
-
-  it('does not show Report issue button for non-staff users', () => {
-    useAuth.mockReturnValue({
-      user: { id: 2, username: 'member', email: 'member@vels.online', is_staff: false },
       isAuthenticated: true,
       isLoading: false,
     });
@@ -172,30 +152,6 @@ describe('TopNav', () => {
     const statusLink = screen.getByRole('link', { name: /site status/i });
     expect(statusLink.closest('span').className).toContain('hidden');
     expect(statusLink.closest('span').className).toContain('md:flex');
-  });
-
-  it('Dashboard link carries hidden md:inline-flex for mobile hiding', () => {
-    useAuth.mockReturnValue({
-      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
-      isAuthenticated: true,
-      isLoading: false,
-    });
-    renderTopNav();
-    const dashboardLink = screen.getByRole('link', { name: 'Dashboard' });
-    expect(dashboardLink.className).toContain('hidden');
-    expect(dashboardLink.className).toContain('md:inline-flex');
-  });
-
-  it('Report issue button carries hidden md:inline-flex for mobile hiding', () => {
-    useAuth.mockReturnValue({
-      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
-      isAuthenticated: true,
-      isLoading: false,
-    });
-    renderTopNav();
-    const reportBtn = screen.getByRole('button', { name: /report issue/i });
-    expect(reportBtn.className).toContain('hidden');
-    expect(reportBtn.className).toContain('md:inline-flex');
   });
 
   it('username span carries hidden md:inline for mobile hiding', () => {
