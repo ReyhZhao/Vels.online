@@ -32,12 +32,30 @@ describe('LandingPage', () => {
     expect(link).toHaveAttribute('href', '/blog');
   });
 
-  it('renders the Services section with three service cards', () => {
+  it('renders the Services section with four service cards', () => {
     api.get.mockResolvedValue({ data: [] });
     renderLandingPage();
     expect(screen.getByText('Infrastructure')).toBeInTheDocument();
     expect(screen.getByText('Observability')).toBeInTheDocument();
     expect(screen.getByText('Automation')).toBeInTheDocument();
+    expect(screen.getByText('Managed Security')).toBeInTheDocument();
+  });
+
+  it('renders the Managed Security Services section heading', () => {
+    api.get.mockResolvedValue({ data: [] });
+    renderLandingPage();
+    expect(screen.getByRole('heading', { name: 'Managed Security Services' })).toBeInTheDocument();
+  });
+
+  it('renders all six MSSP feature highlights', () => {
+    api.get.mockResolvedValue({ data: [] });
+    renderLandingPage();
+    expect(screen.getByText('Incident triage and response')).toBeInTheDocument();
+    expect(screen.getByText('Playbook enforcement')).toBeInTheDocument();
+    expect(screen.getByText('Delegation and transfers')).toBeInTheDocument();
+    expect(screen.getByText('TLP/PAP-aware communications')).toBeInTheDocument();
+    expect(screen.getByText('Full audit trail')).toBeInTheDocument();
+    expect(screen.getByText('Multi-organisation support')).toBeInTheDocument();
   });
 
   it('renders up to three PostCards when the API returns posts', async () => {

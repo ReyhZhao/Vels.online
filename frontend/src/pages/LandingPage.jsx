@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, Activity, Zap, ArrowRight } from 'lucide-react';
+import { Server, Activity, Zap, ArrowRight, ShieldCheck, AlertTriangle, ListChecks, Users, Lock, Clock, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import PostCard from '@/components/blog/PostCard';
@@ -27,6 +27,52 @@ const SERVICES = [
     title: 'Automation',
     description:
       'Automate repetitive workflows and deployments to ship faster and reduce operational overhead.',
+  },
+  {
+    id: 'managed-security',
+    icon: ShieldCheck,
+    title: 'Managed Security',
+    description:
+      'End-to-end security incident management for your organisation, handled by our SOC team with full transparency and auditability.',
+  },
+];
+
+const MSSP_FEATURES = [
+  {
+    icon: AlertTriangle,
+    title: 'Incident triage and response',
+    description:
+      'Incoming incidents are assigned, prioritised by severity, and worked to resolution by dedicated SOC analysts.',
+  },
+  {
+    icon: ListChecks,
+    title: 'Playbook enforcement',
+    description:
+      'Subject-based task templates automatically apply the right checklist for each incident type — phishing, malware, vulnerability, and more.',
+  },
+  {
+    icon: Users,
+    title: 'Delegation and transfers',
+    description:
+      'Analysts can temporarily delegate work to teammates and receive it back when done, maintaining a clear chain of responsibility.',
+  },
+  {
+    icon: Lock,
+    title: 'TLP/PAP-aware communications',
+    description:
+      'Sensitive findings are gated by classification level — customers see exactly what they are entitled to see, nothing more.',
+  },
+  {
+    icon: Clock,
+    title: 'Full audit trail',
+    description:
+      'Every state change, comment, delegation, and attachment is timestamped in an immutable timeline for complete accountability.',
+  },
+  {
+    icon: Globe,
+    title: 'Multi-organisation support',
+    description:
+      "Each customer organisation's incidents are isolated and managed independently, with no cross-tenant data leakage.",
   },
 ];
 
@@ -70,7 +116,7 @@ function ServicesSection() {
             Expanding capabilities — more coming soon.
           </p>
         </div>
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-2">
           {SERVICES.map(({ id, icon: Icon, title, description }) => (
             <Card key={id} className="flex flex-col">
               <CardHeader>
@@ -83,6 +129,38 @@ function ServicesSection() {
                 <p className="text-sm text-muted-foreground">{description}</p>
               </CardContent>
             </Card>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ManagedSecuritySection() {
+  return (
+    <section className="border-t border-border px-4 py-20">
+      <div className="container mx-auto">
+        <div className="mb-12 text-center">
+          <h2 className="text-3xl font-bold tracking-tight text-foreground">
+            Managed Security Services
+          </h2>
+          <p className="mt-3 mx-auto max-w-2xl text-muted-foreground">
+            Our SOC team handles the full lifecycle of security incident management for your
+            organisation — triaging, tracking, and resolving incidents with full playbook
+            enforcement and an immutable audit trail.
+          </p>
+        </div>
+        <div className="grid gap-8 sm:grid-cols-2">
+          {MSSP_FEATURES.map(({ icon: Icon, title, description }) => (
+            <div key={title} className="flex gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10">
+                <Icon className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+              </div>
+            </div>
           ))}
         </div>
       </div>
@@ -143,6 +221,7 @@ function LandingPage() {
     <div>
       <HeroSection />
       <ServicesSection />
+      <ManagedSecuritySection />
       <BlogPreviewSection posts={posts} />
     </div>
   );
