@@ -146,6 +146,28 @@ describe('IncidentList', () => {
     );
   });
 
+  it('renders markdown in slide-over description', async () => {
+    api.get
+      .mockResolvedValueOnce(PAGE_RESPONSE())
+      .mockResolvedValueOnce({ data: { ...INCIDENTS[0], description: '**bold text**' } });
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    fireEvent.click(screen.getByText('Suspicious login'));
+    await waitFor(() => expect(screen.getByText('bold text')).toBeInTheDocument());
+    expect(screen.getByText('bold text').tagName).toBe('STRONG');
+  });
+
+  it('does not render description section when description is empty', async () => {
+    api.get
+      .mockResolvedValueOnce(PAGE_RESPONSE())
+      .mockResolvedValueOnce({ data: { ...INCIDENTS[0], description: '' } });
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    fireEvent.click(screen.getByText('Suspicious login'));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/incidents/INC-2026-0001/'));
+    expect(screen.queryByRole('article')).not.toBeInTheDocument();
+  });
+
   it('renders pagination buttons when total_pages > 1', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE(INCIDENTS, { count: 30, total_pages: 2 }));
     renderPage();

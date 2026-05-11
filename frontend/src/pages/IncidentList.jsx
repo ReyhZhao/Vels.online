@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import api from '../lib/axios';
 import SlideOver from '../components/SlideOver';
 import SLAPill from '../components/SLAPill';
@@ -292,7 +294,9 @@ export default function IncidentList() {
             <div>
               <h3 className="text-base font-semibold text-foreground">{preview.incident.title}</h3>
               {preview.incident.description && (
-                <p className="mt-1 text-sm text-muted-foreground">{preview.incident.description}</p>
+                <div className="prose prose-sm dark:prose-invert max-w-none mt-1">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.incident.description}</ReactMarkdown>
+                </div>
               )}
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
