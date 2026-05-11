@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import IncidentComments from '../components/IncidentComments';
@@ -79,7 +81,9 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {/* Description */}
           {currentTask.description ? (
-            <p className="text-sm text-foreground whitespace-pre-wrap">{currentTask.description}</p>
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{currentTask.description}</ReactMarkdown>
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground italic">No description.</p>
           )}

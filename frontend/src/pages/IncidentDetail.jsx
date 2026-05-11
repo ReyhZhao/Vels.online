@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import DelegationPanel from '../components/DelegationPanel';
@@ -479,7 +481,9 @@ export default function IncidentDetail() {
             <div>
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</span>
               {incident.description ? (
-                <p className="mt-1 text-sm text-foreground whitespace-pre-wrap">{incident.description}</p>
+                <div className="mt-1 prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{incident.description}</ReactMarkdown>
+                </div>
               ) : (
                 <p className="mt-1 text-sm text-muted-foreground italic">No description provided.</p>
               )}

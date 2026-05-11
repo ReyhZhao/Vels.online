@@ -1,5 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import api from '../lib/axios';
+import MarkdownToolbar from './MarkdownToolbar';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
@@ -16,31 +19,12 @@ function isDeletable(comment, currentUserId, isStaff) {
   return Date.now() - new Date(comment.created_at).getTime() < EDIT_WINDOW_MS;
 }
 
-function linkify(text) {
-  const URL_RE = /(https?:\/\/[^\s<>"]+)/g;
-  const parts = text.split(URL_RE);
-  return parts.map((part, i) =>
-    URL_RE.test(part) ? (
-      <a
-        key={i}
-        href={part}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-600 dark:text-blue-400 underline break-all"
-      >
-        {part}
-      </a>
-    ) : (
-      part
-    )
-  );
-}
-
 function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
   const [editing, setEditing] = useState(false);
   const [editBody, setEditBody] = useState(comment.body);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const editRef = useRef(null);
 
   async function handleSave() {
     setSaving(true);
@@ -88,7 +72,9 @@ function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
         <p className="text-sm italic text-muted-foreground">[deleted]</p>
       ) : editing ? (
         <div className="space-y-2">
+          <MarkdownToolbar textareaRef={editRef} value={editBody} onChange={setEditBody} />
           <textarea
+            ref={editRef}
             value={editBody}
             onChange={e => setEditBody(e.target.value)}
             rows={3}
@@ -113,7 +99,9 @@ function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
           </div>
         </div>
       ) : (
-        <p className="text-sm text-foreground whitespace-pre-wrap">{linkify(comment.body)}</p>
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{comment.body}</ReactMarkdown>
+        </div>
       )}
 
       {!comment.deleted_at && !editing && (canEdit || canDelete) && (
@@ -147,6 +135,7 @@ function CommentForm({ onSubmit }) {
   const [isInternal, setIsInternal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const bodyRef = useRef(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -166,14 +155,18 @@ function CommentForm({ onSubmit }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
-      <textarea
-        value={body}
-        onChange={e => setBody(e.target.value)}
-        placeholder="Add a comment…"
-        rows={3}
-        disabled={submitting}
-        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none disabled:opacity-50"
-      />
+      <div className="rounded-md border border-border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring">
+        <MarkdownToolbar textareaRef={bodyRef} value={body} onChange={setBody} />
+        <textarea
+          ref={bodyRef}
+          value={body}
+          onChange={e => setBody(e.target.value)}
+          placeholder="Add a comment…"
+          rows={3}
+          disabled={submitting}
+          className="w-full bg-transparent text-sm focus:outline-none resize-none disabled:opacity-50"
+        />
+      </div>
       <div className="flex items-center justify-between gap-3">
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
           <input
