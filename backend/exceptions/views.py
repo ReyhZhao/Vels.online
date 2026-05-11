@@ -10,9 +10,59 @@ from security.models import OrganizationMembership
 from .llm.factory import get_llm_provider
 from .models import ExceptionRule
 from .serializers import ExceptionRuleSerializer
+from .services import allocate_rule_id
+from .services_github import push_rule
 
 
 class ExceptionRuleListView(APIView):
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Resolve organisation
+        org_slug = request.data.get("org")
+        if not org_slug:
+            return Response({"detail": "org is required."}, status=status.HTTP_400_BAD_REQUEST)
+        from security.models import Organization
+        try:
+            org = Organization.objects.get(slug=org_slug)
+        except Organization.DoesNotExist:
+            return Response({"detail": "Organisation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Resolve optional incident FK
+        incident = None
+        incident_display_id = request.data.get("incident")
+        if incident_display_id:
+            try:
+                incident = Incident.objects.get(display_id=incident_display_id)
+            except Incident.DoesNotExist:
+                return Response({"detail": "Incident not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        rule = ExceptionRule.objects.create(
+            trigger_rule_id=request.data.get("trigger_rule_id") or None,
+            description=request.data.get("description", ""),
+            match_value=request.data.get("match_value") or "",
+            field_name=request.data.get("field_name") or "",
+            field_value=request.data.get("field_value") or "",
+            field_type=request.data.get("field_type") or "",
+            scope=request.data.get("scope", "org"),
+            agent_name=request.data.get("agent_name") or "",
+            organisation=org,
+            incident=incident,
+            created_by=request.user,
+            status="applied",
+            wazuh_rule_id=allocate_rule_id(),
+        )
+
+        try:
+            push_rule(rule)
+        except Exception as exc:
+            # Log but don't fail — rule is saved; push can be retried
+            import logging
+            logging.getLogger(__name__).error("GitHub push failed for rule %s: %s", rule.id, exc)
+
+        return Response(ExceptionRuleSerializer(rule).data, status=status.HTTP_201_CREATED)
+
     def get(self, request):
         if request.user.is_staff:
             qs = ExceptionRule.objects.select_related("organisation", "incident", "created_by")

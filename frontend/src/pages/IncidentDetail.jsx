@@ -10,6 +10,7 @@ import IncidentComments from '../components/IncidentComments';
 import IncidentTimeline from '../components/IncidentTimeline';
 import IncidentTasks from './IncidentTasks';
 import SLAPill from '../components/SLAPill';
+import CreateExceptionSlideOver from '../components/CreateExceptionSlideOver';
 
 const TRIAGE_STATES = new Set(['new', 'triaged']);
 
@@ -238,6 +239,7 @@ export default function IncidentDetail() {
   const [savingBadge, setSavingBadge]     = useState(false);
   const [badgeError, setBadgeError]       = useState(null);
   const [activeTab, setActiveTab]         = useState('timeline');
+  const [showExceptionSlideOver, setShowExceptionSlideOver] = useState(false);
   const pollRef = useRef(null);
 
   useEffect(() => {
@@ -374,6 +376,12 @@ export default function IncidentDetail() {
         />
       )}
 
+      <CreateExceptionSlideOver
+        open={showExceptionSlideOver}
+        onClose={() => setShowExceptionSlideOver(false)}
+        incident={incident}
+      />
+
       <div className="flex items-center gap-3">
         <Link to="/incidents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
           ← Incidents
@@ -406,6 +414,14 @@ export default function IncidentDetail() {
                 className="rounded-md border border-slate-400 bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50 transition-colors dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
               >
                 Transfer
+              </button>
+            )}
+            {user?.is_staff && incident.source_kind === 'wazuh_event' && (
+              <button
+                onClick={() => setShowExceptionSlideOver(true)}
+                className="rounded-md border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-600 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40"
+              >
+                Create Exception
               </button>
             )}
           </div>
