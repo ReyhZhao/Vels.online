@@ -1,7 +1,8 @@
 """
-Tests for POST /api/feedback/issue/ (issue #115).
+Tests for POST /api/feedback/issue/ (issue #115, #119).
 """
 import pytest
+import requests as http_requests
 from unittest.mock import MagicMock, patch
 
 
@@ -155,6 +156,14 @@ def test_issue_body_includes_description_path_and_reporter(client, staff, settin
 
 # ── GitHub API failure ────────────────────────────────────────────────────────
 
+def _http_error(status_code, text="error"):
+    """Return an HTTPError whose .response has the given status code."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_resp.text = text
+    return http_requests.exceptions.HTTPError(response=mock_resp)
+
+
 @pytest.mark.django_db
 def test_github_api_failure_returns_502(client, staff, settings):
     settings.GITHUB_TOKEN = "ghp_fake"
@@ -162,6 +171,70 @@ def test_github_api_failure_returns_502(client, staff, settings):
     client.force_login(staff)
 
     with patch("feedback.views.http_requests.post", side_effect=Exception("network error")):
+        r = post_issue(client)
+
+    assert r.status_code == 502
+    assert "Failed to create" in r.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_github_401_returns_503_with_token_message(client, staff, settings):
+    settings.GITHUB_TOKEN = "ghp_bad"
+    settings.GITHUB_REPO = "owner/repo"
+    client.force_login(staff)
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.side_effect = _http_error(401, "Unauthorized")
+
+    with patch("feedback.views.http_requests.post", return_value=mock_resp):
+        r = post_issue(client)
+
+    assert r.status_code == 503
+    assert "GITHUB_TOKEN" in r.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_github_403_returns_503_with_token_message(client, staff, settings):
+    settings.GITHUB_TOKEN = "ghp_noscope"
+    settings.GITHUB_REPO = "owner/repo"
+    client.force_login(staff)
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.side_effect = _http_error(403, "Forbidden")
+
+    with patch("feedback.views.http_requests.post", return_value=mock_resp):
+        r = post_issue(client)
+
+    assert r.status_code == 503
+    assert "GITHUB_TOKEN" in r.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_github_404_returns_503_with_repo_message(client, staff, settings):
+    settings.GITHUB_TOKEN = "ghp_fake"
+    settings.GITHUB_REPO = "owner/nonexistent"
+    client.force_login(staff)
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.side_effect = _http_error(404, "Not Found")
+
+    with patch("feedback.views.http_requests.post", return_value=mock_resp):
+        r = post_issue(client)
+
+    assert r.status_code == 503
+    assert "GITHUB_REPO" in r.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_github_other_non2xx_returns_502(client, staff, settings):
+    settings.GITHUB_TOKEN = "ghp_fake"
+    settings.GITHUB_REPO = "owner/repo"
+    client.force_login(staff)
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.side_effect = _http_error(500, "Internal Server Error")
+
+    with patch("feedback.views.http_requests.post", return_value=mock_resp):
         r = post_issue(client)
 
     assert r.status_code == 502
