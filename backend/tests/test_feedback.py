@@ -113,7 +113,7 @@ def test_successful_bug_returns_201_with_issue_url(client, staff, settings):
 
     call_kwargs = mock_post.call_args
     body = call_kwargs.kwargs["json"]
-    assert body["labels"] == ["bug"]
+    assert body["labels"] == ["bug", "needs-triage"]
     assert "Login button broken" == body["title"]
 
 
@@ -132,7 +132,7 @@ def test_feature_type_uses_enhancement_label(client, staff, settings):
 
     assert r.status_code == 201
     body = mock_post.call_args.kwargs["json"]
-    assert body["labels"] == ["enhancement"]
+    assert body["labels"] == ["enhancement", "needs-triage"]
 
 
 @pytest.mark.django_db

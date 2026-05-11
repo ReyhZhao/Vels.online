@@ -53,7 +53,7 @@ class CreateGithubIssueView(APIView):
         try:
             resp = http_requests.post(
                 f"https://api.github.com/repos/{repo}/issues",
-                json={"title": title, "body": body, "labels": [label]},
+                json={"title": title, "body": body, "labels": [label, "needs-triage"]},
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Accept": "application/vnd.github+json",
