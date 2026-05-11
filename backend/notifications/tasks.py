@@ -1,4 +1,5 @@
 from celery import shared_task
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
 from django.utils import timezone
@@ -35,7 +36,7 @@ def send_digest_email(recipient_id, incident_id):
     send_mail(
         subject=f"Vels Online: {len(notifications)} notification(s) for you",
         message="\n".join(lines),
-        from_email="noreply@vels.online",
+        from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[recipient.email],
         fail_silently=True,
     )

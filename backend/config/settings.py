@@ -128,6 +128,16 @@ UPTIMEROBOT_API_KEY = os.environ.get("UPTIMEROBOT_API_KEY", "")
 
 CELERY_BROKER_URL = _REDIS_URL or "memory://"
 CELERY_RESULT_BACKEND = _REDIS_URL or "cache+memory://"
+
+# ── Email ──────────────────────────────────────────────────────────────────────
+EMAIL_BACKEND       = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST          = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT          = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS       = os.environ.get("EMAIL_USE_TLS", "True") == "True"
+EMAIL_USE_SSL       = os.environ.get("EMAIL_USE_SSL", "False") == "True"
+EMAIL_HOST_USER     = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL  = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@vels.online")
 def _parse_crontab(cron_str):
     minute, hour, dom, month, dow = cron_str.split()
     return crontab(minute=minute, hour=hour, day_of_month=dom, month_of_year=month, day_of_week=dow)
