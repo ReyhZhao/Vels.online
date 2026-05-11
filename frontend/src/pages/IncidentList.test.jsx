@@ -1,5 +1,5 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../lib/axios', () => ({
@@ -163,5 +163,65 @@ describe('IncidentList', () => {
         params: expect.objectContaining({ page: '2' }),
       }))
     );
+  });
+
+});
+
+// ── silent background poll ────────────────────────────────────────────────────
+// Use a spy to capture the 30-second setInterval callback so we can fire it
+// manually without fake timers (which break waitFor's internal polling).
+
+describe('IncidentList — background poll', () => {
+  let pollCb = null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pollCb = null;
+    vi.spyOn(global, 'setInterval').mockImplementation((cb, delay) => {
+      if (delay === 30000) pollCb = cb;
+      return 0;
+    });
+    vi.spyOn(global, 'clearInterval').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('does not show Loading… while poll is in flight', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE());
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+
+    // Stall the next response so the poll hangs in flight
+    api.get.mockReturnValueOnce(new Promise(() => {}));
+    act(() => { pollCb(); });
+
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+    expect(screen.getByText('INC-2026-0001')).toBeInTheDocument();
+  });
+
+  it('updates rows silently when poll resolves', async () => {
+    api.get.mockResolvedValueOnce(PAGE_RESPONSE([INCIDENTS[0]]));
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    expect(screen.queryByText('INC-2026-0002')).not.toBeInTheDocument();
+
+    api.get.mockResolvedValueOnce(PAGE_RESPONSE(INCIDENTS));
+    await act(async () => { pollCb(); });
+
+    await waitFor(() => screen.getByText('INC-2026-0002'));
+  });
+
+  it('failed poll does not overwrite loaded data with an error message', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE());
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+
+    api.get.mockRejectedValueOnce({ response: { data: { detail: 'Poll failure.' } } });
+    await act(async () => { pollCb(); });
+
+    expect(screen.queryByText('Poll failure.')).not.toBeInTheDocument();
+    expect(screen.getByText('INC-2026-0001')).toBeInTheDocument();
   });
 });

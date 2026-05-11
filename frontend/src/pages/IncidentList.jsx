@@ -51,16 +51,18 @@ export default function IncidentList() {
 
   const activeTab = searchParams.get('tab') || '';
 
-  const fetchIncidents = useCallback(async (params) => {
-    setLoading(true);
-    setError(null);
+  const fetchIncidents = useCallback(async (params, { silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await api.get('/api/incidents/', { params });
       setData(res.data);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to load incidents.');
+      if (!silent) setError(err.response?.data?.detail || 'Failed to load incidents.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -71,7 +73,7 @@ export default function IncidentList() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => {
       if (document.visibilityState !== 'hidden') {
-        fetchIncidents(Object.fromEntries(searchParams.entries()));
+        fetchIncidents(Object.fromEntries(searchParams.entries()), { silent: true });
       }
     }, 30000);
     return () => clearInterval(pollRef.current);
