@@ -34,7 +34,7 @@ export default function LinkedIncidents({ sourceKind, sourceRef }) {
       source_ref_contains: JSON.stringify(sourceRef),
     });
     api.get(`/api/incidents/?${params}`)
-      .then(res => { if (!cancelled) setIncidents(res.data); })
+      .then(res => { if (!cancelled) setIncidents(res.data.results ?? res.data); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };

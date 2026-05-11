@@ -283,7 +283,7 @@ def test_source_ref_contains_filter(client, member, acme):
         f'/api/incidents/?source_ref_contains={json.dumps({"cve_id": "CVE-2025-12345"})}'
     )
     assert response.status_code == 200
-    ids = [i["id"] for i in response.json()]
+    ids = [i["id"] for i in response.json()["results"]]
     assert inc.id in ids
     assert len(ids) == 1
 
@@ -295,9 +295,9 @@ def test_source_kind_filter(client, member, acme):
     client.force_login(member)
     response = client.get("/api/incidents/?source_kind=vulnerability")
     assert response.status_code == 200
-    ids = [i["id"] for i in response.json()]
+    ids = [i["id"] for i in response.json()["results"]]
     assert inc.id in ids
-    assert all(i["source_kind"] == "vulnerability" for i in response.json())
+    assert all(i["source_kind"] == "vulnerability" for i in response.json()["results"])
 
 
 @pytest.mark.django_db

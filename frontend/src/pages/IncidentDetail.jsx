@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
@@ -207,6 +207,7 @@ export default function IncidentDetail() {
   const [staffUsers, setStaffUsers] = useState([]);
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState(null);
+  const pollRef = useRef(null);
 
   useEffect(() => {
     async function load() {
@@ -226,6 +227,16 @@ export default function IncidentDetail() {
       }
     }
     load();
+
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => {
+      if (document.visibilityState !== 'hidden') {
+        api.get(`/api/incidents/${incidentId}/`)
+          .then(res => setIncident(prev => prev ? res.data : prev))
+          .catch(() => {});
+      }
+    }, 30000);
+    return () => clearInterval(pollRef.current);
   }, [incidentId]);
 
   async function handleOpenTransfer() {

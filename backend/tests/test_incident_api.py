@@ -50,7 +50,7 @@ def test_list_returns_own_org_incidents(client, acme_member, acme, contoso):
     client.force_login(acme_member)
     response = client.get("/api/incidents/")
     assert response.status_code == 200
-    ids = [i["id"] for i in response.json()]
+    ids = [i["id"] for i in response.json()["results"]]
     assert own.id in ids
     assert other.id not in ids
 
@@ -61,7 +61,7 @@ def test_list_hides_tlp_red_from_members(client, acme_member, acme):
     hidden = make_incident(acme, tlp="red")
     client.force_login(acme_member)
     response = client.get("/api/incidents/")
-    ids = [i["id"] for i in response.json()]
+    ids = [i["id"] for i in response.json()["results"]]
     assert visible.id in ids
     assert hidden.id not in ids
 
@@ -72,7 +72,7 @@ def test_list_staff_sees_all(admin_client, acme, contoso):
     i2 = make_incident(contoso, tlp="amber")
     response = admin_client.get("/api/incidents/")
     assert response.status_code == 200
-    ids = [i["id"] for i in response.json()]
+    ids = [i["id"] for i in response.json()["results"]]
     assert i1.id in ids
     assert i2.id in ids
 
