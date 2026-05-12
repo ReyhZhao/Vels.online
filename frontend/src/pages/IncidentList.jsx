@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../lib/axios';
+import { useAuth } from '../context/AuthContext';
 import SlideOver from '../components/SlideOver';
 import SLAPill from '../components/SLAPill';
 import CreateIncidentModal from '../components/CreateIncidentModal';
@@ -43,7 +44,103 @@ const TLP_OPTIONS      = ['white', 'green', 'amber', 'red'];
 
 const EMPTY_DATA = { count: 0, page: 1, per_page: 25, total_pages: 1, results: [] };
 
+const CLOSURE_REASONS = [
+  { value: 'resolved',       label: 'Resolved' },
+  { value: 'false_positive', label: 'False Positive' },
+  { value: 'duplicate',      label: 'Duplicate' },
+  { value: 'informational',  label: 'Informational' },
+  { value: 'accepted_risk',  label: 'Accepted Risk' },
+];
+
+function BulkCloseDialog({ onConfirm, onCancel, loading }) {
+  const [reason, setReason] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Bulk close incidents</h2>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-foreground" htmlFor="bulk-closure-reason">
+            Closure reason
+          </label>
+          <select
+            id="bulk-closure-reason"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">Select a reason…</option>
+            {CLOSURE_REASONS.map(r => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            disabled={loading}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => reason && onConfirm(reason)}
+            disabled={!reason || loading}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {loading ? 'Closing…' : 'Close incidents'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BulkReassignDialog({ staffUsers, onConfirm, onCancel, loading }) {
+  const [assigneeId, setAssigneeId] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Bulk reassign incidents</h2>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-foreground" htmlFor="bulk-assignee">
+            Assign to
+          </label>
+          <select
+            id="bulk-assignee"
+            value={assigneeId}
+            onChange={e => setAssigneeId(e.target.value)}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">Select…</option>
+            <option value="null">Unassigned</option>
+            {staffUsers.map(u => (
+              <option key={u.id} value={u.id}>{u.username}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            disabled={loading}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => assigneeId !== '' && onConfirm(assigneeId === 'null' ? null : Number(assigneeId))}
+            disabled={assigneeId === '' || loading}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {loading ? 'Reassigning…' : 'Confirm reassign'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function IncidentList() {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData]         = useState(EMPTY_DATA);
   const [loading, setLoading]   = useState(false);
@@ -51,6 +148,12 @@ export default function IncidentList() {
   const [preview, setPreview]   = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkAction, setBulkAction]   = useState(null);
+  const [staffUsers, setStaffUsers]   = useState([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkError, setBulkError]     = useState(null);
+  const [bulkResult, setBulkResult]   = useState(null);
   const pollRef = useRef(null);
 
   const activeTab = searchParams.get('tab') || '';
@@ -124,10 +227,94 @@ export default function IncidentList() {
     }
   }
 
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    const visibleIds = data.results.map(inc => inc.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+    if (allSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        visibleIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        visibleIds.forEach(id => next.add(id));
+        return next;
+      });
+    }
+  }
+
+  async function openBulkReassign() {
+    if (staffUsers.length === 0) {
+      try {
+        const res = await api.get('/api/incidents/staff-users/');
+        setStaffUsers(res.data);
+      } catch {
+        setBulkError('Failed to load staff users.');
+        return;
+      }
+    }
+    setBulkError(null);
+    setBulkAction('reassign');
+  }
+
+  async function executeBulkAction(action, extra) {
+    setBulkLoading(true);
+    setBulkError(null);
+    setBulkResult(null);
+    try {
+      const res = await api.post('/api/incidents/bulk/', {
+        action,
+        ids: [...selectedIds],
+        ...extra,
+      });
+      const { succeeded, failed } = res.data;
+      setBulkResult({ succeeded: succeeded.length, failed: failed.length });
+      setSelectedIds(new Set());
+      setBulkAction(null);
+      fetchIncidents(Object.fromEntries(searchParams.entries()), { silent: true });
+    } catch (err) {
+      setBulkError(err.response?.data?.detail || 'Bulk action failed.');
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
   const { results, count, page, per_page, total_pages } = data;
+  const visibleIds = results.map(inc => inc.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+  const someVisibleSelected = visibleIds.some(id => selectedIds.has(id));
+  const colSpan = user?.is_staff ? 9 : 8;
 
   return (
     <div className="space-y-4 p-6">
+      {bulkAction === 'close' && (
+        <BulkCloseDialog
+          loading={bulkLoading}
+          onConfirm={reason => executeBulkAction('close', { closure_reason: reason })}
+          onCancel={() => { setBulkAction(null); setBulkError(null); }}
+        />
+      )}
+
+      {bulkAction === 'reassign' && (
+        <BulkReassignDialog
+          staffUsers={staffUsers}
+          loading={bulkLoading}
+          onConfirm={assigneeId => executeBulkAction('reassign', { assignee_id: assigneeId })}
+          onCancel={() => { setBulkAction(null); setBulkError(null); }}
+        />
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Incidents</h1>
         <div className="flex items-center gap-3">
@@ -209,10 +396,54 @@ export default function IncidentList() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
+      {user?.is_staff && selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 rounded-md border border-border bg-card px-4 py-2">
+          <span className="text-sm font-medium text-foreground">{selectedIds.size} selected</span>
+          <div className="flex gap-2 ml-2">
+            <button
+              onClick={() => { setBulkError(null); setBulkResult(null); setBulkAction('close'); }}
+              className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => { setBulkError(null); setBulkResult(null); openBulkReassign(); }}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+            >
+              Reassign
+            </button>
+          </div>
+          {bulkError && <span className="text-sm text-red-600 ml-2">{bulkError}</span>}
+          {bulkResult && (
+            <span className="text-sm text-foreground ml-2">
+              {bulkResult.succeeded} succeeded{bulkResult.failed > 0 ? `, ${bulkResult.failed} failed` : ''}
+            </span>
+          )}
+          <button
+            onClick={() => { setSelectedIds(new Set()); setBulkResult(null); setBulkError(null); }}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
+              {user?.is_staff && (
+                <th className="px-4 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all"
+                    checked={allVisibleSelected}
+                    ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                    onChange={toggleSelectAll}
+                    className="rounded border-border"
+                  />
+                </th>
+              )}
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">ID</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Title</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
@@ -226,11 +457,11 @@ export default function IncidentList() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={colSpan} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
             ) : results.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No incidents.</td>
+                <td colSpan={colSpan} className="px-4 py-8 text-center text-muted-foreground">No incidents.</td>
               </tr>
             ) : (
               results.map(inc => (
@@ -239,6 +470,17 @@ export default function IncidentList() {
                   className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
                   onClick={() => openPreview(inc.display_id)}
                 >
+                  {user?.is_staff && (
+                    <td className="px-4 py-3 w-8" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${inc.display_id}`}
+                        checked={selectedIds.has(inc.id)}
+                        onChange={() => toggleSelect(inc.id)}
+                        className="rounded border-border"
+                      />
+                    </td>
+                  )}
                   <td className="px-4 py-3 font-mono text-xs font-medium text-foreground">{inc.display_id}</td>
                   <td className="px-4 py-3 text-foreground max-w-xs truncate">{inc.title}</td>
                   <td className="px-4 py-3">

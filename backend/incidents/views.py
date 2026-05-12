@@ -434,6 +434,96 @@ class IncidentListView(APIView):
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)
 
 
+class IncidentBulkActionView(APIView):
+    def post(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+
+        action = request.data.get("action")
+        ids = request.data.get("ids")
+
+        if action not in ("close", "reassign"):
+            return Response(
+                {"detail": "action must be 'close' or 'reassign'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(ids, list) or not ids or not all(isinstance(i, int) for i in ids):
+            return Response(
+                {"detail": "ids must be a non-empty list of integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        closure_reason = None
+        assignee_id = None
+
+        if action == "close":
+            closure_reason = request.data.get("closure_reason")
+            if not closure_reason:
+                return Response(
+                    {"detail": "closure_reason is required for close action."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            valid_reasons = {c[0] for c in Incident.CLOSURE_REASON_CHOICES}
+            if closure_reason not in valid_reasons:
+                return Response(
+                    {"detail": "Invalid closure_reason."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if action == "reassign":
+            if "assignee_id" not in request.data:
+                return Response(
+                    {"detail": "assignee_id is required for reassign action."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            assignee_id = request.data.get("assignee_id")
+            if assignee_id is not None and not isinstance(assignee_id, int):
+                return Response(
+                    {"detail": "assignee_id must be an integer or null."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        qs = filter_incidents_for_user(
+            Incident.objects.select_related("organization", "created_by", "assignee"),
+            request.user,
+        ).filter(id__in=ids)
+
+        incidents_by_id = {inc.id: inc for inc in qs}
+
+        succeeded = []
+        failed = []
+
+        for incident_id in ids:
+            incident = incidents_by_id.get(incident_id)
+            if incident is None:
+                continue
+
+            try:
+                if action == "close":
+                    transition_incident(incident, "closed", actor=request.user, closure_reason=closure_reason)
+                    succeeded.append(incident_id)
+                else:
+                    old_assignee_id = incident.assignee_id
+                    incident.assignee_id = assignee_id
+                    incident.save(update_fields=["assignee"])
+                    record_event(
+                        incident,
+                        "incident_updated",
+                        actor=request.user,
+                        payload={"changes": {"assignee_id": {"old": old_assignee_id, "new": assignee_id}}},
+                    )
+                    succeeded.append(incident_id)
+            except ValidationError as e:
+                msg = e.messages[0] if e.messages else str(e)
+                failed.append({"id": incident_id, "error": msg})
+
+        return Response({"succeeded": succeeded, "failed": failed})
+
+
 class IncidentDetailView(APIView):
     def _get_incident(self, request, display_id):
         if not request.user.is_authenticated:

@@ -6,6 +6,7 @@ from .views import (
     IncidentAttachmentDeleteView,
     IncidentAttachmentDownloadView,
     IncidentAttachmentListView,
+    IncidentBulkActionView,
     IncidentCommentListView,
     IncidentDelegateView,
     IncidentDelegationReturnView,
@@ -21,6 +22,7 @@ from .views import (
 
 urlpatterns = [
     path("", IncidentListView.as_view()),
+    path("bulk/", IncidentBulkActionView.as_view()),
     path("promote/", PromoteView.as_view()),
     path("staff-users/", StaffUserListView.as_view()),
     path("<str:display_id>/", IncidentDetailView.as_view()),

@@ -1,15 +1,19 @@
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../lib/axios', () => ({
-  default: { get: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn() },
 }));
 
 vi.mock('../components/CreateIncidentModal', () => ({
   default: ({ open, onClose }) =>
     open ? <div data-testid="create-modal"><button onClick={onClose}>close-modal</button></div> : null,
 }));
+
+const mockUseAuth = vi.fn(() => ({ user: null }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => mockUseAuth() }));
 
 import api from '../lib/axios';
 import IncidentList from './IncidentList';
@@ -52,7 +56,10 @@ function renderPage(initialEntry = '/') {
 }
 
 describe('IncidentList', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: null });
+  });
 
   it('shows loading state while fetching', () => {
     api.get.mockReturnValue(new Promise(() => {}));
@@ -213,6 +220,70 @@ describe('IncidentList', () => {
         params: expect.objectContaining({ page: '2' }),
       }))
     );
+  });
+
+  // ── bulk actions (staff only) ─────────────────────────────────────────────
+
+  it('selecting a checkbox renders the toolbar with correct count', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, is_staff: true } });
+    api.get.mockResolvedValue(PAGE_RESPONSE());
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await user.click(screen.getByLabelText('Select INC-2026-0001'));
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Select INC-2026-0002'));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+  });
+
+  it('deselecting all checkboxes hides the toolbar', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, is_staff: true } });
+    api.get.mockResolvedValue(PAGE_RESPONSE());
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await user.click(screen.getByLabelText('Select INC-2026-0001'));
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Select INC-2026-0001'));
+    expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+  });
+
+  it('confirming Close calls POST /api/incidents/bulk/ with correct payload', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, is_staff: true } });
+    api.get.mockResolvedValue(PAGE_RESPONSE());
+    api.post.mockResolvedValue({ data: { succeeded: [1], failed: [] } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await user.click(screen.getByLabelText('Select INC-2026-0001'));
+    await user.click(screen.getByText('Close', { selector: 'button' }));
+    await user.selectOptions(screen.getByLabelText('Closure reason'), 'false_positive');
+    await user.click(screen.getByRole('button', { name: 'Close incidents' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/incidents/bulk/',
+      { action: 'close', ids: [1], closure_reason: 'false_positive' }
+    ));
+  });
+
+  it('confirming Reassign calls POST /api/incidents/bulk/ with correct payload', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, is_staff: true } });
+    api.get.mockImplementation(url => {
+      if (url === '/api/incidents/staff-users/') return Promise.resolve({ data: [{ id: 5, username: 'bob' }] });
+      return Promise.resolve(PAGE_RESPONSE());
+    });
+    api.post.mockResolvedValue({ data: { succeeded: [1], failed: [] } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await user.click(screen.getByLabelText('Select INC-2026-0001'));
+    await user.click(screen.getByRole('button', { name: 'Reassign' }));
+    await waitFor(() => screen.getByLabelText('Assign to'));
+    await user.selectOptions(screen.getByLabelText('Assign to'), '5');
+    await user.click(screen.getByRole('button', { name: 'Confirm reassign' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/incidents/bulk/',
+      { action: 'reassign', ids: [1], assignee_id: 5 }
+    ));
   });
 
 });
