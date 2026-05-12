@@ -1,9 +1,10 @@
 from django.urls import path
 
-from .views import IngressSettingsView, RouteDetailView, RouteListView
+from .views import IngressSettingsView, RouteDetailView, RouteListView, RouteSettingsView
 
 urlpatterns = [
     path("settings/", IngressSettingsView.as_view()),
     path("routes/", RouteListView.as_view()),
+    path("routes/<str:fqdn>/settings/", RouteSettingsView.as_view()),
     path("routes/<str:fqdn>/", RouteDetailView.as_view()),
 ]

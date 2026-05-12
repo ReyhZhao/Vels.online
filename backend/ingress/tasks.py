@@ -5,6 +5,23 @@ from django.conf import settings
 
 
 @shared_task
+def push_route_settings(fqdn, settings_dict):
+    from .bunkerweb import BunkerWebClient, BunkerWebError
+    from .models import Route
+
+    try:
+        route = Route.objects.get(fqdn=fqdn)
+    except Route.DoesNotExist:
+        return
+
+    try:
+        BunkerWebClient().update_service_settings(fqdn, settings_dict)
+    except BunkerWebError:
+        route.status = Route.STATUS_ERROR
+        route.save(update_fields=["status"])
+
+
+@shared_task
 def check_route_dns(route_id):
     from .models import Route
 

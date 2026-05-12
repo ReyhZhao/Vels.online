@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
+import RouteSettings from './RouteSettings';
 
 const STATUS_CLASSES = {
   pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
@@ -107,9 +108,7 @@ export default function RouteDetail() {
       </div>
 
       <div>
-        {activeTab === 'settings' && (
-          <p className="text-sm text-muted-foreground">WAF and access settings — coming soon.</p>
-        )}
+        {activeTab === 'settings' && <RouteSettings fqdn={route.fqdn} />}
         {activeTab === 'reports' && (
           <p className="text-sm text-muted-foreground">Blocked activity reports — coming soon.</p>
         )}

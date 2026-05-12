@@ -9,7 +9,7 @@ from security.models import Organization, OrganizationMembership
 from .bunkerweb import BunkerWebClient, BunkerWebError
 from .models import Route
 from .serializers import RouteSerializer
-from .tasks import check_route_dns
+from .tasks import check_route_dns, push_route_settings
 
 
 def _resolve_org(request, slug):
@@ -121,6 +121,70 @@ class RouteDetailView(APIView):
 
         route.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# Keys this app exposes; grows as more setting slices are added.
+_MANAGED_SETTINGS = {
+    "USE_MODSECURITY",
+    "USE_MODSECURITY_CRS",
+    "MODSECURITY_CRS_PARANOIA_LEVEL",
+}
+
+_BOOLEAN_SETTINGS = {"USE_MODSECURITY", "USE_MODSECURITY_CRS"}
+
+
+def _validate_settings(data):
+    """Returns (cleaned_dict, error_str) where error_str is None on success."""
+    unknown = set(data) - _MANAGED_SETTINGS
+    if unknown:
+        return None, f"Unknown settings key(s): {', '.join(sorted(unknown))}"
+
+    if "MODSECURITY_CRS_PARANOIA_LEVEL" in data:
+        try:
+            level = int(data["MODSECURITY_CRS_PARANOIA_LEVEL"])
+        except (TypeError, ValueError):
+            return None, "MODSECURITY_CRS_PARANOIA_LEVEL must be an integer."
+        if level < 1 or level > 4:
+            return None, "MODSECURITY_CRS_PARANOIA_LEVEL must be between 1 and 4."
+
+    return dict(data), None
+
+
+class RouteSettingsView(APIView):
+    def _get_route(self, request, fqdn):
+        try:
+            route = Route.objects.select_related("organization").get(fqdn=fqdn)
+        except Route.DoesNotExist:
+            return None, Response(status=404)
+        if not request.user.is_staff:
+            if not OrganizationMembership.objects.filter(
+                user=request.user, organization=route.organization
+            ).exists():
+                return None, Response(status=403)
+        return route, None
+
+    def get(self, request, fqdn):
+        _, err = self._get_route(request, fqdn)
+        if err:
+            return err
+        try:
+            all_settings = BunkerWebClient().get_service_settings(fqdn)
+        except BunkerWebError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        filtered = {k: v for k, v in all_settings.items() if k in _MANAGED_SETTINGS}
+        return Response(filtered)
+
+    def patch(self, request, fqdn):
+        route, err = self._get_route(request, fqdn)
+        if err:
+            return err
+
+        cleaned, error = _validate_settings(request.data)
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+
+        push_route_settings.delay(fqdn, cleaned)
+        return Response(cleaned)
 
 
 class IngressSettingsView(APIView):
