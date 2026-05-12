@@ -30,29 +30,35 @@ const TLP_CLASSES = {
 };
 
 const STATE_CLASSES = {
-  new:         'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-  triaged:     'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-  in_progress: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-  on_hold:     'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
-  resolved:    'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-  closed:      'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+  new:          'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  triaged:      'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
+  in_progress:  'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+  on_hold:      'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+  needs_tuning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+  resolved:     'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+  closed:       'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
 };
 
+// States from which the resolve dropdown (Resolved / Needs tuning) is shown.
+const RESOLVE_DROPDOWN_STATES = new Set(['in_progress', 'on_hold']);
+
 const ALLOWED_TRANSITIONS = {
-  new:         [{ state: 'triaged', label: 'Triage' }, { state: 'in_progress', label: 'Start work' }],
-  triaged:     [{ state: 'in_progress', label: 'Start work' }, { state: 'on_hold', label: 'Put on hold' }],
-  in_progress: [{ state: 'on_hold', label: 'Put on hold' }, { state: 'resolved', label: 'Mark resolved' }, { state: 'closed', label: 'Close' }],
-  on_hold:     [{ state: 'in_progress', label: 'Resume' }, { state: 'resolved', label: 'Mark resolved' }, { state: 'closed', label: 'Close' }],
-  resolved:    [{ state: 'in_progress', label: 'Reopen' }, { state: 'closed', label: 'Close' }],
-  closed:      [{ state: 'in_progress', label: 'Reopen' }],
+  new:          [{ state: 'triaged', label: 'Triage' }, { state: 'in_progress', label: 'Start work' }],
+  triaged:      [{ state: 'in_progress', label: 'Start work' }, { state: 'on_hold', label: 'Put on hold' }],
+  in_progress:  [{ state: 'on_hold', label: 'Put on hold' }, { state: 'closed', label: 'Close' }],
+  on_hold:      [{ state: 'in_progress', label: 'Resume' }, { state: 'closed', label: 'Close' }],
+  needs_tuning: [{ state: 'in_progress', label: 'Reopen' }, { state: 'closed', label: 'Close' }],
+  resolved:     [{ state: 'in_progress', label: 'Reopen' }, { state: 'closed', label: 'Close' }],
+  closed:       [{ state: 'in_progress', label: 'Reopen' }],
 };
 
 const TRANSITION_BTN_CLASSES = {
-  triaged:     'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600',
-  in_progress: 'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600',
-  on_hold:     'bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500',
-  resolved:    'bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600',
-  closed:      'bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600',
+  triaged:      'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600',
+  in_progress:  'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600',
+  on_hold:      'bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500',
+  needs_tuning: 'bg-amber-600 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600',
+  resolved:     'bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600',
+  closed:       'bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600',
 };
 
 const CLOSURE_REASONS = [
@@ -105,6 +111,59 @@ function IncidentExceptionsSection({ displayId }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function ResolveDropdown({ onResolve, onNeedsTuning, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <div className="flex rounded-md overflow-hidden">
+        <button
+          onClick={() => { setOpen(false); onResolve(); }}
+          disabled={disabled}
+          className="bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600 px-3 py-1.5 text-sm font-medium disabled:opacity-50 transition-colors"
+        >
+          Mark resolved
+        </button>
+        <button
+          onClick={() => setOpen(o => !o)}
+          disabled={disabled}
+          aria-label="More resolution options"
+          className="bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600 px-2 py-1.5 text-sm font-medium disabled:opacity-50 transition-colors border-l border-green-500 dark:border-green-600"
+        >
+          ▾
+        </button>
+      </div>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-10 w-44 rounded-md border border-border bg-card shadow-lg">
+          <button
+            onClick={() => { setOpen(false); onResolve(); }}
+            disabled={disabled}
+            className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-accent disabled:opacity-50 rounded-t-md"
+          >
+            Resolved
+          </button>
+          <button
+            onClick={() => { setOpen(false); onNeedsTuning(); }}
+            disabled={disabled}
+            className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-accent disabled:opacity-50 rounded-b-md"
+          >
+            Needs tuning
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -452,6 +511,13 @@ export default function IncidentDetail() {
                 {label}
               </button>
             ))}
+            {RESOLVE_DROPDOWN_STATES.has(incident.state) && (
+              <ResolveDropdown
+                onResolve={() => handleActionClick('resolved')}
+                onNeedsTuning={() => handleActionClick('needs_tuning')}
+                disabled={transitioning}
+              />
+            )}
             {user?.is_staff && (
               <button
                 onClick={handleOpenTransfer}

@@ -110,6 +110,7 @@ class Incident(models.Model):
     STATE_TRIAGED = "triaged"
     STATE_IN_PROGRESS = "in_progress"
     STATE_ON_HOLD = "on_hold"
+    STATE_NEEDS_TUNING = "needs_tuning"
     STATE_RESOLVED = "resolved"
     STATE_CLOSED = "closed"
     STATE_CHOICES = [
@@ -117,6 +118,7 @@ class Incident(models.Model):
         (STATE_TRIAGED, "Triaged"),
         (STATE_IN_PROGRESS, "In Progress"),
         (STATE_ON_HOLD, "On Hold"),
+        (STATE_NEEDS_TUNING, "Needs Tuning"),
         (STATE_RESOLVED, "Resolved"),
         (STATE_CLOSED, "Closed"),
     ]

@@ -24,12 +24,13 @@ const TLP_CLASSES = {
 };
 
 const STATE_CLASSES = {
-  new:         'text-blue-600 dark:text-blue-400',
-  triaged:     'text-purple-600 dark:text-purple-400',
-  in_progress: 'text-yellow-600 dark:text-yellow-400',
-  on_hold:     'text-orange-600 dark:text-orange-400',
-  resolved:    'text-green-600 dark:text-green-400',
-  closed:      'text-muted-foreground',
+  new:          'text-blue-600 dark:text-blue-400',
+  triaged:      'text-purple-600 dark:text-purple-400',
+  in_progress:  'text-yellow-600 dark:text-yellow-400',
+  on_hold:      'text-orange-600 dark:text-orange-400',
+  needs_tuning: 'text-amber-600 dark:text-amber-400',
+  resolved:     'text-green-600 dark:text-green-400',
+  closed:       'text-muted-foreground',
 };
 
 const TABS = [
@@ -38,7 +39,7 @@ const TABS = [
   { key: '',           label: 'All' },
 ];
 
-const STATE_OPTIONS    = ['new', 'triaged', 'in_progress', 'on_hold', 'resolved', 'closed'];
+const STATE_OPTIONS    = ['new', 'triaged', 'in_progress', 'on_hold', 'needs_tuning', 'resolved', 'closed'];
 const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low', 'info'];
 const TLP_OPTIONS      = ['white', 'green', 'amber', 'red'];
 

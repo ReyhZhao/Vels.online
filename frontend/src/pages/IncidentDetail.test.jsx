@@ -207,6 +207,57 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByText('Invalid transition.'));
   });
 
+  it('shows resolve dropdown button for in_progress incident', async () => {
+    mockGet({ ...INCIDENT, state: 'in_progress' });
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Mark resolved' }));
+    expect(screen.getByRole('button', { name: 'More resolution options' })).toBeInTheDocument();
+  });
+
+  it('clicking Mark resolved transitions to resolved', async () => {
+    mockGet({ ...INCIDENT, state: 'in_progress' });
+    api.post.mockResolvedValue({ data: { ...INCIDENT, state: 'resolved' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Mark resolved' }));
+    await user.click(screen.getByRole('button', { name: 'Mark resolved' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/incidents/INC-2026-0001/transition/',
+      { state: 'resolved' }
+    ));
+  });
+
+  it('clicking dropdown chevron reveals Resolved and Needs tuning options', async () => {
+    mockGet({ ...INCIDENT, state: 'in_progress' });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'More resolution options' }));
+    await user.click(screen.getByRole('button', { name: 'More resolution options' }));
+    expect(screen.getByRole('button', { name: 'Needs tuning' })).toBeInTheDocument();
+  });
+
+  it('clicking Needs tuning transitions to needs_tuning', async () => {
+    mockGet({ ...INCIDENT, state: 'in_progress' });
+    api.post.mockResolvedValue({ data: { ...INCIDENT, state: 'needs_tuning' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'More resolution options' }));
+    await user.click(screen.getByRole('button', { name: 'More resolution options' }));
+    await user.click(screen.getByRole('button', { name: 'Needs tuning' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/incidents/INC-2026-0001/transition/',
+      { state: 'needs_tuning' }
+    ));
+  });
+
+  it('shows Reopen and Close actions for needs_tuning incident', async () => {
+    mockGet({ ...INCIDENT, state: 'needs_tuning' });
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Reopen' }));
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mark resolved' })).not.toBeInTheDocument();
+  });
+
   // ── subject dropdown ──────────────────────────────────────────────────────
 
   it('renders subject dropdown', async () => {

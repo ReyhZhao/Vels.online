@@ -5,15 +5,16 @@ from django.db import transaction
 from incidents.services.events import record_event
 
 ALLOWED_TRANSITIONS = {
-    "new":         {"triaged", "in_progress"},
-    "triaged":     {"in_progress", "on_hold"},
-    "in_progress": {"on_hold", "resolved", "closed"},
-    "on_hold":     {"in_progress", "resolved", "closed"},
-    "resolved":    {"in_progress", "closed"},
-    "closed":      {"in_progress"},
+    "new":          {"triaged", "in_progress"},
+    "triaged":      {"in_progress", "on_hold"},
+    "in_progress":  {"on_hold", "resolved", "needs_tuning", "closed"},
+    "on_hold":      {"in_progress", "resolved", "needs_tuning", "closed"},
+    "needs_tuning": {"in_progress", "closed"},
+    "resolved":     {"in_progress", "closed"},
+    "closed":       {"in_progress"},
 }
 
-REOPEN_STATES = {"closed", "resolved"}
+REOPEN_STATES = {"closed", "resolved", "needs_tuning"}
 
 
 def transition_incident(incident, target_state, actor, closure_reason=None):

@@ -47,10 +47,14 @@ def make_incident(acme, state="new", closure_reason=None):
     ("triaged", "on_hold"),
     ("in_progress", "on_hold"),
     ("in_progress", "resolved"),
+    ("in_progress", "needs_tuning"),
     ("in_progress", "closed"),
     ("on_hold", "in_progress"),
     ("on_hold", "resolved"),
+    ("on_hold", "needs_tuning"),
     ("on_hold", "closed"),
+    ("needs_tuning", "in_progress"),
+    ("needs_tuning", "closed"),
     ("resolved", "in_progress"),
     ("resolved", "closed"),
     ("closed", "in_progress"),
@@ -69,20 +73,28 @@ def test_legal_transition(from_state, to_state, acme, actor):
 @pytest.mark.parametrize("from_state,to_state", [
     ("new", "on_hold"),
     ("new", "resolved"),
+    ("new", "needs_tuning"),
     ("new", "closed"),
     ("triaged", "new"),
     ("triaged", "resolved"),
+    ("triaged", "needs_tuning"),
     ("triaged", "closed"),
     ("in_progress", "new"),
     ("in_progress", "triaged"),
     ("on_hold", "new"),
     ("on_hold", "triaged"),
+    ("needs_tuning", "new"),
+    ("needs_tuning", "triaged"),
+    ("needs_tuning", "on_hold"),
+    ("needs_tuning", "resolved"),
     ("resolved", "new"),
     ("resolved", "triaged"),
     ("resolved", "on_hold"),
+    ("resolved", "needs_tuning"),
     ("closed", "new"),
     ("closed", "triaged"),
     ("closed", "on_hold"),
+    ("closed", "needs_tuning"),
     ("closed", "resolved"),
 ])
 def test_illegal_transition_raises(from_state, to_state, acme, actor):
@@ -140,6 +152,50 @@ def test_reopen_from_resolved_clears_closure_reason(acme, actor):
     incident.refresh_from_db()
     assert incident.state == "in_progress"
     assert incident.closure_reason is None
+
+
+@pytest.mark.django_db
+def test_needs_tuning_entry_from_in_progress(acme, actor):
+    incident = make_incident(acme, state="in_progress")
+    result = transition_incident(incident, "needs_tuning", actor=actor)
+    assert result.state == "needs_tuning"
+
+
+@pytest.mark.django_db
+def test_needs_tuning_entry_from_on_hold(acme, actor):
+    incident = make_incident(acme, state="on_hold")
+    result = transition_incident(incident, "needs_tuning", actor=actor)
+    assert result.state == "needs_tuning"
+
+
+@pytest.mark.django_db
+def test_needs_tuning_reopen_to_in_progress(acme, actor):
+    incident = make_incident(acme, state="needs_tuning")
+    result = transition_incident(incident, "in_progress", actor=actor)
+    assert result.state == "in_progress"
+
+
+@pytest.mark.django_db
+def test_needs_tuning_close(acme, actor):
+    incident = make_incident(acme, state="needs_tuning")
+    result = transition_incident(incident, "closed", actor=actor, closure_reason="resolved")
+    assert result.state == "closed"
+
+
+@pytest.mark.django_db
+def test_needs_tuning_reopen_clears_closure_reason(acme, actor):
+    incident = make_incident(acme, state="needs_tuning", closure_reason="false_positive")
+    transition_incident(incident, "in_progress", actor=actor)
+    incident.refresh_from_db()
+    assert incident.closure_reason is None
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("from_state", ["new", "triaged", "resolved", "closed"])
+def test_needs_tuning_not_reachable_from_invalid_states(from_state, acme, actor):
+    incident = make_incident(acme, state=from_state)
+    with pytest.raises(ValidationError):
+        transition_incident(incident, "needs_tuning", actor=actor)
 
 
 # ── event written for every transition ──────────────────────────────────────
