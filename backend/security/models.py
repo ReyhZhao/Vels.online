@@ -41,6 +41,7 @@ class Organization(models.Model):
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True)
     wazuh_group = models.CharField(max_length=255)
+    max_routes = models.PositiveIntegerField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
         if not self.wazuh_group:

@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "exceptions",
     "notifications",
     "feedback",
+    "ingress",
 ]
 
 SITE_ID = 1
