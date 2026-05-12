@@ -238,6 +238,81 @@ class RouteReportsView(APIView):
             )
 
 
+class RouteImportView(APIView):
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        slug = request.query_params.get("org", "")
+        _, err = _resolve_org(request, slug)
+        if err:
+            return err
+        try:
+            services = BunkerWebClient().list_services()
+        except BunkerWebError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        existing = set(Route.objects.values_list("fqdn", flat=True))
+        candidates = [s for s in services if s.get("server_name") not in existing]
+        return Response({"candidates": candidates})
+
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        slug = request.query_params.get("org", "")
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+        fqdns = request.data.get("fqdns", [])
+        if not isinstance(fqdns, list) or not fqdns:
+            return Response(
+                {"detail": "fqdns must be a non-empty list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            services = BunkerWebClient().list_services()
+        except BunkerWebError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        bw_map = {s.get("server_name"): s for s in services}
+        existing = set(Route.objects.values_list("fqdn", flat=True))
+        for fqdn in fqdns:
+            if fqdn not in bw_map:
+                return Response(
+                    {"detail": f"{fqdn!r} is not a known BunkerWeb service."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if fqdn in existing:
+                return Response(
+                    {"detail": f"{fqdn!r} is already imported."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+        if org.max_routes is not None:
+            current = Route.objects.filter(organization=org).count()
+            if current + len(fqdns) > org.max_routes:
+                return Response(
+                    {
+                        "detail": (
+                            f"Route quota exceeded. "
+                            f"This organisation is limited to {org.max_routes} route(s)."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        created = []
+        for fqdn in fqdns:
+            svc = bw_map[fqdn]
+            route = Route.objects.create(
+                fqdn=fqdn,
+                backend_host=svc.get("backend_host", ""),
+                backend_port=svc.get("backend_port", 80),
+                backend_protocol=svc.get("backend_protocol", Route.PROTOCOL_HTTP),
+                backend_type=Route.TYPE_DIRECT,
+                organization=org,
+                status=Route.STATUS_ACTIVE,
+            )
+            check_route_dns.delay(route.pk)
+            created.append(route)
+        return Response(RouteSerializer(created, many=True).data, status=status.HTTP_201_CREATED)
+
+
 class IngressSettingsView(APIView):
     def get(self, request):
         return Response(

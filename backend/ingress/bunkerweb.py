@@ -72,3 +72,12 @@ class BunkerWebClient:
         )
         self._check(resp)
         return resp.json()
+
+    def list_services(self):
+        resp = requests.get(
+            f"{self._base_url}/api/v1/services",
+            headers=self._headers(),
+            timeout=10,
+        )
+        self._check(resp)
+        return resp.json()

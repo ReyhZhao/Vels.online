@@ -156,3 +156,35 @@ def test_get_service_reports_returns_data(mock_get):
     assert result == payload
     url = mock_get.call_args[0][0]
     assert url == f"{_BASE_URL}/api/v1/services/app.example.com/reports"
+
+
+# ------------------------------------------------------------- list_services
+
+
+@patch("ingress.bunkerweb.requests.get")
+def test_list_services_returns_list(mock_get):
+    payload = [
+        {"server_name": "a.example.com", "backend_host": "10.0.0.1", "backend_port": 80},
+        {"server_name": "b.example.com", "backend_host": "10.0.0.2", "backend_port": 443},
+    ]
+    mock_get.return_value = _ok(payload)
+    result = BunkerWebClient().list_services()
+    assert result == payload
+    url = mock_get.call_args[0][0]
+    assert url == f"{_BASE_URL}/api/v1/services"
+
+
+@patch("ingress.bunkerweb.requests.get")
+def test_list_services_auth_header(mock_get):
+    mock_get.return_value = _ok([])
+    BunkerWebClient().list_services()
+    _, kwargs = mock_get.call_args
+    assert kwargs["headers"]["Authorization"] == f"Bearer {_TOKEN}"
+
+
+@patch("ingress.bunkerweb.requests.get")
+def test_list_services_bunkerweb_error(mock_get):
+    mock_get.return_value = _error(500, "server error")
+    with pytest.raises(BunkerWebError) as exc_info:
+        BunkerWebClient().list_services()
+    assert exc_info.value.status_code == 500
