@@ -217,6 +217,9 @@ CSRF_COOKIE_SAMESITE = "Lax"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 
+BUNKERWEB_API_URL = os.environ.get("BUNKERWEB_API_URL", "")
+BUNKERWEB_API_TOKEN = os.environ.get("BUNKERWEB_API_TOKEN", "")
+
 WAZUH_RULES_GITHUB_TOKEN = os.environ.get("WAZUH_RULES_GITHUB_TOKEN", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
