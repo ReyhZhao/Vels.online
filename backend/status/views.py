@@ -1,4 +1,5 @@
 import datetime
+import logging
 
 from django.core.cache import cache
 from rest_framework.permissions import AllowAny, IsAdminUser
@@ -7,7 +8,9 @@ from rest_framework.views import APIView
 
 from .models import MonitorVisibility
 from .serializers import MonitorVisibilityPatchSerializer
-from .uptimerobot import STATUS_MAP, get_monitors
+from .uptimerobot import STATUS_MAP, UptimeRobotUnavailableError, get_monitors
+
+logger = logging.getLogger(__name__)
 
 _CACHE_KEY = "uptimerobot_monitors"
 _CACHE_TTL = 300  # 5 minutes
@@ -57,7 +60,12 @@ class StatusView(APIView):
             if cached is not None:
                 return Response(cached)
 
-        monitors = get_monitors(include_logs=is_admin)
+        try:
+            monitors = get_monitors(include_logs=is_admin)
+        except UptimeRobotUnavailableError:
+            logger.error("Status endpoint returning 503: UptimeRobot unavailable")
+            return Response({"error": "upstream_unavailable"}, status=503)
+
         visible_ids = _get_visible_ids()
         visible = [m for m in monitors if str(m["id"]) in visible_ids]
 

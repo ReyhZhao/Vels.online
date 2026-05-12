@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+import requests
 from django.core.cache import cache
 from django.test import Client
 
@@ -207,3 +208,23 @@ def test_monitor_list_requires_staff(mock_get, client, django_user_model):
     client.force_login(user)
     response = client.get("/api/status/monitors/")
     assert response.status_code == 403
+
+
+# --- Timeout / connectivity error handling ---
+
+@pytest.mark.django_db
+@patch("status.uptimerobot.requests.post")
+def test_status_returns_503_on_read_timeout(mock_post, client):
+    mock_post.side_effect = requests.exceptions.ReadTimeout()
+    response = client.get("/api/status/")
+    assert response.status_code == 503
+    assert response.json() == {"error": "upstream_unavailable"}
+
+
+@pytest.mark.django_db
+@patch("status.uptimerobot.requests.post")
+def test_status_returns_503_on_connection_error(mock_post, client):
+    mock_post.side_effect = requests.exceptions.ConnectionError()
+    response = client.get("/api/status/")
+    assert response.status_code == 503
+    assert response.json() == {"error": "upstream_unavailable"}

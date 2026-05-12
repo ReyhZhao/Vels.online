@@ -1,8 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
-from status.uptimerobot import get_monitors
+from status.uptimerobot import UptimeRobotUnavailableError, get_monitors
 
 
 def _mock_response(json_data, status_code=200):
@@ -95,3 +96,19 @@ def test_get_monitors_exclude_logs_by_default(mock_post):
 
     _, kwargs = mock_post.call_args
     assert kwargs["data"]["response_times"] == 0
+
+
+@patch("status.uptimerobot.requests.post")
+def test_get_monitors_raises_unavailable_on_read_timeout(mock_post):
+    mock_post.side_effect = requests.exceptions.ReadTimeout()
+
+    with pytest.raises(UptimeRobotUnavailableError):
+        get_monitors()
+
+
+@patch("status.uptimerobot.requests.post")
+def test_get_monitors_raises_unavailable_on_connection_error(mock_post):
+    mock_post.side_effect = requests.exceptions.ConnectionError()
+
+    with pytest.raises(UptimeRobotUnavailableError):
+        get_monitors()
