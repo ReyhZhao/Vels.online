@@ -34,7 +34,7 @@ function ImportModal({ open, onClose, onImported, orgSlug }) {
     setCandidatesLoading(true);
     api.get('/api/ingress/routes/import/', { params: { org: orgSlug } })
       .then(res => setCandidates(res.data.candidates))
-      .catch(() => setCandidatesError('Failed to load BunkerWeb services.'))
+      .catch(err => setCandidatesError(err.response?.data?.detail || 'Failed to load BunkerWeb services.'))
       .finally(() => setCandidatesLoading(false));
   }, [open, orgSlug]);
 

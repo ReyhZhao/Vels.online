@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from ingress.bunkerweb import BunkerWebClient, BunkerWebError
 
@@ -82,7 +83,7 @@ def test_create_service_success(mock_post):
     assert result == {"id": "app.example.com"}
     mock_post.assert_called_once()
     url = mock_post.call_args[0][0]
-    assert url == f"{_BASE_URL}/api/v1/services"
+    assert url == f"{_BASE_URL}/services"
     payload = mock_post.call_args[1]["json"]
     assert payload["server_name"] == "app.example.com"
     assert payload["backend_host"] == "10.0.0.1"
@@ -107,7 +108,7 @@ def test_delete_service_success(mock_delete):
     mock_delete.return_value = _ok()
     BunkerWebClient().delete_service("app.example.com")
     url = mock_delete.call_args[0][0]
-    assert url == f"{_BASE_URL}/api/v1/services/app.example.com"
+    assert url == f"{_BASE_URL}/services/app.example.com"
 
 
 @patch("ingress.bunkerweb.requests.delete")
@@ -128,7 +129,8 @@ def test_get_service_settings_returns_dict(mock_get):
     result = BunkerWebClient().get_service_settings("app.example.com")
     assert result == payload
     url = mock_get.call_args[0][0]
-    assert url == f"{_BASE_URL}/api/v1/services/app.example.com/settings"
+    assert url == f"{_BASE_URL}/services/app.example.com"
+    assert mock_get.call_args[1]["params"] == {"full": "true"}
 
 
 # ------------------------------------------------------ update_service_settings
@@ -141,7 +143,7 @@ def test_update_service_settings_sends_payload(mock_patch):
     result = BunkerWebClient().update_service_settings("app.example.com", new_settings)
     assert result == new_settings
     url = mock_patch.call_args[0][0]
-    assert url == f"{_BASE_URL}/api/v1/services/app.example.com/settings"
+    assert url == f"{_BASE_URL}/services/app.example.com"
     assert mock_patch.call_args[1]["json"] == new_settings
 
 
@@ -155,7 +157,7 @@ def test_get_service_reports_returns_data(mock_get):
     result = BunkerWebClient().get_service_reports("app.example.com")
     assert result == payload
     url = mock_get.call_args[0][0]
-    assert url == f"{_BASE_URL}/api/v1/services/app.example.com/reports"
+    assert url == f"{_BASE_URL}/services/app.example.com/reports"
 
 
 # ------------------------------------------------------------- list_services
@@ -171,7 +173,7 @@ def test_list_services_returns_list(mock_get):
     result = BunkerWebClient().list_services()
     assert result == payload
     url = mock_get.call_args[0][0]
-    assert url == f"{_BASE_URL}/api/v1/services"
+    assert url == f"{_BASE_URL}/services"
 
 
 @patch("ingress.bunkerweb.requests.get")
@@ -188,3 +190,23 @@ def test_list_services_bunkerweb_error(mock_get):
     with pytest.raises(BunkerWebError) as exc_info:
         BunkerWebClient().list_services()
     assert exc_info.value.status_code == 500
+
+
+# -------------------------------------------------- network error → BunkerWebError
+
+
+@patch("ingress.bunkerweb.requests.get")
+def test_network_error_raises_bunkerweb_error(mock_get):
+    mock_get.side_effect = RequestsConnectionError("Connection refused")
+    with pytest.raises(BunkerWebError) as exc_info:
+        BunkerWebClient().list_services()
+    assert exc_info.value.status_code == 0
+    assert "Connection refused" in exc_info.value.body
+
+
+@patch("ingress.bunkerweb.requests.post")
+def test_network_error_on_create_raises_bunkerweb_error(mock_post):
+    mock_post.side_effect = RequestsConnectionError("timeout")
+    with pytest.raises(BunkerWebError) as exc_info:
+        BunkerWebClient().create_service("app.example.com", "10.0.0.1", 8080, "http")
+    assert exc_info.value.status_code == 0
