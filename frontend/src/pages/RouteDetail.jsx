@@ -49,6 +49,20 @@ export default function RouteDetail() {
 
   return (
     <div className="space-y-6 p-6">
+      {route.dns_ok === false && (
+        <div role="alert" className="rounded-md border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm dark:border-yellow-700 dark:bg-yellow-950/30">
+          <span className="font-medium text-yellow-800 dark:text-yellow-300">DNS not yet pointing to BunkerWeb</span>
+          {' — '}
+          <span className="text-yellow-700 dark:text-yellow-400">
+            ensure your FQDN resolves to the BunkerWeb public IP.
+          </span>
+        </div>
+      )}
+
+      {route.dns_ok === null && (
+        <p className="text-xs text-muted-foreground" data-testid="dns-pending">DNS check pending…</p>
+      )}
+
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-3">

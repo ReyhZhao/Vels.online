@@ -9,6 +9,7 @@ from security.models import Organization, OrganizationMembership
 from .bunkerweb import BunkerWebClient, BunkerWebError
 from .models import Route
 from .serializers import RouteSerializer
+from .tasks import check_route_dns
 
 
 def _resolve_org(request, slug):
@@ -82,6 +83,7 @@ class RouteListView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
+        check_route_dns.delay(route.pk)
         return Response(RouteSerializer(route).data, status=status.HTTP_201_CREATED)
 
 

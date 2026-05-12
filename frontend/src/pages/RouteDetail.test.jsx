@@ -22,6 +22,7 @@ const ROUTE = {
   backend_port: 8080,
   backend_protocol: 'http',
   status: 'active',
+  dns_ok: true,
 };
 
 function renderPage(fqdn = 'app.example.com') {
@@ -76,6 +77,30 @@ describe('RouteDetail', () => {
     api.get.mockRejectedValue(new Error('not found'));
     renderPage();
     await waitFor(() => expect(screen.getByText('Route not found.')).toBeInTheDocument());
+  });
+
+  it('shows DNS warning banner when dns_ok is false', async () => {
+    api.get.mockResolvedValue({ data: { ...ROUTE, dns_ok: false } });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/DNS not yet pointing to BunkerWeb/i)
+    );
+  });
+
+  it('shows DNS pending indicator when dns_ok is null', async () => {
+    api.get.mockResolvedValue({ data: { ...ROUTE, dns_ok: null } });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId('dns-pending')).toBeInTheDocument()
+    );
+  });
+
+  it('shows no DNS banner when dns_ok is true', async () => {
+    api.get.mockResolvedValue({ data: { ...ROUTE, dns_ok: true } });
+    renderPage();
+    await waitFor(() => screen.getByText('app.example.com'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dns-pending')).not.toBeInTheDocument();
   });
 
   it('deletes route and navigates away', async () => {

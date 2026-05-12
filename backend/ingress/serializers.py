@@ -17,8 +17,9 @@ class RouteSerializer(serializers.ModelSerializer):
             "backend_protocol",
             "backend_type",
             "status",
+            "dns_ok",
             "org_slug",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "status", "org_slug", "created_at", "updated_at"]
+        read_only_fields = ["id", "status", "dns_ok", "org_slug", "created_at", "updated_at"]
