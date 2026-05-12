@@ -175,6 +175,25 @@ def test_dashboard_admin_can_query_any_org(mock_wazuh_cls, mock_os_cls, admin_cl
     assert response.status_code == 200
 
 
+@pytest.mark.django_db
+@patch("security.views.OpenSearchClient")
+@patch("security.views.WazuhClient")
+def test_dashboard_degrades_gracefully_when_opensearch_unavailable(mock_wazuh_cls, mock_os_cls, client, acme_member, acme):
+    from security.opensearch import OpenSearchError
+    mock_wazuh_cls.return_value.get_agents.return_value = _WAZUH_AGENTS
+    mock_os_cls.return_value.get_vulnerabilities_summary.side_effect = OpenSearchError("index not found")
+    client.force_login(acme_member)
+
+    response = client.get("/api/security/dashboard/?org=acme")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["agent_count"] == 2
+    assert data["active_count"] == 1
+    assert data["vulnerabilities"] == {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    assert data["events_24h"] == 0
+
+
 # ---------------------------------------------------------------- POST /api/security/dashboard/refresh/
 
 

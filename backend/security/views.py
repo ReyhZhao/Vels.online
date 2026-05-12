@@ -299,11 +299,16 @@ class DashboardView(APIView):
 
         try:
             raw_agents = WazuhClient().get_agents(org.wazuh_group)
+        except (WazuhAuthError, WazuhAPIError) as exc:
+            return Response({"detail": str(exc)}, status=502)
+
+        try:
             os_client = OpenSearchClient()
             vuln_summary = os_client.get_vulnerabilities_summary(raw_agents)
             event_count = os_client.get_events_count(raw_agents)
-        except (WazuhAuthError, WazuhAPIError, OpenSearchError) as exc:
-            return Response({"detail": str(exc)}, status=502)
+        except OpenSearchError:
+            vuln_summary = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            event_count = 0
 
         active = sum(1 for a in raw_agents if a.get("status") == "active")
         data = {
