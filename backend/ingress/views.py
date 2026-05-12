@@ -12,6 +12,20 @@ from .serializers import RouteSerializer
 from .tasks import check_route_dns, push_route_settings
 
 
+def _get_route(request, fqdn):
+    """Returns (route, error_response). Enforces org membership; staff bypass."""
+    try:
+        route = Route.objects.select_related("organization").get(fqdn=fqdn)
+    except Route.DoesNotExist:
+        return None, Response(status=404)
+    if not request.user.is_staff:
+        if not OrganizationMembership.objects.filter(
+            user=request.user, organization=route.organization
+        ).exists():
+            return None, Response(status=403)
+    return route, None
+
+
 def _resolve_org(request, slug):
     if not slug:
         return None, Response({"detail": "org is required."}, status=400)
@@ -88,26 +102,14 @@ class RouteListView(APIView):
 
 
 class RouteDetailView(APIView):
-    def _get_route(self, request, fqdn):
-        try:
-            route = Route.objects.select_related("organization").get(fqdn=fqdn)
-        except Route.DoesNotExist:
-            return None, Response(status=404)
-        if not request.user.is_staff:
-            if not OrganizationMembership.objects.filter(
-                user=request.user, organization=route.organization
-            ).exists():
-                return None, Response(status=403)
-        return route, None
-
     def get(self, request, fqdn):
-        route, err = self._get_route(request, fqdn)
+        route, err = _get_route(request, fqdn)
         if err:
             return err
         return Response(RouteSerializer(route).data)
 
     def delete(self, request, fqdn):
-        route, err = self._get_route(request, fqdn)
+        route, err = _get_route(request, fqdn)
         if err:
             return err
 
@@ -151,20 +153,8 @@ def _validate_settings(data):
 
 
 class RouteSettingsView(APIView):
-    def _get_route(self, request, fqdn):
-        try:
-            route = Route.objects.select_related("organization").get(fqdn=fqdn)
-        except Route.DoesNotExist:
-            return None, Response(status=404)
-        if not request.user.is_staff:
-            if not OrganizationMembership.objects.filter(
-                user=request.user, organization=route.organization
-            ).exists():
-                return None, Response(status=403)
-        return route, None
-
     def get(self, request, fqdn):
-        _, err = self._get_route(request, fqdn)
+        _, err = _get_route(request, fqdn)
         if err:
             return err
         try:
@@ -175,7 +165,7 @@ class RouteSettingsView(APIView):
         return Response(filtered)
 
     def patch(self, request, fqdn):
-        route, err = self._get_route(request, fqdn)
+        route, err = _get_route(request, fqdn)
         if err:
             return err
 
@@ -185,6 +175,24 @@ class RouteSettingsView(APIView):
 
         push_route_settings.delay(fqdn, cleaned)
         return Response(cleaned)
+
+
+class RouteReportsView(APIView):
+    def get(self, request, fqdn):
+        _, err = _get_route(request, fqdn)
+        if err:
+            return err
+        try:
+            data = BunkerWebClient().get_service_reports(fqdn)
+            entries = data if isinstance(data, list) else data.get("entries", [])
+            return Response({"entries": entries})
+        except BunkerWebError:
+            return Response(
+                {
+                    "entries": [],
+                    "message": "BunkerWeb is currently unavailable. No report data could be retrieved.",
+                }
+            )
 
 
 class IngressSettingsView(APIView):

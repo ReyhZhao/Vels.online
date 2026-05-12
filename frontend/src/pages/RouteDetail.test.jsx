@@ -12,6 +12,9 @@ vi.mock('../lib/axios', () => ({
   default: { get: vi.fn(), delete: vi.fn() },
 }));
 
+vi.mock('./RouteSettings', () => ({ default: () => <div data-testid="route-settings" /> }));
+vi.mock('./RouteReports', () => ({ default: () => <div data-testid="route-reports" /> }));
+
 import api from '../lib/axios';
 import RouteDetail from './RouteDetail';
 
@@ -65,12 +68,12 @@ describe('RouteDetail', () => {
     });
   });
 
-  it('switches to Reports tab on click', async () => {
+  it('switches to Reports tab on click and shows RouteReports', async () => {
     api.get.mockResolvedValue({ data: ROUTE });
     renderPage();
     await waitFor(() => screen.getByRole('button', { name: 'Reports' }));
     fireEvent.click(screen.getByRole('button', { name: 'Reports' }));
-    expect(screen.getByText(/blocked activity reports/i)).toBeInTheDocument();
+    expect(screen.getByTestId('route-reports')).toBeInTheDocument();
   });
 
   it('shows error state when route not found', async () => {
@@ -101,6 +104,23 @@ describe('RouteDetail', () => {
     await waitFor(() => screen.getByText('app.example.com'));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByTestId('dns-pending')).not.toBeInTheDocument();
+  });
+
+  it('does not fetch reports until Reports tab is opened', async () => {
+    api.get.mockResolvedValue({ data: ROUTE });
+    renderPage();
+    await waitFor(() => screen.getByText('app.example.com'));
+    const reportsCalls = api.get.mock.calls.filter(c => c[0].includes('/reports/'));
+    expect(reportsCalls).toHaveLength(0);
+  });
+
+  it('mounts RouteReports only after Reports tab is clicked', async () => {
+    api.get.mockResolvedValue({ data: ROUTE });
+    renderPage();
+    await waitFor(() => screen.getByText('app.example.com'));
+    expect(screen.queryByTestId('route-reports')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reports' }));
+    expect(screen.getByTestId('route-reports')).toBeInTheDocument();
   });
 
   it('deletes route and navigates away', async () => {

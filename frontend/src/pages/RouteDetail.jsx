@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
 import RouteSettings from './RouteSettings';
+import RouteReports from './RouteReports';
 
 const STATUS_CLASSES = {
   pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
@@ -22,6 +23,7 @@ export default function RouteDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('settings');
+  const [reportsOpened, setReportsOpened] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
 
@@ -94,7 +96,10 @@ export default function RouteDetail() {
           {TABS.map(tab => (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => {
+                setActiveTab(tab.key);
+                if (tab.key === 'reports') setReportsOpened(true);
+              }}
               className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.key
                   ? 'border-primary text-foreground'
@@ -109,8 +114,10 @@ export default function RouteDetail() {
 
       <div>
         {activeTab === 'settings' && <RouteSettings fqdn={route.fqdn} />}
-        {activeTab === 'reports' && (
-          <p className="text-sm text-muted-foreground">Blocked activity reports — coming soon.</p>
+        {reportsOpened && (
+          <div className={activeTab !== 'reports' ? 'hidden' : ''}>
+            <RouteReports fqdn={route.fqdn} />
+          </div>
         )}
       </div>
     </div>
