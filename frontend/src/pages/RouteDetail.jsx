@@ -1,0 +1,105 @@
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import api from '../lib/axios';
+
+const STATUS_CLASSES = {
+  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+  active:  'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+  error:   'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+};
+
+const TABS = [
+  { key: 'settings', label: 'Settings' },
+  { key: 'reports',  label: 'Reports' },
+];
+
+export default function RouteDetail() {
+  const { fqdn } = useParams();
+  const navigate = useNavigate();
+
+  const [route, setRoute] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState('settings');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  useEffect(() => {
+    api.get(`/api/ingress/routes/${fqdn}/`)
+      .then(res => setRoute(res.data))
+      .catch(() => setError('Route not found.'))
+      .finally(() => setLoading(false));
+  }, [fqdn]);
+
+  async function handleDelete() {
+    if (!window.confirm(`Delete route ${fqdn}?`)) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.delete(`/api/ingress/routes/${fqdn}/`);
+      navigate('/routes');
+    } catch (err) {
+      setDeleteError(err.response?.data?.detail || 'Failed to delete route.');
+      setDeleting(false);
+    }
+  }
+
+  if (loading) return <p className="p-6 text-sm text-muted-foreground">Loading…</p>;
+  if (error) return <p className="p-6 text-sm text-destructive">{error}</p>;
+
+  return (
+    <div className="space-y-6 p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-foreground font-mono">{route.fqdn}</h1>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_CLASSES[route.status] ?? 'bg-gray-100 text-gray-700'}`}>
+              {route.status}
+            </span>
+          </div>
+          {route.name && <p className="text-sm text-muted-foreground">{route.name}</p>}
+          <p className="text-sm text-muted-foreground">
+            {route.backend_protocol}://{route.backend_host}:{route.backend_port}
+          </p>
+        </div>
+
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          className="rounded-md border border-destructive px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50 transition-colors"
+        >
+          {deleting ? 'Deleting…' : 'Delete'}
+        </button>
+      </div>
+
+      {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+
+      <div className="border-b border-border">
+        <nav className="flex gap-4" aria-label="Route tabs">
+          {TABS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.key
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      <div>
+        {activeTab === 'settings' && (
+          <p className="text-sm text-muted-foreground">WAF and access settings — coming soon.</p>
+        )}
+        {activeTab === 'reports' && (
+          <p className="text-sm text-muted-foreground">Blocked activity reports — coming soon.</p>
+        )}
+      </div>
+    </div>
+  );
+}
