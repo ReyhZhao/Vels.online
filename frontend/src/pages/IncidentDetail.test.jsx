@@ -243,21 +243,37 @@ describe('IncidentDetail', () => {
 
   // ── transfer ──────────────────────────────────────────────────────────────
 
-  it('does not show Transfer button for non-staff users', async () => {
+  it('does not show Assign/Transfer button for non-staff users', async () => {
     mockGet();
     renderPage();
     await waitFor(() => screen.getByText('INC-2026-0001'));
+    expect(screen.queryByRole('button', { name: 'Assign' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Transfer' })).not.toBeInTheDocument();
   });
 
-  it('shows Transfer button for staff users', async () => {
+  it('shows Assign button for staff users when incident is unassigned', async () => {
     mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
     mockGet();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Assign' }));
+  });
+
+  it('shows Transfer button for staff users when incident already has an assignee', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    const ASSIGNED = { ...INCIDENT, assignee: 2, assignee_username: 'bob' };
+    api.get.mockImplementation(url => {
+      if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
+      if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
+      if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: ASSIGNED });
+    });
     renderPage();
     await waitFor(() => screen.getByRole('button', { name: 'Transfer' }));
   });
 
-  it('opens transfer dialog with staff users when Transfer is clicked', async () => {
+  it('opens assign dialog with staff users when Assign is clicked', async () => {
     mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
     mockGet();
     api.get.mockImplementation(url => {
@@ -271,9 +287,9 @@ describe('IncidentDetail', () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByRole('button', { name: 'Transfer' }));
-    await user.click(screen.getByRole('button', { name: 'Transfer' }));
-    await waitFor(() => screen.getByRole('heading', { name: 'Transfer incident' }));
+    await waitFor(() => screen.getByRole('button', { name: 'Assign' }));
+    await user.click(screen.getByRole('button', { name: 'Assign' }));
+    await waitFor(() => screen.getByRole('heading', { name: 'Assign incident' }));
     expect(screen.getByRole('option', { name: 'bob' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'carol' })).toBeInTheDocument();
   });
@@ -293,15 +309,15 @@ describe('IncidentDetail', () => {
     api.post.mockResolvedValue({ data: TRANSFERRED });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByRole('button', { name: 'Transfer' }));
-    await user.click(screen.getByRole('button', { name: 'Transfer' }));
-    await waitFor(() => screen.getByRole('heading', { name: 'Transfer incident' }));
+    await waitFor(() => screen.getByRole('button', { name: 'Assign' }));
+    await user.click(screen.getByRole('button', { name: 'Assign' }));
+    await waitFor(() => screen.getByRole('heading', { name: 'Assign incident' }));
     await user.selectOptions(screen.getByLabelText('New assignee'), '2');
-    await user.click(screen.getByRole('button', { name: 'Confirm transfer' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm assignment' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/incidents/INC-2026-0001/transfer/', { assignee_id: 2 }));
   });
 
-  it('cancels transfer dialog without calling API', async () => {
+  it('cancels assign dialog without calling API', async () => {
     mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
     api.get.mockImplementation(url => {
       if (url === '/api/incidents/staff-users/') return Promise.resolve({ data: STAFF_USERS });
@@ -314,12 +330,12 @@ describe('IncidentDetail', () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByRole('button', { name: 'Transfer' }));
-    await user.click(screen.getByRole('button', { name: 'Transfer' }));
-    await waitFor(() => screen.getByRole('heading', { name: 'Transfer incident' }));
+    await waitFor(() => screen.getByRole('button', { name: 'Assign' }));
+    await user.click(screen.getByRole('button', { name: 'Assign' }));
+    await waitFor(() => screen.getByRole('heading', { name: 'Assign incident' }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(api.post).not.toHaveBeenCalled();
-    expect(screen.queryByRole('heading', { name: 'Transfer incident' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Assign incident' })).not.toBeInTheDocument();
   });
 
   // ── tabs ──────────────────────────────────────────────────────────────────

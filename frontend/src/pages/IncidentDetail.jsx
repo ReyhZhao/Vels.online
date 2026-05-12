@@ -191,12 +191,16 @@ function ClosureReasonDialog({ onConfirm, onCancel, transitioning }) {
   );
 }
 
-function TransferDialog({ onConfirm, onCancel, transferring, staffUsers }) {
+function TransferDialog({ onConfirm, onCancel, transferring, staffUsers, isInitialAssignment }) {
   const [selectedId, setSelectedId] = useState('');
+  const title = isInitialAssignment ? 'Assign incident' : 'Transfer incident';
+  const confirmLabel = transferring
+    ? (isInitialAssignment ? 'Assigning…' : 'Transferring…')
+    : (isInitialAssignment ? 'Confirm assignment' : 'Confirm transfer');
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
-        <h2 className="text-lg font-semibold text-foreground">Transfer incident</h2>
+        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-foreground" htmlFor="transfer-assignee">
             New assignee
@@ -226,7 +230,7 @@ function TransferDialog({ onConfirm, onCancel, transferring, staffUsers }) {
             disabled={!selectedId || transferring}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            {transferring ? 'Transferring…' : 'Confirm transfer'}
+            {confirmLabel}
           </button>
         </div>
       </div>
@@ -413,6 +417,7 @@ export default function IncidentDetail() {
           transferring={transferring}
           onConfirm={handleTransfer}
           onCancel={() => setShowTransferDialog(false)}
+          isInitialAssignment={!incident.assignee_username}
         />
       )}
 
@@ -453,7 +458,7 @@ export default function IncidentDetail() {
                 disabled={transitioning || transferring}
                 className="rounded-md border border-slate-400 bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50 transition-colors dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
               >
-                Transfer
+                {incident.assignee_username ? 'Transfer' : 'Assign'}
               </button>
             )}
             {user?.is_staff && incident.source_kind === 'wazuh_event' && (
