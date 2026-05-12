@@ -92,12 +92,14 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   const [collapsed, setCollapsed] = useState(() => readLS('sidebar:collapsed', false));
   const [incidentsOpen, setIncidentsOpen] = useState(() => readLS('sidebar:incidents:open', true));
   const [securityOpen, setSecurityOpen] = useState(() => readLS('sidebar:security:open', true));
+  const [ingressOpen, setIngressOpen] = useState(() => readLS('sidebar:ingress:open', true));
   const [adminOpen, setAdminOpen] = useState(() => readLS('sidebar:admin:open', true));
   const [reportOpen, setReportOpen] = useState(false);
 
   useEffect(() => { writeLS('sidebar:collapsed', collapsed); }, [collapsed]);
   useEffect(() => { writeLS('sidebar:incidents:open', incidentsOpen); }, [incidentsOpen]);
   useEffect(() => { writeLS('sidebar:security:open', securityOpen); }, [securityOpen]);
+  useEffect(() => { writeLS('sidebar:ingress:open', ingressOpen); }, [ingressOpen]);
   useEffect(() => { writeLS('sidebar:admin:open', adminOpen); }, [adminOpen]);
 
   const showItems = !collapsed;
@@ -116,7 +118,7 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
 
       <aside
         className={cn(
-          'flex-col border-r border-border bg-card transition-all duration-200',
+          'flex-col border-r border-border bg-card transition-all duration-200 overflow-y-auto',
           mobileOpen
             ? 'fixed top-28 bottom-0 left-0 z-50 w-56 flex'
             : cn('hidden md:flex', collapsed ? 'w-14' : 'w-56')
@@ -214,13 +216,25 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 <SidebarLink to="/exceptions" icon={Filter} collapsed={collapsed}>
                   Exception Rules
                 </SidebarLink>
-                <SidebarLink to="/routes" icon={Globe} collapsed={collapsed}>
-                  Routes
-                </SidebarLink>
                 <SidebarLink to="/security/enroll" icon={UserPlus} collapsed={collapsed}>
                   Enroll
                 </SidebarLink>
               </>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            {showItems && (
+              <SectionToggle
+                label="App Ingress"
+                open={ingressOpen}
+                onToggle={() => setIngressOpen((o) => !o)}
+              />
+            )}
+            {(ingressOpen || collapsed) && (
+              <SidebarLink to="/routes" icon={Globe} collapsed={collapsed}>
+                Routes
+              </SidebarLink>
             )}
           </div>
 
