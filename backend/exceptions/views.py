@@ -1,3 +1,4 @@
+import logging
 from dataclasses import asdict
 
 from rest_framework import status
@@ -13,6 +14,8 @@ from .models import ExceptionRule
 from .serializers import ExceptionRuleSerializer
 from .services import allocate_rule_id, free_rule_id
 from .services_github import push_rule, remove_rule
+
+logger = logging.getLogger(__name__)
 
 
 class ExceptionRuleListView(APIView):
@@ -212,10 +215,11 @@ class ExceptionGenerateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        provider = get_llm_provider()
         try:
+            provider = get_llm_provider()
             fields = provider.generate_exception(incident.source_ref)
         except Exception as exc:
+            logger.exception("LLM provider error during exception generation for %s", incident.display_id)
             return Response({"detail": f"LLM provider error: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
 
         return Response(asdict(fields))

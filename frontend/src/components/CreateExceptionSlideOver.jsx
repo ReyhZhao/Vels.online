@@ -46,7 +46,7 @@ export default function CreateExceptionSlideOver({ open, onClose, incident }) {
           agent_name:      res.data.agent_name      || '',
         }));
       })
-      .catch(() => {/* silently skip pre-fill; user can fill manually */})
+      .catch(() => setError('Could not generate a proposal — please fill in manually.'))
       .finally(() => setGenerating(false));
   }, [open, incident]);
 

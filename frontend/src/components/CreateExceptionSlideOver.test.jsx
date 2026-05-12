@@ -150,11 +150,13 @@ describe('CreateExceptionSlideOver', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('silently skips pre-fill if generate fails', async () => {
+  it('shows error and keeps form editable if generate fails', async () => {
     api.post.mockRejectedValueOnce(new Error('LLM down'));
     renderSlideOver();
-    await waitFor(() => expect(screen.getByRole('textbox', { name: /description/i })).toBeInTheDocument());
-    // Form still renders with empty defaults
+    await waitFor(() =>
+      expect(screen.getByText(/could not generate a proposal/i)).toBeInTheDocument()
+    );
+    // Form remains open with empty defaults so user can fill manually
     expect(screen.getByRole('textbox', { name: /description/i })).toHaveValue('');
   });
 });
