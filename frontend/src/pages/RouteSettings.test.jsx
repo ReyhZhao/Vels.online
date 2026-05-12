@@ -115,4 +115,79 @@ describe('RouteSettings', () => {
     expect(select.options[0].value).toBe('1');
     expect(select.options[3].value).toBe('4');
   });
+
+  it('renders IP whitelist toggle and textarea with loaded values', async () => {
+    api.get.mockResolvedValue({
+      data: { ...BW_SETTINGS, USE_WHITELIST: 'yes', WHITELIST_IP: '10.0.0.0/8 192.168.1.1' },
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('toggle-USE_WHITELIST')).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByTestId('input-WHITELIST_IP')).toHaveValue('10.0.0.0/8 192.168.1.1');
+    });
+  });
+
+  it('toggles USE_WHITELIST on click', async () => {
+    api.get.mockResolvedValue({ data: { ...BW_SETTINGS, USE_WHITELIST: 'no' } });
+    renderPage();
+    await waitFor(() => screen.getByTestId('toggle-USE_WHITELIST'));
+    const toggle = screen.getByTestId('toggle-USE_WHITELIST');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('renders rate limiting toggle and inputs with loaded values', async () => {
+    api.get.mockResolvedValue({
+      data: { ...BW_SETTINGS, USE_LIMIT_REQ: 'yes', LIMIT_REQ_RATE: '10r/s', LIMIT_REQ_BURST: '20' },
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('toggle-USE_LIMIT_REQ')).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByTestId('input-LIMIT_REQ_RATE')).toHaveValue('10r/s');
+      expect(screen.getByTestId('input-LIMIT_REQ_BURST')).toHaveValue('20');
+    });
+  });
+
+  it('renders country access textareas with loaded values', async () => {
+    api.get.mockResolvedValue({
+      data: { ...BW_SETTINGS, BLACKLIST_COUNTRY: 'CN RU', WHITELIST_COUNTRY: 'GB US' },
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('input-BLACKLIST_COUNTRY')).toHaveValue('CN RU');
+      expect(screen.getByTestId('input-WHITELIST_COUNTRY')).toHaveValue('GB US');
+    });
+  });
+
+  it('submits all settings sections on save', async () => {
+    const fullSettings = {
+      ...BW_SETTINGS,
+      USE_WHITELIST: 'yes',
+      WHITELIST_IP: '10.0.0.0/8',
+      USE_LIMIT_REQ: 'yes',
+      LIMIT_REQ_RATE: '5r/m',
+      LIMIT_REQ_BURST: '10',
+      BLACKLIST_COUNTRY: 'CN',
+      WHITELIST_COUNTRY: '',
+    };
+    api.get.mockResolvedValue({ data: fullSettings });
+    api.patch.mockResolvedValue({ data: fullSettings });
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Save Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+    await waitFor(() => {
+      expect(api.patch).toHaveBeenCalledWith(
+        '/api/ingress/routes/app.example.com/settings/',
+        expect.objectContaining({
+          USE_WHITELIST: 'yes',
+          WHITELIST_IP: '10.0.0.0/8',
+          USE_LIMIT_REQ: 'yes',
+          LIMIT_REQ_RATE: '5r/m',
+          LIMIT_REQ_BURST: '10',
+          BLACKLIST_COUNTRY: 'CN',
+        }),
+      );
+    });
+  });
 });

@@ -1,3 +1,6 @@
+import ipaddress
+import re
+
 from django.conf import settings as django_settings
 from django.db import IntegrityError
 from rest_framework import status
@@ -127,12 +130,24 @@ class RouteDetailView(APIView):
 
 # Keys this app exposes; grows as more setting slices are added.
 _MANAGED_SETTINGS = {
+    # WAF
     "USE_MODSECURITY",
     "USE_MODSECURITY_CRS",
     "MODSECURITY_CRS_PARANOIA_LEVEL",
+    # IP whitelist
+    "USE_WHITELIST",
+    "WHITELIST_IP",
+    # Rate limiting
+    "USE_LIMIT_REQ",
+    "LIMIT_REQ_RATE",
+    "LIMIT_REQ_BURST",
+    # Country access
+    "BLACKLIST_COUNTRY",
+    "WHITELIST_COUNTRY",
 }
 
-_BOOLEAN_SETTINGS = {"USE_MODSECURITY", "USE_MODSECURITY_CRS"}
+_RATE_RE = re.compile(r"^\d+r/[smh]$")
+_COUNTRY_CODE_RE = re.compile(r"^[A-Z]{2}$")
 
 
 def _validate_settings(data):
@@ -148,6 +163,34 @@ def _validate_settings(data):
             return None, "MODSECURITY_CRS_PARANOIA_LEVEL must be an integer."
         if level < 1 or level > 4:
             return None, "MODSECURITY_CRS_PARANOIA_LEVEL must be between 1 and 4."
+
+    if data.get("WHITELIST_IP"):
+        for token in data["WHITELIST_IP"].split():
+            try:
+                ipaddress.ip_network(token, strict=False)
+            except ValueError:
+                return None, f"Invalid IP address or CIDR: {token!r}"
+
+    if data.get("LIMIT_REQ_RATE"):
+        if not _RATE_RE.match(data["LIMIT_REQ_RATE"]):
+            return None, "LIMIT_REQ_RATE must be in format like '10r/s', '5r/m', or '2r/h'."
+
+    if "LIMIT_REQ_BURST" in data and data["LIMIT_REQ_BURST"] not in ("", None):
+        try:
+            burst = int(data["LIMIT_REQ_BURST"])
+        except (TypeError, ValueError):
+            return None, "LIMIT_REQ_BURST must be an integer."
+        if burst < 0:
+            return None, "LIMIT_REQ_BURST must be a non-negative integer."
+
+    for key in ("BLACKLIST_COUNTRY", "WHITELIST_COUNTRY"):
+        if data.get(key):
+            for token in data[key].split():
+                if not _COUNTRY_CODE_RE.match(token):
+                    return None, (
+                        f"Invalid country code in {key}: {token!r}. "
+                        "Must be 2-letter uppercase ISO 3166-1 alpha-2."
+                    )
 
     return dict(data), None
 

@@ -179,3 +179,109 @@ def test_patch_settings_rejects_non_integer_paranoia_level(client, acme_member, 
         content_type="application/json",
     )
     assert res.status_code == 400
+
+
+# ── IP whitelist ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_valid_whitelist_ip(mock_task, client, acme_member, route):
+    payload = {"USE_WHITELIST": "yes", "WHITELIST_IP": "10.0.0.0/8 192.168.1.1"}
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        payload,
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+    mock_task.delay.assert_called_once_with("app.example.com", payload)
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_invalid_whitelist_ip(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"WHITELIST_IP": "not-an-ip"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+    assert "CIDR" in res.json()["detail"] or "Invalid IP" in res.json()["detail"]
+
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_valid_rate_limit(mock_task, client, acme_member, route):
+    payload = {"USE_LIMIT_REQ": "yes", "LIMIT_REQ_RATE": "10r/s", "LIMIT_REQ_BURST": "20"}
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        payload,
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_invalid_rate_format(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"LIMIT_REQ_RATE": "10/second"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_non_integer_burst(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"LIMIT_REQ_BURST": "many"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_negative_burst(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"LIMIT_REQ_BURST": "-1"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+
+
+# ── Country access ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_valid_country_codes(mock_task, client, acme_member, route):
+    payload = {"BLACKLIST_COUNTRY": "CN RU", "WHITELIST_COUNTRY": "GB US AU"}
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        payload,
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_invalid_country_code(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"BLACKLIST_COUNTRY": "CN INVALID"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+    assert "country code" in res.json()["detail"].lower()
