@@ -45,3 +45,11 @@ def send_digest_email(recipient_id, incident_id):
     for n in notifications:
         n.email_sent_at = now
     Notification.objects.bulk_update(notifications, ["email_sent_at"])
+
+
+@shared_task
+def cleanup_old_notifications():
+    from datetime import timedelta
+    from notifications.models import Notification
+    cutoff = timezone.now() - timedelta(hours=24)
+    Notification.objects.filter(created_at__lt=cutoff).delete()

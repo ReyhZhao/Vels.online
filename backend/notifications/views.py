@@ -76,6 +76,17 @@ class NotificationReadAllView(APIView):
         return Response({"detail": "All notifications marked as read."})
 
 
+class NotificationDeleteView(APIView):
+    def delete(self, request, pk):
+        try:
+            notification = Notification.objects.get(pk=pk, recipient=request.user)
+        except Notification.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        was_unread = not notification.read_at
+        notification.delete()
+        return Response({"was_unread": was_unread}, status=status.HTTP_200_OK)
+
+
 class UnreadCountView(APIView):
     def get(self, request):
         count = Notification.objects.filter(

@@ -23,7 +23,7 @@ function BellIcon({ hasUnread }) {
   );
 }
 
-function NotificationItem({ notification, onRead }) {
+function NotificationItem({ notification, onRead, onDismiss }) {
   const navigate = useNavigate();
   const isUnread = !notification.read_at;
   const title = notification.payload?.title ?? notification.kind;
@@ -39,26 +39,45 @@ function NotificationItem({ notification, onRead }) {
     }
   }
 
+  async function handleDismiss(e) {
+    e.stopPropagation();
+    try {
+      const res = await api.delete(`/api/me/notifications/${notification.id}/`);
+      onDismiss(notification.id, res.data.was_unread);
+    } catch {
+      // silently ignore
+    }
+  }
+
   return (
-    <button
-      onClick={handleClick}
-      className={`w-full text-left px-6 py-4 border-b border-border hover:bg-accent transition-colors ${
-        isUnread ? 'bg-accent/30' : ''
-      }`}
-    >
-      <div className="flex items-start gap-2">
-        {isUnread && (
-          <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-primary" aria-hidden="true" />
-        )}
-        <div className={isUnread ? '' : 'ml-4'}>
-          <p className="text-sm font-medium text-foreground">{title}</p>
-          {body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{body}</p>}
-          <p className="text-xs text-muted-foreground mt-1">
-            {new Date(notification.created_at).toLocaleString()}
-          </p>
+    <div className={`relative border-b border-border ${isUnread ? 'bg-accent/30' : ''}`}>
+      <button
+        onClick={handleClick}
+        className="w-full text-left px-6 py-4 hover:bg-accent transition-colors"
+      >
+        <div className="flex items-start gap-2">
+          {isUnread && (
+            <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-primary" aria-hidden="true" />
+          )}
+          <div className={isUnread ? '' : 'ml-4'}>
+            <p className="text-sm font-medium text-foreground">{title}</p>
+            {body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{body}</p>}
+            <p className="text-xs text-muted-foreground mt-1">
+              {new Date(notification.created_at).toLocaleString()}
+            </p>
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+      <button
+        onClick={handleDismiss}
+        aria-label="Dismiss notification"
+        className="absolute top-2 right-2 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -109,6 +128,11 @@ export default function NotificationBell() {
     setUnreadCount(0);
   }
 
+  function handleDismiss(id, wasUnread) {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+    if (wasUnread) setUnreadCount(prev => Math.max(0, prev - 1));
+  }
+
   return (
     <>
       <button
@@ -155,6 +179,7 @@ export default function NotificationBell() {
               key={n.id}
               notification={n}
               onRead={handleNotificationRead}
+              onDismiss={handleDismiss}
             />
           ))
         )}

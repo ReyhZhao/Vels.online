@@ -158,6 +158,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "incidents.tasks.cleanup_orphaned_attachments",
         "schedule": 86400,  # every 24 hours
     },
+    "cleanup-old-notifications-daily": {
+        "task": "notifications.tasks.cleanup_old_notifications",
+        "schedule": 86400,  # every 24 hours
+    },
 }
 
 REST_FRAMEWORK = {

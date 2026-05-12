@@ -272,3 +272,59 @@ def test_prefs_get_auto_creates_row(client, staff):
     response = client.get("/api/me/notification-prefs/")
     assert response.status_code == 200
     assert NotificationPreferences.objects.filter(user=staff).exists()
+
+
+# ── DELETE /api/me/notifications/<pk>/ ───────────────────────────────────────
+
+@pytest.mark.django_db
+def test_dismiss_unread_notification_returns_was_unread_true(client, staff, acme):
+    incident = make_incident(acme)
+    n = Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={})
+    client.force_login(staff)
+    response = client.delete(f"/api/me/notifications/{n.id}/")
+    assert response.status_code == 200
+    assert response.json()["was_unread"] is True
+    assert not Notification.objects.filter(pk=n.id).exists()
+
+
+@pytest.mark.django_db
+def test_dismiss_read_notification_returns_was_unread_false(client, staff, acme):
+    from django.utils import timezone as tz
+    incident = make_incident(acme)
+    n = Notification.objects.create(
+        recipient=staff, kind="comment", incident=incident, payload={}, read_at=tz.now()
+    )
+    client.force_login(staff)
+    response = client.delete(f"/api/me/notifications/{n.id}/")
+    assert response.status_code == 200
+    assert response.json()["was_unread"] is False
+
+
+@pytest.mark.django_db
+def test_dismiss_another_users_notification_returns_404(client, staff, staff2, acme):
+    incident = make_incident(acme)
+    n = Notification.objects.create(recipient=staff2, kind="comment", incident=incident, payload={})
+    client.force_login(staff)
+    response = client.delete(f"/api/me/notifications/{n.id}/")
+    assert response.status_code == 404
+    assert Notification.objects.filter(pk=n.id).exists()
+
+
+# ── cleanup_old_notifications task ───────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_cleanup_old_notifications_deletes_old_and_keeps_recent(acme, staff):
+    from datetime import timedelta
+    from django.utils import timezone as tz
+    from notifications.tasks import cleanup_old_notifications
+
+    incident = make_incident(acme)
+    old = Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={})
+    Notification.objects.filter(pk=old.pk).update(created_at=tz.now() - timedelta(hours=25))
+
+    recent = Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={})
+
+    cleanup_old_notifications()
+
+    assert not Notification.objects.filter(pk=old.pk).exists()
+    assert Notification.objects.filter(pk=recent.pk).exists()
