@@ -31,7 +31,7 @@ class GeminiFlashProvider(BaseLLMProvider):
     def generate_exception(self, source_ref: dict) -> ExceptionFields:
         prompt = json.dumps(source_ref, indent=2)
         response = self._client.models.generate_content(
-            model="gemini-1.5-flash",
+            model=settings.GEMINI_MODEL,
             contents=prompt,
             config=self._types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
