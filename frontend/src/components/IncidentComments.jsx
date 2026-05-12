@@ -56,7 +56,7 @@ function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
   const canDelete = isDeletable(comment, currentUserId, isStaff);
 
   return (
-    <div className={`rounded-md border p-3 space-y-1 ${comment.is_internal ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-700' : 'border-border bg-card'}`}>
+    <div className={`rounded-md border p-3 space-y-1 ${comment.is_internal ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-700' : 'border-border bg-muted'}`}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{comment.author_username ?? '[deleted user]'}</span>
         <span>·</span>
