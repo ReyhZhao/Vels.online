@@ -209,3 +209,21 @@ def test_generate_returns_502_on_provider_error(admin_client, acme):
         )
     assert response.status_code == 502
     assert "LLM unavailable" in response.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_generate_returns_400_for_empty_source_ref(admin_client, acme):
+    Incident.objects.create(
+        display_id="INC-2026-0099",
+        organization=acme,
+        title="Empty ref",
+        source_kind="wazuh_event",
+        source_ref={},
+    )
+    response = admin_client.post(
+        "/api/exceptions/generate/",
+        {"display_id": "INC-2026-0099"},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert "no Wazuh alert data" in response.json()["detail"]

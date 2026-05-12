@@ -215,6 +215,12 @@ class ExceptionGenerateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        if not incident.source_ref:
+            return Response(
+                {"detail": "This incident has no Wazuh alert data attached. Cannot generate an exception proposal."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             provider = get_llm_provider()
             fields = provider.generate_exception(incident.source_ref)
