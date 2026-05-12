@@ -16,6 +16,8 @@ class NotificationPreferences(models.Model):
     inapp_state_change = models.BooleanField(default=True)
     email_incident_alert = models.BooleanField(default=True)
     inapp_incident_alert = models.BooleanField(default=True)
+    email_system_alert = models.BooleanField(default=True)
+    inapp_system_alert = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -28,12 +30,14 @@ class Notification(models.Model):
     KIND_COMMENT = "comment"
     KIND_STATE_CHANGE = "state_change"
     KIND_INCIDENT_ALERT = "incident_alert"
+    KIND_SYSTEM_ALERT = "system_alert"
     KIND_CHOICES = [
         (KIND_ASSIGNMENT, "Assignment"),
         (KIND_DELEGATION, "Delegation"),
         (KIND_COMMENT, "Comment"),
         (KIND_STATE_CHANGE, "State Change"),
         (KIND_INCIDENT_ALERT, "Incident Alert"),
+        (KIND_SYSTEM_ALERT, "System Alert"),
     ]
 
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
