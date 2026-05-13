@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, Zap, ArrowRight, ShieldCheck, AlertTriangle, ListChecks, Users, Lock, Clock, Globe } from 'lucide-react';
+import { Server, Zap, ArrowRight, ShieldCheck, AlertTriangle, ListChecks, Users, Lock, Clock, Globe, Activity, Map, Network } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import PostCard from '@/components/blog/PostCard';
@@ -34,6 +34,45 @@ const SERVICES = [
     title: 'Managed Security',
     description:
       'End-to-end security incident management for your organisation, handled by our SOC team with full transparency and auditability.',
+  },
+];
+
+const INGRESS_FEATURES = [
+  {
+    icon: Network,
+    title: 'Self-service route management',
+    description:
+      'Create ingress routes that map any public FQDN to a backend service — IP address or hostname — with configurable port and protocol. Every route is scoped to your organisation so you only ever see your own services.',
+  },
+  {
+    icon: Lock,
+    title: 'Automatic SSL termination',
+    description:
+      'BunkerWeb provisions and renews Let\'s Encrypt certificates automatically. The creation form shows you exactly which IP to point your DNS record to, and a background check warns you if DNS is not yet aligned.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Web Application Firewall',
+    description:
+      'ModSecurity with the OWASP Core Rule Set protects every route. Choose a paranoia level from 1 (permissive) to 4 (strict) to balance security with false-positive tolerance for your specific application.',
+  },
+  {
+    icon: Zap,
+    title: 'Rate limiting',
+    description:
+      'Set per-route request rate and burst limits to protect your backend from traffic spikes, credential-stuffing attempts, and abusive bots — without touching your application code.',
+  },
+  {
+    icon: Map,
+    title: 'Country access controls',
+    description:
+      'Restrict inbound traffic by geography. Blacklist countries you do not serve, or lock a route to a whitelist of allowed countries — whichever approach fits your compliance and threat model best.',
+  },
+  {
+    icon: Activity,
+    title: 'On-demand blocked activity reports',
+    description:
+      'Open the Reports tab on any route to see a live feed of blocked requests — source IP, rule triggered, and action taken — fetched directly from BunkerWeb so you always have an up-to-date view of what is being stopped.',
   },
 ];
 
@@ -136,6 +175,39 @@ function ServicesSection() {
   );
 }
 
+function AppIngressSection() {
+  return (
+    <section className="border-t border-border px-4 py-20">
+      <div className="container mx-auto">
+        <div className="mb-12 text-center">
+          <h2 className="text-3xl font-bold tracking-tight text-foreground">
+            App Ingress
+          </h2>
+          <p className="mt-3 mx-auto max-w-2xl text-muted-foreground">
+            Publish your applications to the internet safely and on your own terms. Our
+            BunkerWeb-powered ingress layer handles SSL termination, WAF protection, rate
+            limiting, and country-based access control — all managed from one self-service
+            dashboard, scoped to your organisation.
+          </p>
+        </div>
+        <div className="grid gap-8 sm:grid-cols-2">
+          {INGRESS_FEATURES.map(({ icon: Icon, title, description }) => (
+            <div key={title} className="flex gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10">
+                <Icon className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ManagedSecuritySection() {
   return (
     <section className="border-t border-border px-4 py-20">
@@ -221,6 +293,7 @@ function LandingPage() {
     <div>
       <HeroSection />
       <ServicesSection />
+      <AppIngressSection />
       <ManagedSecuritySection />
       <BlogPreviewSection posts={posts} />
     </div>

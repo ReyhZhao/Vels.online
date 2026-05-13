@@ -36,7 +36,7 @@ describe('LandingPage', () => {
     api.get.mockResolvedValue({ data: [] });
     renderLandingPage();
     expect(screen.getByText('Infrastructure')).toBeInTheDocument();
-    expect(screen.getByText('App Ingress')).toBeInTheDocument();
+    expect(screen.getAllByText('App Ingress').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Automation')).toBeInTheDocument();
     expect(screen.getByText('Managed Security')).toBeInTheDocument();
   });
