@@ -69,7 +69,8 @@ const CLOSURE_REASONS = [
   { value: 'accepted_risk',  label: 'Accepted Risk' },
 ];
 
-const SECONDARY_TABS = [
+const TABS = [
+  { key: 'details',     label: 'Details' },
   { key: 'timeline',    label: 'Timeline' },
   { key: 'attachments', label: 'Attachments' },
   { key: 'tasks',       label: 'Tasks' },
@@ -341,7 +342,7 @@ export default function IncidentDetail() {
   const [transferError, setTransferError] = useState(null);
   const [savingBadge, setSavingBadge]     = useState(false);
   const [badgeError, setBadgeError]       = useState(null);
-  const [activeTab, setActiveTab]         = useState('timeline');
+  const [activeTab, setActiveTab]         = useState('details');
   const [showExceptionSlideOver, setShowExceptionSlideOver] = useState(false);
   const pollRef = useRef(null);
 
@@ -492,8 +493,8 @@ export default function IncidentDetail() {
         </Link>
       </div>
 
-      {/* ── Header card ── */}
-      <div className="rounded-lg border border-border bg-card p-6 space-y-6">
+      {/* ── Header card: title + actions only ── */}
+      <div className="rounded-lg border border-border bg-card p-6 space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="font-mono text-xs text-muted-foreground">{incident.display_id}</p>
@@ -541,102 +542,12 @@ export default function IncidentDetail() {
         {transitionError && <p className="text-sm text-red-600">{transitionError}</p>}
         {transferError   && <p className="text-sm text-red-600">{transferError}</p>}
         {badgeError      && <p className="text-sm text-red-600">{badgeError}</p>}
-
-        {/* Metadata grid */}
-        <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
-          <Badge
-            label="State"
-            value={incident.state.replace('_', ' ')}
-            badgeClass={STATE_CLASSES[incident.state] ?? ''}
-          />
-          <InlineSelect
-            label="Severity"
-            value={incident.severity}
-            options={['critical', 'high', 'medium', 'low', 'info']}
-            colorClasses={SEVERITY_CLASSES}
-            onChange={v => handleBadgeChange('severity', v)}
-            saving={savingBadge}
-          />
-          <InlineSelect
-            label="TLP"
-            value={incident.tlp}
-            options={['white', 'green', 'amber', 'red']}
-            colorClasses={TLP_CLASSES}
-            onChange={v => handleBadgeChange('tlp', v)}
-            saving={savingBadge}
-          />
-          <InlineSelect
-            label="PAP"
-            value={incident.pap}
-            options={['white', 'green', 'amber', 'red']}
-            colorClasses={TLP_CLASSES}
-            onChange={v => handleBadgeChange('pap', v)}
-            saving={savingBadge}
-          />
-          <Field label="Organisation" value={incident.org_slug} />
-          <Field label="Source"       value={incident.source_kind} />
-          <Field label="Assignee"     value={incident.assignee_username} />
-          <Field label="Created By"   value={incident.created_by_username} />
-          {incident.closure_reason && (
-            <Field label="Closure Reason" value={incident.closure_reason.replace('_', ' ')} />
-          )}
-          {incident.response_sla?.applies && (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Response SLA</span>
-              <SLAPill sla={incident.response_sla} label="Response SLA" />
-            </div>
-          )}
-          {incident.resolve_sla?.applies && (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Resolve SLA</span>
-              <SLAPill sla={incident.resolve_sla} label="Resolve SLA" />
-            </div>
-          )}
-          <SubjectDropdown
-            incident={incident}
-            subjects={subjects}
-            onSubjectChange={handleSubjectChange}
-            saving={savingSubject}
-          />
-        </div>
-
-        {subjectError && <p className="text-sm text-red-600">{subjectError}</p>}
-
-        {/* Description + Comments split */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <div>
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</span>
-              {incident.description ? (
-                <div className="mt-1 prose prose-sm dark:prose-invert max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{incident.description}</ReactMarkdown>
-                </div>
-              ) : (
-                <p className="mt-1 text-sm text-muted-foreground italic">No description provided.</p>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
-              <span>Created: {incident.created_at ? new Date(incident.created_at).toLocaleString() : '—'}</span>
-              <span>Updated: {incident.updated_at ? new Date(incident.updated_at).toLocaleString() : '—'}</span>
-            </div>
-          </div>
-          <div>
-            <IncidentComments
-              incidentId={displayId}
-              currentUserId={user?.id}
-              isStaff={user?.is_staff ?? false}
-            />
-          </div>
-        </div>
       </div>
 
-      {/* ── Exceptions sidebar ── */}
-      <IncidentExceptionsSection displayId={displayId} />
-
-      {/* ── Tabbed secondary content ── */}
+      {/* ── Tabbed content ── */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="flex border-b border-border">
-          {SECONDARY_TABS.map(tab => (
+          {TABS.map(tab => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
@@ -651,6 +562,99 @@ export default function IncidentDetail() {
           ))}
         </div>
         <div className="p-6">
+          {activeTab === 'details' && (
+            <div className="space-y-6">
+              {/* Metadata grid */}
+              <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
+                <Badge
+                  label="State"
+                  value={incident.state.replace('_', ' ')}
+                  badgeClass={STATE_CLASSES[incident.state] ?? ''}
+                />
+                <InlineSelect
+                  label="Severity"
+                  value={incident.severity}
+                  options={['critical', 'high', 'medium', 'low', 'info']}
+                  colorClasses={SEVERITY_CLASSES}
+                  onChange={v => handleBadgeChange('severity', v)}
+                  saving={savingBadge}
+                />
+                <InlineSelect
+                  label="TLP"
+                  value={incident.tlp}
+                  options={['white', 'green', 'amber', 'red']}
+                  colorClasses={TLP_CLASSES}
+                  onChange={v => handleBadgeChange('tlp', v)}
+                  saving={savingBadge}
+                />
+                <InlineSelect
+                  label="PAP"
+                  value={incident.pap}
+                  options={['white', 'green', 'amber', 'red']}
+                  colorClasses={TLP_CLASSES}
+                  onChange={v => handleBadgeChange('pap', v)}
+                  saving={savingBadge}
+                />
+                <Field label="Organisation" value={incident.org_slug} />
+                <Field label="Source"       value={incident.source_kind} />
+                <Field label="Assignee"     value={incident.assignee_username} />
+                <Field label="Created By"   value={incident.created_by_username} />
+                {incident.closure_reason && (
+                  <Field label="Closure Reason" value={incident.closure_reason.replace('_', ' ')} />
+                )}
+                {incident.response_sla?.applies && (
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Response SLA</span>
+                    <SLAPill sla={incident.response_sla} label="Response SLA" />
+                  </div>
+                )}
+                {incident.resolve_sla?.applies && (
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Resolve SLA</span>
+                    <SLAPill sla={incident.resolve_sla} label="Resolve SLA" />
+                  </div>
+                )}
+                <SubjectDropdown
+                  incident={incident}
+                  subjects={subjects}
+                  onSubjectChange={handleSubjectChange}
+                  saving={savingSubject}
+                />
+              </div>
+
+              {subjectError && <p className="text-sm text-red-600">{subjectError}</p>}
+
+              {/* Description + Comments */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div>
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</span>
+                    {incident.description ? (
+                      <div className="mt-1 prose prose-sm dark:prose-invert max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{incident.description}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-sm text-muted-foreground italic">No description provided.</p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+                    <span>Created: {incident.created_at ? new Date(incident.created_at).toLocaleString() : '—'}</span>
+                    <span>Updated: {incident.updated_at ? new Date(incident.updated_at).toLocaleString() : '—'}</span>
+                  </div>
+                </div>
+                <div>
+                  <IncidentComments
+                    incidentId={displayId}
+                    currentUserId={user?.id}
+                    isStaff={user?.is_staff ?? false}
+                  />
+                </div>
+              </div>
+
+              {/* Exceptions */}
+              <IncidentExceptionsSection displayId={displayId} />
+            </div>
+          )}
           {activeTab === 'timeline' && (
             <IncidentTimeline incidentId={displayId} />
           )}

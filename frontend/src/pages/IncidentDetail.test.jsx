@@ -391,10 +391,11 @@ describe('IncidentDetail', () => {
 
   // ── tabs ──────────────────────────────────────────────────────────────────
 
-  it('renders Timeline, Attachments, Tasks, and Delegations tab buttons', async () => {
+  it('renders Details, Timeline, Attachments, Tasks, and Delegations tab buttons', async () => {
     mockGet();
     renderPage();
     await waitFor(() => screen.getByText('INC-2026-0001'));
+    expect(screen.getByRole('button', { name: 'Details' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Timeline' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Attachments' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument();
@@ -417,15 +418,14 @@ describe('IncidentDetail', () => {
     expect(screen.queryByText('No active delegations.')).not.toBeInTheDocument();
   });
 
-  it('shows Timeline content by default', async () => {
+  it('shows Details tab content by default', async () => {
     mockGet();
     renderPage();
-    await waitFor(() => screen.getByRole('button', { name: 'Timeline' }));
-    // Timeline tab is active; attachments and tasks are not rendered
-    expect(screen.queryByRole('button', { name: 'Tasks' })).toBeInTheDocument();
-    // The timeline tab button should carry the active style (primary text)
+    await waitFor(() => screen.getByRole('button', { name: 'Details' }));
+    const detailsBtn = screen.getByRole('button', { name: 'Details' });
+    expect(detailsBtn.className).toMatch(/text-primary/);
     const timelineBtn = screen.getByRole('button', { name: 'Timeline' });
-    expect(timelineBtn.className).toMatch(/text-primary/);
+    expect(timelineBtn.className).not.toMatch(/text-primary/);
   });
 
   it('switching to Tasks tab does not navigate', async () => {
