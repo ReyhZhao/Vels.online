@@ -10,9 +10,11 @@ def _complete_signup_request(org_slug):
     try:
         from signups.models import SignupRequest
 
-        SignupRequest.objects.filter(
+        for req in SignupRequest.objects.filter(
             org_slug=org_slug, status=SignupRequest.STATUS_APPROVED
-        ).update(status=SignupRequest.STATUS_COMPLETED)
+        ):
+            req.complete()
+            req.save(update_fields=["status"])
     except Exception:
         pass
 

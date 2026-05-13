@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 from security.models import Organization
 
 from .authentik import AuthentikClient, AuthentikError
-from .models import SignupRequest
+from .models import InvalidTransition, SignupRequest
 from .serializers import (
     ApproveSerializer,
     RejectSerializer,
@@ -170,7 +170,6 @@ def _provision_and_approve(req, org_name_override=None):
 
     client = AuthentikClient()
     flow_slug = getattr(settings, "AUTHENTIK_ENROLLMENT_FLOW_SLUG", "")
-    expires_at = timezone.now() + timedelta(days=INVITE_TTL_DAYS)
 
     # Create Authentik group if not already provisioned
     group_pk = req.authentik_group_pk
@@ -183,15 +182,18 @@ def _provision_and_approve(req, org_name_override=None):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-    # Delete stale invitation before creating a new one
+    # Delete stale invitation before creating a new one (resend path)
     if req.invite_token:
         try:
             client.delete_invitation(str(req.invite_token))
         except AuthentikError:
             pass
 
+    # expiry is set by the model's approve()/resend() method, pass a placeholder datetime
+    # for the Authentik API call — the model computes the real expiry
+    placeholder_expires = timezone.now() + timedelta(days=7)
     try:
-        invitation = client.create_invitation(flow_slug, expires_at)
+        invitation = client.create_invitation(flow_slug, placeholder_expires)
     except AuthentikError as exc:
         return None, Response(
             {"detail": f"Failed to create Authentik invitation: {exc}"},
@@ -205,13 +207,11 @@ def _provision_and_approve(req, org_name_override=None):
             defaults={"name": org_name, "wazuh_group": org_slug},
         )
 
-    req.status = SignupRequest.STATUS_APPROVED
-    req.approved_org_name = org_name
-    req.org_slug = org_slug
-    req.authentik_group_pk = group_pk
-    req.invite_token = invitation["token"]
-    req.invite_expires_at = expires_at
-    req.actioned_at = timezone.now()
+    # Drive state via model transition method
+    if req.status == SignupRequest.STATUS_PENDING:
+        req.approve(org_name, org_slug, group_pk, invitation["token"])
+    else:
+        req.resend(invitation["token"])
     req.save()
 
     send_invite_email.delay(req.pk)
@@ -237,8 +237,7 @@ class SignupRequestApproveView(APIView):
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        org_name_override = ser.validated_data.get("approved_org_name") or None
-        req, err = _provision_and_approve(req, org_name_override)
+        req, err = _provision_and_approve(req, ser.validated_data.get("approved_org_name") or None)
         if err:
             return err
         return Response(SignupRequestSerializer(req).data)
@@ -253,21 +252,18 @@ class SignupRequestRejectView(APIView):
         except SignupRequest.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        if req.status != SignupRequest.STATUS_PENDING:
-            return Response(
-                {"detail": "Only pending requests can be rejected."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         ser = RejectSerializer(data=request.data)
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        req.status = SignupRequest.STATUS_REJECTED
-        req.rejection_reason = ser.validated_data["rejection_reason"]
-        req.rejection_note = ser.validated_data.get("rejection_note", "")
-        req.send_rejection_email = ser.validated_data.get("send_rejection_email", True)
-        req.actioned_at = timezone.now()
+        try:
+            req.reject(
+                reason=ser.validated_data["rejection_reason"],
+                note=ser.validated_data.get("rejection_note", ""),
+                send_email=ser.validated_data.get("send_rejection_email", True),
+            )
+        except InvalidTransition as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         req.save()
 
         if req.send_rejection_email:
