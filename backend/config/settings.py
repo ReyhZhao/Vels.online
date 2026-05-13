@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "notifications",
     "feedback",
     "ingress",
+    "signups",
 ]
 
 SITE_ID = 1
@@ -163,6 +164,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "notifications.tasks.cleanup_old_notifications",
         "schedule": 86400,  # every 24 hours
     },
+    "expire-stale-invites-nightly": {
+        "task": "signups.tasks.expire_stale_invites",
+        "schedule": 86400,  # every 24 hours
+    },
 }
 
 REST_FRAMEWORK = {
@@ -223,6 +228,13 @@ GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 BUNKERWEB_API_URL = os.environ.get("BUNKERWEB_API_URL", "")
 BUNKERWEB_API_TOKEN = os.environ.get("BUNKERWEB_API_TOKEN", "")
 BUNKERWEB_PUBLIC_IP = os.environ.get("BUNKERWEB_PUBLIC_IP", "")
+
+AUTHENTIK_API_TOKEN = os.environ.get("AUTHENTIK_API_TOKEN", "")
+AUTHENTIK_ENROLLMENT_FLOW_SLUG = os.environ.get("AUTHENTIK_ENROLLMENT_FLOW_SLUG", "")
+
+TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
+
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://vels.online")
 
 WAZUH_RULES_GITHUB_TOKEN = os.environ.get("WAZUH_RULES_GITHUB_TOKEN", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")

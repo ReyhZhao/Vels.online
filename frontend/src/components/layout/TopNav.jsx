@@ -59,12 +59,20 @@ function TopNav() {
               </div>
             </>
           ) : (
-            <a
-              href={import.meta.env.VITE_LOGIN_URL ?? '/auth/oidc/authentik/login/'}
-              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
-            >
-              Login
-            </a>
+            <div className="flex items-center gap-2">
+              <Link
+                to="/signup"
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Sign up
+              </Link>
+              <a
+                href={import.meta.env.VITE_LOGIN_URL ?? '/auth/oidc/authentik/login/'}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
+              >
+                Login
+              </a>
+            </div>
           )}
         </nav>
       </div>

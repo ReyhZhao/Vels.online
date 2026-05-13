@@ -6,6 +6,17 @@ from security.models import Organization, OrganizationMembership
 _CUSTOMER_PREFIX = "customer:"
 
 
+def _complete_signup_request(org_slug):
+    try:
+        from signups.models import SignupRequest
+
+        SignupRequest.objects.filter(
+            org_slug=org_slug, status=SignupRequest.STATUS_APPROVED
+        ).update(status=SignupRequest.STATUS_COMPLETED)
+    except Exception:
+        pass
+
+
 def sync_org_memberships(user, groups):
     """Sync a user's OrganizationMembership records from their OIDC group claims."""
     if not user.pk:
@@ -20,7 +31,9 @@ def sync_org_memberships(user, groups):
     target_orgs = list(Organization.objects.filter(slug__in=org_slugs))
 
     for org in target_orgs:
-        OrganizationMembership.objects.get_or_create(user=user, organization=org)
+        _, created = OrganizationMembership.objects.get_or_create(user=user, organization=org)
+        if created:
+            _complete_signup_request(org.slug)
 
     OrganizationMembership.objects.filter(user=user).exclude(organization__in=target_orgs).delete()
 

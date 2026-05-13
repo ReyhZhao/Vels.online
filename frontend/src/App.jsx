@@ -29,6 +29,8 @@ import RouteList from './pages/RouteList';
 import RouteNew from './pages/RouteNew';
 import RouteDetail from './pages/RouteDetail';
 import NotificationPreferences from './pages/account/NotificationPreferences';
+import SignupPage from './pages/SignupPage';
+import SignupRequests from './pages/admin/SignupRequests';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -37,6 +39,7 @@ function App() {
     <Routes>
       <Route element={<PublicLayout />}>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/signup" element={<SignupPage />} />
         <Route path="/blog" element={<BlogIndexPage />} />
         <Route path="/status" element={<StatusPage />} />
         <Route path="/:slug" element={<PostDetail />} />
@@ -53,6 +56,7 @@ function App() {
           <Route path="/admin/status-settings" element={<StatusSettings />} />
           <Route path="/admin/security/organizations" element={<OrgManagement />} />
           <Route path="/admin/security/downloads" element={<DownloadManagement />} />
+          <Route path="/admin/signup-requests" element={<SignupRequests />} />
           <Route path="/admin/incidents/subjects" element={<SubjectsAdmin />} />
           <Route path="/admin/incidents/task-templates" element={<TaskTemplatesAdmin />} />
         </Route>

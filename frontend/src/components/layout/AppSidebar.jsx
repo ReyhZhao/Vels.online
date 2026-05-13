@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
+import api from '@/lib/axios';
 
 function readLS(key, fallback) {
   try {
@@ -95,6 +96,15 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   const [ingressOpen, setIngressOpen] = useState(() => readLS('sidebar:ingress:open', true));
   const [adminOpen, setAdminOpen] = useState(() => readLS('sidebar:admin:open', true));
   const [reportOpen, setReportOpen] = useState(false);
+  const [pendingSignups, setPendingSignups] = useState(0);
+
+  useEffect(() => {
+    if (!isStaff) return;
+    api
+      .get('/api/signups/pending-count/')
+      .then((res) => setPendingSignups(res.data.count ?? 0))
+      .catch(() => {});
+  }, [isStaff]);
 
   useEffect(() => { writeLS('sidebar:collapsed', collapsed); }, [collapsed]);
   useEffect(() => { writeLS('sidebar:incidents:open', incidentsOpen); }, [incidentsOpen]);
@@ -264,6 +274,31 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                   <SidebarLink to="/admin/security/downloads" icon={Download} collapsed={collapsed}>
                     Downloads
                   </SidebarLink>
+                  <NavLink
+                    to="/admin/signup-requests"
+                    title={collapsed ? 'Signup Requests' : undefined}
+                    className={({ isActive }) =>
+                      cn(
+                        'flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                        collapsed ? 'justify-center px-2 gap-0' : 'gap-3',
+                        isActive
+                          ? 'bg-accent text-accent-foreground'
+                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                      )
+                    }
+                  >
+                    <UserPlus className="h-4 w-4 shrink-0" />
+                    {!collapsed && (
+                      <>
+                        <span>Signup Requests</span>
+                        {pendingSignups > 0 && (
+                          <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 text-xs font-semibold text-primary-foreground">
+                            {pendingSignups}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </NavLink>
                   <div
                     className={cn(
                       'flex items-center rounded-md px-3 py-2 text-sm text-muted-foreground/50 cursor-default select-none',

@@ -20,5 +20,6 @@ urlpatterns = [
     path("me/", include("notifications.urls")),
     path("feedback/", include("feedback.urls")),
     path("ingress/", include("ingress.urls")),
+    path("signups/", include("signups.urls")),
     path("", include(blog_router.urls)),
 ]
