@@ -26,6 +26,7 @@ import IncidentList from './pages/IncidentList';
 import IncidentDetail from './pages/IncidentDetail';
 import ExceptionList from './pages/ExceptionList';
 import RouteList from './pages/RouteList';
+import RouteNew from './pages/RouteNew';
 import RouteDetail from './pages/RouteDetail';
 import NotificationPreferences from './pages/account/NotificationPreferences';
 import SignupPage from './pages/SignupPage';
@@ -73,7 +74,8 @@ function App() {
         <Route path="/incidents/:displayId" element={<IncidentDetail />} />
         <Route path="/exceptions" element={<ExceptionList />} />
         <Route path="/routes" element={<RouteList />} />
-<Route path="/routes/:fqdn" element={<RouteDetail />} />
+        <Route path="/routes/new" element={<RouteNew />} />
+        <Route path="/routes/:fqdn" element={<RouteDetail />} />
 
         <Route path="/account/notifications" element={<NotificationPreferences />} />
       </Route>

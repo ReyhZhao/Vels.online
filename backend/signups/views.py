@@ -87,7 +87,7 @@ class SignupRequestListView(APIView):
         ).exists():
             return Response(
                 {"detail": "Please wait 24 hours before resubmitting."},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         req = SignupRequest.objects.create(

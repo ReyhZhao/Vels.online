@@ -11,7 +11,9 @@ from signups.models import SignupRequest
 
 
 @pytest.fixture(autouse=True)
-def bypass_throttle(monkeypatch):
+def bypass_throttle(monkeypatch, request):
+    if request.node.get_closest_marker("use_real_throttle"):
+        return
     from signups.views import SignupThrottle
 
     monkeypatch.setattr(SignupThrottle, "allow_request", lambda self, request, view: True)
@@ -142,7 +144,7 @@ def test_submit_rejected_within_cooldown_is_blocked(anon_client):
         resp = anon_client.post(
             "/api/signups/", data=SUBMIT_PAYLOAD, content_type="application/json"
         )
-    assert resp.status_code == 429
+    assert resp.status_code == 400
 
 
 @pytest.mark.django_db
@@ -161,6 +163,29 @@ def test_submit_rejected_after_cooldown_is_allowed(anon_client):
         )
     assert resp.status_code == 200
     assert SignupRequest.objects.filter(status="pending").exists()
+
+
+@pytest.mark.use_real_throttle
+@pytest.mark.django_db
+def test_rate_limit_blocks_fourth_submission_from_same_ip(anon_client):
+    from django.core.cache import cache
+
+    cache.clear()  # ensure clean throttle state
+
+    with _mock_turnstile_ok(), patch("signups.views.send_admin_notification_email"):
+        for i in range(3):
+            payload = {**SUBMIT_PAYLOAD, "email": f"user{i}@example.com"}
+            resp = anon_client.post("/api/signups/", data=payload, content_type="application/json")
+            assert resp.status_code == 200, f"Request {i + 1} should have been allowed"
+
+    # Fourth request from the same IP should be throttled
+    with _mock_turnstile_ok():
+        resp = anon_client.post(
+            "/api/signups/",
+            data={**SUBMIT_PAYLOAD, "email": "user4@example.com"},
+            content_type="application/json",
+        )
+    assert resp.status_code == 429
 
 
 @pytest.mark.django_db
