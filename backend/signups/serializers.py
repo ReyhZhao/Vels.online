@@ -39,7 +39,16 @@ class ApproveSerializer(serializers.Serializer):
     approved_org_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 
+REJECTION_REASONS = [
+    "Unable to verify organisation",
+    "Duplicate request",
+    "Outside our service area",
+    "Incomplete information",
+    "Other",
+]
+
+
 class RejectSerializer(serializers.Serializer):
-    rejection_reason = serializers.CharField(max_length=255)
+    rejection_reason = serializers.ChoiceField(choices=REJECTION_REASONS)
     rejection_note = serializers.CharField(required=False, default="", allow_blank=True)
     send_rejection_email = serializers.BooleanField(default=True)

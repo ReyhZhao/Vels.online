@@ -5,7 +5,12 @@ import pytest
 from django.utils import timezone
 
 from security.models import Organization, OrganizationMembership
+from django.core import mail
+
 from signups.models import SignupRequest
+from signups.serializers import REJECTION_REASONS
+
+_VALID_REASON = REJECTION_REASONS[0]  # "Unable to verify organisation"
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -371,13 +376,13 @@ def test_reject_sets_status_and_reason(staff_client):
     with patch("signups.views.send_rejection_email_task"):
         resp = staff_client.post(
             f"/api/signups/{req.pk}/reject/",
-            data={"rejection_reason": "spam", "rejection_note": "Looks fake", "send_rejection_email": True},
+            data={"rejection_reason": _VALID_REASON, "rejection_note": "Looks fake", "send_rejection_email": True},
             content_type="application/json",
         )
     assert resp.status_code == 200
     req.refresh_from_db()
     assert req.status == SignupRequest.STATUS_REJECTED
-    assert req.rejection_reason == "spam"
+    assert req.rejection_reason == _VALID_REASON
 
 
 @pytest.mark.django_db
@@ -392,7 +397,7 @@ def test_reject_with_send_email_true_enqueues_task(staff_client):
     with patch("signups.views.send_rejection_email_task") as mock_task:
         staff_client.post(
             f"/api/signups/{req.pk}/reject/",
-            data={"rejection_reason": "spam", "send_rejection_email": True},
+            data={"rejection_reason": _VALID_REASON, "send_rejection_email": True},
             content_type="application/json",
         )
     mock_task.delay.assert_called_once_with(req.pk)
@@ -410,10 +415,83 @@ def test_reject_with_send_email_false_skips_task(staff_client):
     with patch("signups.views.send_rejection_email_task") as mock_task:
         staff_client.post(
             f"/api/signups/{req.pk}/reject/",
-            data={"rejection_reason": "spam", "send_rejection_email": False},
+            data={"rejection_reason": _VALID_REASON, "send_rejection_email": False},
             content_type="application/json",
         )
     mock_task.delay.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_reject_requires_staff(anon_client, db):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_PENDING,
+    )
+    resp = anon_client.post(
+        f"/api/signups/{req.pk}/reject/",
+        data={"rejection_reason": _VALID_REASON},
+        content_type="application/json",
+    )
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_reject_non_pending_returns_400(staff_client):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_REJECTED,
+        rejection_reason=_VALID_REASON,
+    )
+    resp = staff_client.post(
+        f"/api/signups/{req.pk}/reject/",
+        data={"rejection_reason": _VALID_REASON},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_reject_invalid_reason_returns_400(staff_client):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_PENDING,
+    )
+    resp = staff_client.post(
+        f"/api/signups/{req.pk}/reject/",
+        data={"rejection_reason": "spam"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_reject_email_contains_reason_and_note():
+    from signups.tasks import send_rejection_email_task
+
+    note = "Please reapply once documentation is available."
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_REJECTED,
+        rejection_reason=_VALID_REASON,
+        rejection_note=note,
+    )
+    send_rejection_email_task(req.pk)
+    assert len(mail.outbox) == 1
+    body = mail.outbox[0].body
+    assert _VALID_REASON in body
+    assert note in body
 
 
 # ── DELETE /api/signups/<id>/ ─────────────────────────────────────────────────
