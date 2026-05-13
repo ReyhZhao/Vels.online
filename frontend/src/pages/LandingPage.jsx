@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, Activity, Zap, ArrowRight, ShieldCheck, AlertTriangle, ListChecks, Users, Lock, Clock, Globe } from 'lucide-react';
+import { Server, Zap, ArrowRight, ShieldCheck, AlertTriangle, ListChecks, Users, Lock, Clock, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import PostCard from '@/components/blog/PostCard';
@@ -15,11 +15,11 @@ const SERVICES = [
       'Monitor and manage your infrastructure with real-time visibility across all your services and environments.',
   },
   {
-    id: 'observability',
-    icon: Activity,
-    title: 'Observability',
+    id: 'app-ingress',
+    icon: Globe,
+    title: 'App Ingress',
     description:
-      'Logs, metrics, and traces unified in one place so you can diagnose issues before they become incidents.',
+      'Securely publish your applications to the internet with managed reverse proxy, automatic SSL certificates, and a built-in Web Application Firewall — all configurable per service from one place.',
   },
   {
     id: 'automation',
