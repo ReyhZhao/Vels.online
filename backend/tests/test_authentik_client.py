@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from signups.authentik import AuthentikClient, AuthentikError
+from signups.authentik import AuthentikClient, AuthentikAPIError
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +33,7 @@ def test_create_group_returns_pk():
 def test_create_group_raises_on_error():
     resp = _make_response(400, text="Bad request")
     with patch("signups.authentik.requests.post", return_value=resp):
-        with pytest.raises(AuthentikError) as exc_info:
+        with pytest.raises(AuthentikAPIError) as exc_info:
             AuthentikClient().create_group("customer:acme")
     assert exc_info.value.status_code == 400
 
@@ -53,7 +53,7 @@ def test_create_invitation_raises_on_error():
     resp = _make_response(500, text="Server error")
     expires = datetime(2026, 1, 1, tzinfo=dt_timezone.utc)
     with patch("signups.authentik.requests.post", return_value=resp):
-        with pytest.raises(AuthentikError) as exc_info:
+        with pytest.raises(AuthentikAPIError) as exc_info:
             AuthentikClient().create_invitation("enrollment", expires)
     assert exc_info.value.status_code == 500
 
@@ -90,6 +90,6 @@ def test_network_error_raises_authentik_error():
     from requests.exceptions import ConnectionError
 
     with patch("signups.authentik.requests.post", side_effect=ConnectionError("timeout")):
-        with pytest.raises(AuthentikError) as exc_info:
+        with pytest.raises(AuthentikAPIError) as exc_info:
             AuthentikClient().create_group("customer:acme")
     assert exc_info.value.status_code == 0

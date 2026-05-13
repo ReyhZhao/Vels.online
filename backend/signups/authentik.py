@@ -3,7 +3,7 @@ from django.conf import settings
 from requests.exceptions import RequestException
 
 
-class AuthentikError(Exception):
+class AuthentikAPIError(Exception):
     def __init__(self, status_code, body):
         self.status_code = status_code
         self.body = body
@@ -23,7 +23,7 @@ class AuthentikClient:
 
     def _check(self, response):
         if not response.ok:
-            raise AuthentikError(response.status_code, response.text)
+            raise AuthentikAPIError(response.status_code, response.text)
         return response
 
     def _post(self, path, **kwargs):
@@ -35,7 +35,7 @@ class AuthentikClient:
                 **kwargs,
             )
         except RequestException as exc:
-            raise AuthentikError(0, str(exc)) from exc
+            raise AuthentikAPIError(0, str(exc)) from exc
 
     def _delete(self, path, **kwargs):
         try:
@@ -46,7 +46,7 @@ class AuthentikClient:
                 **kwargs,
             )
         except RequestException as exc:
-            raise AuthentikError(0, str(exc)) from exc
+            raise AuthentikAPIError(0, str(exc)) from exc
 
     def create_group(self, name):
         resp = self._post("/core/groups/", json={"name": name})

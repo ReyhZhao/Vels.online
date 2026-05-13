@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 
 from security.models import Organization
 
-from .authentik import AuthentikClient, AuthentikError
+from .authentik import AuthentikClient, AuthentikAPIError
 from .models import InvalidTransition, SignupRequest
 from .serializers import (
     ApproveSerializer,
@@ -133,12 +133,12 @@ class SignupRequestDetailView(APIView):
         if req.authentik_group_pk:
             try:
                 client.delete_group(req.authentik_group_pk)
-            except AuthentikError:
+            except AuthentikAPIError:
                 pass
         if req.invite_token:
             try:
                 client.delete_invitation(str(req.invite_token))
-            except AuthentikError:
+            except AuthentikAPIError:
                 pass
 
         if req.org_slug:
@@ -176,7 +176,7 @@ def _provision_and_approve(req, org_name_override=None):
     if not group_pk:
         try:
             group_pk = client.create_group(f"customer:{org_slug}")
-        except AuthentikError as exc:
+        except AuthentikAPIError as exc:
             return None, Response(
                 {"detail": f"Failed to create Authentik group: {exc}"},
                 status=status.HTTP_502_BAD_GATEWAY,
@@ -186,7 +186,7 @@ def _provision_and_approve(req, org_name_override=None):
     if req.invite_token:
         try:
             client.delete_invitation(str(req.invite_token))
-        except AuthentikError:
+        except AuthentikAPIError:
             pass
 
     # expiry is set by the model's approve()/resend() method, pass a placeholder datetime
@@ -194,7 +194,7 @@ def _provision_and_approve(req, org_name_override=None):
     placeholder_expires = timezone.now() + timedelta(days=7)
     try:
         invitation = client.create_invitation(flow_slug, placeholder_expires)
-    except AuthentikError as exc:
+    except AuthentikAPIError as exc:
         return None, Response(
             {"detail": f"Failed to create Authentik invitation: {exc}"},
             status=status.HTTP_502_BAD_GATEWAY,
