@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 import { useAuth } from '../context/AuthContext';
+import RouteNewDrawer from './RouteNewDrawer';
 
 const STATUS_CLASSES = {
   pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
@@ -134,6 +135,7 @@ export default function RouteList() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);
 
   useEffect(() => {
     if (!selectedOrg) return;
@@ -157,6 +159,24 @@ export default function RouteList() {
         onImported={handleImported}
         orgSlug={selectedOrg?.slug}
       />
+
+      {showDrawer && (
+        <RouteNewDrawer
+          onClose={() => setShowDrawer(false)}
+          onCreated={() => {
+            setShowDrawer(false);
+            if (selectedOrg) {
+              setLoading(true);
+              api.get('/api/ingress/routes/', { params: { org: selectedOrg.slug } })
+                .then(res => setRoutes(res.data))
+                .catch(() => {})
+                .finally(() => setLoading(false));
+            }
+          }}
+          orgSlug={selectedOrg?.slug}
+        />
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Routes</h1>
         <div className="flex items-center gap-2">
@@ -168,12 +188,12 @@ export default function RouteList() {
               Import from BunkerWeb
             </button>
           )}
-          <Link
-            to="/routes/new"
+          <button
+            onClick={() => setShowDrawer(true)}
             className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           >
             New Route
-          </Link>
+          </button>
         </div>
       </div>
 
