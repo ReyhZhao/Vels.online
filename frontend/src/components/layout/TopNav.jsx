@@ -60,7 +60,7 @@ function TopNav() {
             </>
           ) : (
             <a
-              href="/auth/oidc/authentik/login/"
+              href={import.meta.env.VITE_LOGIN_URL ?? '/auth/oidc/authentik/login/'}
               className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
             >
               Login

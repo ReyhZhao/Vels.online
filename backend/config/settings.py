@@ -193,6 +193,7 @@ ACCOUNT_EMAIL_VERIFICATION = "none"
 SOCIALACCOUNT_AUTO_SIGNUP = True
 SOCIALACCOUNT_LOGIN_ON_GET = True
 
+_authentik_url = os.environ.get("AUTHENTIK_SERVER_URL", "")
 SOCIALACCOUNT_PROVIDERS = {
     "openid_connect": {
         "APPS": [
@@ -202,10 +203,12 @@ SOCIALACCOUNT_PROVIDERS = {
                 "client_id": os.environ.get("AUTHENTIK_CLIENT_ID", ""),
                 "secret": os.environ.get("AUTHENTIK_CLIENT_SECRET", ""),
                 "settings": {
-                    "server_url": os.environ.get("AUTHENTIK_SERVER_URL", ""),
+                    "server_url": _authentik_url,
                 },
             }
         ]
+        if _authentik_url
+        else []
     }
 }
 

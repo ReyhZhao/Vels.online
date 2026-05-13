@@ -13,6 +13,8 @@ export default defineConfig({
     proxy: {
       '/api': 'http://backend:8000',
       '/auth': 'http://backend:8000',
+      '/login-redirect': 'http://backend:8000',
+      '/static': 'http://backend:8000',
     },
   },
   test: {
