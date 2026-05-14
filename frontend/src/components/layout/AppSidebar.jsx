@@ -193,6 +193,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 <SidebarLink to="/incidents" icon={AlertTriangle} collapsed={collapsed}>
                   Incidents
                 </SidebarLink>
+                <SidebarLink to="/tasks" icon={ListChecks} collapsed={collapsed}>
+                  Tasks
+                </SidebarLink>
                 {isStaff && (
                   <>
                     <SidebarLink to="/admin/incidents/subjects" icon={Tag} collapsed={collapsed}>

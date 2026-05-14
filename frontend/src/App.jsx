@@ -30,6 +30,7 @@ import RouteDetail from './pages/RouteDetail';
 import NotificationPreferences from './pages/account/NotificationPreferences';
 import SignupPage from './pages/SignupPage';
 import SignupRequests from './pages/admin/SignupRequests';
+import TaskListPage from './pages/TaskListPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -71,6 +72,7 @@ function App() {
 
         <Route path="/incidents" element={<IncidentList />} />
         <Route path="/incidents/:displayId" element={<IncidentDetail />} />
+        <Route path="/tasks" element={<TaskListPage />} />
         <Route path="/exceptions" element={<ExceptionList />} />
         <Route path="/routes" element={<RouteList />} />
         <Route path="/routes/:fqdn" element={<RouteDetail />} />

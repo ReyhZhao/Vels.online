@@ -207,6 +207,8 @@ class TaskTemplatePatchSerializer(serializers.ModelSerializer):
 class TaskSerializer(serializers.ModelSerializer):
     template_name = serializers.SerializerMethodField()
     assignee_username = serializers.SerializerMethodField()
+    incident_display_id = serializers.SerializerMethodField()
+    incident_title = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
@@ -215,6 +217,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "title", "description", "state",
             "assignee", "assignee_username", "display_order",
             "created_at", "closed_at",
+            "incident_display_id", "incident_title",
         ]
         read_only_fields = ["id", "incident", "created_at"]
 
@@ -225,6 +228,12 @@ class TaskSerializer(serializers.ModelSerializer):
 
     def get_assignee_username(self, obj):
         return obj.assignee.username if obj.assignee else None
+
+    def get_incident_display_id(self, obj):
+        return obj.incident.display_id if obj.incident_id else None
+
+    def get_incident_title(self, obj):
+        return obj.incident.title if obj.incident_id else None
 
 
 class TaskCreateSerializer(serializers.ModelSerializer):

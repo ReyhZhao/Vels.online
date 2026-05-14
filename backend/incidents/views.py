@@ -883,6 +883,72 @@ class ApplyTemplateView(APIView):
         return Response(TaskSerializer(tasks, many=True).data, status=status.HTTP_201_CREATED)
 
 
+_TASK_SORT_FIELDS = {
+    "title":      "title",
+    "state":      "state",
+    "created_at": "created_at",
+    "incident":   "incident__display_id",
+}
+
+
+class TaskListView(APIView):
+    def get(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+
+        visible_ids = filter_incidents_for_user(
+            Incident.objects.all(), request.user
+        ).values_list("id", flat=True)
+
+        qs = (
+            Task.objects
+            .filter(incident_id__in=visible_ids)
+            .select_related("incident", "assignee", "template_item__template")
+        )
+
+        q = request.query_params.get("q", "").strip()
+        if q:
+            qs = qs.filter(title__icontains=q)
+
+        state = request.query_params.get("state", "").strip()
+        if state:
+            qs = qs.filter(state=state)
+
+        sort = request.query_params.get("sort", "")
+        order = request.query_params.get("order", "")
+        if sort in _TASK_SORT_FIELDS:
+            field = _TASK_SORT_FIELDS[sort]
+            if order == "asc":
+                qs = qs.order_by(F(field).asc(nulls_last=True))
+            else:
+                qs = qs.order_by(F(field).desc(nulls_last=True))
+        else:
+            qs = qs.order_by("-created_at")
+
+        try:
+            per_page = min(max(1, int(request.query_params.get("per_page", 25))), 100)
+        except (ValueError, TypeError):
+            per_page = 25
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+        except (ValueError, TypeError):
+            page = 1
+
+        total = qs.count()
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        start = (page - 1) * per_page
+        results = qs[start : start + per_page]
+
+        return Response({
+            "count": total,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": total_pages,
+            "results": TaskSerializer(results, many=True).data,
+        })
+
+
 class TaskDetailView(APIView):
     def _get_task(self, request, pk):
         err = _require_auth(request)
