@@ -59,10 +59,11 @@ class AuthentikClient:
             return
         self._check(resp)
 
-    def create_invitation(self, flow_slug, expires_at):
+    def create_invitation(self, flow_slug, expires_at, name):
         resp = self._post(
             "/stages/invitation/invitations/",
             json={
+                "name": name,
                 "flow": flow_slug,
                 "expires": expires_at.isoformat(),
                 "single_use": True,

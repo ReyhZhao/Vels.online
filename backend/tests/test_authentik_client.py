@@ -40,12 +40,22 @@ def test_create_group_raises_on_error():
 
 @pytest.mark.django_db
 def test_create_invitation_returns_pk_and_token():
-    resp = _make_response(201, {"pk": "inv-uuid-xyz", "name": "invite-slug"})
+    resp = _make_response(201, {"pk": "inv-uuid-xyz", "name": "signup-42"})
     expires = datetime(2026, 1, 1, tzinfo=dt_timezone.utc)
     with patch("signups.authentik.requests.post", return_value=resp):
-        result = AuthentikClient().create_invitation("enrollment", expires)
+        result = AuthentikClient().create_invitation("enrollment", expires, name="signup-42")
     assert result["pk"] == "inv-uuid-xyz"
     assert result["token"] == "inv-uuid-xyz"
+
+
+@pytest.mark.django_db
+def test_create_invitation_sends_name_field():
+    resp = _make_response(201, {"pk": "inv-uuid-xyz", "name": "signup-42"})
+    expires = datetime(2026, 1, 1, tzinfo=dt_timezone.utc)
+    with patch("signups.authentik.requests.post", return_value=resp) as mock_post:
+        AuthentikClient().create_invitation("enrollment", expires, name="signup-42")
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["name"] == "signup-42"
 
 
 @pytest.mark.django_db
@@ -54,7 +64,7 @@ def test_create_invitation_raises_on_error():
     expires = datetime(2026, 1, 1, tzinfo=dt_timezone.utc)
     with patch("signups.authentik.requests.post", return_value=resp):
         with pytest.raises(AuthentikAPIError) as exc_info:
-            AuthentikClient().create_invitation("enrollment", expires)
+            AuthentikClient().create_invitation("enrollment", expires, name="signup-1")
     assert exc_info.value.status_code == 500
 
 

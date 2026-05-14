@@ -195,7 +195,7 @@ def _provision_and_approve(req, org_name_override=None):
     # for the Authentik API call — the model computes the real expiry
     placeholder_expires = timezone.now() + timedelta(days=7)
     try:
-        invitation = client.create_invitation(flow_slug, placeholder_expires)
+        invitation = client.create_invitation(flow_slug, placeholder_expires, name=f"signup-{req.id}")
     except AuthentikAPIError as exc:
         if newly_created_group:
             try:
