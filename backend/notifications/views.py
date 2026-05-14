@@ -1,3 +1,7 @@
+from smtplib import SMTPException
+
+from django.conf import settings
+from django.core.mail import send_mail
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -93,3 +97,25 @@ class UnreadCountView(APIView):
             recipient=request.user, read_at__isnull=True
         ).count()
         return Response({"unread_count": count})
+
+
+class TestEmailView(APIView):
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        recipient = request.user.email
+        if not recipient:
+            return Response({"detail": "Your account has no email address set."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            send_mail(
+                subject="[vels.online] Test email",
+                message="This is a test email sent from the vels.online admin dashboard to verify email delivery.",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[recipient],
+                fail_silently=False,
+            )
+        except SMTPException as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"detail": f"Test email sent to {recipient}."})

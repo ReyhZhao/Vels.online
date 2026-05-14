@@ -36,7 +36,7 @@ def send_admin_notification_email(signup_request_pk):
         ),
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=staff_emails,
-        fail_silently=True,
+        fail_silently=False,
     )
 
 
@@ -65,7 +65,7 @@ def send_invite_email(signup_request_pk):
         ),
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[req.email],
-        fail_silently=True,
+        fail_silently=False,
     )
 
 
@@ -92,7 +92,7 @@ def send_rejection_email_task(signup_request_pk):
         message=body,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[req.email],
-        fail_silently=True,
+        fail_silently=False,
     )
 
 

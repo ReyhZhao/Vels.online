@@ -38,7 +38,7 @@ def send_digest_email(recipient_id, incident_id):
         message="\n".join(lines),
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[recipient.email],
-        fail_silently=True,
+        fail_silently=False,
     )
 
     now = timezone.now()

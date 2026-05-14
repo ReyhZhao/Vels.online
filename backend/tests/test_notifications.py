@@ -328,3 +328,53 @@ def test_cleanup_old_notifications_deletes_old_and_keeps_recent(acme, staff):
 
     assert not Notification.objects.filter(pk=old.pk).exists()
     assert Notification.objects.filter(pk=recent.pk).exists()
+
+
+# ── TestEmailView ─────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_test_email_requires_auth(client):
+    res = client.post("/api/admin/test-email/")
+    assert res.status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_test_email_non_staff_forbidden(client, regular):
+    client.force_login(regular)
+    res = client.post("/api/admin/test-email/")
+    assert res.status_code == 403
+
+
+@pytest.mark.django_db
+def test_test_email_sends_to_staff_email(client, staff, mailoutbox):
+    staff.email = "staff@example.com"
+    staff.save()
+    client.force_login(staff)
+    res = client.post("/api/admin/test-email/")
+    assert res.status_code == 200
+    assert res.json()["detail"] == "Test email sent to staff@example.com."
+    assert len(mailoutbox) == 1
+    assert mailoutbox[0].to == ["staff@example.com"]
+
+
+@pytest.mark.django_db
+def test_test_email_no_email_returns_400(client, staff):
+    staff.email = ""
+    staff.save()
+    client.force_login(staff)
+    res = client.post("/api/admin/test-email/")
+    assert res.status_code == 400
+
+
+@pytest.mark.django_db
+def test_test_email_smtp_error_returns_500(client, staff):
+    from unittest.mock import patch
+    from smtplib import SMTPException
+
+    staff.email = "staff@example.com"
+    staff.save()
+    client.force_login(staff)
+    with patch("notifications.views.send_mail", side_effect=SMTPException("connection refused")):
+        res = client.post("/api/admin/test-email/")
+    assert res.status_code == 500
+    assert "connection refused" in res.json()["detail"]
