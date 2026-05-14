@@ -286,6 +286,80 @@ describe('IncidentList', () => {
     ));
   });
 
+  // ── sortable column headers ───────────────────────────────────────────────
+
+  it('renders sortable column header buttons', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Sort by Title'));
+    expect(screen.getByLabelText('Sort by Severity')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sort by State')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sort by Assignee')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sort by Created')).toBeInTheDocument();
+  });
+
+  it('clicking a sort header re-fetches with sort and order params', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Sort by Title'));
+    fireEvent.click(screen.getByLabelText('Sort by Title'));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/incidents/', expect.objectContaining({
+        params: expect.objectContaining({ sort: 'title', order: 'asc' }),
+      }))
+    );
+  });
+
+  it('clicking severity sort header uses desc as default direction', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Sort by Severity'));
+    fireEvent.click(screen.getByLabelText('Sort by Severity'));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/incidents/', expect.objectContaining({
+        params: expect.objectContaining({ sort: 'severity', order: 'desc' }),
+      }))
+    );
+  });
+
+  it('clicking the same sort header again toggles the direction', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage('/incidents?sort=title&order=asc');
+    await waitFor(() => screen.getByLabelText('Sort by Title'));
+    fireEvent.click(screen.getByLabelText('Sort by Title'));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/incidents/', expect.objectContaining({
+        params: expect.objectContaining({ sort: 'title', order: 'desc' }),
+      }))
+    );
+  });
+
+  it('shows direction indicator on the active sort column', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage('/incidents?sort=title&order=asc');
+    await waitFor(() => screen.getByLabelText('Sort by Title'));
+    expect(screen.getByLabelText('Sort by Title').textContent).toContain('▲');
+  });
+
+  it('shows descending indicator when order is desc', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage('/incidents?sort=created_at&order=desc');
+    await waitFor(() => screen.getByLabelText('Sort by Created'));
+    expect(screen.getByLabelText('Sort by Created').textContent).toContain('▼');
+  });
+
+  it('sort params are preserved alongside existing filter params', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage('/incidents?severity=high');
+    await waitFor(() => screen.getByLabelText('Sort by Title'));
+    fireEvent.click(screen.getByLabelText('Sort by Title'));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/incidents/', expect.objectContaining({
+        params: expect.objectContaining({ severity: 'high', sort: 'title', order: 'asc' }),
+      }))
+    );
+  });
+
 });
 
 // ── silent background poll ────────────────────────────────────────────────────

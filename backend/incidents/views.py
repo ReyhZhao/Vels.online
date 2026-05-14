@@ -3,7 +3,7 @@ from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Case, IntegerField, Q, Value, When
+from django.db.models import Case, F, IntegerField, Q, Value, When
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import status
@@ -57,6 +57,14 @@ SEVERITY_RANK = Case(
     default=Value(0),
     output_field=IntegerField(),
 )
+
+_SORTABLE_FIELDS = {
+    "title":      "title",
+    "state":      "state",
+    "created_at": "created_at",
+    "updated_at": "updated_at",
+    "assignee":   "assignee__username",
+}
 
 
 def _parse_multi(request, key):
@@ -374,8 +382,20 @@ class IncidentListView(APIView):
         # 8-filter pipeline + tab logic
         qs = _apply_incident_filters(qs, request)
 
-        # Default ordering: severity desc, created_at asc
-        qs = qs.annotate(severity_rank=SEVERITY_RANK).order_by("-severity_rank", "created_at")
+        # Ordering — honour sort/order query params or fall back to default
+        sort = request.query_params.get("sort", "")
+        order = request.query_params.get("order", "")
+        if sort == "severity":
+            qs = qs.annotate(severity_rank=SEVERITY_RANK)
+            qs = qs.order_by("severity_rank" if order == "asc" else "-severity_rank")
+        elif sort in _SORTABLE_FIELDS:
+            field = _SORTABLE_FIELDS[sort]
+            if order == "asc":
+                qs = qs.order_by(F(field).asc(nulls_last=True))
+            else:
+                qs = qs.order_by(F(field).desc(nulls_last=True))
+        else:
+            qs = qs.annotate(severity_rank=SEVERITY_RANK).order_by("-severity_rank", "created_at")
 
         # Pagination
         try:

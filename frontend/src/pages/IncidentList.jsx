@@ -45,6 +45,14 @@ const TLP_OPTIONS      = ['white', 'green', 'amber', 'red'];
 
 const EMPTY_DATA = { count: 0, page: 1, per_page: 25, total_pages: 1, results: [] };
 
+const SORT_COLUMNS = {
+  title:      { label: 'Title',    defaultOrder: 'asc'  },
+  severity:   { label: 'Severity', defaultOrder: 'desc' },
+  state:      { label: 'State',    defaultOrder: 'asc'  },
+  assignee:   { label: 'Assignee', defaultOrder: 'asc'  },
+  created_at: { label: 'Created',  defaultOrder: 'asc'  },
+};
+
 const CLOSURE_REASONS = [
   { value: 'resolved',       label: 'Resolved' },
   { value: 'false_positive', label: 'False Positive' },
@@ -211,6 +219,23 @@ export default function IncidentList() {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.set('page', p);
+      return next;
+    });
+  }
+
+  const sortKey = searchParams.get('sort') || '';
+  const sortOrder = searchParams.get('order') || 'asc';
+
+  function setSort(field) {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (sortKey === field) {
+        next.set('order', sortOrder === 'asc' ? 'desc' : 'asc');
+      } else {
+        next.set('sort', field);
+        next.set('order', SORT_COLUMNS[field]?.defaultOrder ?? 'asc');
+      }
+      next.delete('page');
       return next;
     });
   }
@@ -446,13 +471,36 @@ export default function IncidentList() {
                 </th>
               )}
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">ID</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Title</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
+              {['title', 'severity', 'state'].map(field => (
+                <th key={field} className="px-4 py-3 text-left font-medium text-muted-foreground">
+                  <button
+                    onClick={() => setSort(field)}
+                    className="flex items-center gap-1 hover:text-foreground transition-colors"
+                    aria-label={`Sort by ${SORT_COLUMNS[field].label}`}
+                  >
+                    {SORT_COLUMNS[field].label}
+                    {sortKey === field && (
+                      <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </button>
+                </th>
+              ))}
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">TLP</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">State</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">SLA</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Assignee</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Created</th>
+              {['assignee', 'created_at'].map(field => (
+                <th key={field} className="px-4 py-3 text-left font-medium text-muted-foreground">
+                  <button
+                    onClick={() => setSort(field)}
+                    className="flex items-center gap-1 hover:text-foreground transition-colors"
+                    aria-label={`Sort by ${SORT_COLUMNS[field].label}`}
+                  >
+                    {SORT_COLUMNS[field].label}
+                    {sortKey === field && (
+                      <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </button>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>

@@ -389,6 +389,89 @@ def test_tab_unassigned(client, staff, acme, staff2):
     assert assigned.id not in result_ids
 
 
+# ── sort param ───────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_sort_by_title_asc(client, staff, acme):
+    b = make_incident(acme, title="Beta", state="in_progress")
+    a = make_incident(acme, title="Alpha", state="in_progress")
+    c = make_incident(acme, title="Gamma", state="in_progress")
+    client.force_login(staff)
+    r = client.get("/api/incidents/?sort=title&order=asc&state=in_progress")
+    result_ids = ids(r)
+    assert result_ids.index(a.id) < result_ids.index(b.id) < result_ids.index(c.id)
+
+
+@pytest.mark.django_db
+def test_sort_by_title_desc(client, staff, acme):
+    b = make_incident(acme, title="Beta", state="in_progress")
+    a = make_incident(acme, title="Alpha", state="in_progress")
+    c = make_incident(acme, title="Gamma", state="in_progress")
+    client.force_login(staff)
+    r = client.get("/api/incidents/?sort=title&order=desc&state=in_progress")
+    result_ids = ids(r)
+    assert result_ids.index(c.id) < result_ids.index(b.id) < result_ids.index(a.id)
+
+
+@pytest.mark.django_db
+def test_sort_by_severity_desc(client, staff, acme):
+    low = make_incident(acme, severity="low", state="in_progress")
+    critical = make_incident(acme, severity="critical", state="in_progress")
+    high = make_incident(acme, severity="high", state="in_progress")
+    client.force_login(staff)
+    r = client.get("/api/incidents/?sort=severity&order=desc&state=in_progress")
+    result_ids = ids(r)
+    assert result_ids.index(critical.id) < result_ids.index(high.id)
+    assert result_ids.index(high.id) < result_ids.index(low.id)
+
+
+@pytest.mark.django_db
+def test_sort_by_severity_asc(client, staff, acme):
+    low = make_incident(acme, severity="low", state="in_progress")
+    critical = make_incident(acme, severity="critical", state="in_progress")
+    client.force_login(staff)
+    r = client.get("/api/incidents/?sort=severity&order=asc&state=in_progress")
+    result_ids = ids(r)
+    assert result_ids.index(low.id) < result_ids.index(critical.id)
+
+
+@pytest.mark.django_db
+def test_sort_by_created_at_asc(client, staff, acme):
+    from datetime import timedelta
+    from django.utils import timezone
+
+    newer = make_incident(acme, state="in_progress")
+    older = make_incident(acme, state="in_progress")
+    Incident.objects.filter(pk=older.pk).update(
+        created_at=timezone.now() - timedelta(days=1)
+    )
+    client.force_login(staff)
+    r = client.get("/api/incidents/?sort=created_at&order=asc&state=in_progress")
+    result_ids = ids(r)
+    assert result_ids.index(older.id) < result_ids.index(newer.id)
+
+
+@pytest.mark.django_db
+def test_sort_by_assignee_asc_nulls_last(client, staff, staff2, acme):
+    unassigned = make_incident(acme, state="in_progress")
+    assigned = make_incident(acme, state="in_progress", assignee=staff2)
+    client.force_login(staff)
+    r = client.get("/api/incidents/?sort=assignee&order=asc&state=in_progress")
+    result_ids = ids(r)
+    assert result_ids.index(assigned.id) < result_ids.index(unassigned.id)
+
+
+@pytest.mark.django_db
+def test_unknown_sort_falls_back_to_default(client, staff, acme):
+    low = make_incident(acme, severity="low", state="in_progress")
+    critical = make_incident(acme, severity="critical", state="in_progress")
+    client.force_login(staff)
+    r = client.get("/api/incidents/?sort=bogus&state=in_progress")
+    result_ids = ids(r)
+    # Default is severity desc — critical before low
+    assert result_ids.index(critical.id) < result_ids.index(low.id)
+
+
 # ── combinations ─────────────────────────────────────────────────────────────
 
 @pytest.mark.django_db
