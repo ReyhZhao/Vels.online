@@ -347,6 +347,49 @@ def test_approve_sends_invite_email(staff_client):
 
 
 @pytest.mark.django_db
+def test_approve_requires_staff(anon_client, db):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_PENDING,
+    )
+    resp = anon_client.post(
+        f"/api/signups/{req.pk}/approve/", data={}, content_type="application/json"
+    )
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_approve_authentik_failure_rolls_back(staff_client):
+    from signups.authentik import AuthentikAPIError
+
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_PENDING,
+    )
+    mock = MagicMock()
+    mock.return_value.create_group.return_value = _FAKE_GROUP_PK
+    mock.return_value.create_invitation.side_effect = AuthentikAPIError(500, "internal error")
+    mock.return_value.delete_group.return_value = None
+
+    with patch("signups.views.AuthentikClient", mock):
+        resp = staff_client.post(
+            f"/api/signups/{req.pk}/approve/", data={}, content_type="application/json"
+        )
+
+    assert resp.status_code == 502
+    mock.return_value.delete_group.assert_called_once_with(_FAKE_GROUP_PK)
+    req.refresh_from_db()
+    assert req.status == SignupRequest.STATUS_PENDING
+    assert not Organization.objects.filter(slug="acme-corp").exists()
+
+
+@pytest.mark.django_db
 def test_approve_non_pending_returns_400(staff_client):
     req = SignupRequest.objects.create(
         email="alice@example.com",

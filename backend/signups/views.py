@@ -173,9 +173,11 @@ def _provision_and_approve(req, org_name_override=None):
 
     # Create Authentik group if not already provisioned
     group_pk = req.authentik_group_pk
+    newly_created_group = False
     if not group_pk:
         try:
             group_pk = client.create_group(f"customer:{org_slug}")
+            newly_created_group = True
         except AuthentikAPIError as exc:
             return None, Response(
                 {"detail": f"Failed to create Authentik group: {exc}"},
@@ -195,6 +197,11 @@ def _provision_and_approve(req, org_name_override=None):
     try:
         invitation = client.create_invitation(flow_slug, placeholder_expires)
     except AuthentikAPIError as exc:
+        if newly_created_group:
+            try:
+                client.delete_group(group_pk)
+            except AuthentikAPIError:
+                pass
         return None, Response(
             {"detail": f"Failed to create Authentik invitation: {exc}"},
             status=status.HTTP_502_BAD_GATEWAY,
