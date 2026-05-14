@@ -3,4 +3,4 @@ kind: ConfigMap
 metadata:
   name: backend-config
 data:
-  EMAIL_USE_SSL: "False"
+  EMAIL_SSL_NO_VERIFY: "True"
