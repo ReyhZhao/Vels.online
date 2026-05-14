@@ -12,7 +12,7 @@ class AuthentikAPIError(Exception):
 
 class AuthentikClient:
     def __init__(self):
-        self._base_url = settings.AUTHENTIK_SERVER_URL.rstrip("/")
+        self._base_url = settings.AUTHENTIK_API_URL.rstrip("/")
         self._token = settings.AUTHENTIK_API_TOKEN
 
     def _headers(self):

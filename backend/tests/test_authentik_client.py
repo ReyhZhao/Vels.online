@@ -8,7 +8,7 @@ from signups.authentik import AuthentikClient, AuthentikAPIError
 
 @pytest.fixture(autouse=True)
 def authentik_settings(settings):
-    settings.AUTHENTIK_SERVER_URL = "https://auth.example.com"
+    settings.AUTHENTIK_API_URL = "https://auth.example.com"
     settings.AUTHENTIK_API_TOKEN = "test-token"
 
 
