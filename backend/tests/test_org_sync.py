@@ -95,3 +95,17 @@ def test_wazuh_group_defaults_to_slug_when_not_provided():
 def test_wazuh_group_preserved_when_explicitly_set():
     org = Organization.objects.create(name="Test Org", slug="test-org", wazuh_group="custom-group")
     assert org.wazuh_group == "custom-group"
+
+
+# ── signup completion via OIDC signal ─────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_first_login_with_no_matching_signup_request_creates_membership(django_user_model, acme):
+    from signups.models import SignupRequest
+
+    user = django_user_model.objects.create_user(username="alice")
+    sync_org_memberships(user, ["customer:acme"])
+
+    assert OrganizationMembership.objects.filter(user=user, organization=acme).exists()
+    assert SignupRequest.objects.count() == 0
