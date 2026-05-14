@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+  AlertCircle, FilePen, MessageSquare, Pencil, Trash2,
+  UserCheck, CornerDownLeft, ArrowLeftRight, LayoutTemplate,
+  SquareCheck, RefreshCw, CircleX, ShieldCheck,
+} from 'lucide-react';
 import api from '../lib/axios';
 
 // ── kind renderers ────────────────────────────────────────────────────────────
-// Each is a pure function: (payload) => string | null
 
 export function renderIncidentUpdated(payload) {
   const changes = payload?.changes;
@@ -95,38 +99,114 @@ export function renderEvent(kind, payload) {
   return `Event: ${kind}.`;
 }
 
-// ── component ─────────────────────────────────────────────────────────────────
+// ── kind metadata ─────────────────────────────────────────────────────────────
 
-function RelativeTime({ isoString }) {
-  const date = new Date(isoString);
-  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
-  let label;
-  if (diff < 60) label = 'just now';
-  else if (diff < 3600) label = `${Math.floor(diff / 60)}m ago`;
-  else if (diff < 86400) label = `${Math.floor(diff / 3600)}h ago`;
-  else label = `${Math.floor(diff / 86400)}d ago`;
-  return (
-    <time dateTime={isoString} title={date.toLocaleString()} className="text-xs text-muted-foreground shrink-0">
-      {label}
-    </time>
-  );
+const KIND_CONFIG = {
+  incident_created:             { Icon: AlertCircle,    badge: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',       label: 'CREATED'   },
+  incident_updated:             { Icon: FilePen,        badge: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',           label: 'UPDATED'   },
+  comment_added:                { Icon: MessageSquare,  badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',          label: 'COMMENT'   },
+  comment_edited:               { Icon: Pencil,         badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',          label: 'EDIT'      },
+  comment_deleted:              { Icon: Trash2,         badge: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',          label: 'DELETE'    },
+  incident_delegated:           { Icon: UserCheck,      badge: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',   label: 'DELEGATED' },
+  incident_delegation_returned: { Icon: CornerDownLeft, badge: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',   label: 'RETURNED'  },
+  incident_assignee_changed:    { Icon: ArrowLeftRight, badge: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',   label: 'TRANSFER'  },
+  incident_template_applied:    { Icon: LayoutTemplate, badge: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',           label: 'TEMPLATE'  },
+  incident_template_reapplied:  { Icon: LayoutTemplate, badge: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',           label: 'TEMPLATE'  },
+  task_created:                 { Icon: SquareCheck,    badge: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',   label: 'TASK'      },
+  task_state_changed:           { Icon: RefreshCw,      badge: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',   label: 'TASK'      },
+  task_auto_cancelled:          { Icon: CircleX,        badge: 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-300',   label: 'TASK'      },
+  exception_created:            { Icon: ShieldCheck,    badge: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',       label: 'EXCEPTION' },
+};
+
+const DEFAULT_CONFIG = { Icon: AlertCircle, badge: 'bg-muted text-muted-foreground', label: 'EVENT' };
+
+function kindConfig(kind) {
+  return KIND_CONFIG[kind] ?? DEFAULT_CONFIG;
 }
 
-function TimelineRow({ event }) {
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function relativeTime(isoString) {
+  const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function actorInitials(username) {
+  if (!username) return '?';
+  return username.slice(0, 2).toUpperCase();
+}
+
+const AVATAR_COLORS = [
+  'bg-blue-500', 'bg-purple-500', 'bg-green-500', 'bg-orange-500',
+  'bg-pink-500', 'bg-teal-500', 'bg-red-500', 'bg-indigo-500',
+];
+
+function avatarColor(username) {
+  if (!username) return 'bg-muted';
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) hash = username.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+const TASK_KINDS = new Set(['task_created', 'task_state_changed', 'task_auto_cancelled']);
+
+// ── sub-components ────────────────────────────────────────────────────────────
+
+function TimelineCard({ event }) {
+  const { badge, label, Icon } = kindConfig(event.kind);
   const message = renderEvent(event.kind, event.payload);
+  const color = avatarColor(event.actor_username);
+
   return (
-    <li className="flex items-start gap-3 py-2">
-      <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-border" />
-      <div className="flex-1 min-w-0">
+    <div className="flex gap-3 rounded-lg border border-border bg-card p-3 hover:border-border/80 hover:shadow-sm transition-shadow">
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${color} text-white text-xs font-bold`}>
+        {event.actor_username ? actorInitials(event.actor_username) : <Icon size={14} />}
+      </div>
+      <div className="flex-1 min-w-0 space-y-0.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          {event.actor_username && (
+            <span className="text-sm font-medium text-foreground">{event.actor_username}</span>
+          )}
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${badge}`}>
+            <Icon size={10} />
+            {label}
+          </span>
+        </div>
         <p className="text-sm text-foreground">{message}</p>
-        {event.actor_username && (
-          <p className="text-xs text-muted-foreground">{event.actor_username}</p>
+        {TASK_KINDS.has(event.kind) && (event.payload?.created_at || event.payload?.closed_at) && (
+          <div className="flex gap-3 mt-1">
+            {event.payload.created_at && (
+              <span className="text-xs text-muted-foreground">
+                Opened: <time dateTime={event.payload.created_at} className="tabular-nums">
+                  {new Date(event.payload.created_at).toLocaleString()}
+                </time>
+              </span>
+            )}
+            {event.payload.closed_at && (
+              <span className="text-xs text-muted-foreground">
+                Closed: <time dateTime={event.payload.closed_at} className="tabular-nums">
+                  {new Date(event.payload.closed_at).toLocaleString()}
+                </time>
+              </span>
+            )}
+          </div>
         )}
       </div>
-      <RelativeTime isoString={event.created_at} />
-    </li>
+      <time
+        dateTime={event.created_at}
+        title={new Date(event.created_at).toLocaleString()}
+        className="text-xs text-muted-foreground shrink-0 pt-1 tabular-nums"
+      >
+        {relativeTime(event.created_at)}
+      </time>
+    </div>
   );
 }
+
+// ── component ─────────────────────────────────────────────────────────────────
 
 export default function IncidentTimeline({ incidentId }) {
   const [data, setData] = useState(null);
@@ -166,11 +246,11 @@ export default function IncidentTimeline({ incidentId }) {
       {data.results.length === 0 ? (
         <p className="text-sm text-muted-foreground">No events yet.</p>
       ) : (
-        <ul className="divide-y divide-border">
+        <div className="space-y-3">
           {data.results.map(event => (
-            <TimelineRow key={event.id} event={event} />
+            <TimelineCard key={event.id} event={event} />
           ))}
-        </ul>
+        </div>
       )}
       {totalPages > 1 && (
         <div className="flex items-center gap-3 pt-2">

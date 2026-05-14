@@ -848,7 +848,7 @@ class IncidentTaskListView(APIView):
             task = ser.save(incident=incident)
             record_event(
                 incident, "task_created", actor=request.user,
-                payload={"task_id": task.id, "title": task.title},
+                payload={"task_id": task.id, "title": task.title, "created_at": task.created_at.isoformat()},
             )
         return Response(TaskSerializer(task).data, status=status.HTTP_201_CREATED)
 
@@ -994,7 +994,8 @@ class TaskDetailView(APIView):
             if old_state != task.state:
                 record_event(
                     task.incident, "task_state_changed", actor=request.user,
-                    payload={"task_id": task.id, "title": task.title, "old": old_state, "new": task.state},
+                    payload={"task_id": task.id, "title": task.title, "old": old_state, "new": task.state,
+                         "created_at": task.created_at.isoformat(), "closed_at": task.closed_at.isoformat() if task.closed_at else None},
                 )
             if old_assignee_id != task.assignee_id:
                 record_event(
