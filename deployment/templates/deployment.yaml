@@ -22,6 +22,8 @@ spec:
           envFrom:
             - secretRef:
                 name: backend-secret
+            - configMapRef:
+                name: backend-config
 
           env:
             - name: DATABASE_URL
@@ -47,6 +49,8 @@ spec:
           envFrom:
             - secretRef:
                 name: backend-secret
+            - configMapRef:
+                name: backend-config
           env:
             - name: DATABASE_URL
               valueFrom:
