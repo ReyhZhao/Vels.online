@@ -132,7 +132,12 @@ CELERY_BROKER_URL = _REDIS_URL or "memory://"
 CELERY_RESULT_BACKEND = _REDIS_URL or "cache+memory://"
 
 # ── Email ──────────────────────────────────────────────────────────────────────
-EMAIL_BACKEND       = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+_email_ssl_no_verify = os.environ.get("EMAIL_SSL_NO_VERIFY", "False") == "True"
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "config.email_backend.UnverifiedSSLEmailBackend" if _email_ssl_no_verify
+    else "django.core.mail.backends.smtp.EmailBackend",
+)
 EMAIL_HOST          = os.environ.get("EMAIL_HOST", "localhost")
 EMAIL_PORT          = int(os.environ.get("EMAIL_PORT", "587"))
 EMAIL_USE_TLS       = os.environ.get("EMAIL_USE_TLS", "True") == "True"
