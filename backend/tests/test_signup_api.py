@@ -655,3 +655,84 @@ def test_pending_count_returns_correct_number(staff_client):
     resp = staff_client.get("/api/signups/pending-count/")
     assert resp.status_code == 200
     assert resp.json()["count"] == 2
+
+
+# ── POST /api/signups/<id>/resend/ ───────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_resend_on_expired_transitions_to_approved(staff_client):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_EXPIRED,
+        org_slug="acme-corp",
+        approved_org_name="Acme Corp",
+        authentik_group_pk=_FAKE_GROUP_PK,
+    )
+    with _mock_authentik(), patch("signups.views.send_invite_email") as mock_task:
+        resp = staff_client.post(
+            f"/api/signups/{req.pk}/resend/", data={}, content_type="application/json"
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "approved"
+    assert data["invite_token"] == _FAKE_INV_UUID
+    mock_task.delay.assert_called_once_with(req.pk)
+
+
+@pytest.mark.django_db
+def test_resend_on_approved_refreshes_token(staff_client):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_APPROVED,
+        org_slug="acme-corp",
+        approved_org_name="Acme Corp",
+        authentik_group_pk=_FAKE_GROUP_PK,
+    )
+    with _mock_authentik(), patch("signups.views.send_invite_email") as mock_task:
+        resp = staff_client.post(
+            f"/api/signups/{req.pk}/resend/", data={}, content_type="application/json"
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "approved"
+    assert data["invite_token"] == _FAKE_INV_UUID
+    mock_task.delay.assert_called_once_with(req.pk)
+
+
+@pytest.mark.django_db
+def test_resend_on_invalid_state_returns_400(staff_client):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_PENDING,
+    )
+    resp = staff_client.post(
+        f"/api/signups/{req.pk}/resend/", data={}, content_type="application/json"
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_resend_requires_staff(anon_client, db):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_EXPIRED,
+        org_slug="acme-corp",
+        approved_org_name="Acme Corp",
+    )
+    resp = anon_client.post(
+        f"/api/signups/{req.pk}/resend/", data={}, content_type="application/json"
+    )
+    assert resp.status_code in (401, 403)

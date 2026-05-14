@@ -217,8 +217,13 @@ def _provision_and_approve(req, org_name_override=None):
     # Drive state via model transition method
     if req.status == SignupRequest.STATUS_PENDING:
         req.approve(org_name, org_slug, group_pk, invitation["token"])
-    else:
+    elif req.status == SignupRequest.STATUS_EXPIRED:
         req.resend(invitation["token"])
+    else:
+        # Already approved — just refresh the token and expiry
+        req.invite_token = invitation["token"]
+        req.invite_expires_at = timezone.now() + timedelta(days=INVITE_TTL_DAYS)
+        req.actioned_at = timezone.now()
     req.save()
 
     send_invite_email.delay(req.pk)
@@ -288,9 +293,9 @@ class SignupRequestResendView(APIView):
         except SignupRequest.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        if req.status != SignupRequest.STATUS_EXPIRED:
+        if req.status not in (SignupRequest.STATUS_APPROVED, SignupRequest.STATUS_EXPIRED):
             return Response(
-                {"detail": "Only expired requests can have their invite resent."},
+                {"detail": "Only approved or expired requests can have their invite resent."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
