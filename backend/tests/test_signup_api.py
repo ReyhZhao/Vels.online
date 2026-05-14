@@ -559,6 +559,64 @@ def test_delete_removes_record_and_deprovisions(staff_client):
     assert not Organization.objects.filter(slug="acme-corp").exists()
 
 
+@pytest.mark.django_db
+def test_delete_pending_request_makes_no_authentik_calls(staff_client):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_PENDING,
+    )
+    with _mock_authentik() as mock_cls:
+        resp = staff_client.delete(f"/api/signups/{req.pk}/")
+    assert resp.status_code == 204
+    assert not SignupRequest.objects.filter(pk=req.pk).exists()
+    mock_cls.return_value.delete_group.assert_not_called()
+    mock_cls.return_value.delete_invitation.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_delete_tolerates_authentik_errors(staff_client):
+    from signups.authentik import AuthentikAPIError
+
+    Organization.objects.create(name="Acme Corp", slug="acme-corp", wazuh_group="acme-corp")
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_APPROVED,
+        authentik_group_pk="group-uuid-123",
+        org_slug="acme-corp",
+        invite_token=_FAKE_INV_UUID,
+    )
+    mock = MagicMock()
+    mock.return_value.delete_group.side_effect = AuthentikAPIError(404, "not found")
+    mock.return_value.delete_invitation.side_effect = AuthentikAPIError(404, "not found")
+
+    with patch("signups.views.AuthentikClient", mock):
+        resp = staff_client.delete(f"/api/signups/{req.pk}/")
+
+    assert resp.status_code == 204
+    assert not SignupRequest.objects.filter(pk=req.pk).exists()
+    assert not Organization.objects.filter(slug="acme-corp").exists()
+
+
+@pytest.mark.django_db
+def test_delete_requires_staff(anon_client, db):
+    req = SignupRequest.objects.create(
+        email="alice@example.com",
+        full_name="Alice",
+        org_name="Acme Corp",
+        intended_use="...",
+        status=SignupRequest.STATUS_PENDING,
+    )
+    resp = anon_client.delete(f"/api/signups/{req.pk}/")
+    assert resp.status_code in (401, 403)
+    assert SignupRequest.objects.filter(pk=req.pk).exists()
+
+
 # ── Celery task: expire_stale_invites ─────────────────────────────────────────
 
 
