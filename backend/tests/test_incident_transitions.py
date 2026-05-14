@@ -43,6 +43,7 @@ def make_incident(acme, state="new", closure_reason=None):
 @pytest.mark.parametrize("from_state,to_state", [
     ("new", "triaged"),
     ("new", "in_progress"),
+    ("new", "closed"),
     ("triaged", "in_progress"),
     ("triaged", "on_hold"),
     ("in_progress", "on_hold"),
@@ -74,7 +75,6 @@ def test_legal_transition(from_state, to_state, acme, actor):
     ("new", "on_hold"),
     ("new", "resolved"),
     ("new", "needs_tuning"),
-    ("new", "closed"),
     ("triaged", "new"),
     ("triaged", "resolved"),
     ("triaged", "needs_tuning"),
@@ -286,7 +286,7 @@ def test_transition_endpoint_illegal_transition_returns_400(admin_client, acme):
     incident = make_incident(acme, state="new")
     response = admin_client.post(
         f"/api/incidents/{incident.display_id}/transition/",
-        {"state": "closed"},
+        {"state": "on_hold"},
         content_type="application/json",
     )
     assert response.status_code == 400

@@ -213,6 +213,23 @@ def test_bulk_reassign_records_event(client, staff, assignee, acme):
 
 
 @pytest.mark.django_db
+def test_bulk_close_new_state_incident(client, staff, acme):
+    inc = make_incident(acme, state="new", display_id="INC-2026-0050")
+    client.force_login(staff)
+    response = client.post(
+        "/api/incidents/bulk/",
+        {"action": "close", "ids": [inc.id], "closure_reason": "resolved"},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert inc.id in data["succeeded"]
+    assert data["failed"] == []
+    inc.refresh_from_db()
+    assert inc.state == "closed"
+
+
+@pytest.mark.django_db
 def test_bulk_staff_can_act_on_any_org(client, staff, acme, contoso):
     own = make_incident(acme, state="in_progress", display_id="INC-2026-0040")
     other = make_incident(contoso, state="in_progress", display_id="INC-2026-0041")

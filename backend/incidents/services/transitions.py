@@ -5,7 +5,7 @@ from django.db import transaction
 from incidents.services.events import record_event
 
 ALLOWED_TRANSITIONS = {
-    "new":          {"triaged", "in_progress"},
+    "new":          {"triaged", "in_progress", "closed"},
     "triaged":      {"in_progress", "on_hold"},
     "in_progress":  {"on_hold", "resolved", "needs_tuning", "closed"},
     "on_hold":      {"in_progress", "resolved", "needs_tuning", "closed"},

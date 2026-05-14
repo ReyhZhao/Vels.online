@@ -305,7 +305,7 @@ export default function IncidentList() {
         ...extra,
       });
       const { succeeded, failed } = res.data;
-      setBulkResult({ succeeded: succeeded.length, failed: failed.length });
+      setBulkResult({ succeeded: succeeded.length, failed });
       setSelectedIds(new Set());
       setBulkAction(null);
       fetchIncidents(Object.fromEntries(searchParams.entries()), { silent: true });
@@ -442,7 +442,17 @@ export default function IncidentList() {
           {bulkError && <span className="text-sm text-red-600 ml-2">{bulkError}</span>}
           {bulkResult && (
             <span className="text-sm text-foreground ml-2">
-              {bulkResult.succeeded} succeeded{bulkResult.failed > 0 ? `, ${bulkResult.failed} failed` : ''}
+              {bulkResult.succeeded} succeeded
+              {bulkResult.failed.length > 0 && (
+                <span className="ml-1 text-red-600">
+                  , {bulkResult.failed.length} failed:
+                  <ul className="mt-1 list-none space-y-0.5">
+                    {bulkResult.failed.map(f => (
+                      <li key={f.id} className="text-xs">ID {f.id}: {f.error}</li>
+                    ))}
+                  </ul>
+                </span>
+              )}
             </span>
           )}
           <button
