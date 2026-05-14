@@ -165,20 +165,38 @@ def test_get_service_reports_returns_data(mock_get):
 
 @patch("ingress.bunkerweb.requests.get")
 def test_list_services_returns_list(mock_get):
-    payload = [
-        {"server_name": "a.example.com", "backend_host": "10.0.0.1", "backend_port": 80},
-        {"server_name": "b.example.com", "backend_host": "10.0.0.2", "backend_port": 443},
-    ]
-    mock_get.return_value = _ok(payload)
+    envelope = {
+        "status": "success",
+        "services": [
+            {"id": "a.example.com", "method": "ui", "is_draft": False},
+            {"id": "b.example.com", "method": "ui", "is_draft": False},
+        ],
+    }
+    mock_get.return_value = _ok(envelope)
     result = BunkerWebClient().list_services()
-    assert result == payload
+    assert len(result) == 2
+    assert result[0]["server_name"] == "a.example.com"
+    assert result[1]["server_name"] == "b.example.com"
     url = mock_get.call_args[0][0]
     assert url == f"{_BASE_URL}/services"
 
 
 @patch("ingress.bunkerweb.requests.get")
+def test_list_services_unwraps_envelope(mock_get):
+    envelope = {
+        "status": "success",
+        "services": [{"id": "svc.example.com", "method": "ui", "is_draft": False}],
+    }
+    mock_get.return_value = _ok(envelope)
+    result = BunkerWebClient().list_services()
+    assert isinstance(result, list)
+    assert result[0]["server_name"] == "svc.example.com"
+    assert "id" not in result[0]
+
+
+@patch("ingress.bunkerweb.requests.get")
 def test_list_services_auth_header(mock_get):
-    mock_get.return_value = _ok([])
+    mock_get.return_value = _ok({"status": "success", "services": []})
     BunkerWebClient().list_services()
     _, kwargs = mock_get.call_args
     assert kwargs["headers"]["Authorization"] == f"Bearer {_TOKEN}"

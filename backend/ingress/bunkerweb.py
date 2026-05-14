@@ -79,4 +79,6 @@ class BunkerWebClient:
     def list_services(self):
         resp = self._get("/services")
         self._check(resp)
-        return resp.json()
+        data = resp.json()
+        services = data.get("services", []) if isinstance(data, dict) else data
+        return [{"server_name": s["id"], **{k: v for k, v in s.items() if k != "id"}} for s in services]
