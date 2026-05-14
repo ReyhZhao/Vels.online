@@ -26,11 +26,11 @@ const STATUS_COLORS = {
 };
 
 const REJECTION_REASONS = [
-  'spam',
-  'duplicate',
-  'incomplete',
-  'not_eligible',
-  'other',
+  'Unable to verify organisation',
+  'Duplicate request',
+  'Outside our service area',
+  'Incomplete information',
+  'Other',
 ];
 
 function StatusBadge({ status }) {
@@ -46,7 +46,7 @@ function StatusBadge({ status }) {
 function RequestRow({ req, onAction }) {
   const [expanded, setExpanded] = useState(false);
   const [approveOrgName, setApproveOrgName] = useState('');
-  const [rejectReason, setRejectReason] = useState('spam');
+  const [rejectReason, setRejectReason] = useState(REJECTION_REASONS[0]);
   const [rejectNote, setRejectNote] = useState('');
   const [sendEmail, setSendEmail] = useState(true);
   const [working, setWorking] = useState(false);
@@ -239,7 +239,7 @@ function RequestRow({ req, onAction }) {
           )}
 
           {/* Resend panel */}
-          {req.status === 'expired' && (
+          {(req.status === 'approved' || req.status === 'expired') && (
             <div className="space-y-2 border-t pt-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Resend invite
@@ -291,6 +291,7 @@ function SignupRequests() {
   }, [load]);
 
   function handleAction(updatedReq) {
+    window.dispatchEvent(new CustomEvent('signuprequest:changed'));
     if (updatedReq === null) {
       load();
     } else {

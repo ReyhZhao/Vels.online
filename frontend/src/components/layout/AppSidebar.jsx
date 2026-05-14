@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import OrgSwitcher from '../OrgSwitcher';
 import ReportIssueModal from '../ReportIssueModal';
@@ -98,13 +98,22 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   const [reportOpen, setReportOpen] = useState(false);
   const [pendingSignups, setPendingSignups] = useState(0);
 
-  useEffect(() => {
+  const fetchPendingCount = useCallback(() => {
     if (!isStaff) return;
     api
       .get('/api/signups/pending-count/')
       .then((res) => setPendingSignups(res.data.count ?? 0))
       .catch(() => {});
   }, [isStaff]);
+
+  useEffect(() => {
+    fetchPendingCount();
+  }, [fetchPendingCount]);
+
+  useEffect(() => {
+    window.addEventListener('signuprequest:changed', fetchPendingCount);
+    return () => window.removeEventListener('signuprequest:changed', fetchPendingCount);
+  }, [fetchPendingCount]);
 
   useEffect(() => { writeLS('sidebar:collapsed', collapsed); }, [collapsed]);
   useEffect(() => { writeLS('sidebar:incidents:open', incidentsOpen); }, [incidentsOpen]);
