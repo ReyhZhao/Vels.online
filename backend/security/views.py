@@ -451,8 +451,26 @@ class AgentVulnerabilitiesView(APIView):
         except OpenSearchError as exc:
             return Response({"detail": str(exc)}, status=502)
 
+        cached_agents = cache.get(_agents_cache_key(org.slug)) or []
+        agent_raw = next((a for a in cached_agents if str(a.get("id")) == str(agent_id)), {})
+        os_info = agent_raw.get("os", {})
+        raw_platform = os_info.get("platform", "") if isinstance(os_info, dict) else ""
+        agent_platform = normalize_platform(raw_platform)
+
         serialized = [_serialize_vulnerability(v) for v in result["vulnerabilities"]]
         serialized.sort(key=lambda v: _SEVERITY_ORDER.get(v["severity"], 99))
+
+        if agent_platform:
+            for vuln in serialized:
+                adv = get_or_fetch_advisory(vuln["cve"], agent_platform)
+                vuln["advisory"] = {
+                    "platform": agent_platform,
+                    "advisory_url": adv.advisory_url,
+                    "remediation_text": adv.remediation_text,
+                }
+        else:
+            for vuln in serialized:
+                vuln["advisory"] = None
 
         data = PaginatedVulnerabilitiesSerializer({
             "vulnerabilities": serialized,

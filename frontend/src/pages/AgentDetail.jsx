@@ -4,6 +4,7 @@ import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 import SlideOver from '../components/SlideOver';
 import EventSlideOver from '../components/EventSlideOver';
+import CveAdvisoryBlock from '../components/CveAdvisoryBlock';
 import PromoteToIncidentButton from '../components/PromoteToIncidentButton';
 import LinkedIncidents from '../components/LinkedIncidents';
 
@@ -412,6 +413,7 @@ function VulnerabilitiesTab({ agentId, orgSlug }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [expandedCve, setExpandedCve] = useState(null);
   const [error, setError] = useState(null);
   const [acceptedCveIds, setAcceptedCveIds] = useState(new Set());
   const [hideAccepted, setHideAccepted] = useState(true);
@@ -511,34 +513,57 @@ function VulnerabilitiesTab({ agentId, orgSlug }) {
                 </td>
               </tr>
             ) : (
-              displayedVulns.map((vuln) => (
-                <tr
-                  key={vuln.cve}
-                  onClick={() => setSelectedVulnId(vuln.id)}
-                  className="border-b border-border last:border-0 cursor-pointer hover:bg-accent/40 transition-colors"
-                >
-                  <td className="px-4 py-3 font-mono text-xs text-foreground">
-                    <span className="flex items-center gap-1.5 flex-wrap">
-                      {vuln.cve}
-                      {acceptedCveIds.has(vuln.cve) && <AcceptedBadge />}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <SeverityBadge severity={vuln.severity} />
-                  </td>
-                  <td className="px-4 py-3 text-foreground">{vuln.package}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{vuln.version}</td>
-                  <td className="px-4 py-3">
-                    {vuln.fix_available ? (
-                      <span className="text-xs font-medium text-green-600 dark:text-green-400">
-                        Available
+              displayedVulns.flatMap((vuln) => {
+                const isExpanded = expandedCve === vuln.cve;
+                return [
+                  <tr
+                    key={vuln.cve}
+                    onClick={() => setExpandedCve(isExpanded ? null : vuln.cve)}
+                    className="border-b border-border last:border-0 cursor-pointer hover:bg-accent/40 transition-colors"
+                  >
+                    <td className="px-4 py-3 font-mono text-xs text-foreground">
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-muted-foreground text-xs select-none">{isExpanded ? '▾' : '▸'}</span>
+                        {vuln.cve}
+                        {acceptedCveIds.has(vuln.cve) && <AcceptedBadge />}
                       </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">None</span>
-                    )}
-                  </td>
-                </tr>
-              ))
+                    </td>
+                    <td className="px-4 py-3">
+                      <SeverityBadge severity={vuln.severity} />
+                    </td>
+                    <td className="px-4 py-3 text-foreground">{vuln.package}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{vuln.version}</td>
+                    <td className="px-4 py-3">
+                      {vuln.fix_available ? (
+                        <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                          Available
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">None</span>
+                      )}
+                    </td>
+                  </tr>,
+                  isExpanded && (
+                    <tr key={`${vuln.cve}-advisory`} className="border-b border-border bg-muted/20">
+                      <td colSpan={5} className="px-6 py-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSelectedVulnId(vuln.id); }}
+                            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            View vulnerability details →
+                          </button>
+                        </div>
+                        {vuln.advisory ? (
+                          <CveAdvisoryBlock advisories={[vuln.advisory]} />
+                        ) : (
+                          <p className="text-sm text-muted-foreground italic">No advisory available.</p>
+                        )}
+                      </td>
+                    </tr>
+                  ),
+                ].filter(Boolean);
+              })
             )}
           </tbody>
         </table>

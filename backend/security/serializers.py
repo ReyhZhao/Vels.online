@@ -41,6 +41,7 @@ class VulnerabilitySerializer(serializers.Serializer):
     version = serializers.CharField()
     severity = serializers.CharField()
     fix_available = serializers.BooleanField()
+    advisory = CveAdvisorySerializer(allow_null=True, required=False)
 
 
 class PaginatedVulnerabilitiesSerializer(serializers.Serializer):
