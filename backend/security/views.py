@@ -895,6 +895,37 @@ class DownloadUploadView(APIView):
         return Response(DownloadSerializer(download).data)
 
 
+def _enrich_work_package_with_advisories(package, org_slug):
+    """Attach advisories to each WorkPackageItem using platforms from the cached agent list."""
+    cached_agents = cache.get(_agents_cache_key(org_slug)) or []
+    agent_platform_map = {}
+    for a in cached_agents:
+        os_info = a.get("os", {})
+        raw_platform = os_info.get("platform", "") if isinstance(os_info, dict) else ""
+        platform = normalize_platform(raw_platform)
+        if platform:
+            agent_platform_map[str(a.get("id", ""))] = platform
+
+    for item in package.items.all():
+        platforms = {
+            agent_platform_map[str(a.get("agent_id", ""))]
+            for a in (item.affected_agents or [])
+            if str(a.get("agent_id", "")) in agent_platform_map
+        }
+        if not platforms and agent_platform_map:
+            platforms = set(agent_platform_map.values())
+
+        item._advisories = [
+            {
+                "platform": platform,
+                "advisory_url": adv.advisory_url,
+                "remediation_text": adv.remediation_text,
+            }
+            for platform in sorted(platforms)
+            for adv in [get_or_fetch_advisory(item.cve_id, platform)]
+        ]
+
+
 class WorkPackageView(APIView):
     def get(self, request):
         slug = request.query_params.get("org", "").strip()
@@ -910,7 +941,11 @@ class WorkPackageView(APIView):
         )
         if package is None:
             return Response({"package": None})
-        return Response({"package": WorkPackageSerializer(package).data})
+
+        _enrich_work_package_with_advisories(package, org.slug)
+
+        serialized = WorkPackageSerializer(package)
+        return Response({"package": serialized.data})
 
 
 class WorkPackageGenerateView(APIView):
@@ -1064,6 +1099,7 @@ class WorkPackageDetailView(APIView):
         except WorkPackage.DoesNotExist:
             return Response(status=404)
 
+        _enrich_work_package_with_advisories(package, org.slug)
         return Response({"package": WorkPackageSerializer(package).data})
 
 

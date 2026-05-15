@@ -34,6 +34,12 @@ class PaginatedEventsSerializer(serializers.Serializer):
     total = serializers.IntegerField()
 
 
+class CveAdvisorySerializer(serializers.Serializer):
+    platform = serializers.CharField()
+    advisory_url = serializers.URLField(allow_null=True)
+    remediation_text = serializers.CharField(allow_null=True)
+
+
 class VulnerabilitySerializer(serializers.Serializer):
     id = serializers.CharField()
     cve = serializers.CharField()
@@ -125,12 +131,6 @@ class CveAffectedAgentSerializer(serializers.Serializer):
     fix_available = serializers.BooleanField()
 
 
-class CveAdvisorySerializer(serializers.Serializer):
-    platform = serializers.CharField()
-    advisory_url = serializers.URLField(allow_null=True)
-    remediation_text = serializers.CharField(allow_null=True)
-
-
 class CveDetailSerializer(serializers.Serializer):
     cve = serializers.CharField()
     severity = serializers.CharField()
@@ -165,13 +165,19 @@ class DownloadCreateSerializer(serializers.Serializer):
 
 
 class WorkPackageItemSerializer(serializers.ModelSerializer):
+    advisories = serializers.SerializerMethodField()
+
     class Meta:
         model = WorkPackageItem
         fields = [
             "id", "cve_id", "severity", "cvss_score", "description",
             "references", "affected_agent_count", "impact_score",
-            "affected_agents", "status", "note",
+            "affected_agents", "status", "note", "advisories",
         ]
+
+    def get_advisories(self, obj):
+        advisories = getattr(obj, "_advisories", [])
+        return CveAdvisorySerializer(advisories, many=True).data
 
 
 class WorkPackageSerializer(serializers.ModelSerializer):

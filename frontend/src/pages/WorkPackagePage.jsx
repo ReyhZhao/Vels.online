@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 import { useAuth } from '../context/AuthContext';
+import CveAdvisoryBlock from '../components/CveAdvisoryBlock';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -45,6 +46,7 @@ function StatusBadge({ status }) {
 
 function CveItem({ item, onUpdate, onRemove, readOnly = false, isStaff = false }) {
   const [open, setOpen] = useState(false);
+  const [remediationOpen, setRemediationOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const noteTimerRef = useRef(null);
@@ -180,6 +182,19 @@ function CveItem({ item, onUpdate, onRemove, readOnly = false, isStaff = false }
               </ul>
             </div>
           )}
+
+          <div>
+            <button
+              onClick={() => setRemediationOpen(o => !o)}
+              className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors mb-1"
+            >
+              {remediationOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              Remediation
+            </button>
+            {remediationOpen && (
+              <CveAdvisoryBlock advisories={item.advisories} />
+            )}
+          </div>
 
           {item.affected_agents?.length > 0 && (
             <div>
