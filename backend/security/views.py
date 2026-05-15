@@ -780,18 +780,29 @@ class EnrollmentView(APIView):
 
         manager_host = os.environ.get("WAZUH_MANAGER_HOST", "")
         agent_version = os.environ.get("WAZUH_AGENT_VERSION", "4.12.0-1")
+        registration_password = os.environ.get("WAZUH_REGISTRATION_PASSWORD", "")
+        linux_parts = [
+            f"WAZUH_MANAGER='{manager_host}'",
+            f"WAZUH_AGENT_GROUP='{org.wazuh_group}'",
+        ]
+        if registration_password:
+            linux_parts.append(f"WAZUH_REGISTRATION_PASSWORD='{registration_password}'")
         install_command = (
-            f"WAZUH_MANAGER='{manager_host}' "
-            f"WAZUH_AGENT_GROUP='{org.wazuh_group}' "
-            f"apt-get install -y wazuh-agent && "
-            f"systemctl daemon-reload && "
-            f"systemctl enable --now wazuh-agent"
+            " ".join(linux_parts)
+            + " apt-get install -y wazuh-agent && "
+            "systemctl daemon-reload && "
+            "systemctl enable --now wazuh-agent"
         )
+        windows_msiexec = (
+            f"msiexec.exe /i $installer /q WAZUH_MANAGER='{manager_host}' WAZUH_AGENT_GROUP='{org.wazuh_group}'"
+        )
+        if registration_password:
+            windows_msiexec += f" WAZUH_REGISTRATION_PASSWORD='{registration_password}'"
         windows_install_command = (
             f"$installer = \"$env:tmp\\wazuh-agent.msi\"\n"
             f"Invoke-WebRequest -Uri 'https://packages.wazuh.com/4.x/windows/wazuh-agent-{agent_version}.msi' "
             f"-OutFile $installer\n"
-            f"msiexec.exe /i $installer /q WAZUH_MANAGER='{manager_host}' WAZUH_AGENT_GROUP='{org.wazuh_group}'\n"
+            f"{windows_msiexec}\n"
             f"NET START WazuhSvc"
         )
         data = EnrollmentSerializer({

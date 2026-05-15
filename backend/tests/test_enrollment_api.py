@@ -105,3 +105,29 @@ def test_enrollment_windows_command_uses_version_env(client, acme_member, acme, 
 
     data = response.json()
     assert "4.9.0-1" in data["windows_install_command"]
+
+
+@pytest.mark.django_db
+def test_enrollment_includes_password_when_set(client, acme_member, acme, monkeypatch):
+    monkeypatch.setenv("WAZUH_MANAGER_HOST", "wazuh.example.com")
+    monkeypatch.setenv("WAZUH_REGISTRATION_PASSWORD", "secret123")
+    client.force_login(acme_member)
+
+    response = client.get("/api/security/enrollment/?org=acme")
+
+    data = response.json()
+    assert "secret123" in data["install_command"]
+    assert "secret123" in data["windows_install_command"]
+
+
+@pytest.mark.django_db
+def test_enrollment_omits_password_when_not_set(client, acme_member, acme, monkeypatch):
+    monkeypatch.setenv("WAZUH_MANAGER_HOST", "wazuh.example.com")
+    monkeypatch.delenv("WAZUH_REGISTRATION_PASSWORD", raising=False)
+    client.force_login(acme_member)
+
+    response = client.get("/api/security/enrollment/?org=acme")
+
+    data = response.json()
+    assert "WAZUH_REGISTRATION_PASSWORD" not in data["install_command"]
+    assert "WAZUH_REGISTRATION_PASSWORD" not in data["windows_install_command"]
