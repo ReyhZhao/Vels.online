@@ -103,3 +103,41 @@ def test_network_error_raises_authentik_error():
         with pytest.raises(AuthentikAPIError) as exc_info:
             AuthentikClient().create_group("customer:acme")
     assert exc_info.value.status_code == 0
+
+
+@pytest.mark.django_db
+def test_get_flow_uuid_returns_pk():
+    resp = _make_response(200, {"results": [{"pk": "flow-uuid-abc", "slug": "main-page-enrollment"}]})
+    with patch("signups.authentik.requests.get", return_value=resp):
+        uuid = AuthentikClient().get_flow_uuid("main-page-enrollment")
+    assert uuid == "flow-uuid-abc"
+
+
+@pytest.mark.django_db
+def test_get_flow_uuid_calls_correct_endpoint():
+    resp = _make_response(200, {"results": [{"pk": "flow-uuid-abc"}]})
+    with patch("signups.authentik.requests.get", return_value=resp) as mock_get:
+        AuthentikClient().get_flow_uuid("main-page-enrollment")
+    url = mock_get.call_args.args[0]
+    params = mock_get.call_args.kwargs.get("params", {})
+    assert "/flows/instances/" in url
+    assert params == {"slug": "main-page-enrollment"}
+
+
+@pytest.mark.django_db
+def test_get_flow_uuid_raises_when_no_results():
+    resp = _make_response(200, {"results": []})
+    with patch("signups.authentik.requests.get", return_value=resp):
+        with pytest.raises(AuthentikAPIError) as exc_info:
+            AuthentikClient().get_flow_uuid("nonexistent-slug")
+    assert exc_info.value.status_code == 0
+    assert "nonexistent-slug" in str(exc_info.value)
+
+
+@pytest.mark.django_db
+def test_get_flow_uuid_raises_on_api_error():
+    resp = _make_response(403, text="Forbidden")
+    with patch("signups.authentik.requests.get", return_value=resp):
+        with pytest.raises(AuthentikAPIError) as exc_info:
+            AuthentikClient().get_flow_uuid("main-page-enrollment")
+    assert exc_info.value.status_code == 403

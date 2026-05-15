@@ -37,6 +37,17 @@ class AuthentikClient:
         except RequestException as exc:
             raise AuthentikAPIError(0, str(exc)) from exc
 
+    def _get(self, path, **kwargs):
+        try:
+            return requests.get(
+                f"{self._base_url}/api/v3{path}",
+                headers=self._headers(),
+                timeout=10,
+                **kwargs,
+            )
+        except RequestException as exc:
+            raise AuthentikAPIError(0, str(exc)) from exc
+
     def _delete(self, path, **kwargs):
         try:
             return requests.delete(
@@ -59,12 +70,20 @@ class AuthentikClient:
             return
         self._check(resp)
 
-    def create_invitation(self, flow_slug, expires_at, name):
+    def get_flow_uuid(self, slug):
+        resp = self._get("/flows/instances/", params={"slug": slug})
+        self._check(resp)
+        results = resp.json().get("results", [])
+        if not results:
+            raise AuthentikAPIError(0, f"No flow found with slug '{slug}'")
+        return results[0]["pk"]
+
+    def create_invitation(self, flow_uuid, expires_at, name):
         resp = self._post(
             "/stages/invitation/invitations/",
             json={
                 "name": name,
-                "flow": flow_slug,
+                "flow": flow_uuid,
                 "expires": expires_at.isoformat(),
                 "single_use": True,
             },

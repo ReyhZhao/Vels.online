@@ -184,6 +184,20 @@ def _provision_and_approve(req, org_name_override=None):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+    # Resolve flow slug to UUID (Authentik API requires UUID, not slug)
+    try:
+        flow_uuid = client.get_flow_uuid(flow_slug)
+    except AuthentikAPIError as exc:
+        if newly_created_group:
+            try:
+                client.delete_group(group_pk)
+            except AuthentikAPIError:
+                pass
+        return None, Response(
+            {"detail": f"Failed to resolve enrollment flow: {exc}"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
     # Delete stale invitation before creating a new one (resend path)
     if req.invite_token:
         try:
@@ -195,7 +209,7 @@ def _provision_and_approve(req, org_name_override=None):
     # for the Authentik API call — the model computes the real expiry
     placeholder_expires = timezone.now() + timedelta(days=7)
     try:
-        invitation = client.create_invitation(flow_slug, placeholder_expires, name=f"signup-{req.id}")
+        invitation = client.create_invitation(flow_uuid, placeholder_expires, name=f"signup-{req.id}")
     except AuthentikAPIError as exc:
         if newly_created_group:
             try:
