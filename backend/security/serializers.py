@@ -71,6 +71,7 @@ class FleetVulnerabilitySerializer(serializers.Serializer):
     affected_agents = serializers.IntegerField()
     fix_available = serializers.BooleanField()
     published = serializers.CharField(allow_null=True)
+    advisories = CveAdvisorySerializer(many=True, required=False)
 
 
 class FleetVulnerabilitiesResponseSerializer(serializers.Serializer):

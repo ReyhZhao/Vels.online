@@ -555,6 +555,24 @@ class FleetVulnerabilitiesView(APIView):
         except OpenSearchError as exc:
             return Response({"detail": str(exc)}, status=502)
 
+        fleet_platforms = {
+            normalize_platform(a.get("os", {}).get("platform", "") if isinstance(a.get("os"), dict) else "")
+            for a in raw_agents
+            if a.get("status") == "active"
+        }
+        fleet_platforms.discard("")
+
+        for vuln in result["vulnerabilities"]:
+            vuln["advisories"] = [
+                {
+                    "platform": platform,
+                    "advisory_url": adv.advisory_url,
+                    "remediation_text": adv.remediation_text,
+                }
+                for platform in sorted(fleet_platforms)
+                for adv in [get_or_fetch_advisory(vuln["cve"], platform)]
+            ]
+
         data = FleetVulnerabilitiesResponseSerializer(result).data
         if is_first_page:
             cache.set(cache_key, data, _FLEET_VULNS_CACHE_TTL)
