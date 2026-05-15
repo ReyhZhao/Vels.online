@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 import dj_database_url
-from celery.schedules import crontab
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -50,6 +49,9 @@ INSTALLED_APPS = [
     "feedback",
     "ingress",
     "signups",
+    "django_celery_results",
+    "django_celery_beat",
+    "celery_tasks",
 ]
 
 SITE_ID = 1
@@ -129,7 +131,9 @@ CACHES = {
 UPTIMEROBOT_API_KEY = os.environ.get("UPTIMEROBOT_API_KEY", "")
 
 CELERY_BROKER_URL = _REDIS_URL or "memory://"
-CELERY_RESULT_BACKEND = _REDIS_URL or "cache+memory://"
+CELERY_RESULT_BACKEND = "django-db"
+CELERY_RESULT_EXTENDED = True
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 # ── Email ──────────────────────────────────────────────────────────────────────
 _email_ssl_no_verify = os.environ.get("EMAIL_SSL_NO_VERIFY", "False") == "True"
@@ -145,35 +149,6 @@ EMAIL_USE_SSL       = os.environ.get("EMAIL_USE_SSL", "False") == "True"
 EMAIL_HOST_USER     = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL  = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@vels.online")
-def _parse_crontab(cron_str):
-    minute, hour, dom, month, dow = cron_str.split()
-    return crontab(minute=minute, hour=hour, day_of_month=dom, month_of_year=month, day_of_week=dow)
-
-
-_WORK_PACKAGE_CRON = os.environ.get("WORK_PACKAGE_CRON_SCHEDULE", "0 6 * * 1")
-
-CELERY_BEAT_SCHEDULE = {
-    "snapshot-vulnerabilities-daily": {
-        "task": "security.tasks.snapshot_vulnerabilities",
-        "schedule": 86400,  # every 24 hours
-    },
-    "generate-work-packages-weekly": {
-        "task": "security.tasks.generate_work_packages",
-        "schedule": _parse_crontab(_WORK_PACKAGE_CRON),
-    },
-    "cleanup-orphaned-attachments-daily": {
-        "task": "incidents.tasks.cleanup_orphaned_attachments",
-        "schedule": 86400,  # every 24 hours
-    },
-    "cleanup-old-notifications-daily": {
-        "task": "notifications.tasks.cleanup_old_notifications",
-        "schedule": 86400,  # every 24 hours
-    },
-    "expire-stale-invites-nightly": {
-        "task": "signups.tasks.expire_stale_invites",
-        "schedule": 86400,  # every 24 hours
-    },
-}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [

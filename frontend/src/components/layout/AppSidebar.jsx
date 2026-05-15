@@ -25,6 +25,8 @@ import {
   Filter,
   Bell,
   Globe,
+  History,
+  CalendarClock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -314,6 +316,12 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                       </>
                     )}
                   </NavLink>
+                  <SidebarLink to="/admin/tasks/history" icon={History} collapsed={collapsed}>
+                    Task History
+                  </SidebarLink>
+                  <SidebarLink to="/admin/tasks/scheduled" icon={CalendarClock} collapsed={collapsed}>
+                    Scheduled Tasks
+                  </SidebarLink>
                   <div
                     className={cn(
                       'flex items-center rounded-md px-3 py-2 text-sm text-muted-foreground/50 cursor-default select-none',
