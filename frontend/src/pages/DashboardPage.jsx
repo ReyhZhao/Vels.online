@@ -1,8 +1,47 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Globe } from 'lucide-react';
+import { Shield, Globe, Mail } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
+
+function EmailDiagnosticsCard() {
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function handleSend() {
+    setSending(true);
+    setResult(null);
+    try {
+      const res = await api.post('/api/admin/test-email/');
+      setResult({ ok: true, message: res.data.detail });
+    } catch (err) {
+      setResult({ ok: false, message: err.response?.data?.detail || 'Failed to send test email.' });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">Email diagnostics</CardTitle>
+        <Mail className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button size="sm" onClick={handleSend} disabled={sending}>
+          {sending ? 'Sending…' : 'Send test email'}
+        </Button>
+        {result && (
+          <p className={`text-sm ${result.ok ? 'text-green-600' : 'text-red-600'}`}>
+            {result.message}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function ServiceCard({ icon: Icon, title, description, to }) {
   return (
@@ -121,6 +160,15 @@ export default function DashboardPage() {
             value={routeCount}
             isLoading={routesLoading}
           />
+        </div>
+      </section>
+
+      <section aria-label="Diagnostics">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Diagnostics
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <EmailDiagnosticsCard />
         </div>
       </section>
     </div>

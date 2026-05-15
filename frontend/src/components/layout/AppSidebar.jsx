@@ -3,7 +3,6 @@ import { NavLink } from 'react-router-dom';
 import OrgSwitcher from '../OrgSwitcher';
 import ReportIssueModal from '../ReportIssueModal';
 import {
-  LayoutDashboard,
   FileText,
   FilePlus,
   Server,
@@ -176,10 +175,6 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
             </div>
           )}
 
-          <SidebarLink to="/admin" end icon={LayoutDashboard} collapsed={collapsed}>
-            Dashboard
-          </SidebarLink>
-
           <div className="space-y-1">
             {showItems && (
               <SectionToggle
@@ -271,6 +266,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
               )}
               {(adminOpen || collapsed) && (
                 <>
+                  <SidebarLink to="/admin" end icon={FileText} collapsed={collapsed}>
+                    Blog Administration
+                  </SidebarLink>
                   <SidebarLink to="/admin/posts" icon={FileText} collapsed={collapsed}>
                     Posts
                   </SidebarLink>
