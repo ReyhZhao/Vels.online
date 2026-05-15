@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 
 import requests
@@ -6,6 +7,8 @@ from django.utils import timezone
 from .models import CveAdvisory
 
 _UBUNTU_BASE = "https://ubuntu.com/security"
+_MSRC_BASE = "https://api.msrc.microsoft.com/cvrf/v2.0"
+_MSRC_ADVISORY_BASE = "https://msrc.microsoft.com/update-guide/vulnerability"
 _STALENESS = timedelta(days=7)
 
 _PLATFORM_ALIASES = {
@@ -13,7 +16,7 @@ _PLATFORM_ALIASES = {
 }
 
 # Platforms with a fetch implementation in this file.
-_SUPPORTED_PLATFORMS = {"ubuntu"}
+_SUPPORTED_PLATFORMS = {"ubuntu", "windows"}
 
 
 def normalize_platform(raw_platform):
@@ -89,6 +92,82 @@ class UbuntuAdvisoryClient:
         return advisory_url, " ".join(parts)
 
 
+class MsrcConfigError(RuntimeError):
+    """Raised when MSRC_API_KEY environment variable is not set."""
+
+
+class MsrcAdvisoryError(RuntimeError):
+    pass
+
+
+class MsrcAdvisoryClient:
+    def fetch(self, cve_id):
+        """
+        Returns (advisory_url, remediation_text, raw_data).
+        Raises MsrcConfigError if MSRC_API_KEY is not set.
+        Returns (None, None, None) when the CVE is not found in MSRC.
+        Raises MsrcAdvisoryError on non-404 HTTP failures.
+        """
+        api_key = os.environ.get("MSRC_API_KEY", "")
+        if not api_key:
+            raise MsrcConfigError("MSRC_API_KEY is not configured")
+
+        url = f"{_MSRC_BASE}/cvrf/{cve_id}"
+        resp = requests.get(
+            url,
+            headers={"api-key": api_key, "Accept": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code == 404:
+            return None, None, None
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise MsrcAdvisoryError(f"MSRC advisory API error for {cve_id}: {exc}") from exc
+
+        data = resp.json()
+        advisory_url, remediation_text = self._parse(cve_id, data)
+        return advisory_url, remediation_text, data
+
+    def _parse(self, cve_id, data):
+        advisory_url = f"{_MSRC_ADVISORY_BASE}/{cve_id}"
+
+        vulnerabilities = data.get("Vulnerability") or []
+        kb_articles = []
+        for vuln in vulnerabilities:
+            for rem in (vuln.get("Remediations") or []):
+                if rem.get("Type") in ("VendorFix", "Workaround"):
+                    desc = rem.get("Description", {})
+                    value = desc.get("Value", "").strip() if isinstance(desc, dict) else str(desc).strip()
+                    if value:
+                        kb_articles.append(value)
+
+        unique_articles = list(dict.fromkeys(kb_articles))[:5]
+        if unique_articles:
+            kb_list = ", ".join(unique_articles)
+            remediation_text = (
+                f"Microsoft has released security updates addressing this vulnerability. "
+                f"Apply update(s) {kb_list} via Windows Update or the Microsoft Update Catalog. "
+                f"Visit the vendor advisory for affected product versions and full details."
+            )
+        else:
+            remediation_text = (
+                "Microsoft has released security updates addressing this vulnerability. "
+                "Apply available updates via Windows Update. "
+                "Visit the vendor advisory for affected product versions and full details."
+            )
+
+        return advisory_url, remediation_text
+
+
+def _get_client(platform):
+    if platform == "ubuntu":
+        return UbuntuAdvisoryClient()
+    if platform == "windows":
+        return MsrcAdvisoryClient()
+    return None
+
+
 def get_or_fetch(cve_id, platform):
     """
     Return a CveAdvisory for (cve_id, platform), fetching from the upstream API
@@ -104,11 +183,12 @@ def get_or_fetch(cve_id, platform):
     except CveAdvisory.DoesNotExist:
         pass
 
-    if platform not in _SUPPORTED_PLATFORMS:
+    client = _get_client(platform)
+    if client is None:
         return stale_row or CveAdvisory(cve_id=cve_id, platform=platform)
 
     try:
-        advisory_url, remediation_text, raw_data = UbuntuAdvisoryClient().fetch(cve_id)
+        advisory_url, remediation_text, raw_data = client.fetch(cve_id)
         row, _ = CveAdvisory.objects.update_or_create(
             cve_id=cve_id,
             platform=platform,
@@ -120,5 +200,8 @@ def get_or_fetch(cve_id, platform):
             },
         )
         return row
+    except MsrcConfigError:
+        # Key not configured — return null without storing so the next request retries.
+        return stale_row or CveAdvisory(cve_id=cve_id, platform=platform)
     except Exception:
         return stale_row or CveAdvisory(cve_id=cve_id, platform=platform)

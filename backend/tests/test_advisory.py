@@ -5,7 +5,13 @@ import pytest
 import requests
 from django.utils import timezone
 
-from security.advisory import UbuntuAdvisoryClient, UbuntuAdvisoryError, get_or_fetch
+from security.advisory import (
+    MsrcAdvisoryClient,
+    MsrcConfigError,
+    UbuntuAdvisoryClient,
+    UbuntuAdvisoryError,
+    get_or_fetch,
+)
 from security.models import CveAdvisory
 
 _CVE = "CVE-2023-0464"
@@ -208,7 +214,98 @@ def test_get_or_fetch_returns_null_advisory_on_exception_no_stale(MockClient):
 @pytest.mark.django_db
 @patch("security.advisory.UbuntuAdvisoryClient")
 def test_get_or_fetch_skips_fetch_for_unsupported_platform(MockClient):
-    result = get_or_fetch(_CVE, "windows")
+    result = get_or_fetch(_CVE, "macos")
 
     MockClient.assert_not_called()
     assert result.advisory_url is None
+
+
+# --------------------------------------------------------- MsrcAdvisoryClient
+
+_MSRC_PAYLOAD = {
+    "DocumentTitle": {"Value": "April 2023 Security Updates"},
+    "Vulnerability": [
+        {
+            "CVE": _CVE,
+            "Title": {"Value": "OpenSSL Vulnerability"},
+            "Remediations": [
+                {"Type": "VendorFix", "Description": {"Value": "5023778"}},
+                {"Type": "VendorFix", "Description": {"Value": "5023774"}},
+            ],
+        }
+    ],
+}
+
+
+@patch("security.advisory.requests.get")
+def test_msrc_client_raises_config_error_when_key_missing(mock_get, monkeypatch):
+    monkeypatch.delenv("MSRC_API_KEY", raising=False)
+    with pytest.raises(MsrcConfigError):
+        MsrcAdvisoryClient().fetch(_CVE)
+    mock_get.assert_not_called()
+
+
+@patch("security.advisory.requests.get")
+def test_msrc_client_returns_advisory_on_valid_response(mock_get, monkeypatch):
+    monkeypatch.setenv("MSRC_API_KEY", "test-key")
+    mock_get.return_value = _ok(_MSRC_PAYLOAD)
+
+    advisory_url, remediation_text, raw_data = MsrcAdvisoryClient().fetch(_CVE)
+
+    assert advisory_url == f"https://msrc.microsoft.com/update-guide/vulnerability/{_CVE}"
+    assert "5023778" in remediation_text
+    assert "5023774" in remediation_text
+    assert raw_data == _MSRC_PAYLOAD
+    _, kwargs = mock_get.call_args
+    assert kwargs["headers"]["api-key"] == "test-key"
+
+
+@patch("security.advisory.requests.get")
+def test_msrc_client_returns_none_on_404(mock_get, monkeypatch):
+    monkeypatch.setenv("MSRC_API_KEY", "test-key")
+    mock_get.return_value = _not_found()
+
+    advisory_url, remediation_text, raw_data = MsrcAdvisoryClient().fetch(_CVE)
+
+    assert advisory_url is None
+    assert remediation_text is None
+    assert raw_data is None
+
+
+@patch("security.advisory.requests.get")
+def test_msrc_client_raises_on_server_error(mock_get, monkeypatch):
+    monkeypatch.setenv("MSRC_API_KEY", "test-key")
+    mock_get.return_value = _server_error()
+
+    with pytest.raises(Exception):
+        MsrcAdvisoryClient().fetch(_CVE)
+
+
+@pytest.mark.django_db
+@patch("security.advisory.MsrcAdvisoryClient")
+def test_get_or_fetch_windows_returns_null_without_storing_when_key_missing(MockClient, monkeypatch):
+    monkeypatch.delenv("MSRC_API_KEY", raising=False)
+    MockClient.return_value.fetch.side_effect = MsrcConfigError("no key")
+
+    result = get_or_fetch(_CVE, "windows")
+
+    assert result.advisory_url is None
+    assert result.pk is None
+    assert not CveAdvisory.objects.filter(cve_id=_CVE, platform="windows").exists()
+
+
+@pytest.mark.django_db
+@patch("security.advisory.MsrcAdvisoryClient")
+def test_get_or_fetch_windows_fetches_and_stores_when_key_present(MockClient, monkeypatch):
+    monkeypatch.setenv("MSRC_API_KEY", "test-key")
+    MockClient.return_value.fetch.return_value = (
+        f"https://msrc.microsoft.com/update-guide/vulnerability/{_CVE}",
+        "Apply KB5023778 via Windows Update.",
+        _MSRC_PAYLOAD,
+    )
+
+    result = get_or_fetch(_CVE, "windows")
+
+    MockClient.return_value.fetch.assert_called_once_with(_CVE)
+    assert result.advisory_url is not None
+    assert CveAdvisory.objects.filter(cve_id=_CVE, platform="windows").exists()
