@@ -493,15 +493,14 @@ export default function IncidentDetail() {
         </Link>
       </div>
 
-      {/* ── Header card: title + actions only ── */}
+      {/* ── Header card: title + actions ── */}
       <div className="rounded-lg border border-border bg-card p-6 space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0">
             <p className="font-mono text-xs text-muted-foreground">{incident.display_id}</p>
             <h1 className="mt-1 text-2xl font-semibold text-foreground">{incident.title}</h1>
           </div>
-
-          <div className="flex shrink-0 flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 shrink-0">
             {nextStates.map(({ state, label }) => (
               <button
                 key={state}
@@ -538,7 +537,6 @@ export default function IncidentDetail() {
             )}
           </div>
         </div>
-
         {transitionError && <p className="text-sm text-red-600">{transitionError}</p>}
         {transferError   && <p className="text-sm text-red-600">{transferError}</p>}
         {badgeError      && <p className="text-sm text-red-600">{badgeError}</p>}
