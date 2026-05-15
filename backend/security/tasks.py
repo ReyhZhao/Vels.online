@@ -72,6 +72,28 @@ def snapshot_vulnerabilities():
 
 
 @shared_task
+def refresh_stale_advisories():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from security.advisory import get_or_fetch
+    from security.models import CveAdvisory
+
+    cutoff = timezone.now() - timedelta(days=7)
+    stale = CveAdvisory.objects.filter(fetched_at__lt=cutoff)
+
+    for advisory in stale:
+        try:
+            get_or_fetch(advisory.cve_id, advisory.platform)
+        except Exception as exc:
+            logger.exception(
+                "refresh_stale_advisories failed for %s/%s: %s",
+                advisory.cve_id, advisory.platform, exc,
+            )
+
+
+@shared_task
 def generate_work_packages():
     from security.models import Organization
     from security.work_package_service import cleanup_old_packages, generate_work_package
