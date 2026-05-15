@@ -123,7 +123,7 @@ export default function EnrollmentPage() {
                   {copied ? 'Copied!' : 'Copy'}
                 </button>
               </div>
-              <pre className="overflow-x-auto rounded-lg border border-border bg-muted p-4 text-sm text-foreground">
+              <pre className="whitespace-pre-wrap break-all rounded-lg border border-border bg-muted p-4 text-sm text-foreground">
                 <code data-testid="install-command">{enrollment.install_command}</code>
               </pre>
               <p className="text-xs text-muted-foreground">
@@ -155,7 +155,7 @@ export default function EnrollmentPage() {
                     {copied ? 'Copied!' : 'Copy'}
                   </button>
                 </div>
-                <pre className="overflow-x-auto rounded-lg border border-border bg-muted p-4 text-sm text-foreground">
+                <pre className="whitespace-pre-wrap break-all rounded-lg border border-border bg-muted p-4 text-sm text-foreground">
                   <code data-testid="windows-install-command">{enrollment.windows_install_command}</code>
                 </pre>
                 <p className="text-xs text-muted-foreground">
