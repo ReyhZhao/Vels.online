@@ -19,6 +19,15 @@ const STATS = {
   events_24h: 42,
 };
 
+const ROUTES = [{ fqdn: 'app.example.com' }, { fqdn: 'api.example.com' }];
+
+function mockApiBothEndpoints({ statsData = STATS, routesData = ROUTES } = {}) {
+  api.get.mockImplementation((url) => {
+    if (url.includes('/api/ingress/routes/')) return Promise.resolve({ data: routesData });
+    return Promise.resolve({ data: statsData });
+  });
+}
+
 function renderPage(selectedOrg = SELECTED_ORG) {
   return render(
     <MemoryRouter>
@@ -35,7 +44,7 @@ describe('DashboardPage', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('renders the Security service card linking to /security', async () => {
-    api.get.mockResolvedValue({ data: STATS });
+    mockApiBothEndpoints();
     renderPage();
 
     const securityCard = screen.getByRole('link', { name: /security/i });
@@ -44,8 +53,17 @@ describe('DashboardPage', () => {
     await waitFor(() => expect(screen.getByText('24')).toBeInTheDocument());
   });
 
+  it('renders the Ingress service card linking to /routes', async () => {
+    mockApiBothEndpoints();
+    renderPage();
+
+    const ingressCard = screen.getByRole('link', { name: /ingress/i });
+    expect(ingressCard).toBeInTheDocument();
+    expect(ingressCard).toHaveAttribute('href', '/routes');
+  });
+
   it('displays fetched vulnerability count', async () => {
-    api.get.mockResolvedValue({ data: STATS });
+    mockApiBothEndpoints();
     renderPage();
 
     // 2 + 7 + 12 + 3 = 24
@@ -53,10 +71,17 @@ describe('DashboardPage', () => {
   });
 
   it('displays fetched agent count', async () => {
-    api.get.mockResolvedValue({ data: STATS });
+    mockApiBothEndpoints();
     renderPage();
 
     await waitFor(() => expect(screen.getByText('5')).toBeInTheDocument());
+  });
+
+  it('displays fetched route count', async () => {
+    mockApiBothEndpoints();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('2')).toBeInTheDocument());
   });
 
   it('shows loading indicator while data is being fetched', () => {
@@ -66,7 +91,7 @@ describe('DashboardPage', () => {
     expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0);
   });
 
-  it('shows fallback "—" when API call fails', async () => {
+  it('shows fallback "—" when API calls fail', async () => {
     api.get.mockRejectedValue(new Error('Network Error'));
     renderPage();
 

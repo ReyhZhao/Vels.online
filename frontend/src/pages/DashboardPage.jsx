@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Plus } from 'lucide-react';
+import { Shield, Globe } from 'lucide-react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 
@@ -21,14 +21,6 @@ function ServiceCard({ icon: Icon, title, description, to }) {
   );
 }
 
-function PlaceholderCard({ title }) {
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border bg-card/50 p-5 cursor-default select-none opacity-60">
-      <Plus className="h-6 w-6 text-muted-foreground" />
-      <p className="text-sm font-semibold text-muted-foreground">{title}</p>
-    </div>
-  );
-}
 
 function SummaryWidget({ label, value, isLoading }) {
   return (
@@ -53,6 +45,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
+  const [routeCount, setRouteCount] = useState(null);
+  const [routesLoading, setRoutesLoading] = useState(false);
+
   useEffect(() => {
     if (!selectedOrg) return;
     setLoading(true);
@@ -62,6 +57,16 @@ export default function DashboardPage() {
       .then((res) => setStats(res.data))
       .catch(() => setError(true))
       .finally(() => setLoading(false));
+  }, [selectedOrg]);
+
+  useEffect(() => {
+    if (!selectedOrg) return;
+    setRoutesLoading(true);
+    api
+      .get('/api/ingress/routes/', { params: { org: selectedOrg.slug } })
+      .then((res) => setRouteCount(res.data.length))
+      .catch(() => setRouteCount(null))
+      .finally(() => setRoutesLoading(false));
   }, [selectedOrg]);
 
   const vulnCount =
@@ -87,7 +92,12 @@ export default function DashboardPage() {
             description="Vulnerability and agent monitoring"
             to="/security"
           />
-          <PlaceholderCard title="Coming soon" />
+          <ServiceCard
+            icon={Globe}
+            title="Ingress"
+            description="Reverse proxy and WAF routes"
+            to="/routes"
+          />
         </div>
       </section>
 
@@ -105,6 +115,11 @@ export default function DashboardPage() {
             label="Agents"
             value={error ? '—' : stats?.agent_count ?? null}
             isLoading={loading}
+          />
+          <SummaryWidget
+            label="Routes"
+            value={routeCount}
+            isLoading={routesLoading}
           />
         </div>
       </section>
