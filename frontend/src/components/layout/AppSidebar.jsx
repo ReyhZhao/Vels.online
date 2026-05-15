@@ -139,16 +139,14 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
 
       <aside
         className={cn(
-          'flex-col border-r border-border bg-card transition-all duration-200 overflow-y-auto',
+          'flex-col border-r border-border bg-card transition-all duration-200',
           mobileOpen
             ? 'fixed top-28 bottom-0 left-0 z-50 w-56 flex'
             : cn('hidden md:flex', collapsed ? 'w-14' : 'w-56')
         )}
       >
-        <div className="flex h-16 items-center border-b border-border px-4">
-          {!collapsed && (
-            <span className="text-sm font-semibold text-foreground">vels.online</span>
-          )}
+        <div className="flex h-16 shrink-0 items-center border-b border-border px-4 gap-2">
+          {!collapsed && <OrgSwitcher />}
           <button
             onClick={() => setCollapsed((c) => !c)}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -162,21 +160,7 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
           </button>
         </div>
 
-        <nav className="flex flex-col gap-2 p-3">
-          {!collapsed && (
-            <div className="space-y-2 pb-2 border-b border-border">
-              <OrgSwitcher />
-              {isStaff && (
-                <button
-                  onClick={() => setReportOpen(true)}
-                  className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors text-left"
-                  aria-label="Report issue"
-                >
-                  Report issue
-                </button>
-              )}
-            </div>
-          )}
+        <nav className="flex flex-col gap-2 p-3 flex-1 overflow-y-auto no-scrollbar">
 
           <SidebarLink to="/dashboard" end icon={LayoutDashboard} collapsed={collapsed}>
             Dashboard
@@ -354,6 +338,18 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
             </SidebarLink>
           </div>
         </nav>
+
+        {isStaff && !collapsed && (
+          <div className="shrink-0 border-t border-border p-3">
+            <button
+              onClick={() => setReportOpen(true)}
+              className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors text-left"
+              aria-label="Report issue"
+            >
+              Report issue
+            </button>
+          </div>
+        )}
       </aside>
     </>
   );

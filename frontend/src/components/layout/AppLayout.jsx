@@ -15,7 +15,7 @@ function AppLayout() {
 
   return (
     <OrgProvider>
-      <div className="flex min-h-screen flex-col">
+      <div className="flex h-screen flex-col">
         <TopNav />
         <div className="flex h-12 items-center border-b border-border px-4 md:hidden">
           <button
