@@ -597,10 +597,16 @@ describe('AgentDetail — VulnerabilitySlideOver', () => {
     return user;
   }
 
+  async function openSlideOver(user) {
+    await user.click(screen.getByText('CVE-2024-0001'));
+    await waitFor(() => screen.getByText('View vulnerability details →'));
+    await user.click(screen.getByText('View vulnerability details →'));
+  }
+
   it('clicking a vuln row opens the slide-over and fetches detail', async () => {
     const user = await openVulnsTab();
 
-    await user.click(screen.getByText('CVE-2024-0001'));
+    await openSlideOver(user);
 
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/vulnerabilities/vuln-001/'))
@@ -613,7 +619,7 @@ describe('AgentDetail — VulnerabilitySlideOver', () => {
   it('renders Summary, Package, and Details sections', async () => {
     const user = await openVulnsTab();
 
-    await user.click(screen.getByText('CVE-2024-0001'));
+    await openSlideOver(user);
 
     await waitFor(() => screen.getByText('Summary'));
     expect(screen.getAllByText('Package').length).toBeGreaterThan(0);
@@ -623,9 +629,9 @@ describe('AgentDetail — VulnerabilitySlideOver', () => {
   it('renders CVE ID, CVSS score, severity, and package details', async () => {
     const user = await openVulnsTab();
 
-    await user.click(screen.getByText('CVE-2024-0001'));
+    await openSlideOver(user);
 
-    await waitFor(() => screen.getByText('Vulnerability Detail'));
+    await waitFor(() => screen.getByText('Summary'));
     expect(screen.getAllByText('CVE-2024-0001').length).toBeGreaterThan(0);
     expect(screen.getByText('9.8')).toBeInTheDocument();
     expect(screen.getAllByText('7.68.0').length).toBeGreaterThan(0);
@@ -635,7 +641,7 @@ describe('AgentDetail — VulnerabilitySlideOver', () => {
   it('renders References section with clickable links when present', async () => {
     const user = await openVulnsTab();
 
-    await user.click(screen.getByText('CVE-2024-0001'));
+    await openSlideOver(user);
 
     await waitFor(() => screen.getByText('References'));
     const links = screen.getAllByRole('link');
@@ -646,9 +652,8 @@ describe('AgentDetail — VulnerabilitySlideOver', () => {
     setupMocks({ vulnDetail: VULN_DETAIL_MINIMAL });
     const user = await openVulnsTab();
 
-    await user.click(screen.getByText('CVE-2024-0001'));
+    await openSlideOver(user);
 
-    await waitFor(() => screen.getByText('Vulnerability Detail'));
     await waitFor(() => screen.getByText('Summary'));
     expect(screen.queryByText('References')).not.toBeInTheDocument();
   });
