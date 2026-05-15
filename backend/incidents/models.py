@@ -279,7 +279,7 @@ class Comment(models.Model):
         ordering = ["created_at"]
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(incident__isnull=False),
+                check=models.Q(incident__isnull=False),
                 name="comment_incident_not_null",
             )
         ]

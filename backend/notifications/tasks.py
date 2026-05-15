@@ -12,6 +12,9 @@ def send_digest_email(recipient_id, incident_id):
     except User.DoesNotExist:
         return
 
+    if not recipient.email:
+        return
+
     from notifications.models import Notification
 
     qs = Notification.objects.filter(recipient=recipient, email_sent_at__isnull=True)

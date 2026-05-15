@@ -31,13 +31,16 @@ def notify(category, recipients, *, incident=None, task=None, payload):
                 created_at__gte=cutoff,
             ).exists()
 
-        if getattr(prefs, inapp_attr, False):
+        needs_inapp = getattr(prefs, inapp_attr, False)
+
+        if needs_inapp or needs_email:
             Notification.objects.create(
                 recipient=recipient,
                 kind=category,
                 incident=incident,
                 task=task,
                 payload=payload,
+                shown_inapp=needs_inapp,
             )
 
         if needs_email and not has_pending_email_task:

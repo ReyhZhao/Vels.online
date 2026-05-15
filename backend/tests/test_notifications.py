@@ -82,7 +82,8 @@ def test_notify_no_inapp_when_inapp_disabled(staff, acme):
     prefs.save()
     incident = make_incident(acme)
     notify("comment", [staff], incident=incident, payload={"title": "hi", "body": "", "link": ""})
-    assert not Notification.objects.filter(recipient=staff, kind="comment").exists()
+    # Row still created for email queuing (email_comment defaults True), but not shown in-app.
+    assert not Notification.objects.filter(recipient=staff, kind="comment", shown_inapp=True).exists()
 
 
 @pytest.mark.django_db
@@ -91,6 +92,70 @@ def test_notify_skips_inactive_user(acme, django_user_model):
     incident = make_incident(acme)
     notify("comment", [inactive], incident=incident, payload={"title": "hi", "body": "", "link": ""})
     assert not Notification.objects.filter(recipient=inactive).exists()
+
+
+# ── send_digest_email channel combinations ───────────────────────────────────
+
+@pytest.mark.django_db
+def test_email_sent_when_only_email_channel_enabled(acme, django_user_model, mailoutbox):
+    user = django_user_model.objects.create_user(username="emailonly", password="p", email="e@example.com")
+    prefs = NotificationPreferences.objects.get_or_create(user=user)[0]
+    prefs.inapp_comment = False
+    prefs.email_comment = True
+    prefs.save()
+
+    incident = make_incident(acme)
+    notify("comment", [user], incident=incident, payload={"title": "New comment", "body": "", "link": ""})
+
+    assert not Notification.objects.filter(recipient=user, shown_inapp=True).exists()
+
+    from notifications.tasks import send_digest_email
+    send_digest_email(user.id, incident.id)
+
+    assert len(mailoutbox) == 1
+    assert mailoutbox[0].to == ["e@example.com"]
+
+
+@pytest.mark.django_db
+def test_no_email_sent_when_only_inapp_channel_enabled(acme, django_user_model, mailoutbox):
+    user = django_user_model.objects.create_user(username="inapponly", password="p", email="i@example.com")
+    prefs = NotificationPreferences.objects.get_or_create(user=user)[0]
+    prefs.inapp_comment = True
+    prefs.email_comment = False
+    prefs.save()
+
+    incident = make_incident(acme)
+    notify("comment", [user], incident=incident, payload={"title": "New comment", "body": "", "link": ""})
+
+    assert Notification.objects.filter(recipient=user, shown_inapp=True).exists()
+    assert len(mailoutbox) == 0
+
+
+@pytest.mark.django_db
+def test_both_channels_enabled_creates_inapp_and_sends_email(acme, django_user_model, mailoutbox):
+    user = django_user_model.objects.create_user(username="both", password="p", email="b@example.com")
+    incident = make_incident(acme)
+    notify("comment", [user], incident=incident, payload={"title": "New comment", "body": "", "link": ""})
+
+    assert Notification.objects.filter(recipient=user, shown_inapp=True).exists()
+
+    from notifications.tasks import send_digest_email
+    send_digest_email(user.id, incident.id)
+
+    assert len(mailoutbox) == 1
+    assert mailoutbox[0].to == ["b@example.com"]
+
+
+@pytest.mark.django_db
+def test_digest_skips_user_with_no_email_address(acme, django_user_model, mailoutbox):
+    user = django_user_model.objects.create_user(username="noemail", password="p", email="")
+    incident = make_incident(acme)
+    Notification.objects.create(recipient=user, kind="comment", incident=incident, payload={})
+
+    from notifications.tasks import send_digest_email
+    send_digest_email(user.id, incident.id)
+
+    assert len(mailoutbox) == 0
 
 
 # ── email digest rate-limit ───────────────────────────────────────────────────

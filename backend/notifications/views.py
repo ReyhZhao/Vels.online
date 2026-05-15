@@ -30,7 +30,7 @@ class NotificationListView(APIView):
     PAGE_SIZE = 20
 
     def get(self, request):
-        qs = Notification.objects.filter(recipient=request.user).select_related("incident")
+        qs = Notification.objects.filter(recipient=request.user, shown_inapp=True).select_related("incident")
 
         read_filter = request.query_params.get("read")
         if read_filter == "true":
@@ -50,7 +50,7 @@ class NotificationListView(APIView):
         return Response({
             "count": total,
             "unread_count": Notification.objects.filter(
-                recipient=request.user, read_at__isnull=True
+                recipient=request.user, read_at__isnull=True, shown_inapp=True
             ).count(),
             "page": page,
             "page_size": self.PAGE_SIZE,
@@ -74,9 +74,9 @@ class NotificationReadView(APIView):
 
 class NotificationReadAllView(APIView):
     def post(self, request):
-        Notification.objects.filter(recipient=request.user, read_at__isnull=True).update(
-            read_at=timezone.now()
-        )
+        Notification.objects.filter(
+            recipient=request.user, read_at__isnull=True, shown_inapp=True
+        ).update(read_at=timezone.now())
         return Response({"detail": "All notifications marked as read."})
 
 
@@ -94,7 +94,7 @@ class NotificationDeleteView(APIView):
 class UnreadCountView(APIView):
     def get(self, request):
         count = Notification.objects.filter(
-            recipient=request.user, read_at__isnull=True
+            recipient=request.user, read_at__isnull=True, shown_inapp=True
         ).count()
         return Response({"unread_count": count})
 

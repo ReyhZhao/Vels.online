@@ -49,6 +49,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='comment',
-            constraint=models.CheckConstraint(condition=models.Q(('incident__isnull', False)), name='comment_incident_not_null'),
+            constraint=models.CheckConstraint(check=models.Q(('incident__isnull', False)), name='comment_incident_not_null'),
         ),
     ]

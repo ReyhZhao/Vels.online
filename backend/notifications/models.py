@@ -49,6 +49,7 @@ class Notification(models.Model):
         Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="notifications"
     )
     payload = models.JSONField(default=dict)
+    shown_inapp = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     read_at = models.DateTimeField(null=True, blank=True)
     email_sent_at = models.DateTimeField(null=True, blank=True)

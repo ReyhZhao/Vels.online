@@ -53,7 +53,7 @@ def reverse_seed(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("django_celery_beat", "0019_alter_periodictasks_options"),
+        ("django_celery_beat", "0018_improve_crontab_helptext"),
     ]
 
     operations = [
