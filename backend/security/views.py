@@ -25,6 +25,7 @@ from security.serializers import (
     WorkPackageItemUpdateSerializer,
     WorkPackageSerializer,
 )
+from security.advisory import get_or_fetch as get_or_fetch_advisory, normalize_platform
 from security.storage import StorageClient
 from security.work_package_service import add_more_items, generate_work_package
 from security.opensearch import OpenSearchClient, OpenSearchError
@@ -78,14 +79,17 @@ def _serialize_agent(agent):
     os_info = agent.get("os", {})
     if isinstance(os_info, dict):
         os_label = f"{os_info.get('name', '')} {os_info.get('version', '')}".strip() or os_info.get("platform", "")
+        os_platform = os_info.get("platform", "")
     else:
         os_label = ""
+        os_platform = ""
     return {
         "id": agent.get("id"),
         "name": agent.get("name"),
         "ip": agent.get("ip"),
         "status": agent.get("status"),
         "os": os_label,
+        "os_platform": os_platform,
         "last_seen": agent.get("lastKeepAlive"),
     }
 
@@ -699,6 +703,22 @@ class CveDetailView(APIView):
                 "fix_available": dv.get("status", "").lower() == "fixed",
             })
 
+        platforms = {
+            normalize_platform(agent_map.get(a["agent_id"], {}).get("os_platform", ""))
+            for a in affected
+        }
+        platforms.discard("")
+
+        advisories = [
+            {
+                "platform": platform,
+                "advisory_url": adv.advisory_url,
+                "remediation_text": adv.remediation_text,
+            }
+            for platform in sorted(platforms)
+            for adv in [get_or_fetch_advisory(cve_id, platform)]
+        ]
+
         detail = {
             "cve": v.get("id", cve_id),
             "severity": v.get("severity", "").lower(),
@@ -707,6 +727,7 @@ class CveDetailView(APIView):
             "description": v.get("description", ""),
             "published": v.get("published") or None,
             "affected_agents": affected,
+            "advisories": advisories,
         }
         if refs:
             detail["references"] = refs if isinstance(refs, list) else [refs]

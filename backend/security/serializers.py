@@ -123,6 +123,12 @@ class CveAffectedAgentSerializer(serializers.Serializer):
     fix_available = serializers.BooleanField()
 
 
+class CveAdvisorySerializer(serializers.Serializer):
+    platform = serializers.CharField()
+    advisory_url = serializers.URLField(allow_null=True)
+    remediation_text = serializers.CharField(allow_null=True)
+
+
 class CveDetailSerializer(serializers.Serializer):
     cve = serializers.CharField()
     severity = serializers.CharField()
@@ -132,6 +138,7 @@ class CveDetailSerializer(serializers.Serializer):
     published = serializers.CharField(allow_null=True)
     references = serializers.ListField(child=serializers.CharField(), required=False)
     affected_agents = CveAffectedAgentSerializer(many=True)
+    advisories = CveAdvisorySerializer(many=True, required=False)
 
 
 class DownloadSerializer(serializers.ModelSerializer):

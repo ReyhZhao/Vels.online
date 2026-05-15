@@ -154,6 +154,21 @@ class WorkPackageItem(models.Model):
         return f"{self.cve_id} ({self.work_package})"
 
 
+class CveAdvisory(models.Model):
+    cve_id = models.CharField(max_length=50)
+    platform = models.CharField(max_length=20)
+    advisory_url = models.URLField(max_length=500, null=True, blank=True)
+    remediation_text = models.TextField(null=True, blank=True)
+    fetched_at = models.DateTimeField()
+    raw_data = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        unique_together = [("cve_id", "platform")]
+
+    def __str__(self):
+        return f"{self.cve_id} ({self.platform})"
+
+
 class RiskAcceptance(models.Model):
     org = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="risk_acceptances")
     cve_id = models.CharField(max_length=50)

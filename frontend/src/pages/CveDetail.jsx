@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
+import CveAdvisoryBlock from '../components/CveAdvisoryBlock';
 import PromoteToIncidentButton from '../components/PromoteToIncidentButton';
 import LinkedIncidents from '../components/LinkedIncidents';
 
@@ -134,6 +135,8 @@ export default function CveDetail() {
             </ul>
           </div>
         )}
+
+        <CveAdvisoryBlock advisories={detail.advisories} />
       </div>
 
       <LinkedIncidents
