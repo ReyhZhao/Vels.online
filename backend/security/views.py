@@ -779,6 +779,7 @@ class EnrollmentView(APIView):
             return err
 
         manager_host = os.environ.get("WAZUH_MANAGER_HOST", "")
+        agent_version = os.environ.get("WAZUH_AGENT_VERSION", "4.12.0-1")
         install_command = (
             f"WAZUH_MANAGER='{manager_host}' "
             f"WAZUH_AGENT_GROUP='{org.wazuh_group}' "
@@ -786,10 +787,18 @@ class EnrollmentView(APIView):
             f"systemctl daemon-reload && "
             f"systemctl enable --now wazuh-agent"
         )
+        windows_install_command = (
+            f"$installer = \"$env:tmp\\wazuh-agent.msi\"\n"
+            f"Invoke-WebRequest -Uri 'https://packages.wazuh.com/4.x/windows/wazuh-agent-{agent_version}.msi' "
+            f"-OutFile $installer\n"
+            f"msiexec.exe /i $installer /q WAZUH_MANAGER='{manager_host}' WAZUH_AGENT_GROUP='{org.wazuh_group}'\n"
+            f"NET START WazuhSvc"
+        )
         data = EnrollmentSerializer({
             "wazuh_group": org.wazuh_group,
             "manager_host": manager_host,
             "install_command": install_command,
+            "windows_install_command": windows_install_command,
         }).data
         return Response(data)
 

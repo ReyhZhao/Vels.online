@@ -22,6 +22,7 @@ export default function EnrollmentPage() {
   const [copied, setCopied] = useState(false);
   const [downloads, setDownloads] = useState([]);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [platform, setPlatform] = useState('linux');
 
   useEffect(() => {
     if (!selectedOrg) return;
@@ -41,7 +42,10 @@ export default function EnrollmentPage() {
 
   async function handleCopy() {
     if (!enrollment) return;
-    await navigator.clipboard.writeText(enrollment.install_command);
+    const command = platform === 'windows'
+      ? enrollment.windows_install_command
+      : enrollment.install_command;
+    await navigator.clipboard.writeText(command);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -84,33 +88,113 @@ export default function EnrollmentPage() {
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
 
       {!loading && enrollment && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-foreground">Install command (Linux / DEB)</p>
+        <div className="space-y-4">
+          <div className="flex gap-2">
             <button
-              onClick={handleCopy}
-              className="rounded-md border border-border bg-background px-3 py-1 text-xs font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
+              onClick={() => { setPlatform('linux'); setCopied(false); }}
+              className={`rounded-md border px-4 py-1.5 text-sm font-medium transition-colors ${
+                platform === 'linux'
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-background text-foreground hover:bg-accent'
+              }`}
             >
-              {copied ? 'Copied!' : 'Copy'}
+              Linux
+            </button>
+            <button
+              onClick={() => { setPlatform('windows'); setCopied(false); }}
+              className={`rounded-md border px-4 py-1.5 text-sm font-medium transition-colors ${
+                platform === 'windows'
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-background text-foreground hover:bg-accent'
+              }`}
+            >
+              Windows
             </button>
           </div>
 
-          <pre className="overflow-x-auto rounded-lg border border-border bg-muted p-4 text-sm text-foreground">
-            <code data-testid="install-command">{enrollment.install_command}</code>
-          </pre>
+          {platform === 'linux' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-foreground">Install command (Linux / DEB)</p>
+                <button
+                  onClick={handleCopy}
+                  className="rounded-md border border-border bg-background px-3 py-1 text-xs font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
+                >
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <pre className="overflow-x-auto rounded-lg border border-border bg-muted p-4 text-sm text-foreground">
+                <code data-testid="install-command">{enrollment.install_command}</code>
+              </pre>
+              <p className="text-xs text-muted-foreground">
+                Group:{' '}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono">{enrollment.wazuh_group}</code>
+                {enrollment.manager_host && (
+                  <>
+                    {' '}· Manager:{' '}
+                    <code className="rounded bg-muted px-1 py-0.5 font-mono">
+                      {enrollment.manager_host}
+                    </code>
+                  </>
+                )}
+              </p>
+            </div>
+          )}
 
-          <p className="text-xs text-muted-foreground">
-            Group:{' '}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono">{enrollment.wazuh_group}</code>
-            {enrollment.manager_host && (
-              <>
-                {' '}· Manager:{' '}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono">
-                  {enrollment.manager_host}
-                </code>
-              </>
-            )}
-          </p>
+          {platform === 'windows' && (
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-foreground">
+                    Install command (Windows — PowerShell, run as Administrator)
+                  </p>
+                  <button
+                    onClick={handleCopy}
+                    className="rounded-md border border-border bg-background px-3 py-1 text-xs font-medium text-foreground shadow-sm hover:bg-accent transition-colors"
+                  >
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+                <pre className="overflow-x-auto rounded-lg border border-border bg-muted p-4 text-sm text-foreground">
+                  <code data-testid="windows-install-command">{enrollment.windows_install_command}</code>
+                </pre>
+                <p className="text-xs text-muted-foreground">
+                  Group:{' '}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono">{enrollment.wazuh_group}</code>
+                  {enrollment.manager_host && (
+                    <>
+                      {' '}· Manager:{' '}
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono">
+                        {enrollment.manager_host}
+                      </code>
+                    </>
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">
+                  Optional: Install Sysmon (enhanced process monitoring)
+                </h3>
+                <ol className="space-y-1.5 text-sm text-foreground list-decimal list-inside">
+                  <li>
+                    Download <strong>Sysmon installer</strong> and <strong>Sysmon config</strong> from
+                    the Downloads section below.
+                  </li>
+                  <li>
+                    Open PowerShell as Administrator in the folder where you saved the files.
+                  </li>
+                  <li>
+                    Run:{' '}
+                    <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                      sysmon64.exe -accepteula -i sysmonconfig.xml
+                    </code>
+                  </li>
+                  <li>Sysmon runs as a service — no reboot needed.</li>
+                </ol>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

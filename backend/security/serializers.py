@@ -59,6 +59,7 @@ class EnrollmentSerializer(serializers.Serializer):
     wazuh_group = serializers.CharField()
     manager_host = serializers.CharField()
     install_command = serializers.CharField()
+    windows_install_command = serializers.CharField()
 
 
 class FleetVulnStatsSerializer(serializers.Serializer):

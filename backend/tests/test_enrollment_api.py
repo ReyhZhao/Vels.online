@@ -79,3 +79,29 @@ def test_enrollment_admin_can_query_any_org(admin_client, acme, monkeypatch):
     monkeypatch.setenv("WAZUH_MANAGER_HOST", "wazuh.example.com")
     response = admin_client.get("/api/security/enrollment/?org=acme")
     assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_enrollment_contains_windows_install_command(client, acme_member, acme, monkeypatch):
+    monkeypatch.setenv("WAZUH_MANAGER_HOST", "wazuh.example.com")
+    client.force_login(acme_member)
+
+    response = client.get("/api/security/enrollment/?org=acme")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "windows_install_command" in data
+    assert "wazuh.example.com" in data["windows_install_command"]
+    assert "acme" in data["windows_install_command"]
+
+
+@pytest.mark.django_db
+def test_enrollment_windows_command_uses_version_env(client, acme_member, acme, monkeypatch):
+    monkeypatch.setenv("WAZUH_MANAGER_HOST", "wazuh.example.com")
+    monkeypatch.setenv("WAZUH_AGENT_VERSION", "4.9.0-1")
+    client.force_login(acme_member)
+
+    response = client.get("/api/security/enrollment/?org=acme")
+
+    data = response.json()
+    assert "4.9.0-1" in data["windows_install_command"]
