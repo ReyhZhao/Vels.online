@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import OrgSwitcher from '../OrgSwitcher';
 import ReportIssueModal from '../ReportIssueModal';
 import {
+  LayoutDashboard,
   FileText,
   FilePlus,
   Server,
@@ -174,6 +175,10 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
               )}
             </div>
           )}
+
+          <SidebarLink to="/dashboard" end icon={LayoutDashboard} collapsed={collapsed}>
+            Dashboard
+          </SidebarLink>
 
           <div className="space-y-1">
             {showItems && (
