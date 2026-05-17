@@ -2,8 +2,14 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
+const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
+
 vi.mock('../lib/axios', () => ({
   default: { get: vi.fn() },
+}));
+
+vi.mock('../context/AuthContext', () => ({
+  useAuth: mockUseAuth,
 }));
 
 import api from '../lib/axios';
@@ -44,6 +50,7 @@ describe('TaskListPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.get.mockResolvedValue(PAGE_RESPONSE());
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: false } });
   });
 
   it('renders page heading', async () => {
@@ -111,10 +118,12 @@ describe('TaskListPage', () => {
     await waitFor(() => expect(screen.getByText('Permission denied.')).toBeInTheDocument());
   });
 
-  it('fetches from /api/tasks/ on mount', async () => {
+  it('fetches from /api/tasks/ on mount with default assignee=me', async () => {
     renderPage();
     await waitFor(() =>
-      expect(api.get).toHaveBeenCalledWith('/api/tasks/', expect.any(Object))
+      expect(api.get).toHaveBeenCalledWith('/api/tasks/', expect.objectContaining({
+        params: expect.objectContaining({ assignee: 'me' }),
+      }))
     );
   });
 
@@ -191,6 +200,34 @@ describe('TaskListPage', () => {
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith('/api/tasks/', expect.objectContaining({
         params: expect.objectContaining({ page: '2' }),
+      }))
+    );
+  });
+
+  it('renders assignee filter dropdown defaulting to My tasks', async () => {
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Assignee filter'));
+    expect(screen.getByLabelText('Assignee filter').value).toBe('me');
+  });
+
+  it('changing assignee filter to All refetches without assignee param', async () => {
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Assignee filter'));
+    fireEvent.change(screen.getByLabelText('Assignee filter'), { target: { value: '' } });
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/tasks/', expect.objectContaining({
+        params: expect.not.objectContaining({ assignee: 'me' }),
+      }))
+    );
+  });
+
+  it('changing assignee filter to Unassigned refetches with assignee=unassigned', async () => {
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Assignee filter'));
+    fireEvent.change(screen.getByLabelText('Assignee filter'), { target: { value: 'unassigned' } });
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/tasks/', expect.objectContaining({
+        params: expect.objectContaining({ assignee: 'unassigned' }),
       }))
     );
   });

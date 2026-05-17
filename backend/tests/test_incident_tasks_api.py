@@ -493,3 +493,54 @@ def test_task_list_default_sort_newest_first(client, staff, incident):
     resp = client.get("/api/tasks/")
     ids = [r["id"] for r in resp.json()["results"]]
     assert ids.index(new.id) < ids.index(old.id)
+
+
+@pytest.mark.django_db
+def test_task_list_assignee_me_filter(client, staff, incident, django_user_model):
+    other = django_user_model.objects.create_user(username="other", password="pass")
+    mine = _task(incident, title="Mine", assignee=staff)
+    _task(incident, title="Others", assignee=other)
+    _task(incident, title="Unassigned")
+
+    client.force_login(staff)
+    resp = client.get("/api/tasks/?assignee=me")
+    results = resp.json()["results"]
+    ids = [r["id"] for r in results]
+    assert ids == [mine.id]
+
+
+@pytest.mark.django_db
+def test_task_list_assignee_unassigned_filter(client, staff, incident):
+    _task(incident, title="Assigned", assignee=staff)
+    unassigned = _task(incident, title="Unassigned")
+
+    client.force_login(staff)
+    resp = client.get("/api/tasks/?assignee=unassigned")
+    results = resp.json()["results"]
+    ids = [r["id"] for r in results]
+    assert ids == [unassigned.id]
+
+
+@pytest.mark.django_db
+def test_task_list_assignee_all_shows_everything(client, staff, incident, django_user_model):
+    other = django_user_model.objects.create_user(username="other2", password="pass")
+    t1 = _task(incident, title="Mine", assignee=staff)
+    t2 = _task(incident, title="Others", assignee=other)
+    t3 = _task(incident, title="Unassigned")
+
+    client.force_login(staff)
+    resp = client.get("/api/tasks/")
+    ids = [r["id"] for r in resp.json()["results"]]
+    assert t1.id in ids and t2.id in ids and t3.id in ids
+
+
+@pytest.mark.django_db
+def test_task_list_sort_by_assignee_asc(client, staff, incident, django_user_model):
+    alice = django_user_model.objects.create_user(username="alice_sort", password="pass")
+    _task(incident, title="B", assignee=staff)   # staff username = "staff"
+    _task(incident, title="A", assignee=alice)    # alice_sort < staff
+
+    client.force_login(staff)
+    resp = client.get("/api/tasks/?sort=assignee&order=asc")
+    usernames = [r["assignee_username"] for r in resp.json()["results"] if r["assignee_username"]]
+    assert usernames == sorted(usernames)

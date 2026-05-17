@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import api from '../lib/axios';
 
 const TASK_STATE_LABELS = {
@@ -30,6 +31,7 @@ const EMPTY_DATA = { count: 0, page: 1, per_page: 25, total_pages: 1, results: [
 
 export default function TaskListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { user } = useAuth();
   const [data, setData]     = useState(EMPTY_DATA);
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState(null);
@@ -46,6 +48,16 @@ export default function TaskListPage() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!searchParams.has('assignee')) {
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.set('assignee', 'me');
+        return next;
+      }, { replace: true });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchTasks(Object.fromEntries(searchParams.entries()));
@@ -114,6 +126,16 @@ export default function TaskListPage() {
           {STATE_OPTIONS.map(s => (
             <option key={s} value={s}>{TASK_STATE_LABELS[s]}</option>
           ))}
+        </select>
+        <select
+          value={searchParams.get('assignee') || 'me'}
+          onChange={e => setParam('assignee', e.target.value)}
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          aria-label="Assignee filter"
+        >
+          <option value="me">My tasks</option>
+          <option value="">All assignees</option>
+          <option value="unassigned">Unassigned</option>
         </select>
       </div>
 

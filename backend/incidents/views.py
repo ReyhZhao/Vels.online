@@ -888,6 +888,7 @@ _TASK_SORT_FIELDS = {
     "state":      "state",
     "created_at": "created_at",
     "incident":   "incident__display_id",
+    "assignee":   "assignee__username",
 }
 
 
@@ -914,6 +915,12 @@ class TaskListView(APIView):
         state = request.query_params.get("state", "").strip()
         if state:
             qs = qs.filter(state=state)
+
+        assignee = request.query_params.get("assignee", "").strip()
+        if assignee == "me":
+            qs = qs.filter(assignee=request.user)
+        elif assignee == "unassigned":
+            qs = qs.filter(assignee__isnull=True)
 
         sort = request.query_params.get("sort", "")
         order = request.query_params.get("order", "")
