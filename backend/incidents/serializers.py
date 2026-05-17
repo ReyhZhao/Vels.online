@@ -161,15 +161,17 @@ class IncidentUpdateSerializer(serializers.ModelSerializer):
 
 
 class TaskTemplateItemSerializer(serializers.ModelSerializer):
+    automation_name = serializers.CharField(source="automation.name", read_only=True, default=None)
+
     class Meta:
         model = TaskTemplateItem
-        fields = ["id", "title", "description", "display_order"]
+        fields = ["id", "title", "description", "display_order", "automation", "automation_name"]
 
 
 class TaskTemplateItemWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskTemplateItem
-        fields = ["title", "description", "display_order"]
+        fields = ["title", "description", "display_order", "automation"]
 
 
 class TaskTemplateSerializer(serializers.ModelSerializer):
@@ -209,17 +211,20 @@ class TaskSerializer(serializers.ModelSerializer):
     assignee_username = serializers.SerializerMethodField()
     incident_display_id = serializers.SerializerMethodField()
     incident_title = serializers.SerializerMethodField()
+    automation_name = serializers.CharField(source="automation.name", read_only=True, default=None)
 
     class Meta:
         model = Task
         fields = [
             "id", "incident", "template_item", "template_name",
             "title", "description", "state",
+            "task_type", "automation", "automation_name",
+            "semaphore_task_id", "automation_error",
             "assignee", "assignee_username", "display_order",
             "created_at", "closed_at",
             "incident_display_id", "incident_title",
         ]
-        read_only_fields = ["id", "incident", "created_at"]
+        read_only_fields = ["id", "incident", "created_at", "semaphore_task_id", "automation_error"]
 
     def get_template_name(self, obj):
         if obj.template_item_id and obj.template_item and obj.template_item.template:
@@ -239,7 +244,12 @@ class TaskSerializer(serializers.ModelSerializer):
 class TaskCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
-        fields = ["title", "description", "display_order", "assignee"]
+        fields = ["title", "description", "display_order", "assignee", "task_type", "automation"]
+
+    def validate(self, attrs):
+        if attrs.get("task_type") == "automated" and not attrs.get("automation"):
+            raise serializers.ValidationError({"automation": "An automation must be selected when task type is automated."})
+        return attrs
 
 
 class TaskPatchSerializer(serializers.ModelSerializer):

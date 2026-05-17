@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
 
+from automations.models import Automation
 from security.models import Organization
 
 
@@ -49,6 +50,9 @@ class TaskTemplateItem(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     display_order = models.PositiveIntegerField(default=0)
+    automation = models.ForeignKey(
+        Automation, on_delete=models.SET_NULL, null=True, blank=True, related_name="template_items"
+    )
 
     class Meta:
         ordering = ["display_order", "id"]
@@ -180,6 +184,13 @@ class Task(models.Model):
         (STATE_CANCELLED, "Cancelled"),
     ]
 
+    TYPE_MANUAL = "manual"
+    TYPE_AUTOMATED = "automated"
+    TYPE_CHOICES = [
+        (TYPE_MANUAL, "Manual"),
+        (TYPE_AUTOMATED, "Automated"),
+    ]
+
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="tasks")
     template_item = models.ForeignKey(
         TaskTemplateItem, on_delete=models.SET_NULL, null=True, blank=True, related_name="tasks"
@@ -187,6 +198,12 @@ class Task(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     state = models.CharField(max_length=20, choices=STATE_CHOICES, default=STATE_NEW)
+    task_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_MANUAL)
+    automation = models.ForeignKey(
+        Automation, on_delete=models.SET_NULL, null=True, blank=True, related_name="tasks"
+    )
+    semaphore_task_id = models.IntegerField(null=True, blank=True)
+    automation_error = models.TextField(null=True, blank=True)
     assignee = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_tasks"
     )

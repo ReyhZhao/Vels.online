@@ -29,13 +29,15 @@ def apply_template(incident, template, actor):
             applied_by=actor,
         )
 
-        for item in template.items.all():
+        for item in template.items.select_related("automation").all():
             Task.objects.create(
                 incident=incident,
                 template_item=item,
                 title=item.title,
                 description=item.description,
                 display_order=item.display_order,
+                automation=item.automation,
+                task_type=Task.TYPE_AUTOMATED if item.automation_id else Task.TYPE_MANUAL,
             )
 
         event_kind = "incident_template_reapplied" if previous else "incident_template_applied"
