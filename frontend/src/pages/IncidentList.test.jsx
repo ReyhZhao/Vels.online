@@ -64,22 +64,23 @@ describe('IncidentList', () => {
   it('shows loading state while fetching', () => {
     api.get.mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    // Both mobile card list and desktop table render "Loading…" in jsdom (no CSS media queries)
+    expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0);
   });
 
   it('shows empty state when no incidents', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE([]));
     renderPage();
-    await waitFor(() => expect(screen.getByText('No incidents.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('No incidents.').length).toBeGreaterThan(0));
   });
 
   it('renders incident rows with correct data', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE());
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
-    expect(screen.getByText('Suspicious login')).toBeInTheDocument();
-    expect(screen.getByText('INC-2026-0002')).toBeInTheDocument();
-    expect(screen.getByText('Malware detected')).toBeInTheDocument();
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
+    expect(screen.getAllByText('Suspicious login').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('INC-2026-0002').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Malware detected').length).toBeGreaterThan(0);
     expect(screen.getAllByText('high').length).toBeGreaterThan(0);
     expect(screen.getAllByText('critical').length).toBeGreaterThan(0);
   });
@@ -170,12 +171,14 @@ describe('IncidentList', () => {
   });
 
   it('clicking a row opens the slide-over preview', async () => {
+    // The default-tab useEffect triggers a second list fetch, consuming an extra once-mock
     api.get
+      .mockResolvedValueOnce(PAGE_RESPONSE())
       .mockResolvedValueOnce(PAGE_RESPONSE())
       .mockResolvedValueOnce({ data: INCIDENTS[0] });
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
-    fireEvent.click(screen.getByText('Suspicious login'));
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
+    fireEvent.click(screen.getAllByText('Suspicious login')[0]);
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith('/api/incidents/INC-2026-0001/')
     );
@@ -184,10 +187,11 @@ describe('IncidentList', () => {
   it('renders markdown in slide-over description', async () => {
     api.get
       .mockResolvedValueOnce(PAGE_RESPONSE())
+      .mockResolvedValueOnce(PAGE_RESPONSE())
       .mockResolvedValueOnce({ data: { ...INCIDENTS[0], description: '**bold text**' } });
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
-    fireEvent.click(screen.getByText('Suspicious login'));
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
+    fireEvent.click(screen.getAllByText('Suspicious login')[0]);
     await waitFor(() => expect(screen.getByText('bold text')).toBeInTheDocument());
     expect(screen.getByText('bold text').tagName).toBe('STRONG');
   });
@@ -195,10 +199,11 @@ describe('IncidentList', () => {
   it('does not render description section when description is empty', async () => {
     api.get
       .mockResolvedValueOnce(PAGE_RESPONSE())
+      .mockResolvedValueOnce(PAGE_RESPONSE())
       .mockResolvedValueOnce({ data: { ...INCIDENTS[0], description: '' } });
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
-    fireEvent.click(screen.getByText('Suspicious login'));
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
+    fireEvent.click(screen.getAllByText('Suspicious login')[0]);
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/incidents/INC-2026-0001/'));
     expect(screen.queryByRole('article')).not.toBeInTheDocument();
   });
@@ -229,7 +234,7 @@ describe('IncidentList', () => {
     api.get.mockResolvedValue(PAGE_RESPONSE());
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
     await user.click(screen.getByLabelText('Select INC-2026-0001'));
     expect(screen.getByText('1 selected')).toBeInTheDocument();
     await user.click(screen.getByLabelText('Select INC-2026-0002'));
@@ -241,7 +246,7 @@ describe('IncidentList', () => {
     api.get.mockResolvedValue(PAGE_RESPONSE());
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
     await user.click(screen.getByLabelText('Select INC-2026-0001'));
     expect(screen.getByText('1 selected')).toBeInTheDocument();
     await user.click(screen.getByLabelText('Select INC-2026-0001'));
@@ -254,7 +259,7 @@ describe('IncidentList', () => {
     api.post.mockResolvedValue({ data: { succeeded: [1], failed: [] } });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
     await user.click(screen.getByLabelText('Select INC-2026-0001'));
     await user.click(screen.getByText('Close', { selector: 'button' }));
     await user.selectOptions(screen.getByLabelText('Closure reason'), 'false_positive');
@@ -274,7 +279,7 @@ describe('IncidentList', () => {
     api.post.mockResolvedValue({ data: { succeeded: [1], failed: [] } });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
     await user.click(screen.getByLabelText('Select INC-2026-0001'));
     await user.click(screen.getByRole('button', { name: 'Reassign' }));
     await waitFor(() => screen.getByLabelText('Assign to'));
@@ -386,37 +391,38 @@ describe('IncidentList — background poll', () => {
   it('does not show Loading… while poll is in flight', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE());
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
 
     // Stall the next response so the poll hangs in flight
     api.get.mockReturnValueOnce(new Promise(() => {}));
     act(() => { pollCb(); });
 
-    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-    expect(screen.getByText('INC-2026-0001')).toBeInTheDocument();
+    expect(screen.queryAllByText('Loading…')).toHaveLength(0);
+    expect(screen.getAllByText('INC-2026-0001').length).toBeGreaterThan(0);
   });
 
   it('updates rows silently when poll resolves', async () => {
-    api.get.mockResolvedValueOnce(PAGE_RESPONSE([INCIDENTS[0]]));
+    // Use a default mock so both list calls (initial + default-tab effect) succeed
+    api.get.mockResolvedValue(PAGE_RESPONSE([INCIDENTS[0]]));
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
-    expect(screen.queryByText('INC-2026-0002')).not.toBeInTheDocument();
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
+    expect(screen.queryAllByText('INC-2026-0002')).toHaveLength(0);
 
     api.get.mockResolvedValueOnce(PAGE_RESPONSE(INCIDENTS));
     await act(async () => { pollCb(); });
 
-    await waitFor(() => screen.getByText('INC-2026-0002'));
+    await waitFor(() => screen.getAllByText('INC-2026-0002'));
   });
 
   it('failed poll does not overwrite loaded data with an error message', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE());
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
 
     api.get.mockRejectedValueOnce({ response: { data: { detail: 'Poll failure.' } } });
     await act(async () => { pollCb(); });
 
     expect(screen.queryByText('Poll failure.')).not.toBeInTheDocument();
-    expect(screen.getByText('INC-2026-0001')).toBeInTheDocument();
+    expect(screen.getAllByText('INC-2026-0001').length).toBeGreaterThan(0);
   });
 });
