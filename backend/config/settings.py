@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "feedback",
     "ingress",
     "signups",
+    "automations",
     "django_celery_results",
     "django_celery_beat",
     "celery_tasks",
@@ -226,6 +227,10 @@ TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://vels.online")
 
 WAZUH_RULES_GITHUB_TOKEN = os.environ.get("WAZUH_RULES_GITHUB_TOKEN", "")
+
+SEMAPHORE_URL = os.environ.get("SEMAPHORE_URL", "")
+SEMAPHORE_API_TOKEN = os.environ.get("SEMAPHORE_API_TOKEN", "")
+SEMAPHORE_PROJECT_ID = int(os.environ.get("SEMAPHORE_PROJECT_ID", "0"))
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 EXCEPTION_LLM_PROVIDER = os.environ.get(

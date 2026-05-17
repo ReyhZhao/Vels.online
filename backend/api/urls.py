@@ -23,6 +23,7 @@ urlpatterns = [
     path("feedback/", include("feedback.urls")),
     path("ingress/", include("ingress.urls")),
     path("signups/", include("signups.urls")),
+    path("", include("automations.urls")),
     path("admin/celery/", include("celery_tasks.urls")),
     path("", include(blog_router.urls)),
 ]
