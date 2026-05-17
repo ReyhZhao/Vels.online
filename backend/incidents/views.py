@@ -1013,6 +1013,51 @@ class TaskDetailView(APIView):
         return Response(TaskSerializer(task).data)
 
 
+class TaskRunView(APIView):
+    def post(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            task = Task.objects.select_related("incident", "automation").get(pk=pk)
+        except Task.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, task.incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if task.task_type != Task.TYPE_AUTOMATED:
+            return Response({"detail": "Task is not of type automated."}, status=status.HTTP_400_BAD_REQUEST)
+        if not task.automation_id:
+            return Response({"detail": "Task has no automation attached."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from automations.semaphore import SemaphoreAPIError, SemaphoreClient
+        incident = task.incident
+        extra_vars = dict(task.automation.default_vars or {})
+        extra_vars.update({
+            "incident_id": incident.id,
+            "incident_display_id": incident.display_id,
+            "incident_title": incident.title,
+            "incident_severity": incident.severity,
+        })
+        try:
+            client = SemaphoreClient()
+            semaphore_task_id = client.launch_job(
+                template_id=task.automation.semaphore_template_id,
+                extra_vars=extra_vars,
+            )
+        except SemaphoreAPIError as exc:
+            return Response({"detail": f"Semaphore error: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+
+        Task.objects.filter(pk=task.pk).update(
+            semaphore_task_id=semaphore_task_id,
+            state=Task.STATE_IN_PROGRESS,
+            automation_error=None,
+        )
+        task.refresh_from_db()
+        return Response(TaskSerializer(task).data)
+
+
 # ── Promote view ─────────────────────────────────────────────────────────────
 
 class PromoteView(APIView):

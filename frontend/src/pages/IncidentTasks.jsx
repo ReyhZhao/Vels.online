@@ -21,11 +21,34 @@ const TASK_STATE_CLASSES = {
 
 const ALL_STATES = ['new', 'in_progress', 'done', 'cancelled'];
 
+const AUTO_STATUS_LABELS = {
+  pending: 'Pending',
+  running: 'Running',
+  done:    'Done',
+  failed:  'Failed',
+};
+
+const AUTO_STATUS_CLASSES = {
+  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+  running: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  done:    'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+  failed:  'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+};
+
+function automationStatus(task) {
+  if (task.state === 'done') return 'done';
+  if (task.state === 'new' && task.automation_error) return 'failed';
+  if (task.state === 'in_progress' && task.semaphore_task_id) return 'running';
+  if (task.state === 'in_progress') return 'pending';
+  return null;
+}
+
 // ── Task modal ────────────────────────────────────────────────────────────────
 
 function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
   const [currentTask, setCurrentTask] = useState(task);
   const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const [staffUsers, setStaffUsers] = useState(null);
 
@@ -72,6 +95,22 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
     }
   }
 
+  async function runAutomation() {
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await api.post(`/api/tasks/${currentTask.id}/run/`);
+      setCurrentTask(res.data);
+      onUpdate(res.data);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to launch automation.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const isAutomated = currentTask.task_type === 'automated';
+  const autoStatus = isAutomated ? automationStatus(currentTask) : null;
   const nextStates = ALL_STATES.filter(s => s !== currentTask.state);
 
   return (
@@ -83,7 +122,14 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
           <div className="flex flex-col gap-1.5 min-w-0">
-            <h2 className="text-base font-semibold text-foreground">{currentTask.title}</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-semibold text-foreground">{currentTask.title}</h2>
+              {isAutomated && (
+                <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
+                  Automated
+                </span>
+              )}
+            </div>
             {currentTask.template_name && (
               <span className="inline-flex w-fit items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                 {currentTask.template_name}
@@ -110,6 +156,29 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
             <p className="text-sm text-muted-foreground italic">No description.</p>
           )}
 
+          {/* Run automation */}
+          {isAutomated && isStaff && (
+            <div className="space-y-2">
+              <button
+                onClick={runAutomation}
+                disabled={running || saving}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              >
+                {running ? 'Launching…' : 'Run Automation'}
+              </button>
+              {autoStatus && (
+                <div className="flex flex-col gap-1">
+                  <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ${AUTO_STATUS_CLASSES[autoStatus]}`}>
+                    {AUTO_STATUS_LABELS[autoStatus]}
+                  </span>
+                  {currentTask.automation_error && (
+                    <p className="text-xs text-red-600">{currentTask.automation_error}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Assignee */}
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground shrink-0">Assigned to:</span>
@@ -131,21 +200,26 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
             )}
           </div>
 
-          {/* State badge + action buttons */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TASK_STATE_CLASSES[currentTask.state] ?? ''}`}>
-              {TASK_STATE_LABELS[currentTask.state] ?? currentTask.state}
-            </span>
-            {nextStates.map(s => (
-              <button
-                key={s}
-                onClick={() => changeState(s)}
-                disabled={saving}
-                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-              >
-                {TASK_STATE_LABELS[s]}
-              </button>
-            ))}
+          {/* State controls — de-emphasised for automated tasks */}
+          <div className={isAutomated ? 'opacity-60' : ''}>
+            {isAutomated && (
+              <p className="mb-1 text-xs text-muted-foreground">Manual state override</p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TASK_STATE_CLASSES[currentTask.state] ?? ''}`}>
+                {TASK_STATE_LABELS[currentTask.state] ?? currentTask.state}
+              </span>
+              {isStaff && nextStates.map(s => (
+                <button
+                  key={s}
+                  onClick={() => changeState(s)}
+                  disabled={saving}
+                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+                >
+                  {TASK_STATE_LABELS[s]}
+                </button>
+              ))}
+            </div>
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -170,6 +244,7 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
 function TaskRow({ task, onSelect }) {
   const isCancelled     = task.state === 'cancelled';
   const isTemplateDerived = task.template_name !== null;
+  const isAutomated = task.task_type === 'automated';
 
   return (
     <tr
@@ -180,7 +255,7 @@ function TaskRow({ task, onSelect }) {
     >
       <td className="px-3 py-2 text-xs text-muted-foreground w-8">{task.display_order}</td>
       <td className="px-3 py-2 text-sm font-medium text-foreground">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span
             className={isCancelled ? 'line-through text-muted-foreground' : ''}
             title={isCancelled && isTemplateDerived ? 'Auto-cancelled when subject changed' : undefined}
@@ -190,6 +265,11 @@ function TaskRow({ task, onSelect }) {
           {isTemplateDerived && (
             <span className="shrink-0 inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
               template
+            </span>
+          )}
+          {isAutomated && (
+            <span className="shrink-0 inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-xs text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
+              automated
             </span>
           )}
         </div>
@@ -356,6 +436,20 @@ export default function IncidentTasks({ incidentId, subjectId, refreshKey }) {
   }, [incidentId]);
 
   useEffect(() => { loadTasks(); }, [loadTasks, refreshKey]);
+
+  // Auto-refresh every 30s while any automated task is in_progress
+  useEffect(() => {
+    const hasInProgressAuto = tasks.some(
+      t => t.task_type === 'automated' && t.state === 'in_progress'
+    );
+    if (!hasInProgressAuto) return;
+    const id = setInterval(() => {
+      api.get(`/api/incidents/${incidentId}/tasks/`)
+        .then(res => setTasks(res.data))
+        .catch(() => {});
+    }, 30000);
+    return () => clearInterval(id);
+  }, [tasks, incidentId]);
 
   function handleTaskUpdate(updated) {
     setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
