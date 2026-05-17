@@ -1,6 +1,3 @@
-import json
-from datetime import timedelta
-
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Case, F, IntegerField, Q, Value, When
@@ -14,6 +11,7 @@ from security.models import Organization, OrganizationMembership
 
 from django.contrib.auth.models import User
 
+from .filters import IncidentFilterSet
 from .models import Attachment, Comment, Incident, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 from .serializers import (
     AttachmentSerializer,
@@ -67,30 +65,16 @@ _SORTABLE_FIELDS = {
 }
 
 
-def _parse_multi(request, key):
-    """Accept 'state=new,triaged' or '?state=new&state=triaged' → ['new', 'triaged']."""
-    values = request.query_params.getlist(key)
-    return [c.strip() for v in values for c in v.split(",") if c.strip()]
-
-
-def _parse_duration(value):
-    """Parse '1h', '24h', '7d', '30d' → timedelta. Returns None on bad input."""
-    v = value.strip().lower()
-    try:
-        if v.endswith("h"):
-            return timedelta(hours=float(v[:-1]))
-        if v.endswith("d"):
-            return timedelta(days=float(v[:-1]))
-    except (ValueError, TypeError):
-        pass
-    return None
-
-
 def _apply_incident_filters(qs, request):
     tab = request.query_params.get("tab", "all")
-    explicit_states = _parse_multi(request, "state")
+    explicit_states = [
+        c.strip()
+        for v in request.query_params.getlist("state")
+        for c in v.split(",")
+        if c.strip()
+    ]
 
-    # Tab-level base filters (assignee + default state exclusion)
+    # Tab-level base filters: assignee scope + default closed exclusion
     if tab == "my_queue":
         my_delegated_ids = IncidentDelegation.objects.filter(
             user=request.user, returned_at__isnull=True
@@ -106,55 +90,7 @@ def _apply_incident_filters(qs, request):
         if not explicit_states:
             qs = qs.exclude(state="closed")
 
-    if explicit_states:
-        qs = qs.filter(state__in=explicit_states)
-
-    # Remaining 7 filters
-    severities = _parse_multi(request, "severity")
-    if severities:
-        qs = qs.filter(severity__in=severities)
-
-    tlps = _parse_multi(request, "tlp")
-    if tlps:
-        qs = qs.filter(tlp__in=tlps)
-
-    org = request.query_params.get("org", "").strip()
-    if org:
-        qs = qs.filter(organization__slug=org)
-
-    subject = request.query_params.get("subject", "").strip()
-    if subject:
-        try:
-            qs = qs.filter(subject_id=int(subject))
-        except (ValueError, TypeError):
-            pass
-
-    # Explicit assignee param (only used when tab is not my_queue/unassigned)
-    if tab not in ("my_queue", "unassigned"):
-        assignee = request.query_params.get("assignee", "").strip()
-        if assignee == "me":
-            qs = qs.filter(assignee=request.user)
-        elif assignee == "unassigned":
-            qs = qs.filter(assignee__isnull=True)
-        elif assignee:
-            try:
-                qs = qs.filter(assignee_id=int(assignee))
-            except (ValueError, TypeError):
-                pass
-
-    q = request.query_params.get("q", "").strip()
-    if q:
-        qs = qs.filter(
-            Q(title__icontains=q) | Q(description__icontains=q) | Q(display_id__icontains=q)
-        )
-
-    created_within = request.query_params.get("created_within", "").strip()
-    if created_within:
-        delta = _parse_duration(created_within)
-        if delta:
-            qs = qs.filter(created_at__gte=timezone.now() - delta)
-
-    return qs
+    return IncidentFilterSet(request.query_params, queryset=qs, request=request).qs
 
 
 def _require_auth(request):
@@ -365,21 +301,6 @@ class IncidentListView(APIView):
             request.user,
         )
 
-        # Legacy source filters (used by LinkedIncidents component)
-        source_kind = request.query_params.get("source_kind")
-        if source_kind:
-            qs = qs.filter(source_kind=source_kind)
-        source_ref_contains = request.query_params.get("source_ref_contains")
-        if source_ref_contains:
-            try:
-                ref = json.loads(source_ref_contains)
-                if isinstance(ref, dict):
-                    for key, value in ref.items():
-                        qs = qs.filter(**{f"source_ref__{key}": value})
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-
-        # 8-filter pipeline + tab logic
         qs = _apply_incident_filters(qs, request)
 
         # Ordering — honour sort/order query params or fall back to default
@@ -402,6 +323,7 @@ class IncidentListView(APIView):
             per_page = min(max(1, int(request.query_params.get("per_page", 25))), 100)
         except (ValueError, TypeError):
             per_page = 25
+
         try:
             page = max(1, int(request.query_params.get("page", 1)))
         except (ValueError, TypeError):
