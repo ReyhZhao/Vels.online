@@ -5,3 +5,4 @@ metadata:
 data:
   EMAIL_SSL_NO_VERIFY: "True"
   BUNKERWEB_PUBLIC_FQDN: proxy.vels.online
+  SEMAPHORE_PROJECT_ID: 1
