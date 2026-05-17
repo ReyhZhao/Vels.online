@@ -97,6 +97,7 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   const [incidentsOpen, setIncidentsOpen] = useState(() => readLS('sidebar:incidents:open', true));
   const [securityOpen, setSecurityOpen] = useState(() => readLS('sidebar:security:open', true));
   const [ingressOpen, setIngressOpen] = useState(() => readLS('sidebar:ingress:open', true));
+  const [blogOpen, setBlogOpen] = useState(() => readLS('sidebar:blog:open', true));
   const [adminOpen, setAdminOpen] = useState(() => readLS('sidebar:admin:open', true));
   const [reportOpen, setReportOpen] = useState(false);
   const [pendingSignups, setPendingSignups] = useState(0);
@@ -122,6 +123,7 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   useEffect(() => { writeLS('sidebar:incidents:open', incidentsOpen); }, [incidentsOpen]);
   useEffect(() => { writeLS('sidebar:security:open', securityOpen); }, [securityOpen]);
   useEffect(() => { writeLS('sidebar:ingress:open', ingressOpen); }, [ingressOpen]);
+  useEffect(() => { writeLS('sidebar:blog:open', blogOpen); }, [blogOpen]);
   useEffect(() => { writeLS('sidebar:admin:open', adminOpen); }, [adminOpen]);
 
   const showItems = !collapsed;
@@ -251,12 +253,12 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
             <div className="space-y-1">
               {showItems && (
                 <SectionToggle
-                  label="Admin"
-                  open={adminOpen}
-                  onToggle={() => setAdminOpen((o) => !o)}
+                  label="Blog"
+                  open={blogOpen}
+                  onToggle={() => setBlogOpen((o) => !o)}
                 />
               )}
-              {(adminOpen || collapsed) && (
+              {(blogOpen || collapsed) && (
                 <>
                   <SidebarLink to="/admin" end icon={FileText} collapsed={collapsed}>
                     Blog Administration
@@ -267,6 +269,22 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                   <SidebarLink to="/admin/posts/new" icon={FilePlus} collapsed={collapsed}>
                     New Post
                   </SidebarLink>
+                </>
+              )}
+            </div>
+          )}
+
+          {isStaff && (
+            <div className="space-y-1">
+              {showItems && (
+                <SectionToggle
+                  label="Admin"
+                  open={adminOpen}
+                  onToggle={() => setAdminOpen((o) => !o)}
+                />
+              )}
+              {(adminOpen || collapsed) && (
+                <>
                   <SidebarLink to="/admin/status-settings" icon={Server} collapsed={collapsed}>
                     Service Monitor
                   </SidebarLink>

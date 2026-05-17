@@ -84,21 +84,38 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('button', { name: /^security$/i })).toBeInTheDocument();
   });
 
-  it('does not render Admin section for a regular user', () => {
+  it('does not render Blog or Admin sections for a regular user', () => {
     renderSidebar(regularUser);
 
+    expect(screen.queryByText('Blog')).not.toBeInTheDocument();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /posts/i })).not.toBeInTheDocument();
+  });
+
+  it('renders Blog section items for a staff user', () => {
+    renderSidebar(staffUser);
+
+    expect(screen.getByRole('button', { name: /^blog$/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^posts$/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /new post/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /blog administration/i })).toBeInTheDocument();
   });
 
   it('renders Admin section items for a staff user', () => {
     renderSidebar(staffUser);
 
-    expect(screen.getByRole('link', { name: /^posts$/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /new post/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /service monitor/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /organisations/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /downloads/i })).toBeInTheDocument();
+  });
+
+  it('Blog section does not contain Admin-only items', () => {
+    renderSidebar(staffUser);
+
+    const blogToggle = screen.getByRole('button', { name: /^blog$/i });
+    expect(blogToggle).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /service monitor/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /^posts$/i })).toHaveLength(1);
   });
 
   it('does not show Subjects or Task Templates in Admin section', () => {
@@ -186,15 +203,26 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('link', { name: /overview/i })).toBeInTheDocument();
   });
 
-  it('collapses Admin section items when toggle is clicked', async () => {
+  it('collapses Blog section items when toggle is clicked', async () => {
     const user = userEvent.setup();
     renderSidebar(staffUser);
 
     expect(screen.getByRole('link', { name: /^posts$/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /admin/i }));
+    await user.click(screen.getByRole('button', { name: /^blog$/i }));
 
     expect(screen.queryByRole('link', { name: /^posts$/i })).not.toBeInTheDocument();
+  });
+
+  it('collapses Admin section items when toggle is clicked', async () => {
+    const user = userEvent.setup();
+    renderSidebar(staffUser);
+
+    expect(screen.getByRole('link', { name: /service monitor/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^admin$/i }));
+
+    expect(screen.queryByRole('link', { name: /service monitor/i })).not.toBeInTheDocument();
   });
 
   // ── icon-only mode ────────────────────────────────────────────────────────
@@ -255,11 +283,18 @@ describe('AppSidebar', () => {
     expect(screen.queryByRole('link', { name: /overview/i })).not.toBeInTheDocument();
   });
 
+  it('restores Blog section collapsed state from localStorage on mount', () => {
+    store['sidebar:blog:open'] = 'false';
+    renderSidebar(staffUser);
+
+    expect(screen.queryByRole('link', { name: /^posts$/i })).not.toBeInTheDocument();
+  });
+
   it('restores Admin section collapsed state from localStorage on mount', () => {
     store['sidebar:admin:open'] = 'false';
     renderSidebar(staffUser);
 
-    expect(screen.queryByRole('link', { name: /^posts$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /service monitor/i })).not.toBeInTheDocument();
   });
 
   it('persists collapsed state to localStorage when toggled', async () => {
