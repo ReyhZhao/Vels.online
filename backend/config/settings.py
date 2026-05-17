@@ -210,6 +210,13 @@ BUNKERWEB_API_TOKEN = os.environ.get("BUNKERWEB_API_TOKEN", "")
 BUNKERWEB_PUBLIC_IP = os.environ.get("BUNKERWEB_PUBLIC_IP", "")
 BUNKERWEB_PUBLIC_FQDN = os.environ.get("BUNKERWEB_PUBLIC_FQDN", "")
 
+# VAPID keys for web push notifications.
+# Generate once per deployment:
+#   python -c "from py_vapid import Vapid; v=Vapid(); v.generate_keys(); print('Public:', v.public_key); print('Private:', v.private_key)"
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:admin@vels.online")
+
 AUTHENTIK_API_TOKEN = os.environ.get("AUTHENTIK_API_TOKEN", "")
 AUTHENTIK_API_URL = os.environ.get("AUTHENTIK_API_URL", "")
 AUTHENTIK_ENROLLMENT_FLOW_SLUG = os.environ.get("AUTHENTIK_ENROLLMENT_FLOW_SLUG", "")

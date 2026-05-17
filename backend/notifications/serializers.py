@@ -12,6 +12,8 @@ class NotificationPreferencesSerializer(serializers.ModelSerializer):
             "email_comment", "inapp_comment",
             "email_state_change", "inapp_state_change",
             "email_incident_alert", "inapp_incident_alert",
+            "push_assignment", "push_delegation", "push_comment",
+            "push_state_change", "push_incident_alert",
             "updated_at",
         ]
         read_only_fields = ["updated_at"]

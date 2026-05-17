@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 
 from .email import send_html_email
 from .email_defaults import DEFAULT_TEMPLATES
-from .models import EmailTemplate, Notification, NotificationPreferences
+from .models import EmailTemplate, Notification, NotificationPreferences, PushSubscription
 from .serializers import EmailTemplateSerializer, NotificationPreferencesSerializer, NotificationSerializer
 
 
@@ -121,6 +121,30 @@ class TestEmailView(APIView):
         except Exception as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response({"detail": f"Test email sent to {recipient}."})
+
+
+class PushVapidKeyView(APIView):
+    def get(self, request):
+        return Response({"public_key": settings.VAPID_PUBLIC_KEY})
+
+
+class PushSubscribeView(APIView):
+    def post(self, request):
+        endpoint = request.data.get("endpoint", "")
+        p256dh = request.data.get("p256dh", "")
+        auth_key = request.data.get("auth", "")
+        if not endpoint:
+            return Response({"detail": "endpoint is required."}, status=status.HTTP_400_BAD_REQUEST)
+        _, created = PushSubscription.objects.update_or_create(
+            endpoint=endpoint,
+            defaults={"user": request.user, "p256dh": p256dh, "auth": auth_key},
+        )
+        return Response(status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    def delete(self, request):
+        endpoint = request.data.get("endpoint", "")
+        PushSubscription.objects.filter(user=request.user, endpoint=endpoint).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class EmailTemplateListView(APIView):

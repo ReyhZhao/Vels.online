@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../../lib/axios';
+import usePushSubscription from '../../hooks/usePushSubscription';
 
 const CATEGORIES = [
   { key: 'assignment', label: 'Assignment', description: 'When an incident is assigned or transferred to you' },
@@ -33,12 +34,24 @@ function Toggle({ checked, onChange, disabled, label }) {
 }
 
 export default function NotificationPreferences() {
+  const { isSubscribed, isSupported, loading: pushLoading, subscribe, unsubscribe } = usePushSubscription();
+  const [pushError, setPushError] = useState(null);
+
   const [prefs, setPrefs] = useState(null);
   const [pending, setPending] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [guardrailError, setGuardrailError] = useState(null);
+
+  async function handleSubscribe() {
+    setPushError(null);
+    try {
+      await subscribe();
+    } catch (e) {
+      setPushError(e.message === 'Permission denied' ? 'Notification permission was denied.' : 'Failed to enable push notifications.');
+    }
+  }
 
   useEffect(() => {
     api.get('/api/me/notification-prefs/').then(res => {
@@ -48,7 +61,8 @@ export default function NotificationPreferences() {
 
   function effectiveValue(key) {
     if (key in pending) return pending[key];
-    return prefs?.[key] ?? true;
+    const defaultVal = key.startsWith('push_') ? false : true;
+    return prefs?.[key] ?? defaultVal;
   }
 
   function handleToggle(key) {
@@ -132,8 +146,40 @@ export default function NotificationPreferences() {
         </div>
       )}
 
+      {/* Push enrollment card */}
+      <div className="mb-6 rounded-lg border border-border p-4 space-y-2">
+        <p className="text-sm font-medium text-foreground">Push notifications</p>
+        {!isSupported ? (
+          <p className="text-sm text-muted-foreground">
+            Push notifications are not supported in this browser. Install the app to your home screen to enable them.
+          </p>
+        ) : isSubscribed ? (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-green-600 dark:text-green-400 font-medium">Push notifications enabled</span>
+            <button
+              onClick={unsubscribe}
+              disabled={pushLoading}
+              className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+            >
+              Disable
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            <button
+              onClick={handleSubscribe}
+              disabled={pushLoading}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {pushLoading ? 'Enabling…' : 'Enable push notifications'}
+            </button>
+            {pushError && <p className="text-xs text-destructive">{pushError}</p>}
+          </div>
+        )}
+      </div>
+
       <div className="rounded-lg border border-border overflow-hidden">
-        <div className="grid grid-cols-[1fr_auto_auto] gap-0">
+        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-0">
           <div className="px-4 py-3 bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Category
           </div>
@@ -142,6 +188,9 @@ export default function NotificationPreferences() {
           </div>
           <div className="px-6 py-3 bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wide text-center">
             Email
+          </div>
+          <div className="px-6 py-3 bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wide text-center">
+            Push
           </div>
 
           {CATEGORIES.map((cat, idx) => (
@@ -164,6 +213,14 @@ export default function NotificationPreferences() {
                   checked={effectiveValue(`email_${cat.key}`)}
                   onChange={() => handleToggle(`email_${cat.key}`)}
                   label={`${cat.label} email`}
+                />
+              </div>
+              <div className="px-6 py-4 border-t border-border flex items-center justify-center">
+                <Toggle
+                  checked={effectiveValue(`push_${cat.key}`)}
+                  onChange={() => handleToggle(`push_${cat.key}`)}
+                  disabled={!isSubscribed}
+                  label={isSubscribed ? `${cat.label} push` : 'Enroll this device first'}
                 />
               </div>
             </div>

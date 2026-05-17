@@ -38,10 +38,26 @@ class NotificationPreferences(models.Model):
     inapp_incident_alert = models.BooleanField(default=True)
     email_system_alert = models.BooleanField(default=True)
     inapp_system_alert = models.BooleanField(default=True)
+    push_assignment = models.BooleanField(default=False)
+    push_delegation = models.BooleanField(default=False)
+    push_comment = models.BooleanField(default=False)
+    push_state_change = models.BooleanField(default=False)
+    push_incident_alert = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"NotificationPreferences({self.user})"
+
+
+class PushSubscription(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="push_subscriptions")
+    endpoint = models.TextField(unique=True)
+    p256dh = models.TextField()
+    auth = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"PushSubscription({self.user}, {self.endpoint[:40]}…)"
 
 
 class Notification(models.Model):

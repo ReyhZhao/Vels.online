@@ -51,3 +51,13 @@ def notify(category, recipients, *, incident=None, task=None, payload):
                 },
                 countdown=300,
             )
+
+        push_attr = f"push_{category}"
+        needs_push = getattr(prefs, push_attr, False)
+        if needs_push:
+            from notifications.tasks import send_push_notifications
+            send_push_notifications.delay(recipient.id, {
+                "title": payload.get("title", "Vels Online"),
+                "body": payload.get("body", ""),
+                "url": payload.get("link", "/dashboard"),
+            })

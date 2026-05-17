@@ -1,3 +1,5 @@
+import json
+
 from celery import shared_task
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -50,6 +52,31 @@ def send_digest_email(recipient_id, incident_id):
     for n in notifications:
         n.email_sent_at = now
     Notification.objects.bulk_update(notifications, ["email_sent_at"])
+
+
+@shared_task
+def send_push_notifications(user_id, payload_dict):
+    from pywebpush import webpush, WebPushException
+    from .models import PushSubscription
+
+    subscriptions = PushSubscription.objects.filter(user_id=user_id)
+    stale = []
+    for sub in subscriptions:
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": sub.endpoint,
+                    "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
+                },
+                data=json.dumps(payload_dict),
+                vapid_private_key=settings.VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": settings.VAPID_SUBJECT},
+            )
+        except WebPushException as e:
+            if e.response and e.response.status_code in (404, 410):
+                stale.append(sub.pk)
+    if stale:
+        PushSubscription.objects.filter(pk__in=stale).delete()
 
 
 @shared_task

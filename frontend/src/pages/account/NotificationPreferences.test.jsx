@@ -7,7 +7,12 @@ vi.mock('../../lib/axios', () => ({
   default: { get: vi.fn(), patch: vi.fn() },
 }));
 
+vi.mock('../../hooks/usePushSubscription', () => ({
+  default: vi.fn(),
+}));
+
 import api from '../../lib/axios';
+import usePushSubscription from '../../hooks/usePushSubscription';
 import NotificationPreferences from './NotificationPreferences';
 
 const defaultPrefs = {
@@ -32,11 +37,14 @@ function renderPage() {
   );
 }
 
+const defaultPushHook = { isSubscribed: false, isSupported: true, loading: false, subscribe: vi.fn(), unsubscribe: vi.fn() };
+
 describe('NotificationPreferences', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.get.mockResolvedValue({ data: { ...defaultPrefs } });
     api.patch.mockResolvedValue({ data: { ...defaultPrefs } });
+    usePushSubscription.mockReturnValue(defaultPushHook);
   });
 
   it('loads and renders the page', async () => {
@@ -101,6 +109,46 @@ describe('NotificationPreferences', () => {
     renderPage();
     await waitFor(() => screen.getByText('Assignment'));
     expect(screen.getByRole('button', { name: /save preferences/i })).toBeDisabled();
+  });
+
+  it('shows Push column header', async () => {
+    renderPage();
+    await waitFor(() => screen.getByText('Assignment'));
+    expect(screen.getByText('Push')).toBeInTheDocument();
+  });
+
+  it('shows enable push button when not subscribed and supported', async () => {
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /enable push notifications/i }));
+  });
+
+  it('push toggles are disabled when device is not enrolled', async () => {
+    renderPage();
+    await waitFor(() => screen.getByText('Assignment'));
+    const pushToggles = screen.getAllByRole('switch', { name: /enroll this device first/i });
+    expect(pushToggles.length).toBeGreaterThan(0);
+    pushToggles.forEach(t => expect(t).toBeDisabled());
+  });
+
+  it('shows unsupported message when push is not available', async () => {
+    usePushSubscription.mockReturnValue({ ...defaultPushHook, isSupported: false });
+    renderPage();
+    await waitFor(() => screen.getByText(/push notifications are not supported/i));
+  });
+
+  it('shows subscribed state with disable button when enrolled', async () => {
+    usePushSubscription.mockReturnValue({ ...defaultPushHook, isSubscribed: true });
+    renderPage();
+    await waitFor(() => screen.getByText(/push notifications enabled/i));
+    expect(screen.getByRole('button', { name: /disable/i })).toBeInTheDocument();
+  });
+
+  it('push toggles are enabled when device is enrolled', async () => {
+    usePushSubscription.mockReturnValue({ ...defaultPushHook, isSubscribed: true });
+    renderPage();
+    await waitFor(() => screen.getByText('Assignment'));
+    const pushToggles = screen.getAllByRole('switch', { name: /push$/i });
+    pushToggles.forEach(t => expect(t).not.toBeDisabled());
   });
 
   it('shows error message when save fails', async () => {
