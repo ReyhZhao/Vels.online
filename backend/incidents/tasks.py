@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone as dt_timezone
 
@@ -6,6 +7,48 @@ from django.conf import settings
 from django.utils import timezone
 
 from notifications.email import send_html_email
+
+logger = logging.getLogger(__name__)
+
+
+@shared_task
+def poll_automated_tasks():
+    from automations.semaphore import SemaphoreAPIError, SemaphoreClient
+    from incidents.models import Task
+
+    tasks = Task.objects.filter(
+        task_type=Task.TYPE_AUTOMATED,
+        semaphore_task_id__isnull=False,
+        state=Task.STATE_IN_PROGRESS,
+    )
+
+    processed = done = failed = 0
+    client = SemaphoreClient()
+
+    for task in tasks:
+        processed += 1
+        try:
+            status = client.get_job_status(task.semaphore_task_id)
+        except (SemaphoreAPIError, Exception) as exc:
+            logger.error("poll_automated_tasks: error polling task %s: %s", task.id, exc)
+            continue
+
+        if status == "success":
+            Task.objects.filter(pk=task.pk).update(
+                state=Task.STATE_DONE,
+                closed_at=timezone.now(),
+                automation_error=None,
+            )
+            done += 1
+        elif status in ("error", "failed"):
+            Task.objects.filter(pk=task.pk).update(
+                state=Task.STATE_NEW,
+                automation_error=f"Semaphore job failed with status: {status}",
+                semaphore_task_id=None,
+            )
+            failed += 1
+
+    return {"processed": processed, "done": done, "failed": failed}
 
 
 @shared_task
