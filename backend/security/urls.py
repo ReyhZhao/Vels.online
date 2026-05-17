@@ -16,6 +16,7 @@ from .views import (
     FleetEventsView,
     FleetVulnerabilitiesView,
     FleetVulnerabilityTrendView,
+    OrgInviteView,
     OrganizationListView,
     RiskAcceptanceDeleteView,
     RiskAcceptanceListView,
@@ -30,6 +31,7 @@ from .views import (
 
 urlpatterns = [
     path("organizations/", OrganizationListView.as_view()),
+    path("organizations/<slug:slug>/invite/", OrgInviteView.as_view()),
     path("agents/", AgentListView.as_view()),
     path("agents/<str:agent_id>/events/", AgentEventsView.as_view()),
     path("agents/<str:agent_id>/events/<str:event_id>/", AgentEventDetailView.as_view()),

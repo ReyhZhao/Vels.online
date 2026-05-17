@@ -1,9 +1,211 @@
 import { useEffect, useState } from 'react';
-import { Shield } from 'lucide-react';
+import { Shield, ChevronDown, ChevronRight, UserPlus, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import api from '@/lib/axios';
+
+const ROLE_LABELS = { member: 'Member', staff: 'Staff', admin: 'Admin' };
+const STATUS_CLASSES = {
+  pending:  'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+  accepted: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+  expired:  'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+};
+
+function InviteDialog({ org, onClose, onCreated }) {
+  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [role, setRole] = useState('member');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await api.post(`/api/security/organizations/${org.slug}/invite/`, {
+        email: email.trim(),
+        full_name: fullName.trim(),
+        role,
+      });
+      onCreated(res.data);
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.detail ?? 'Failed to send invitation.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground">Invite user to {org.name}</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-foreground" htmlFor="invite-email">Email</label>
+            <Input
+              id="invite-email"
+              type="email"
+              placeholder="user@example.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              disabled={submitting}
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-foreground" htmlFor="invite-name">Full name</label>
+            <Input
+              id="invite-name"
+              placeholder="Jane Smith"
+              value={fullName}
+              onChange={e => setFullName(e.target.value)}
+              disabled={submitting}
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-foreground" htmlFor="invite-role">Role</label>
+            <select
+              id="invite-role"
+              value={role}
+              onChange={e => setRole(e.target.value)}
+              disabled={submitting}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="member">Member</option>
+              <option value="staff">Staff</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+
+          <div className="flex justify-end gap-3 pt-1">
+            <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={submitting || !email.trim() || !fullName.trim()}>
+              {submitting ? 'Sending…' : 'Send invitation'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function OrgRow({ org }) {
+  const [expanded, setExpanded] = useState(false);
+  const [invitations, setInvitations] = useState(null);
+  const [loadingInvites, setLoadingInvites] = useState(false);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
+
+  async function loadInvitations() {
+    if (invitations !== null) return;
+    setLoadingInvites(true);
+    try {
+      const res = await api.get(`/api/security/organizations/${org.slug}/invite/`);
+      setInvitations(res.data);
+    } catch {
+      setInvitations([]);
+    } finally {
+      setLoadingInvites(false);
+    }
+  }
+
+  function handleToggle() {
+    if (!expanded) loadInvitations();
+    setExpanded(v => !v);
+  }
+
+  function handleInviteCreated(inv) {
+    setInvitations(prev => [inv, ...(prev ?? [])]);
+  }
+
+  return (
+    <>
+      <tr className="border-b last:border-0">
+        <td className="py-3 font-medium text-foreground">{org.name}</td>
+        <td className="py-3 font-mono text-sm text-muted-foreground">{org.slug}</td>
+        <td className="py-3 font-mono text-sm text-muted-foreground">{org.wazuh_group}</td>
+        <td className="py-3 text-right">
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowInviteDialog(true)}
+              aria-label={`Invite user to ${org.name}`}
+            >
+              <UserPlus className="h-3.5 w-3.5 mr-1" />
+              Invite
+            </Button>
+            <button
+              onClick={handleToggle}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label={expanded ? `Collapse ${org.name} invitations` : `Expand ${org.name} invitations`}
+            >
+              {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </button>
+          </div>
+        </td>
+      </tr>
+
+      {expanded && (
+        <tr className="border-b last:border-0 bg-muted/30">
+          <td colSpan={4} className="px-4 py-3">
+            {loadingInvites && <p className="text-sm text-muted-foreground">Loading invitations…</p>}
+            {!loadingInvites && invitations !== null && invitations.length === 0 && (
+              <p className="text-sm text-muted-foreground">No invitations yet.</p>
+            )}
+            {!loadingInvites && invitations && invitations.length > 0 && (
+              <table className="w-full text-xs" aria-label={`Invitations for ${org.name}`}>
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="pb-1 font-medium">Email</th>
+                    <th className="pb-1 font-medium">Name</th>
+                    <th className="pb-1 font-medium">Role</th>
+                    <th className="pb-1 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invitations.map(inv => (
+                    <tr key={inv.id} className="border-t border-border/50">
+                      <td className="py-1.5 text-foreground">{inv.email}</td>
+                      <td className="py-1.5 text-muted-foreground">{inv.full_name}</td>
+                      <td className="py-1.5 text-muted-foreground">{ROLE_LABELS[inv.role] ?? inv.role}</td>
+                      <td className="py-1.5">
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[inv.status] ?? ''}`}>
+                          {inv.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </td>
+        </tr>
+      )}
+
+      {showInviteDialog && (
+        <InviteDialog
+          org={org}
+          onClose={() => setShowInviteDialog(false)}
+          onCreated={handleInviteCreated}
+        />
+      )}
+    </>
+  );
+}
 
 function OrgManagement() {
   const [orgs, setOrgs] = useState([]);
@@ -89,15 +291,12 @@ function OrgManagement() {
                   <th className="pb-2 font-medium">Name</th>
                   <th className="pb-2 font-medium">Slug</th>
                   <th className="pb-2 font-medium">Wazuh group</th>
+                  <th className="pb-2 font-medium" />
                 </tr>
               </thead>
               <tbody>
                 {orgs.map((org) => (
-                  <tr key={org.id} className="border-b last:border-0">
-                    <td className="py-3 font-medium text-foreground">{org.name}</td>
-                    <td className="py-3 font-mono text-muted-foreground">{org.slug}</td>
-                    <td className="py-3 font-mono text-muted-foreground">{org.wazuh_group}</td>
-                  </tr>
+                  <OrgRow key={org.id} org={org} />
                 ))}
               </tbody>
             </table>

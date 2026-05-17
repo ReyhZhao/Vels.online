@@ -2,10 +2,49 @@ import logging
 from datetime import date
 
 from celery import shared_task
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import transaction
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task
+def send_org_invite_email(invitation_pk):
+    from notifications.email import send_html_email
+    from signups.authentik import AuthentikClient
+    from security.models import OrgInvitation
+
+    try:
+        inv = OrgInvitation.objects.select_related("organization").get(pk=invitation_pk)
+    except OrgInvitation.DoesNotExist:
+        return
+
+    flow_slug = getattr(settings, "AUTHENTIK_ENROLLMENT_FLOW_SLUG", "")
+    invite_url = AuthentikClient().build_invite_url(flow_slug, str(inv.authentik_invite_token))
+    frontend_url = getattr(settings, "FRONTEND_URL", "").rstrip("/")
+
+    send_html_email(
+        "invite",
+        {
+            "full_name": inv.full_name,
+            "org_name": inv.organization.name,
+            "invite_url": invite_url,
+            "frontend_url": frontend_url,
+        },
+        [inv.email],
+    )
+
+
+@shared_task
+def expire_stale_org_invites():
+    from django.utils import timezone
+    from security.models import OrgInvitation
+
+    OrgInvitation.objects.filter(
+        status=OrgInvitation.STATUS_PENDING,
+        invite_expires_at__lt=timezone.now(),
+    ).update(status=OrgInvitation.STATUS_EXPIRED)
 
 
 @shared_task

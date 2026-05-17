@@ -1,13 +1,16 @@
 import os
 
+from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from signups.authentik import AuthentikAPIError, AuthentikClient
 
 from django.db.models import Count, Q
-from security.models import Download, Organization, OrganizationMembership, RiskAcceptance, VulnerabilitySnapshot, WorkPackage, WorkPackageItem
+from security.models import Download, OrgInvitation, Organization, OrganizationMembership, RiskAcceptance, VulnerabilitySnapshot, WorkPackage, WorkPackageItem
 from security.serializers import (
     AgentSerializer,
     CveDetailSerializer,
@@ -265,6 +268,104 @@ class OrganizationListView(APIView):
             return Response({"detail": f"Failed to create Wazuh group: {exc}"}, status=400)
 
         return Response(OrganizationSerializer(org).data, status=201)
+
+
+class OrgInviteView(APIView):
+    """POST /api/security/organizations/<slug>/invite/ — send an invite to join an existing org."""
+
+    def get(self, request, slug):
+        if not request.user.is_staff:
+            return Response(status=403)
+        try:
+            org = Organization.objects.get(slug=slug)
+        except Organization.DoesNotExist:
+            return Response({"detail": "Organisation not found."}, status=404)
+        invitations = OrgInvitation.objects.filter(organization=org).order_by("-created_at")
+        data = [
+            {
+                "id": inv.id,
+                "email": inv.email,
+                "full_name": inv.full_name,
+                "role": inv.role,
+                "status": inv.status,
+                "invite_expires_at": inv.invite_expires_at,
+                "created_at": inv.created_at,
+            }
+            for inv in invitations
+        ]
+        return Response(data)
+
+    def post(self, request, slug):
+        if not request.user.is_staff:
+            return Response(status=403)
+        try:
+            org = Organization.objects.get(slug=slug)
+        except Organization.DoesNotExist:
+            return Response({"detail": "Organisation not found."}, status=404)
+
+        email = request.data.get("email", "").strip().lower()
+        full_name = request.data.get("full_name", "").strip()
+        role = request.data.get("role", OrgInvitation.ROLE_MEMBER)
+
+        if not email:
+            return Response({"detail": "email is required."}, status=400)
+        if not full_name:
+            return Response({"detail": "full_name is required."}, status=400)
+        if role not in (OrgInvitation.ROLE_MEMBER, OrgInvitation.ROLE_STAFF, OrgInvitation.ROLE_ADMIN):
+            return Response({"detail": "role must be member, staff, or admin."}, status=400)
+
+        from datetime import timedelta
+
+        client = AuthentikClient()
+        flow_slug = settings.AUTHENTIK_ENROLLMENT_FLOW_SLUG
+
+        # Find or create the Authentik group for this org
+        group_name = f"customer:{org.slug}"
+        try:
+            group_pk = client.find_group_by_name(group_name)
+            if not group_pk:
+                group_pk = client.create_group(group_name)
+        except AuthentikAPIError as exc:
+            return Response({"detail": f"Failed to resolve Authentik group: {exc}"}, status=502)
+
+        # Resolve the enrollment flow UUID
+        try:
+            flow_uuid = client.get_flow_uuid(flow_slug)
+        except AuthentikAPIError as exc:
+            return Response({"detail": f"Failed to resolve enrollment flow: {exc}"}, status=502)
+
+        # Create an Authentik invitation
+        expires_at = timezone.now() + timedelta(days=7)
+        try:
+            invitation = client.create_invitation(flow_uuid, expires_at, name=f"org-invite-{org.slug}-{email}")
+        except AuthentikAPIError as exc:
+            return Response({"detail": f"Failed to create invitation: {exc}"}, status=502)
+
+        inv = OrgInvitation.objects.create(
+            organization=org,
+            email=email,
+            full_name=full_name,
+            role=role,
+            authentik_invite_token=invitation["token"],
+            invite_expires_at=expires_at,
+            invited_by=request.user,
+        )
+
+        from security.tasks import send_org_invite_email
+        send_org_invite_email.delay(inv.pk)
+
+        return Response(
+            {
+                "id": inv.id,
+                "email": inv.email,
+                "full_name": inv.full_name,
+                "role": inv.role,
+                "status": inv.status,
+                "invite_expires_at": inv.invite_expires_at,
+                "created_at": inv.created_at,
+            },
+            status=201,
+        )
 
 
 class AgentListView(APIView):

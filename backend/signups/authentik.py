@@ -64,6 +64,13 @@ class AuthentikClient:
         self._check(resp)
         return resp.json()["pk"]
 
+    def find_group_by_name(self, name):
+        """Return the group PK if a group with this name exists, else None."""
+        resp = self._get("/core/groups/", params={"name": name})
+        self._check(resp)
+        results = resp.json().get("results", [])
+        return results[0]["pk"] if results else None
+
     def delete_group(self, pk):
         resp = self._delete(f"/core/groups/{pk}/")
         if resp.status_code == 404:

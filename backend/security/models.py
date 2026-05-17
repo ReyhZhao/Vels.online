@@ -63,6 +63,44 @@ class OrganizationMembership(models.Model):
         return f"{self.user} → {self.organization}"
 
 
+class OrgInvitation(models.Model):
+    ROLE_MEMBER = "member"
+    ROLE_STAFF = "staff"
+    ROLE_ADMIN = "admin"
+    ROLE_CHOICES = [
+        (ROLE_MEMBER, "Member"),
+        (ROLE_STAFF, "Staff"),
+        (ROLE_ADMIN, "Admin"),
+    ]
+
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_EXPIRED = "expired"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_EXPIRED, "Expired"),
+    ]
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="invitations")
+    email = models.EmailField()
+    full_name = models.CharField(max_length=255)
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=ROLE_MEMBER)
+    authentik_invite_token = models.UUIDField(null=True, blank=True)
+    invite_expires_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    invited_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="sent_invitations"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.email} → {self.organization} ({self.status})"
+
+
 class VulnerabilitySnapshot(models.Model):
     organization = models.ForeignKey(
         Organization, on_delete=models.CASCADE, related_name="vuln_snapshots"
