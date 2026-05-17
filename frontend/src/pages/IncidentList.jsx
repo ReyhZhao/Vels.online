@@ -332,6 +332,16 @@ export default function IncidentList() {
   const someVisibleSelected = visibleIds.some(id => selectedIds.has(id));
   const colSpan = user?.is_staff ? 9 : 8;
 
+  function getPaginationPages(current, total) {
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+    const pages = [1];
+    if (current - 1 > 2) pages.push('…');
+    for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) pages.push(i);
+    if (current + 1 < total - 1) pages.push('…');
+    pages.push(total);
+    return pages;
+  }
+
   return (
     <div className="space-y-4 p-6">
       {bulkAction === 'close' && (
@@ -474,7 +484,40 @@ export default function IncidentList() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : results.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No incidents.</p>
+        ) : results.map(inc => (
+          <div
+            key={inc.id}
+            className="rounded-lg border border-border bg-card px-4 py-3 space-y-1 cursor-pointer hover:bg-accent/50 transition-colors"
+            onClick={() => openPreview(inc.display_id)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-xs font-medium text-foreground">{inc.display_id}</span>
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[inc.severity] ?? ''}`}>
+                {inc.severity}
+              </span>
+            </div>
+            <p className="text-sm font-medium text-foreground leading-snug">{inc.title}</p>
+            <div className="flex items-center gap-3 text-xs">
+              <span className={`font-medium ${STATE_CLASSES[inc.state] ?? 'text-muted-foreground'}`}>
+                {inc.state?.replace('_', ' ')}
+              </span>
+              <span className="text-muted-foreground">{inc.assignee_username || 'Unassigned'}</span>
+              <span className="text-muted-foreground ml-auto">
+                {inc.created_at ? new Date(inc.created_at).toLocaleDateString() : '—'}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
@@ -580,28 +623,32 @@ export default function IncidentList() {
             )}
           </tbody>
         </table>
-      </div>
+      </div>{/* end desktop table */}
 
       {total_pages > 1 && (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">
             Page {page} of {total_pages} ({count} total)
           </p>
-          <div className="flex gap-1">
-            {Array.from({ length: total_pages }, (_, i) => i + 1).map(p => (
-              <button
-                key={p}
-                onClick={() => setPage(p)}
-                disabled={p === page}
-                className={`rounded px-3 py-1 text-sm transition-colors ${
-                  p === page
-                    ? 'bg-primary text-primary-foreground'
-                    : 'border border-border hover:bg-accent text-foreground'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
+          <div className="flex flex-wrap gap-1">
+            {getPaginationPages(page, total_pages).map((p, i) =>
+              p === '…' ? (
+                <span key={`ellipsis-${i}`} className="px-2 py-1 text-sm text-muted-foreground select-none">…</span>
+              ) : (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  disabled={p === page}
+                  className={`rounded px-3 py-1 text-sm transition-colors ${
+                    p === page
+                      ? 'bg-primary text-primary-foreground'
+                      : 'border border-border hover:bg-accent text-foreground'
+                  }`}
+                >
+                  {p}
+                </button>
+              )
+            )}
           </div>
         </div>
       )}
