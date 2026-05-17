@@ -13,6 +13,7 @@ import OrgManagement from './pages/admin/OrgManagement';
 import DownloadManagement from './pages/admin/DownloadManagement';
 import SubjectsAdmin from './pages/admin/SubjectsAdmin';
 import TaskTemplatesAdmin from './pages/admin/TaskTemplatesAdmin';
+import AutomationsAdmin from './pages/admin/AutomationsAdmin';
 import SecurityDashboard from './pages/SecurityDashboard';
 import VulnerabilityDashboard from './pages/VulnerabilityDashboard';
 import CveDetail from './pages/CveDetail';
@@ -62,6 +63,7 @@ function App() {
           <Route path="/admin/signup-requests" element={<SignupRequests />} />
           <Route path="/admin/incidents/subjects" element={<SubjectsAdmin />} />
           <Route path="/admin/incidents/task-templates" element={<TaskTemplatesAdmin />} />
+          <Route path="/admin/incidents/automations" element={<AutomationsAdmin />} />
           <Route path="/admin/tasks/history" element={<TaskHistory />} />
           <Route path="/admin/tasks/scheduled" element={<ScheduledTasks />} />
           <Route path="/admin/email-templates" element={<EmailTemplates />} />

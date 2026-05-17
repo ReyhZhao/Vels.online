@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Tag,
   ListChecks,
+  Zap,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -192,6 +193,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     </SidebarLink>
                     <SidebarLink to="/admin/incidents/task-templates" icon={ListChecks} collapsed={collapsed}>
                       Task Templates
+                    </SidebarLink>
+                    <SidebarLink to="/admin/incidents/automations" icon={Zap} collapsed={collapsed}>
+                      Automations
                     </SidebarLink>
                   </>
                 )}

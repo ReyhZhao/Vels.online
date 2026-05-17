@@ -11,7 +11,8 @@ class AutomationListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        qs = Automation.objects.filter(archived=False)
+        include_archived = request.query_params.get("include_archived") == "1"
+        qs = Automation.objects.all() if include_archived else Automation.objects.filter(archived=False)
         data = [_serialize(a) for a in qs]
         return Response(data)
 
@@ -54,6 +55,9 @@ class AutomationDetailView(APIView):
         if "default_vars" in request.data:
             automation.default_vars = request.data["default_vars"] or None
             update_fields.append("default_vars")
+        if "archived" in request.data:
+            automation.archived = bool(request.data["archived"])
+            update_fields.append("archived")
         if update_fields:
             update_fields.append("updated_at")
             automation.save(update_fields=update_fields)
