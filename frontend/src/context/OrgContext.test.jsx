@@ -5,6 +5,10 @@ vi.mock('../lib/axios', () => ({
   default: { get: vi.fn() },
 }));
 
+vi.mock('./AuthContext', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
 import api from '../lib/axios';
 import { OrgContext, OrgProvider, useOrganization } from './OrgContext';
 

@@ -5,6 +5,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .models import UserProfile
 from .serializers import UserSerializer
 
 
@@ -33,6 +34,32 @@ class MeView(APIView):
         resp = Response(UserSerializer(request.user).data)
         resp['X-CSRFToken'] = csrf_token
         return resp
+
+    def patch(self, request):
+        if not request.user.is_authenticated:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        default_org_slug = request.data.get("default_org_slug")
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+        if default_org_slug is None:
+            profile.default_org = None
+        else:
+            from security.models import Organization
+            try:
+                if request.user.is_staff:
+                    org = Organization.objects.get(slug=default_org_slug)
+                else:
+                    org = Organization.objects.get(
+                        slug=default_org_slug,
+                        memberships__user=request.user,
+                    )
+            except Organization.DoesNotExist:
+                return Response({"detail": "Organisation not found."}, status=status.HTTP_400_BAD_REQUEST)
+            profile.default_org = org
+
+        profile.save()
+        return Response(UserSerializer(request.user).data)
 
 
 class LogoutView(APIView):
