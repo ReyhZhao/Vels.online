@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    EmailTemplateDetailView,
+    EmailTemplateListView,
     NotificationDeleteView,
     NotificationListView,
     NotificationPreferencesView,
@@ -16,4 +18,6 @@ urlpatterns = [
     path("notifications/read-all/", NotificationReadAllView.as_view()),
     path("notifications/<int:pk>/read/", NotificationReadView.as_view()),
     path("notifications/<int:pk>/", NotificationDeleteView.as_view()),
+    path("email-templates/", EmailTemplateListView.as_view()),
+    path("email-templates/<str:name>/", EmailTemplateDetailView.as_view()),
 ]

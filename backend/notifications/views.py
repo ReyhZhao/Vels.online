@@ -1,14 +1,15 @@
 from smtplib import SMTPException
 
 from django.conf import settings
-from django.core.mail import send_mail
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Notification, NotificationPreferences
-from .serializers import NotificationPreferencesSerializer, NotificationSerializer
+from .email import send_html_email
+from .email_defaults import DEFAULT_TEMPLATES
+from .models import EmailTemplate, Notification, NotificationPreferences
+from .serializers import EmailTemplateSerializer, NotificationPreferencesSerializer, NotificationSerializer
 
 
 class NotificationPreferencesView(APIView):
@@ -107,15 +108,97 @@ class TestEmailView(APIView):
         if not recipient:
             return Response({"detail": "Your account has no email address set."}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            send_mail(
-                subject="[vels.online] Test email",
-                message="This is a test email sent from the vels.online admin dashboard to verify email delivery.",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[recipient],
-                fail_silently=False,
+            send_html_email(
+                "test",
+                {
+                    "recipient_name": request.user.get_full_name() or request.user.username,
+                    "frontend_url": getattr(settings, "FRONTEND_URL", "").rstrip("/"),
+                },
+                [recipient],
             )
         except SMTPException as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response({"detail": f"Test email sent to {recipient}."})
+
+
+class EmailTemplateListView(APIView):
+    """List all known email templates (DB record or built-in default)."""
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        db_records = {t.name: t for t in EmailTemplate.objects.all()}
+        results = []
+        for name, defaults in DEFAULT_TEMPLATES.items():
+            if name in db_records:
+                results.append(EmailTemplateSerializer(db_records[name]).data)
+            else:
+                results.append({
+                    "name": name,
+                    "subject": defaults["subject"],
+                    "html_body": defaults["html_body"],
+                    "description": defaults["description"],
+                    "updated_at": None,
+                })
+        return Response(results)
+
+
+class EmailTemplateDetailView(APIView):
+    """Get or update a single email template."""
+
+    def _get_or_default(self, name):
+        if name not in DEFAULT_TEMPLATES:
+            return None, None
+        try:
+            return EmailTemplate.objects.get(name=name), True
+        except EmailTemplate.DoesNotExist:
+            defaults = DEFAULT_TEMPLATES[name]
+            return EmailTemplate(
+                name=name,
+                subject=defaults["subject"],
+                html_body=defaults["html_body"],
+                description=defaults["description"],
+            ), False
+
+    def get(self, request, name):
+        if not request.user.is_staff:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        tmpl, in_db = self._get_or_default(name)
+        if tmpl is None:
+            return Response({"detail": "Unknown template."}, status=status.HTTP_404_NOT_FOUND)
+        data = EmailTemplateSerializer(tmpl).data
+        data["in_db"] = in_db
+        return Response(data)
+
+    def put(self, request, name):
+        if not request.user.is_staff:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        if name not in DEFAULT_TEMPLATES:
+            return Response({"detail": "Unknown template."}, status=status.HTTP_404_NOT_FOUND)
+
+        tmpl, _ = EmailTemplate.objects.get_or_create(
+            name=name,
+            defaults={
+                "subject": DEFAULT_TEMPLATES[name]["subject"],
+                "html_body": DEFAULT_TEMPLATES[name]["html_body"],
+                "description": DEFAULT_TEMPLATES[name]["description"],
+            },
+        )
+        ser = EmailTemplateSerializer(tmpl, data=request.data, partial=True)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        ser.save()
+        return Response(ser.data)
+
+    def delete(self, request, name):
+        """Reset a template back to the built-in default by deleting the DB override."""
+        if not request.user.is_staff:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        try:
+            EmailTemplate.objects.get(name=name).delete()
+        except EmailTemplate.DoesNotExist:
+            pass
+        return Response(status=status.HTTP_204_NO_CONTENT)

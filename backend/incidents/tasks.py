@@ -3,8 +3,9 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 
 from celery import shared_task
 from django.conf import settings
-from django.core.mail import send_mail
 from django.utils import timezone
+
+from notifications.email import send_html_email
 
 
 @shared_task
@@ -54,43 +55,36 @@ def send_assigned_incidents_digest():
         count = len(assigned_list)
         noun = "incident" if count == 1 else "incidents"
 
-        lines = [
-            f"You have {count} active {noun} assigned to you.",
-            "",
-            "── Active Incidents " + "─" * 40,
-            "",
-        ]
-
-        for incident in assigned_list:
-            lines.append(f"• [{incident.display_id}] {incident.title}")
-            lines.append(f"  Severity: {incident.severity}  |  State: {incident.get_state_display()}")
-            lines.append(f"  {frontend_url}/incidents/{incident.display_id}")
-            lines.append("")
-
-        if recent_events:
-            lines += [
-                "── Activity in the last 24 hours " + "─" * 27,
-                "",
-            ]
-            for event in recent_events:
-                if event.actor:
-                    actor = event.actor.get_full_name() or event.actor.username
-                else:
-                    actor = "System"
-                lines.append(f"• [{event.incident.display_id}] {event.kind} (by {actor})")
-            lines.append("")
-
-        lines += [
-            "─" * 60,
-            f"View all incidents: {frontend_url}/incidents",
-        ]
-
-        send_mail(
-            subject=f"[vels.online] Incident digest: {count} {noun} assigned to you",
-            message="\n".join(lines),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[assignee.email],
-            fail_silently=False,
+        send_html_email(
+            "incident_digest",
+            {
+                "assignee_name": assignee.get_full_name() or assignee.username,
+                "count": count,
+                "noun": noun,
+                "incidents": [
+                    {
+                        "display_id": inc.display_id,
+                        "title": inc.title,
+                        "severity": inc.severity,
+                        "state": inc.get_state_display(),
+                        "url": f"{frontend_url}/incidents/{inc.display_id}",
+                    }
+                    for inc in assigned_list
+                ],
+                "recent_events": [
+                    {
+                        "display_id": ev.incident.display_id,
+                        "kind": ev.kind,
+                        "actor": (
+                            ev.actor.get_full_name() or ev.actor.username
+                            if ev.actor else "System"
+                        ),
+                    }
+                    for ev in recent_events
+                ],
+                "frontend_url": frontend_url,
+            },
+            [assignee.email],
         )
         sent += 1
 

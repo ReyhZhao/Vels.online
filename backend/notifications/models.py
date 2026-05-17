@@ -4,6 +4,26 @@ from django.db import models
 from incidents.models import Incident, Task
 
 
+class EmailTemplate(models.Model):
+    NAMES = [
+        ("notification_digest", "Notification Digest"),
+        ("incident_digest", "Incident Digest"),
+        ("invite", "Account Invitation"),
+        ("rejection", "Signup Rejection"),
+        ("signup_request", "New Signup Request (Admin)"),
+        ("test", "Test Email"),
+    ]
+
+    name = models.CharField(max_length=60, unique=True, choices=NAMES)
+    subject = models.CharField(max_length=255)
+    html_body = models.TextField()
+    description = models.CharField(max_length=500, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.get_name_display()
+
+
 class NotificationPreferences(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="notification_preferences")
     email_assignment = models.BooleanField(default=True)

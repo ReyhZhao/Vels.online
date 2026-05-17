@@ -32,6 +32,7 @@ import SignupPage from './pages/SignupPage';
 import SignupRequests from './pages/admin/SignupRequests';
 import TaskHistory from './pages/admin/TaskHistory';
 import ScheduledTasks from './pages/admin/ScheduledTasks';
+import EmailTemplates from './pages/admin/EmailTemplates';
 import TaskListPage from './pages/TaskListPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
@@ -63,6 +64,7 @@ function App() {
           <Route path="/admin/incidents/task-templates" element={<TaskTemplatesAdmin />} />
           <Route path="/admin/tasks/history" element={<TaskHistory />} />
           <Route path="/admin/tasks/scheduled" element={<ScheduledTasks />} />
+          <Route path="/admin/email-templates" element={<EmailTemplates />} />
         </Route>
 
         <Route path="/security" element={<SecurityDashboard />} />

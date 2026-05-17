@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Notification, NotificationPreferences
+from .models import EmailTemplate, Notification, NotificationPreferences
 
 
 class NotificationPreferencesSerializer(serializers.ModelSerializer):
@@ -33,6 +33,13 @@ class NotificationPreferencesSerializer(serializers.ModelSerializer):
                 "At least one channel must be enabled for delegation notifications."
             )
         return data
+
+
+class EmailTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmailTemplate
+        fields = ["name", "subject", "html_body", "description", "updated_at"]
+        read_only_fields = ["name", "description", "updated_at"]
 
 
 class NotificationSerializer(serializers.ModelSerializer):

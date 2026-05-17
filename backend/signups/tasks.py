@@ -1,8 +1,9 @@
 from celery import shared_task
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.mail import send_mail
 from django.utils import timezone
+
+from notifications.email import send_html_email
 
 
 @shared_task
@@ -24,19 +25,17 @@ def send_admin_notification_email(signup_request_pk):
         return
 
     frontend_url = getattr(settings, "FRONTEND_URL", "").rstrip("/")
-    send_mail(
-        subject=f"[vels.online] New signup request: {req.org_name}",
-        message=(
-            f"A new signup request has been submitted.\n\n"
-            f"Name: {req.full_name}\n"
-            f"Email: {req.email}\n"
-            f"Organisation: {req.org_name}\n"
-            f"Intended use:\n{req.intended_use}\n\n"
-            f"Review at: {frontend_url}/admin/signup-requests"
-        ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=staff_emails,
-        fail_silently=False,
+    send_html_email(
+        "signup_request",
+        {
+            "full_name": req.full_name,
+            "email": req.email,
+            "org_name": req.org_name,
+            "intended_use": req.intended_use,
+            "review_url": f"{frontend_url}/admin/signup-requests",
+            "frontend_url": frontend_url,
+        },
+        staff_emails,
     )
 
 
@@ -53,19 +52,16 @@ def send_invite_email(signup_request_pk):
     flow_slug = getattr(settings, "AUTHENTIK_ENROLLMENT_FLOW_SLUG", "")
     invite_url = AuthentikClient().build_invite_url(flow_slug, str(req.invite_token))
 
-    send_mail(
-        subject="Your invitation to vels.online",
-        message=(
-            f"Hi {req.full_name},\n\n"
-            f"Your signup request for {req.approved_org_name} has been approved.\n\n"
-            f"Use the link below to create your account. "
-            f"This link expires in 7 days.\n\n"
-            f"{invite_url}\n\n"
-            f"If you did not request access, please ignore this email."
-        ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[req.email],
-        fail_silently=False,
+    frontend_url = getattr(settings, "FRONTEND_URL", "").rstrip("/")
+    send_html_email(
+        "invite",
+        {
+            "full_name": req.full_name,
+            "org_name": req.approved_org_name,
+            "invite_url": invite_url,
+            "frontend_url": frontend_url,
+        },
+        [req.email],
     )
 
 
@@ -78,21 +74,17 @@ def send_rejection_email_task(signup_request_pk):
     except SignupRequest.DoesNotExist:
         return
 
-    body = (
-        f"Hi {req.full_name},\n\n"
-        f"Unfortunately, your signup request for {req.org_name} has not been approved.\n\n"
-        f"Reason: {req.rejection_reason}\n"
-    )
-    if req.rejection_note:
-        body += f"\n{req.rejection_note}\n"
-    body += "\nYou may resubmit after 24 hours if circumstances change."
-
-    send_mail(
-        subject="Your signup request to vels.online",
-        message=body,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[req.email],
-        fail_silently=False,
+    frontend_url = getattr(settings, "FRONTEND_URL", "").rstrip("/")
+    send_html_email(
+        "rejection",
+        {
+            "full_name": req.full_name,
+            "org_name": req.org_name,
+            "rejection_reason": req.rejection_reason,
+            "rejection_note": req.rejection_note or "",
+            "frontend_url": frontend_url,
+        },
+        [req.email],
     )
 
 

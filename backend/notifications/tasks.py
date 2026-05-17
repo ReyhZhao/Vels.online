@@ -1,8 +1,9 @@
 from celery import shared_task
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.core.mail import send_mail
 from django.utils import timezone
+
+from .email import send_html_email
 
 
 @shared_task
@@ -25,23 +26,24 @@ def send_digest_email(recipient_id, incident_id):
     if not notifications:
         return
 
-    lines = []
-    for n in notifications:
-        title = n.payload.get("title", f"Notification: {n.kind}")
-        body = n.payload.get("body", "")
-        link = n.payload.get("link", "")
-        lines.append(f"• {title}")
-        if body:
-            lines.append(f"  {body}")
-        if link:
-            lines.append(f"  {link}")
+    items = [
+        {
+            "title": n.payload.get("title", f"Notification: {n.kind}"),
+            "body": n.payload.get("body", ""),
+            "link": n.payload.get("link", ""),
+        }
+        for n in notifications
+    ]
 
-    send_mail(
-        subject=f"Vels Online: {len(notifications)} notification(s) for you",
-        message="\n".join(lines),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[recipient.email],
-        fail_silently=False,
+    send_html_email(
+        "notification_digest",
+        {
+            "recipient_name": recipient.get_full_name() or recipient.username,
+            "count": len(notifications),
+            "items": items,
+            "frontend_url": getattr(settings, "FRONTEND_URL", "").rstrip("/"),
+        },
+        [recipient.email],
     )
 
     now = timezone.now()

@@ -27,6 +27,7 @@ import {
   Globe,
   History,
   CalendarClock,
+  Mail,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -305,6 +306,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                   </SidebarLink>
                   <SidebarLink to="/admin/tasks/scheduled" icon={CalendarClock} collapsed={collapsed}>
                     Scheduled Tasks
+                  </SidebarLink>
+                  <SidebarLink to="/admin/email-templates" icon={Mail} collapsed={collapsed}>
+                    Email Templates
                   </SidebarLink>
                   <div
                     className={cn(

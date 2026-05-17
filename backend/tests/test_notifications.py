@@ -439,7 +439,7 @@ def test_test_email_smtp_error_returns_500(client, staff):
     staff.email = "staff@example.com"
     staff.save()
     client.force_login(staff)
-    with patch("notifications.views.send_mail", side_effect=SMTPException("connection refused")):
+    with patch("notifications.email.EmailMultiAlternatives.send", side_effect=SMTPException("connection refused")):
         res = client.post("/api/admin/test-email/")
     assert res.status_code == 500
     assert "connection refused" in res.json()["detail"]
