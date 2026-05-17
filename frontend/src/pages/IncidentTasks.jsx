@@ -209,7 +209,7 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
               <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TASK_STATE_CLASSES[currentTask.state] ?? ''}`}>
                 {TASK_STATE_LABELS[currentTask.state] ?? currentTask.state}
               </span>
-              {isStaff && nextStates.map(s => (
+              {nextStates.map(s => (
                 <button
                   key={s}
                   onClick={() => changeState(s)}
