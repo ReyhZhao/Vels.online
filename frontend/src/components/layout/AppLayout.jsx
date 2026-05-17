@@ -28,7 +28,7 @@ function AppLayout() {
         </div>
         <div className="flex flex-1 overflow-hidden" ref={contentRef}>
           <AppSidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
-          <div className="flex flex-1 flex-col bg-background overflow-auto">
+          <div className="flex flex-1 flex-col bg-background overflow-auto thin-scrollbar">
             <Breadcrumb />
             <Outlet />
           </div>
