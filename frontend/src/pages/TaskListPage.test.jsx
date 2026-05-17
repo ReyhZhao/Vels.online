@@ -57,6 +57,26 @@ describe('TaskListPage', () => {
     expect(screen.getByText('Loading…')).toBeInTheDocument();
   });
 
+  it('renders Assignee column header', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('button', { name: /sort by assignee/i })).toBeInTheDocument());
+  });
+
+  it('shows — in Assignee column when assignee_username is absent', async () => {
+    renderPage();
+    await waitFor(() => screen.getByText('Review phishing email'));
+    const cells = screen.getAllByRole('cell');
+    const dashCells = cells.filter(c => c.textContent === '—');
+    expect(dashCells.length).toBeGreaterThan(0);
+  });
+
+  it('shows assignee_username in Assignee column when set', async () => {
+    const tasksWithAssignee = [{ ...TASKS[0], assignee: 5, assignee_username: 'bob' }];
+    api.get.mockResolvedValue(PAGE_RESPONSE(tasksWithAssignee));
+    renderPage();
+    await waitFor(() => expect(screen.getByText('bob')).toBeInTheDocument());
+  });
+
   it('shows task titles and state badges', async () => {
     renderPage();
     await waitFor(() => {

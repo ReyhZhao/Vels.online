@@ -6,9 +6,8 @@ vi.mock('../lib/axios', () => ({
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }));
 
-vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false }),
-}));
+const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
+vi.mock('../context/AuthContext', () => ({ useAuth: mockUseAuth }));
 
 import api from '../lib/axios';
 import IncidentTasks from './IncidentTasks';
@@ -86,7 +85,10 @@ function renderTasks(incidentId = '10', subjectId = null) {
 }
 
 describe('IncidentTasks', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false });
+  });
 
   // ── list rendering ────────────────────────────────────────────────────────
 
@@ -345,6 +347,42 @@ describe('IncidentTasks', () => {
     expect(screen.queryByRole('heading', { name: 'Step 1' })).not.toBeInTheDocument();
   });
 
+  it('shows Assignee column header in task table', async () => {
+    mockGet(TASKS, []);
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    expect(screen.getByRole('columnheader', { name: 'Assignee' })).toBeInTheDocument();
+  });
+
+  it('shows — in assignee column when assignee_username is null', async () => {
+    mockGet(TASKS, []);
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    const cells = screen.getAllByRole('cell');
+    const assigneeCells = cells.filter(c => c.textContent === '—');
+    expect(assigneeCells.length).toBeGreaterThan(0);
+  });
+
+  it('shows assignee_username in table when set', async () => {
+    const assignedTask = { ...TASKS[0], assignee: 5, assignee_username: 'bob' };
+    mockGet([assignedTask], []);
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    expect(screen.getByText('bob')).toBeInTheDocument();
+  });
+
+  it('non-staff sees read-only assignee in modal', async () => {
+    const assignedTask = { ...TASKS[0], assignee: 5, assignee_username: 'bob' };
+    mockGet([assignedTask], []);
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await waitFor(() => screen.getByRole('heading', { name: 'Step 1' }));
+    expect(screen.getAllByText('bob').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('combobox', { name: 'Assignee' })).not.toBeInTheDocument();
+  });
+
   it('only one modal is open at a time', async () => {
     mockGet(TASKS, []);
     const user = userEvent.setup();
@@ -354,5 +392,64 @@ describe('IncidentTasks', () => {
     await user.click(screen.getByText('Step 1').closest('tr'));
     await waitFor(() => screen.getByRole('heading', { name: 'Step 1' }));
     expect(screen.queryByRole('heading', { name: 'Step 2' })).not.toBeInTheDocument();
+  });
+});
+
+describe('IncidentTasks — staff assignee picker', () => {
+  const STAFF_USERS = [
+    { id: 2, username: 'bob' },
+    { id: 3, username: 'carol' },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: { id: 2, username: 'bob', is_staff: true }, isAuthenticated: true, isLoading: false });
+    api.get.mockImplementation(url => {
+      if (url.includes('/comments/')) return Promise.resolve({ data: [] });
+      if (url.includes('/tasks/')) return Promise.resolve({ data: TASKS });
+      if (url.includes('task-templates')) return Promise.resolve({ data: [] });
+      if (url.includes('staff-users')) return Promise.resolve({ data: STAFF_USERS });
+      return Promise.resolve({ data: [] });
+    });
+  });
+
+  it('staff sees assignee dropdown in modal', async () => {
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await waitFor(() => screen.getByRole('heading', { name: 'Step 1' }));
+    expect(screen.getByRole('combobox', { name: 'Assignee' })).toBeInTheDocument();
+  });
+
+  it('assignee dropdown includes Unassigned option and staff users', async () => {
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await waitFor(() => screen.getByRole('combobox', { name: 'Assignee' }));
+    const select = screen.getByRole('combobox', { name: 'Assignee' });
+    expect(select).toBeInTheDocument();
+    await waitFor(() => {
+      const options = Array.from(select.options).map(o => o.text);
+      expect(options).toContain('Unassigned');
+      expect(options).toContain('bob');
+      expect(options).toContain('carol');
+    });
+  });
+
+  it('selecting an assignee PATCHes the task', async () => {
+    api.patch.mockResolvedValue({ data: { ...TASKS[0], assignee: 2, assignee_username: 'bob' } });
+    const user = userEvent.setup();
+    renderTasks();
+    await waitFor(() => screen.getByText('Step 1'));
+    await user.click(screen.getByText('Step 1').closest('tr'));
+    await waitFor(() => screen.getByRole('combobox', { name: 'Assignee' }));
+    await waitFor(() => {
+      const select = screen.getByRole('combobox', { name: 'Assignee' });
+      expect(Array.from(select.options).map(o => o.text)).toContain('bob');
+    });
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Assignee' }), '2');
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/tasks/1/', { assignee: 2 }));
   });
 });

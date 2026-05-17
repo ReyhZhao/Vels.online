@@ -27,6 +27,7 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
   const [currentTask, setCurrentTask] = useState(task);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [staffUsers, setStaffUsers] = useState(null);
 
   useEffect(() => {
     function handleKey(e) {
@@ -35,6 +36,13 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
+
+  useEffect(() => {
+    if (!isStaff || staffUsers !== null) return;
+    api.get('/api/incidents/staff-users/')
+      .then(res => setStaffUsers(res.data))
+      .catch(() => setStaffUsers([]));
+  }, [isStaff, staffUsers]);
 
   async function changeState(newState) {
     setSaving(true);
@@ -45,6 +53,20 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
       onUpdate(res.data);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to update task.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeAssignee(userId) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await api.patch(`/api/tasks/${currentTask.id}/`, { assignee: userId });
+      setCurrentTask(res.data);
+      onUpdate(res.data);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to update assignee.');
     } finally {
       setSaving(false);
     }
@@ -87,6 +109,27 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
           ) : (
             <p className="text-sm text-muted-foreground italic">No description.</p>
           )}
+
+          {/* Assignee */}
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground shrink-0">Assigned to:</span>
+            {isStaff ? (
+              <select
+                value={currentTask.assignee ?? ''}
+                onChange={e => changeAssignee(e.target.value === '' ? null : Number(e.target.value))}
+                disabled={saving}
+                className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                aria-label="Assignee"
+              >
+                <option value="">Unassigned</option>
+                {(staffUsers ?? []).map(u => (
+                  <option key={u.id} value={u.id}>{u.username}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-foreground">{currentTask.assignee_username ?? 'Unassigned'}</span>
+            )}
+          </div>
 
           {/* State badge + action buttons */}
           <div className="flex flex-wrap items-center gap-2">
@@ -156,6 +199,7 @@ function TaskRow({ task, onSelect }) {
           {TASK_STATE_LABELS[task.state] ?? task.state}
         </span>
       </td>
+      <td className="px-3 py-2 text-xs text-muted-foreground">{task.assignee_username ?? '—'}</td>
     </tr>
   );
 }
@@ -173,6 +217,7 @@ function TaskGroup({ groupName, tasks, onSelect }) {
               <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-8">#</th>
               <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Title</th>
               <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">State</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Assignee</th>
             </tr>
           </thead>
           <tbody>

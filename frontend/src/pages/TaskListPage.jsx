@@ -21,6 +21,7 @@ const STATE_OPTIONS = ['new', 'in_progress', 'done', 'cancelled'];
 const SORT_COLUMNS = {
   title:      { label: 'Title',    defaultOrder: 'asc'  },
   state:      { label: 'State',    defaultOrder: 'asc'  },
+  assignee:   { label: 'Assignee', defaultOrder: 'asc'  },
   incident:   { label: 'Incident', defaultOrder: 'asc'  },
   created_at: { label: 'Created',  defaultOrder: 'desc' },
 };
@@ -122,7 +123,7 @@ export default function TaskListPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              {['title', 'state', 'incident', 'created_at'].map(field => (
+              {['title', 'state', 'assignee', 'incident', 'created_at'].map(field => (
                 <th key={field} className="px-4 py-3 text-left font-medium text-muted-foreground">
                   <button
                     onClick={() => setSort(field)}
@@ -141,11 +142,11 @@ export default function TaskListPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
             ) : results.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">No tasks found.</td>
+                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No tasks found.</td>
               </tr>
             ) : (
               results.map(task => (
@@ -156,6 +157,7 @@ export default function TaskListPage() {
                       {TASK_STATE_LABELS[task.state] ?? task.state}
                     </span>
                   </td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">{task.assignee_username ?? '—'}</td>
                   <td className="px-4 py-3">
                     {task.incident_display_id ? (
                       <Link
