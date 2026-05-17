@@ -311,48 +311,96 @@ function TaskGroup({ groupName, tasks, onSelect }) {
   );
 }
 
-// ── Add-hoc form (unchanged) ──────────────────────────────────────────────────
+// ── Add-hoc form ──────────────────────────────────────────────────────────────
 
-function AddAdHocForm({ incidentId, onAdded }) {
+function AddAdHocForm({ incidentId, onAdded, isStaff }) {
   const [title, setTitle] = useState('');
+  const [taskType, setTaskType] = useState('manual');
+  const [automationId, setAutomationId] = useState('');
+  const [automations, setAutomations] = useState(null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!isStaff) return;
+    api.get('/api/automations/').then(res => setAutomations(res.data)).catch(() => setAutomations([]));
+  }, [isStaff]);
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!title.trim()) return;
+    if (taskType === 'automated' && !automationId) {
+      setError('Please select an automation.');
+      return;
+    }
     setAdding(true);
     setError(null);
     try {
-      const res = await api.post(`/api/incidents/${incidentId}/tasks/`, {
-        title: title.trim(),
-        display_order: 0,
-      });
+      const payload = { title: title.trim(), display_order: 0 };
+      if (isStaff) {
+        payload.task_type = taskType;
+        if (taskType === 'automated') payload.automation = Number(automationId);
+      }
+      const res = await api.post(`/api/incidents/${incidentId}/tasks/`, payload);
       onAdded(res.data);
       setTitle('');
+      setTaskType('manual');
+      setAutomationId('');
     } catch (err) {
-      setError(err.response?.data?.title?.[0] || 'Failed to add task.');
+      const detail = err.response?.data;
+      setError(detail?.automation?.[0] || detail?.title?.[0] || detail?.detail || 'Failed to add task.');
     } finally {
       setAdding(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 items-center">
-      <input
-        value={title}
-        onChange={e => setTitle(e.target.value)}
-        placeholder="Ad-hoc task title"
-        disabled={adding}
-        className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-      />
-      <button
-        type="submit"
-        disabled={adding || !title.trim()}
-        className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-      >
-        Add task
-      </button>
+    <form onSubmit={handleSubmit} className="space-y-2">
+      <div className="flex gap-2 items-center flex-wrap">
+        <input
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          placeholder="Ad-hoc task title"
+          disabled={adding}
+          className="flex-1 min-w-48 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+        />
+        {isStaff && (
+          <div className="flex items-center rounded-md border border-border bg-background text-sm overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setTaskType('manual')}
+              className={`px-3 py-2 font-medium transition-colors ${taskType === 'manual' ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'}`}
+            >
+              Manual
+            </button>
+            <button
+              type="button"
+              onClick={() => setTaskType('automated')}
+              className={`px-3 py-2 font-medium transition-colors ${taskType === 'automated' ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'}`}
+            >
+              Automated
+            </button>
+          </div>
+        )}
+        {isStaff && taskType === 'automated' && (
+          <select
+            value={automationId}
+            onChange={e => setAutomationId(e.target.value)}
+            disabled={adding}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          >
+            <option value="">Select automation…</option>
+            {(automations ?? []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        )}
+        <button
+          type="submit"
+          disabled={adding || !title.trim() || (isStaff && taskType === 'automated' && !automationId)}
+          className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          Add task
+        </button>
+      </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </form>
   );
@@ -500,7 +548,7 @@ export default function IncidentTasks({ incidentId, subjectId, refreshKey }) {
         </div>
       )}
 
-      <AddAdHocForm incidentId={incidentId} onAdded={handleTaskAdded} />
+      <AddAdHocForm incidentId={incidentId} onAdded={handleTaskAdded} isStaff={user?.is_staff ?? false} />
 
       {selectedTask && (
         <TaskModal
