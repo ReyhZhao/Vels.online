@@ -127,6 +127,7 @@ def test_import_post_non_staff_forbidden(client, acme_member):
 @patch("ingress.views.BunkerWebClient")
 def test_import_post_happy_path(MockClient, mock_dns, client, staff, acme):
     MockClient.return_value.list_services.return_value = BW_SERVICES
+    MockClient.return_value.get_service_settings.return_value = {}
     client.force_login(staff)
     res = client.post(
         "/api/ingress/routes/import/?org=acme",
@@ -148,6 +149,7 @@ def test_import_post_happy_path(MockClient, mock_dns, client, staff, acme):
 @patch("ingress.views.BunkerWebClient")
 def test_import_post_does_not_call_create_service(MockClient, client, staff, acme):
     MockClient.return_value.list_services.return_value = BW_SERVICES
+    MockClient.return_value.get_service_settings.return_value = {}
     client.force_login(staff)
     client.post(
         "/api/ingress/routes/import/?org=acme",
@@ -161,6 +163,7 @@ def test_import_post_does_not_call_create_service(MockClient, client, staff, acm
 @patch("ingress.views.BunkerWebClient")
 def test_import_post_backend_type_is_direct(MockClient, client, staff, acme):
     MockClient.return_value.list_services.return_value = BW_SERVICES
+    MockClient.return_value.get_service_settings.return_value = {}
     client.force_login(staff)
     client.post(
         "/api/ingress/routes/import/?org=acme",
@@ -233,3 +236,50 @@ def test_import_post_empty_fqdns_returns_400(MockClient, client, staff, acme):
         content_type="application/json",
     )
     assert res.status_code == 400
+
+
+# ── backend extraction from REVERSE_PROXY_HOST ───────────────────────────────
+
+BW_SERVICES_NO_BACKEND = [
+    {"server_name": "a.example.com"},
+]
+
+
+@pytest.mark.django_db
+@patch("ingress.views.check_route_dns")
+@patch("ingress.views.BunkerWebClient")
+def test_import_extracts_backend_from_reverse_proxy_host(MockClient, mock_dns, client, staff, acme):
+    MockClient.return_value.list_services.return_value = BW_SERVICES_NO_BACKEND
+    MockClient.return_value.get_service_settings.return_value = {
+        "REVERSE_PROXY_HOST": "10.5.0.1:8080",
+        "REVERSE_PROXY_SCHEME": "https",
+    }
+    client.force_login(staff)
+    res = client.post(
+        "/api/ingress/routes/import/?org=acme",
+        {"fqdns": ["a.example.com"]},
+        content_type="application/json",
+    )
+    assert res.status_code == 201
+    route = Route.objects.get(fqdn="a.example.com")
+    assert route.backend_host == "10.5.0.1"
+    assert route.backend_port == 8080
+    assert route.backend_protocol == "https"
+
+
+@pytest.mark.django_db
+@patch("ingress.views.check_route_dns")
+@patch("ingress.views.BunkerWebClient")
+def test_import_falls_back_gracefully_when_settings_fetch_fails(MockClient, mock_dns, client, staff, acme):
+    from ingress.bunkerweb import BunkerWebError
+    MockClient.return_value.list_services.return_value = BW_SERVICES_NO_BACKEND
+    MockClient.return_value.get_service_settings.side_effect = BunkerWebError(502, "error")
+    client.force_login(staff)
+    res = client.post(
+        "/api/ingress/routes/import/?org=acme",
+        {"fqdns": ["a.example.com"]},
+        content_type="application/json",
+    )
+    assert res.status_code == 201
+    route = Route.objects.get(fqdn="a.example.com")
+    assert route.backend_host == ""

@@ -299,11 +299,32 @@ class RouteImportView(APIView):
         created = []
         for fqdn in fqdns:
             svc = bw_map[fqdn]
+            backend_host = svc.get("backend_host", "")
+            backend_port = svc.get("backend_port", 80)
+            backend_protocol = svc.get("backend_protocol", Route.PROTOCOL_HTTP)
+            try:
+                svc_settings = BunkerWebClient().get_service_settings(fqdn)
+                rp_host = svc_settings.get("REVERSE_PROXY_HOST", "")
+                if rp_host:
+                    if ":" in rp_host:
+                        host_part, port_part = rp_host.rsplit(":", 1)
+                        try:
+                            backend_port = int(port_part)
+                        except ValueError:
+                            host_part = rp_host
+                        backend_host = host_part
+                    else:
+                        backend_host = rp_host
+                rp_scheme = svc_settings.get("REVERSE_PROXY_SCHEME", "")
+                if rp_scheme in (Route.PROTOCOL_HTTP, Route.PROTOCOL_HTTPS):
+                    backend_protocol = rp_scheme
+            except BunkerWebError:
+                pass
             route = Route.objects.create(
                 fqdn=fqdn,
-                backend_host=svc.get("backend_host", ""),
-                backend_port=svc.get("backend_port", 80),
-                backend_protocol=svc.get("backend_protocol", Route.PROTOCOL_HTTP),
+                backend_host=backend_host,
+                backend_port=backend_port,
+                backend_protocol=backend_protocol,
                 backend_type=Route.TYPE_DIRECT,
                 organization=org,
                 status=Route.STATUS_ACTIVE,

@@ -99,7 +99,7 @@ function ImportModal({ open, onClose, onImported, orgSlug }) {
                 <div>
                   <p className="text-sm font-medium text-foreground">{c.server_name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {c.backend_protocol}://{c.backend_host}:{c.backend_port}
+                    {c.backend_host ? `${c.backend_protocol}://${c.backend_host}:${c.backend_port}` : '—'}
                   </p>
                 </div>
               </label>
@@ -293,7 +293,7 @@ export default function RouteList() {
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
                   <Server className="h-3 w-3 flex-shrink-0" />
-                  <span className="truncate">{route.backend_protocol}://{route.backend_host}:{route.backend_port}</span>
+                  <span className="truncate">{route.backend_host ? `${route.backend_protocol}://${route.backend_host}:${route.backend_port}` : '—'}</span>
                 </div>
                 <div className="mt-4 flex items-center justify-end">
                   <span className="text-xs text-muted-foreground group-hover:text-primary transition-colors flex items-center gap-1">

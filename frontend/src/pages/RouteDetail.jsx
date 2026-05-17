@@ -87,7 +87,7 @@ export default function RouteDetail() {
           </div>
           {route.name && <p className="text-sm text-muted-foreground">{route.name}</p>}
           <p className="text-sm text-muted-foreground">
-            {route.backend_protocol}://{route.backend_host}:{route.backend_port}
+            {route.backend_host ? `${route.backend_protocol}://${route.backend_host}:${route.backend_port}` : '—'}
           </p>
         </div>
 

@@ -96,6 +96,29 @@ describe('RouteList', () => {
     });
   });
 
+  it('shows em-dash when backend_host is empty', async () => {
+    const routeNoHost = { ...ROUTES[0], backend_host: '' };
+    api.get.mockResolvedValue({ data: [routeNoHost] });
+    renderPage();
+    await waitFor(() => screen.getByText('app.example.com'));
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.queryByText('http://:8080')).not.toBeInTheDocument();
+  });
+
+  it('shows em-dash in import modal when candidate has no backend_host', async () => {
+    useAuth.mockReturnValue({ user: { id: 1, is_staff: true } });
+    const candidateNoHost = { server_name: 'x.example.com', backend_host: '', backend_port: 80, backend_protocol: 'http' };
+    api.get
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: { candidates: [candidateNoHost] } });
+    render(<MemoryRouter><RouteList /></MemoryRouter>);
+    await waitFor(() => screen.getByText('Import from BunkerWeb'));
+    fireEvent.click(screen.getByText('Import from BunkerWeb'));
+    await waitFor(() => screen.getByText('x.example.com'));
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.queryByText('http://:80')).not.toBeInTheDocument();
+  });
+
   it('shows error state on fetch failure', async () => {
     api.get.mockRejectedValue(new Error('network error'));
     renderPage();
