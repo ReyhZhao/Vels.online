@@ -316,5 +316,8 @@ class RouteImportView(APIView):
 class IngressSettingsView(APIView):
     def get(self, request):
         return Response(
-            {"bunkerweb_public_ip": getattr(django_settings, "BUNKERWEB_PUBLIC_IP", "")}
+            {
+                "bunkerweb_public_ip": getattr(django_settings, "BUNKERWEB_PUBLIC_IP", ""),
+                "bunkerweb_public_fqdn": getattr(django_settings, "BUNKERWEB_PUBLIC_FQDN", ""),
+            }
         )

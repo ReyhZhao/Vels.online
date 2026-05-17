@@ -208,6 +208,7 @@ GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 BUNKERWEB_API_URL = os.environ.get("BUNKERWEB_API_URL", "")
 BUNKERWEB_API_TOKEN = os.environ.get("BUNKERWEB_API_TOKEN", "")
 BUNKERWEB_PUBLIC_IP = os.environ.get("BUNKERWEB_PUBLIC_IP", "")
+BUNKERWEB_PUBLIC_FQDN = os.environ.get("BUNKERWEB_PUBLIC_FQDN", "")
 
 AUTHENTIK_API_TOKEN = os.environ.get("AUTHENTIK_API_TOKEN", "")
 AUTHENTIK_API_URL = os.environ.get("AUTHENTIK_API_URL", "")

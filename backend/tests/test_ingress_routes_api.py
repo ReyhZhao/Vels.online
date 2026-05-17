@@ -274,7 +274,19 @@ def test_delete_staff_bypass(MockClient, client, staff, contoso):
 @pytest.mark.django_db
 def test_settings_returns_bunkerweb_ip(client, acme_member, settings):
     settings.BUNKERWEB_PUBLIC_IP = "203.0.113.42"
+    settings.BUNKERWEB_PUBLIC_FQDN = ""
     client.force_login(acme_member)
     res = client.get("/api/ingress/settings/")
     assert res.status_code == 200
     assert res.json()["bunkerweb_public_ip"] == "203.0.113.42"
+    assert res.json()["bunkerweb_public_fqdn"] == ""
+
+
+@pytest.mark.django_db
+def test_settings_returns_bunkerweb_fqdn(client, acme_member, settings):
+    settings.BUNKERWEB_PUBLIC_IP = "203.0.113.42"
+    settings.BUNKERWEB_PUBLIC_FQDN = "bw.example.com"
+    client.force_login(acme_member)
+    res = client.get("/api/ingress/settings/")
+    assert res.status_code == 200
+    assert res.json()["bunkerweb_public_fqdn"] == "bw.example.com"

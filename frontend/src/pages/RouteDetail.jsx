@@ -26,10 +26,18 @@ export default function RouteDetail() {
   const [reportsOpened, setReportsOpened] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [bwTarget, setBwTarget] = useState(null);
 
   useEffect(() => {
     api.get(`/api/ingress/routes/${fqdn}/`)
-      .then(res => setRoute(res.data))
+      .then(res => {
+        setRoute(res.data);
+        if (res.data.dns_ok === false) {
+          api.get('/api/ingress/settings/')
+            .then(s => setBwTarget(s.data.bunkerweb_public_fqdn || s.data.bunkerweb_public_ip || null))
+            .catch(() => {});
+        }
+      })
       .catch(() => setError('Route not found.'))
       .finally(() => setLoading(false));
   }, [fqdn]);
@@ -57,7 +65,10 @@ export default function RouteDetail() {
           <span className="font-medium text-yellow-800 dark:text-yellow-300">DNS not yet pointing to BunkerWeb</span>
           {' — '}
           <span className="text-yellow-700 dark:text-yellow-400">
-            ensure your FQDN resolves to the BunkerWeb public IP.
+            {bwTarget
+              ? <>set your DNS record to point to <code className="font-mono bg-yellow-100 dark:bg-yellow-900/50 px-1 rounded">{bwTarget}</code></>
+              : 'ensure your FQDN resolves to the BunkerWeb public IP.'
+            }
           </span>
         </div>
       )}

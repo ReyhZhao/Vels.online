@@ -123,6 +123,48 @@ describe('RouteDetail', () => {
     expect(screen.getByTestId('route-reports')).toBeInTheDocument();
   });
 
+  it('shows FQDN in DNS banner when bunkerweb_public_fqdn is set', async () => {
+    api.get.mockImplementation(url => {
+      if (url.includes('/api/ingress/settings/')) return Promise.resolve({ data: { bunkerweb_public_fqdn: 'bw.example.com', bunkerweb_public_ip: '1.2.3.4' } });
+      return Promise.resolve({ data: { ...ROUTE, dns_ok: false } });
+    });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('bw.example.com')
+    );
+    expect(screen.queryByText('1.2.3.4')).not.toBeInTheDocument();
+  });
+
+  it('falls back to IP in DNS banner when only bunkerweb_public_ip is set', async () => {
+    api.get.mockImplementation(url => {
+      if (url.includes('/api/ingress/settings/')) return Promise.resolve({ data: { bunkerweb_public_fqdn: '', bunkerweb_public_ip: '1.2.3.4' } });
+      return Promise.resolve({ data: { ...ROUTE, dns_ok: false } });
+    });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('1.2.3.4')
+    );
+  });
+
+  it('shows generic DNS message when both bunkerweb settings are empty', async () => {
+    api.get.mockImplementation(url => {
+      if (url.includes('/api/ingress/settings/')) return Promise.resolve({ data: { bunkerweb_public_fqdn: '', bunkerweb_public_ip: '' } });
+      return Promise.resolve({ data: { ...ROUTE, dns_ok: false } });
+    });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('ensure your FQDN resolves to the BunkerWeb public IP')
+    );
+  });
+
+  it('does not fetch ingress settings when dns_ok is true', async () => {
+    api.get.mockResolvedValue({ data: ROUTE });
+    renderPage();
+    await waitFor(() => screen.getByText('app.example.com'));
+    const settingsCalls = api.get.mock.calls.filter(c => c[0].includes('/api/ingress/settings/'));
+    expect(settingsCalls).toHaveLength(0);
+  });
+
   it('deletes route and navigates away', async () => {
     api.get.mockResolvedValue({ data: ROUTE });
     api.delete.mockResolvedValue({});

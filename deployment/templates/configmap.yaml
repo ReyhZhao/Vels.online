@@ -4,3 +4,4 @@ metadata:
   name: backend-config
 data:
   EMAIL_SSL_NO_VERIFY: "True"
+  BUNKERWEB_PUBLIC_FQDN: proxy.vels.online
