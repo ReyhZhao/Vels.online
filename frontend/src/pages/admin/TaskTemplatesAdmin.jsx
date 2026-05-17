@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/axios';
 
-function ItemRow({ item, templateId, onUpdate, onDelete }) {
+function ItemRow({ item, templateId, onUpdate, onDelete, automations }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description || '');
   const [order, setOrder] = useState(item.display_order);
+  const [automationId, setAutomationId] = useState(item.automation ?? '');
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -13,6 +14,7 @@ function ItemRow({ item, templateId, onUpdate, onDelete }) {
     try {
       const res = await api.patch(`/api/task-templates/${templateId}/items/${item.id}/`, {
         title, description, display_order: Number(order),
+        automation: automationId === '' ? null : Number(automationId),
       });
       onUpdate(res.data);
       setEditing(false);
@@ -49,6 +51,17 @@ function ItemRow({ item, templateId, onUpdate, onDelete }) {
             placeholder="Description"
             className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
           />
+          <select
+            value={automationId}
+            onChange={e => setAutomationId(e.target.value)}
+            disabled={saving}
+            className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+          >
+            <option value="">No automation</option>
+            {(automations ?? []).map(a => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
         </td>
         <td className="px-3 py-2">
           <div className="flex gap-2">
@@ -69,6 +82,11 @@ function ItemRow({ item, templateId, onUpdate, onDelete }) {
       <td className="px-3 py-2 text-xs text-muted-foreground w-12">{item.display_order}</td>
       <td className="px-3 py-2 text-sm font-medium text-foreground">{item.title}</td>
       <td className="px-3 py-2 text-sm text-muted-foreground max-w-xs truncate">{item.description || '—'}</td>
+      <td className="px-3 py-2 text-xs text-muted-foreground">
+        {item.automation_name
+          ? <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-xs text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">{item.automation_name}</span>
+          : '—'}
+      </td>
       <td className="px-3 py-2">
         <div className="flex gap-2">
           <button onClick={() => setEditing(true)} className="text-xs text-muted-foreground hover:text-foreground hover:underline">Edit</button>
@@ -81,10 +99,16 @@ function ItemRow({ item, templateId, onUpdate, onDelete }) {
 
 function TemplateEditor({ template, onClose, onTemplateUpdate }) {
   const [items, setItems] = useState(template.items || []);
+  const [automations, setAutomations] = useState([]);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
+  const [newAutomation, setNewAutomation] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState(null);
+
+  useEffect(() => {
+    api.get('/api/automations/').then(res => setAutomations(res.data)).catch(() => {});
+  }, []);
 
   async function handleAddItem(e) {
     e.preventDefault();
@@ -97,10 +121,12 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
         title: newTitle.trim(),
         description: newDesc.trim(),
         display_order: nextOrder,
+        automation: newAutomation === '' ? null : Number(newAutomation),
       });
       setItems(prev => [...prev, res.data].sort((a, b) => a.display_order - b.display_order));
       setNewTitle('');
       setNewDesc('');
+      setNewAutomation('');
     } catch (err) {
       setAddError(err.response?.data?.title?.[0] || 'Failed to add item.');
     } finally {
@@ -118,7 +144,7 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 pt-12 pb-12">
-      <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-6 shadow-lg space-y-5 mx-4">
+      <div className="w-full max-w-3xl rounded-lg border border-border bg-card p-6 shadow-lg space-y-5 mx-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">{template.name}</h2>
@@ -134,12 +160,13 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
                 <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-12">#</th>
                 <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Title</th>
                 <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Description</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Automation</th>
                 <th className="px-3 py-2 w-20" />
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={4} className="px-3 py-4 text-center text-sm text-muted-foreground">No items yet.</td></tr>
+                <tr><td colSpan={5} className="px-3 py-4 text-center text-sm text-muted-foreground">No items yet.</td></tr>
               ) : (
                 items.map(item => (
                   <ItemRow
@@ -148,6 +175,7 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
                     templateId={template.id}
                     onUpdate={handleItemUpdate}
                     onDelete={handleItemDelete}
+                    automations={automations}
                   />
                 ))
               )}
@@ -157,21 +185,30 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
 
         <form onSubmit={handleAddItem} className="space-y-2">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Add item</p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <input
               value={newTitle}
               onChange={e => setNewTitle(e.target.value)}
               placeholder="Title"
               disabled={adding}
-              className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              className="flex-1 min-w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             />
             <input
               value={newDesc}
               onChange={e => setNewDesc(e.target.value)}
               placeholder="Description (optional)"
               disabled={adding}
-              className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              className="flex-1 min-w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             />
+            <select
+              value={newAutomation}
+              onChange={e => setNewAutomation(e.target.value)}
+              disabled={adding}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+            >
+              <option value="">No automation</option>
+              {automations.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
             <button
               type="submit"
               disabled={adding || !newTitle.trim()}
