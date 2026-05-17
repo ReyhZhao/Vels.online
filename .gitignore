@@ -191,3 +191,4 @@ test.db
 .sandcastle/*
 *-lock.*
 *.swp
+/backend/db_dev.sqlite3
