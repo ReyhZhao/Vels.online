@@ -1,3 +1,6 @@
+// Required by vite-plugin-pwa injectManifest strategy — plugin injects precache manifest here
+self.__WB_MANIFEST;
+
 self.addEventListener('push', event => {
   const data = event.data?.json() ?? {};
   event.waitUntil(
