@@ -165,7 +165,17 @@ export default function IncidentList() {
   const [bulkResult, setBulkResult]   = useState(null);
   const pollRef = useRef(null);
 
-  const activeTab = searchParams.get('tab') || '';
+  const activeTab = searchParams.get('tab') ?? '';
+
+  useEffect(() => {
+    if (!searchParams.has('tab')) {
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', 'my_queue');
+        return next;
+      }, { replace: true });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchIncidents = useCallback(async (params, { silent = false } = {}) => {
     if (!silent) {
