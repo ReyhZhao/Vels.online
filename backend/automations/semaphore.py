@@ -1,3 +1,4 @@
+import json
 import logging
 
 import requests
@@ -77,7 +78,8 @@ class SemaphoreClient:
         """Launch a Semaphore task and return the task ID integer."""
         payload = {"template_id": template_id}
         if extra_vars:
-            payload["environment"] = {"ENV": extra_vars}
+            # Semaphore expects `environment` as a JSON-encoded string of string values.
+            payload["environment"] = json.dumps({k: str(v) for k, v in extra_vars.items()})
         resp = self._post(f"/project/{self._project_id}/tasks", json=payload)
         self._check(resp)
         return resp.json()["id"]
