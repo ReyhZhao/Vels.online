@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Case, F, IntegerField, Q, Value, When
+from django.http import QueryDict
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import status
@@ -385,6 +386,7 @@ class IncidentBulkActionView(APIView):
             return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
 
         action = request.data.get("action")
+        select_all = request.data.get("select_all", False)
         ids = request.data.get("ids")
 
         if action not in ("close", "reassign"):
@@ -393,7 +395,24 @@ class IncidentBulkActionView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not isinstance(ids, list) or not ids or not all(isinstance(i, int) for i in ids):
+        if select_all:
+            filters = request.data.get("filters", {})
+            fake_get = QueryDict(mutable=True)
+            fake_get.update(filters)
+            original_get = request._request.GET
+            request._request.GET = fake_get
+            try:
+                qs = filter_incidents_for_user(
+                    Incident.objects.select_related("organization", "created_by", "assignee"),
+                    request.user,
+                )
+                qs = _apply_incident_filters(qs, request)
+                ids = list(qs.values_list("id", flat=True))
+            finally:
+                request._request.GET = original_get
+            if not ids:
+                return Response({"detail": "No incidents match the given filters."}, status=400)
+        elif not isinstance(ids, list) or not ids or not all(isinstance(i, int) for i in ids):
             return Response(
                 {"detail": "ids must be a non-empty list of integers."},
                 status=status.HTTP_400_BAD_REQUEST,

@@ -244,3 +244,47 @@ def test_bulk_staff_can_act_on_any_org(client, staff, acme, contoso):
     assert own.id in data["succeeded"]
     assert other.id in data["succeeded"]
     assert data["failed"] == []
+
+
+# ── select_all mode ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_bulk_close_select_all(client, staff, acme):
+    incidents = [
+        make_incident(acme, state="new", display_id=f"INC-2026-{100 + i:04d}")
+        for i in range(30)
+    ]
+    client.force_login(staff)
+    response = client.post(
+        "/api/incidents/bulk/",
+        {"action": "close", "select_all": True, "filters": {}, "closure_reason": "resolved"},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["succeeded"]) == 30
+    assert data["failed"] == []
+    for inc in incidents:
+        inc.refresh_from_db()
+        assert inc.state == "closed"
+
+
+@pytest.mark.django_db
+def test_bulk_close_select_all_with_state_filter(client, staff, acme):
+    new_inc = make_incident(acme, state="new", display_id="INC-2026-0200")
+    resolved_inc = make_incident(acme, state="resolved", display_id="INC-2026-0201")
+    client.force_login(staff)
+    response = client.post(
+        "/api/incidents/bulk/",
+        {"action": "close", "select_all": True, "filters": {"state": "new"}, "closure_reason": "resolved"},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert new_inc.id in data["succeeded"]
+    assert resolved_inc.id not in data["succeeded"]
+    new_inc.refresh_from_db()
+    resolved_inc.refresh_from_db()
+    assert new_inc.state == "closed"
+    assert resolved_inc.state == "resolved"

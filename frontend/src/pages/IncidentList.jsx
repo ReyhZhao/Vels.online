@@ -158,6 +158,7 @@ export default function IncidentList() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectAllPages, setSelectAllPages] = useState(false);
   const [bulkAction, setBulkAction]   = useState(null);
   const [staffUsers, setStaffUsers]   = useState([]);
   const [bulkLoading, setBulkLoading] = useState(false);
@@ -206,6 +207,7 @@ export default function IncidentList() {
   }, [searchParams, fetchIncidents]);
 
   function setParam(key, value) {
+    setSelectAllPages(false);
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       if (value === null || value === '') next.delete(key);
@@ -216,6 +218,7 @@ export default function IncidentList() {
   }
 
   function setTab(tabKey) {
+    setSelectAllPages(false);
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       if (tabKey) next.set('tab', tabKey);
@@ -226,6 +229,7 @@ export default function IncidentList() {
   }
 
   function setPage(p) {
+    setSelectAllPages(false);
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.set('page', p);
@@ -237,6 +241,7 @@ export default function IncidentList() {
   const sortOrder = searchParams.get('order') || 'asc';
 
   function setSort(field) {
+    setSelectAllPages(false);
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       if (sortKey === field) {
@@ -309,14 +314,14 @@ export default function IncidentList() {
     setBulkError(null);
     setBulkResult(null);
     try {
-      const res = await api.post('/api/incidents/bulk/', {
-        action,
-        ids: [...selectedIds],
-        ...extra,
-      });
+      const payload = selectAllPages
+        ? { action, select_all: true, filters: Object.fromEntries(searchParams), ...extra }
+        : { action, ids: [...selectedIds], ...extra };
+      const res = await api.post('/api/incidents/bulk/', payload);
       const { succeeded, failed } = res.data;
       setBulkResult({ succeeded: succeeded.length, failed });
       setSelectedIds(new Set());
+      setSelectAllPages(false);
       setBulkAction(null);
       fetchIncidents(Object.fromEntries(searchParams.entries()), { silent: true });
     } catch (err) {
@@ -476,10 +481,33 @@ export default function IncidentList() {
             </span>
           )}
           <button
-            onClick={() => { setSelectedIds(new Set()); setBulkResult(null); setBulkError(null); }}
+            onClick={() => { setSelectedIds(new Set()); setSelectAllPages(false); setBulkResult(null); setBulkError(null); }}
             className="ml-auto text-xs text-muted-foreground hover:text-foreground"
           >
             Clear
+          </button>
+        </div>
+      )}
+
+      {user?.is_staff && allVisibleSelected && total_pages > 1 && !selectAllPages && (
+        <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-4 py-2 text-sm text-blue-800 dark:text-blue-300">
+          All <strong>{per_page}</strong> incidents on this page are selected.{' '}
+          <button
+            onClick={() => setSelectAllPages(true)}
+            className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
+          >
+            Select all {count} incidents matching these filters
+          </button>
+        </div>
+      )}
+      {user?.is_staff && selectAllPages && (
+        <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-4 py-2 text-sm text-blue-800 dark:text-blue-300">
+          All <strong>{count}</strong> incidents are selected.{' '}
+          <button
+            onClick={() => { setSelectAllPages(false); setSelectedIds(new Set()); }}
+            className="underline font-medium hover:text-blue-600 dark:hover:text-blue-200"
+          >
+            Clear selection
           </button>
         </div>
       )}
