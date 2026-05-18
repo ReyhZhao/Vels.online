@@ -146,7 +146,7 @@ class OpenSearchClient:
     def get_vulnerability_by_id(self, agent_id, vuln_id):
         body = {
             "query": {"bool": {"filter": [
-                {"ids": {"values": [vuln_id]}},
+                {"term": {"vulnerability.id": vuln_id}},
                 {"term": {"agent.id": str(agent_id)}},
             ]}},
             "size": 1,

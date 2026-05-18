@@ -391,9 +391,9 @@ def test_get_vulnerability_by_id_filters_by_agent_and_document_id(mock_post):
     OpenSearchClient().get_vulnerability_by_id("042", "vuln-xyz")
     body = mock_post.call_args[1]["json"]
     filters = body["query"]["bool"]["filter"]
-    ids_filter = next(f for f in filters if "ids" in f)
-    agent_filter = next(f for f in filters if "term" in f)
-    assert ids_filter["ids"]["values"] == ["vuln-xyz"]
+    vuln_filter = next(f for f in filters if "term" in f and "vulnerability.id" in f.get("term", {}))
+    agent_filter = next(f for f in filters if "term" in f and "agent.id" in f.get("term", {}))
+    assert vuln_filter["term"]["vulnerability.id"] == "vuln-xyz"
     assert agent_filter["term"]["agent.id"] == "042"
 
 
