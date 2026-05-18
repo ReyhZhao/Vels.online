@@ -337,7 +337,7 @@ class OrgInviteView(APIView):
         # Create an Authentik invitation
         expires_at = timezone.now() + timedelta(days=7)
         try:
-            invitation = client.create_invitation(flow_uuid, expires_at, name=f"org-invite-{org.slug}-{email}")
+            invitation = client.create_invitation(flow_uuid, expires_at, name=f"org-invite-{org.slug}-{slugify(email)}")
         except AuthentikAPIError as exc:
             return Response({"detail": f"Failed to create invitation: {exc}"}, status=502)
 
