@@ -2,6 +2,8 @@ from django.urls import path
 
 from .views import (
     ApplyTemplateView,
+    IncidentAssetLinkView,
+    IncidentAssetUnlinkView,
     IncidentAttachmentConfirmView,
     IncidentAttachmentDeleteView,
     IncidentAttachmentDownloadView,
@@ -38,4 +40,6 @@ urlpatterns = [
     path("<str:display_id>/attachments/<int:attachment_id>/confirm/", IncidentAttachmentConfirmView.as_view()),
     path("<str:display_id>/attachments/<int:attachment_id>/download/", IncidentAttachmentDownloadView.as_view()),
     path("<str:display_id>/attachments/<int:attachment_id>/", IncidentAttachmentDeleteView.as_view()),
+    path("<str:display_id>/assets/", IncidentAssetLinkView.as_view()),
+    path("<str:display_id>/assets/<int:asset_id>/", IncidentAssetUnlinkView.as_view()),
 ]

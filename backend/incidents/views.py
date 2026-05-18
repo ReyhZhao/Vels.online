@@ -20,12 +20,14 @@ from security.models import Organization, OrganizationMembership
 from django.contrib.auth.models import User
 
 from .filters import IncidentFilterSet
-from .models import Attachment, Comment, Incident, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Asset, Attachment, Comment, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 from .serializers import (
+    AssetSerializer,
     AttachmentSerializer,
     CommentCreateSerializer,
     CommentPatchSerializer,
     CommentSerializer,
+    IncidentAssetSerializer,
     IncidentCreateSerializer,
     IncidentEventSerializer,
     IncidentSerializer,
@@ -42,6 +44,7 @@ from .serializers import (
     TaskTemplateSerializer,
     TaskTemplateWriteSerializer,
 )
+from .services.assets import link_asset_from_source_ref
 from .services.events import record_event
 from .services.identifiers import next_display_id
 from .services.notifications_wiring import notify_comment, notify_incident_alert_if_needed, notify_severity_bump_if_needed
@@ -410,9 +413,153 @@ class IncidentListView(ListAPIView):
                 created_by=request.user,
             )
             record_event(incident, "incident_created", actor=request.user)
+            link_asset_from_source_ref(incident, incident.source_kind, incident.source_ref)
 
         notify_incident_alert_if_needed(incident)
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)
+
+
+class AssetListView(APIView):
+    def get(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+
+        qs = Asset.objects.select_related("route", "organization")
+
+        if not request.user.is_staff:
+            member_org_ids = OrganizationMembership.objects.filter(
+                user=request.user
+            ).values_list("organization_id", flat=True)
+            qs = qs.filter(organization__in=member_org_ids)
+
+        org_slug = request.query_params.get("org")
+        if org_slug:
+            qs = qs.filter(organization__slug=org_slug)
+
+        q = request.query_params.get("q")
+        if q:
+            qs = qs.filter(name__icontains=q)
+
+        return Response(AssetSerializer(qs, many=True).data)
+
+    def post(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+
+        kind = request.data.get("kind")
+        org_slug = request.data.get("organization")
+        name = request.data.get("name")
+
+        if not kind:
+            return Response({"detail": "kind is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not org_slug:
+            return Response({"detail": "organization is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not name:
+            return Response({"detail": "name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            org = Organization.objects.get(slug=org_slug)
+        except Organization.DoesNotExist:
+            return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not request.user.is_staff:
+            if not OrganizationMembership.objects.filter(user=request.user, organization=org).exists():
+                return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        if kind == Asset.KIND_HOST:
+            agent_name = request.data.get("agent_name")
+            if not agent_name:
+                return Response({"detail": "agent_name is required for host assets."}, status=status.HTTP_400_BAD_REQUEST)
+            if Asset.objects.filter(organization=org, kind=Asset.KIND_HOST, agent_name=agent_name).exists():
+                return Response(
+                    {"detail": "A host asset with this agent_name already exists for this organisation."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            asset = Asset.objects.create(
+                organization=org,
+                kind=Asset.KIND_HOST,
+                name=name,
+                agent_name=agent_name,
+                ip_address=request.data.get("ip_address") or None,
+            )
+
+        elif kind == Asset.KIND_ROUTE:
+            from ingress.models import Route
+            route_id = request.data.get("route")
+            if not route_id:
+                return Response({"detail": "route is required for route assets."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                route = Route.objects.get(pk=route_id)
+            except Route.DoesNotExist:
+                return Response({"detail": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+            if Asset.objects.filter(kind=Asset.KIND_ROUTE, route=route).exists():
+                return Response({"detail": "An asset already exists for this route."}, status=status.HTTP_400_BAD_REQUEST)
+            asset = Asset.objects.create(
+                organization=org,
+                kind=Asset.KIND_ROUTE,
+                name=name,
+                route=route,
+            )
+
+        else:
+            return Response({"detail": "kind must be 'host' or 'route'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
+
+
+class IncidentAssetLinkView(APIView):
+    def post(self, request, display_id):
+        err = _require_auth(request)
+        if err:
+            return err
+
+        try:
+            incident = Incident.objects.get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_incident(request.user, incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        asset_id = request.data.get("asset")
+        if not asset_id:
+            return Response({"detail": "asset is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            asset = Asset.objects.get(pk=asset_id)
+        except Asset.DoesNotExist:
+            return Response({"detail": "Asset not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if IncidentAsset.objects.filter(incident=incident, asset=asset).exists():
+            return Response({"detail": "Asset already linked to this incident."}, status=status.HTTP_400_BAD_REQUEST)
+
+        link = IncidentAsset.objects.create(incident=incident, asset=asset, added_by=request.user)
+        return Response(IncidentAssetSerializer(link).data, status=status.HTTP_201_CREATED)
+
+
+class IncidentAssetUnlinkView(APIView):
+    def delete(self, request, display_id, asset_id):
+        err = _require_auth(request)
+        if err:
+            return err
+
+        try:
+            incident = Incident.objects.get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_incident(request.user, incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            link = IncidentAsset.objects.get(incident=incident, asset_id=asset_id)
+        except IncidentAsset.DoesNotExist:
+            return Response({"detail": "Asset not linked to this incident."}, status=status.HTTP_404_NOT_FOUND)
+
+        link.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class IncidentBulkActionView(APIView):

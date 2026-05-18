@@ -75,6 +75,7 @@ const TABS = [
   { key: 'attachments', label: 'Attachments' },
   { key: 'tasks',       label: 'Tasks' },
   { key: 'delegations', label: 'Delegations' },
+  { key: 'assets',      label: 'Assets' },
 ];
 
 const EXCEPTION_STATUS_CLASSES = {
@@ -112,6 +113,164 @@ function IncidentExceptionsSection({ displayId }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
+  const [assets, setAssets] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(null);
+  const [searchQ, setSearchQ] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const [unlinking, setUnlinking] = useState(null);
+
+  const loadAssets = useCallback(() => {
+    api.get(`/api/incidents/${displayId}/`)
+      .then(res => { setAssets(res.data.assets ?? []); setLoaded(true); })
+      .catch(() => setLoaded(true));
+  }, [displayId]);
+
+  useEffect(() => { loadAssets(); }, [loadAssets]);
+
+  useEffect(() => {
+    if (!searchQ.trim()) { setSearchResults([]); return; }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await api.get('/api/assets/', { params: { org: orgSlug, q: searchQ } });
+        const existingIds = new Set(assets.map(a => a.asset.id));
+        setSearchResults((res.data ?? []).filter(a => !existingIds.has(a.id)));
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQ, orgSlug, assets]);
+
+  async function handleLink(assetId) {
+    setLinking(true);
+    setError(null);
+    try {
+      await api.post(`/api/incidents/${displayId}/assets/`, { asset: assetId });
+      setSearchQ('');
+      setSearchResults([]);
+      loadAssets();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to link asset.');
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  async function handleUnlink(assetId) {
+    setUnlinking(assetId);
+    setError(null);
+    try {
+      await api.delete(`/api/incidents/${displayId}/assets/${assetId}/`);
+      loadAssets();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to unlink asset.');
+    } finally {
+      setUnlinking(null);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-foreground">Affected assets</h2>
+        <span className="text-xs text-muted-foreground">{assets.length} linked</span>
+      </div>
+
+      {loaded && assets.length === 0 && (
+        <p className="text-sm text-muted-foreground">No assets linked to this incident.</p>
+      )}
+
+      {assets.length > 0 && (
+        <ul className="divide-y divide-border rounded-lg border border-border bg-card">
+          {assets.map(({ id, asset, added_by, added_by_username, added_at }) => (
+            <li key={id} className="flex items-center gap-3 px-4 py-3">
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium text-foreground">{asset.name}</span>
+                {asset.agent_name && asset.agent_name !== asset.name && (
+                  <span className="ml-2 text-xs text-muted-foreground font-mono">{asset.agent_name}</span>
+                )}
+                {asset.ip_address && (
+                  <span className="ml-2 text-xs text-muted-foreground">{asset.ip_address}</span>
+                )}
+                {asset.route_fqdn && (
+                  <span className="ml-2 text-xs text-muted-foreground">{asset.route_fqdn}</span>
+                )}
+              </div>
+              <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground shrink-0">
+                {asset.kind}
+              </span>
+              {added_by === null ? (
+                <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 text-xs shrink-0">
+                  auto-detected
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground shrink-0">
+                  {added_by_username} · {added_at ? new Date(added_at).toLocaleDateString() : ''}
+                </span>
+              )}
+              {isStaff && (
+                <button
+                  onClick={() => handleUnlink(asset.id)}
+                  disabled={unlinking === asset.id}
+                  className="text-xs text-muted-foreground hover:text-red-600 disabled:opacity-50 shrink-0"
+                  aria-label={`Unlink ${asset.name}`}
+                >
+                  {unlinking === asset.id ? '…' : 'Unlink'}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {isStaff && (
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Link an asset
+          </label>
+          <input
+            type="search"
+            placeholder="Search assets by name…"
+            value={searchQ}
+            onChange={e => setSearchQ(e.target.value)}
+            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {searching && <p className="text-xs text-muted-foreground">Searching…</p>}
+          {searchResults.length > 0 && (
+            <ul className="rounded-md border border-border bg-card divide-y divide-border">
+              {searchResults.map(a => (
+                <li key={a.id} className="flex items-center gap-2 px-3 py-2">
+                  <span className="flex-1 text-sm text-foreground">{a.name}</span>
+                  <span className="text-xs text-muted-foreground">{a.kind}</span>
+                  <button
+                    onClick={() => handleLink(a.id)}
+                    disabled={linking}
+                    className="text-xs text-primary hover:underline disabled:opacity-50"
+                  >
+                    {linking ? 'Linking…' : 'Link'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {searchQ.trim() && !searching && searchResults.length === 0 && (
+            <p className="text-xs text-muted-foreground">No matching assets found.</p>
+          )}
+        </div>
+      )}
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
     </div>
   );
 }
@@ -672,6 +831,13 @@ export default function IncidentDetail() {
               activeDelegations={incident.active_delegations ?? []}
               isStaff={user?.is_staff ?? false}
               onIncidentUpdate={setIncident}
+            />
+          )}
+          {activeTab === 'assets' && (
+            <IncidentAssetsPanel
+              displayId={displayId}
+              isStaff={user?.is_staff ?? false}
+              orgSlug={incident.org_slug}
             />
           )}
         </div>

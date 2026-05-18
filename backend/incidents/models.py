@@ -164,6 +164,9 @@ class Incident(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    assets = models.ManyToManyField(
+        "Asset", through="IncidentAsset", related_name="incidents", blank=True
+    )
 
     class Meta:
         ordering = ["-created_at"]
@@ -330,3 +333,56 @@ class Attachment(models.Model):
 
     def __str__(self):
         return f"{self.filename} on {self.incident}"
+
+
+class Asset(models.Model):
+    KIND_HOST = "host"
+    KIND_ROUTE = "route"
+    KIND_CHOICES = [
+        (KIND_HOST, "Host"),
+        (KIND_ROUTE, "Route"),
+    ]
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="assets")
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    name = models.CharField(max_length=255)
+    agent_name = models.CharField(max_length=255, null=True, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    route = models.ForeignKey(
+        "ingress.Route", on_delete=models.SET_NULL, null=True, blank=True, related_name="assets"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "agent_name"],
+                condition=models.Q(kind="host"),
+                name="unique_host_asset_per_org",
+            ),
+            models.UniqueConstraint(
+                fields=["route"],
+                condition=models.Q(kind="route"),
+                name="unique_route_asset",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.kind})"
+
+
+class IncidentAsset(models.Model):
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="incident_assets")
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="incident_assets")
+    added_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="added_incident_assets"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("incident", "asset")]
+        ordering = ["added_at"]
+
+    def __str__(self):
+        return f"{self.asset} on {self.incident}"

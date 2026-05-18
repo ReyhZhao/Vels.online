@@ -2,7 +2,7 @@ from django.conf import settings
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Attachment, Comment, Incident, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Asset, Attachment, Comment, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 
 
 class SubjectSerializer(serializers.ModelSerializer):
@@ -67,6 +67,31 @@ def _compute_sla(incident, kind):
     }
 
 
+class AssetSerializer(serializers.ModelSerializer):
+    route_fqdn = serializers.SerializerMethodField()
+    org_slug = serializers.CharField(source="organization.slug", read_only=True)
+
+    class Meta:
+        model = Asset
+        fields = ["id", "kind", "name", "agent_name", "ip_address", "route", "route_fqdn", "org_slug", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+    def get_route_fqdn(self, obj):
+        return obj.route.fqdn if obj.route else None
+
+
+class IncidentAssetSerializer(serializers.ModelSerializer):
+    asset = AssetSerializer(read_only=True)
+    added_by_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IncidentAsset
+        fields = ["id", "asset", "added_by", "added_by_username", "added_at"]
+
+    def get_added_by_username(self, obj):
+        return obj.added_by.username if obj.added_by else None
+
+
 class IncidentSerializer(serializers.ModelSerializer):
     created_by_username = serializers.SerializerMethodField()
     assignee_username = serializers.SerializerMethodField()
@@ -76,6 +101,7 @@ class IncidentSerializer(serializers.ModelSerializer):
     active_delegations = serializers.SerializerMethodField()
     response_sla = serializers.SerializerMethodField()
     resolve_sla = serializers.SerializerMethodField()
+    assets = serializers.SerializerMethodField()
 
     class Meta:
         model = Incident
@@ -104,8 +130,13 @@ class IncidentSerializer(serializers.ModelSerializer):
             "updated_at",
             "response_sla",
             "resolve_sla",
+            "assets",
         ]
         read_only_fields = ["id", "display_id", "org_slug", "created_by", "created_at", "updated_at"]
+
+    def get_assets(self, obj):
+        qs = obj.incident_assets.select_related("asset__route", "added_by")
+        return IncidentAssetSerializer(qs, many=True).data
 
     def get_active_delegations(self, obj):
         qs = obj.delegations.filter(returned_at__isnull=True).select_related("user", "delegated_by")
