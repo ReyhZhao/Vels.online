@@ -13,19 +13,21 @@ export default function usePushSubscription() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [publicKey, setPublicKey] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [keyError, setKeyError] = useState(false);
 
   useEffect(() => {
     if (!isSupported) return;
     api.get('/api/me/push/vapid-public-key/')
       .then(res => setPublicKey(res.data.public_key))
-      .catch(() => {});
+      .catch(() => setKeyError(true));
     navigator.serviceWorker.ready.then(reg =>
       reg.pushManager.getSubscription().then(sub => setIsSubscribed(!!sub))
     ).catch(() => {});
   }, [isSupported]);
 
   async function subscribe() {
-    if (!isSupported || !publicKey) return;
+    if (!isSupported) return;
+    if (!publicKey) throw new Error('Push notifications are not available. Please try again later.');
     setLoading(true);
     try {
       const permission = await Notification.requestPermission();
@@ -63,5 +65,5 @@ export default function usePushSubscription() {
     }
   }
 
-  return { isSubscribed, isSupported, loading, subscribe, unsubscribe };
+  return { isSubscribed, isSupported, loading, keyError, subscribe, unsubscribe };
 }

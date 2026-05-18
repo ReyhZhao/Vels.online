@@ -37,7 +37,7 @@ function renderPage() {
   );
 }
 
-const defaultPushHook = { isSubscribed: false, isSupported: true, loading: false, subscribe: vi.fn(), unsubscribe: vi.fn() };
+const defaultPushHook = { isSubscribed: false, isSupported: true, loading: false, keyError: false, subscribe: vi.fn(), unsubscribe: vi.fn() };
 
 describe('NotificationPreferences', () => {
   beforeEach(() => {
@@ -149,6 +149,36 @@ describe('NotificationPreferences', () => {
     await waitFor(() => screen.getByText('Assignment'));
     const pushToggles = screen.getAllByRole('switch', { name: /push$/i });
     pushToggles.forEach(t => expect(t).not.toBeDisabled());
+  });
+
+  it('shows error when subscribe throws due to missing VAPID key', async () => {
+    const subscribe = vi.fn().mockRejectedValue(new Error('Push notifications are not available. Please try again later.'));
+    usePushSubscription.mockReturnValue({ ...defaultPushHook, subscribe });
+
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /enable push notifications/i }));
+
+    await user.click(screen.getByRole('button', { name: /enable push notifications/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/failed to enable push notifications/i)).toBeInTheDocument()
+    );
+  });
+
+  it('shows permission denied error when subscribe throws Permission denied', async () => {
+    const subscribe = vi.fn().mockRejectedValue(new Error('Permission denied'));
+    usePushSubscription.mockReturnValue({ ...defaultPushHook, subscribe });
+
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /enable push notifications/i }));
+
+    await user.click(screen.getByRole('button', { name: /enable push notifications/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/notification permission was denied/i)).toBeInTheDocument()
+    );
   });
 
   it('shows error message when save fails', async () => {
