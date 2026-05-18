@@ -31,6 +31,7 @@ class IncidentFilterSet(django_filters.FilterSet):
     org = django_filters.CharFilter(field_name="organization__slug", lookup_expr="exact")
     subject = django_filters.NumberFilter(field_name="subject_id")
     source_kind = django_filters.CharFilter(field_name="source_kind", lookup_expr="exact")
+    title = django_filters.CharFilter(field_name="title", lookup_expr="icontains")
 
     # Context-aware / computed filters
     assignee = django_filters.CharFilter(method="filter_assignee")

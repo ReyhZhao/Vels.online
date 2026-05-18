@@ -4,7 +4,12 @@ from django.db.models import Case, F, IntegerField, Q, Value, When
 from django.http import QueryDict
 from django.utils import timezone
 from django.utils.text import slugify
+from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
+from rest_framework.generics import ListAPIView
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -291,62 +296,91 @@ class TaskTemplateItemDetailView(APIView):
 
 # ── Incident views ───────────────────────────────────────────────────────────
 
-class IncidentListView(APIView):
-    def get(self, request):
-        err = _require_auth(request)
-        if err:
-            return err
+class IncidentPagination(PageNumberPagination):
+    page_size = 25
+    page_size_query_param = "per_page"
+    max_page_size = 100
+    page_query_param = "page"
 
-        qs = filter_incidents_for_user(
-            Incident.objects.select_related("organization", "created_by", "assignee", "subject"),
-            request.user,
-        )
+    def get_paginated_response(self, data):
+        return Response({
+            "count": self.page.paginator.count,
+            "page": self.page.number,
+            "per_page": self.get_page_size(self.request),
+            "total_pages": self.page.paginator.num_pages,
+            "results": data,
+        })
 
-        qs = _apply_incident_filters(qs, request)
+    def get_paginated_response_schema(self, schema):
+        return {
+            "type": "object",
+            "properties": {
+                "count":       {"type": "integer"},
+                "page":        {"type": "integer"},
+                "per_page":    {"type": "integer"},
+                "total_pages": {"type": "integer"},
+                "results":     schema,
+            },
+        }
 
-        # Ordering — honour sort/order query params or fall back to default
-        sort = request.query_params.get("sort", "")
-        order = request.query_params.get("order", "")
+
+class IncidentListView(ListAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = IncidentFilterSet
+    pagination_class = IncidentPagination
+    serializer_class = IncidentSerializer
+
+    def get_queryset(self):
+        qs = Incident.objects.select_related("organization", "created_by", "assignee", "subject")
+        qs = filter_incidents_for_user(qs, self.request.user)
+
+        tab = self.request.query_params.get("tab", "all")
+        explicit_states = [
+            c.strip()
+            for v in self.request.query_params.getlist("state")
+            for c in v.split(",") if c.strip()
+        ]
+        if tab == "my_queue":
+            delegated = IncidentDelegation.objects.filter(
+                user=self.request.user, returned_at__isnull=True
+            ).values_list("incident_id", flat=True)
+            qs = qs.filter(Q(assignee=self.request.user) | Q(id__in=delegated))
+            if not explicit_states:
+                qs = qs.exclude(state="closed")
+        elif tab == "unassigned":
+            qs = qs.filter(assignee__isnull=True)
+            if not explicit_states:
+                qs = qs.exclude(state="closed")
+        else:
+            if not explicit_states:
+                qs = qs.exclude(state="closed")
+        return qs
+
+    def filter_queryset(self, queryset):
+        qs = super().filter_queryset(queryset)
+        sort = self.request.query_params.get("sort", "")
+        order = self.request.query_params.get("order", "")
         if sort == "severity":
             qs = qs.annotate(severity_rank=SEVERITY_RANK)
             qs = qs.order_by("severity_rank" if order == "asc" else "-severity_rank")
         elif sort in _SORTABLE_FIELDS:
             field = _SORTABLE_FIELDS[sort]
-            if order == "asc":
-                qs = qs.order_by(F(field).asc(nulls_last=True))
-            else:
-                qs = qs.order_by(F(field).desc(nulls_last=True))
+            qs = qs.order_by(F(field).asc(nulls_last=True) if order == "asc" else F(field).desc(nulls_last=True))
         else:
             qs = qs.annotate(severity_rank=SEVERITY_RANK).order_by("-severity_rank", "created_at")
+        return qs
 
-        # Pagination
-        try:
-            per_page = min(max(1, int(request.query_params.get("per_page", 25))), 100)
-        except (ValueError, TypeError):
-            per_page = 25
-
-        try:
-            page = max(1, int(request.query_params.get("page", 1)))
-        except (ValueError, TypeError):
-            page = 1
-
-        total = qs.count()
-        total_pages = max(1, (total + per_page - 1) // per_page)
-        start = (page - 1) * per_page
-
-        return Response({
-            "count": total,
-            "page": page,
-            "per_page": per_page,
-            "total_pages": total_pages,
-            "results": IncidentSerializer(qs[start: start + per_page], many=True).data,
-        })
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("tab", OpenApiTypes.STR, description="all | my_queue | unassigned"),
+            OpenApiParameter("sort", OpenApiTypes.STR, description="severity | title | state | created_at | updated_at | assignee"),
+            OpenApiParameter("order", OpenApiTypes.STR, description="asc | desc (default: desc)"),
+        ],
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
     def post(self, request):
-        err = _require_auth(request)
-        if err:
-            return err
-
         org_slug = request.data.get("org")
         if not org_slug:
             return Response({"detail": "org is required."}, status=status.HTTP_400_BAD_REQUEST)
