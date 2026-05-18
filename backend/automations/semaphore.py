@@ -1,6 +1,10 @@
+import logging
+
 import requests
 from django.conf import settings
 from requests.exceptions import RequestException
+
+logger = logging.getLogger(__name__)
 
 
 class SemaphoreAPIError(Exception):
@@ -35,29 +39,32 @@ class SemaphoreClient:
 
     def _check(self, response):
         if not response.ok:
+            logger.error(
+                "Semaphore API error: %s %s → %s\nResponse body: %s",
+                response.request.method if response.request else "?",
+                response.url,
+                response.status_code,
+                response.text or "(empty)",
+            )
             raise SemaphoreAPIError(response.status_code, response.text)
         return response
 
     def _get(self, path, **kwargs):
+        url = f"{self._base_url}/api{path}"
+        logger.debug("Semaphore GET %s", url)
         try:
-            return requests.get(
-                f"{self._base_url}/api{path}",
-                headers=self._headers(),
-                timeout=10,
-                **kwargs,
-            )
+            return requests.get(url, headers=self._headers(), timeout=10, **kwargs)
         except RequestException as exc:
+            logger.error("Semaphore GET %s failed: %s", url, exc)
             raise SemaphoreAPIError(0, str(exc)) from exc
 
     def _post(self, path, **kwargs):
+        url = f"{self._base_url}/api{path}"
+        logger.debug("Semaphore POST %s payload=%s", url, kwargs.get("json"))
         try:
-            return requests.post(
-                f"{self._base_url}/api{path}",
-                headers=self._headers(),
-                timeout=10,
-                **kwargs,
-            )
+            return requests.post(url, headers=self._headers(), timeout=10, **kwargs)
         except RequestException as exc:
+            logger.error("Semaphore POST %s failed: %s", url, exc)
             raise SemaphoreAPIError(0, str(exc)) from exc
 
     def list_templates(self):

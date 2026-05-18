@@ -1,3 +1,5 @@
+import logging
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Case, F, IntegerField, Q, Value, When
@@ -50,6 +52,8 @@ from .services.delegation import delegate, return_delegation
 from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
 from .services.visibility import can_view_incident, filter_comments_for_user, filter_events_for_user, filter_incidents_for_user
+
+logger = logging.getLogger(__name__)
 
 TRIAGE_STATES = {"new", "triaged"}
 
@@ -1022,6 +1026,15 @@ class TaskRunView(APIView):
                 extra_vars=extra_vars,
             )
         except SemaphoreAPIError as exc:
+            logger.error(
+                "launch_job failed for task=%s automation=%s template_id=%s: status=%s body=%r extra_vars=%s",
+                task.pk,
+                task.automation_id,
+                task.automation.semaphore_template_id,
+                exc.status_code,
+                exc.body,
+                extra_vars,
+            )
             return Response({"detail": f"Semaphore error: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
 
         Task.objects.filter(pk=task.pk).update(
