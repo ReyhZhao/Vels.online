@@ -64,7 +64,7 @@ class SemaphoreClient:
         """Return [{id, name}] for all templates in the configured project."""
         resp = self._get(f"/project/{self._project_id}/templates")
         self._check(resp)
-        return [{"id": t["id"], "name": t["alias"]} for t in resp.json()]
+        return [{"id": t["id"], "name": t.get("name") or t.get("alias", "")} for t in resp.json()]
 
     def launch_job(self, template_id, extra_vars=None):
         """Launch a Semaphore task and return the task ID integer."""

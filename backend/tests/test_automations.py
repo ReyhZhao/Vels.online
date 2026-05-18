@@ -40,12 +40,12 @@ def automation(db, staff):
 
 
 class TestSemaphoreClientListTemplates:
-    def test_returns_id_and_name(self):
+    def test_returns_id_and_name_from_name_field(self):
         mock_resp = MagicMock()
         mock_resp.ok = True
         mock_resp.json.return_value = [
-            {"id": 1, "alias": "deploy-prod"},
-            {"id": 2, "alias": "malware-scan"},
+            {"id": 1, "name": "deploy-prod"},
+            {"id": 2, "name": "malware-scan"},
         ]
         with patch("automations.semaphore.requests.get", return_value=mock_resp) as mock_get:
             result = SemaphoreClient().list_templates()
@@ -54,6 +54,30 @@ class TestSemaphoreClientListTemplates:
         mock_get.assert_called_once()
         url = mock_get.call_args[0][0]
         assert "/project/1/templates" in url
+
+    def test_falls_back_to_alias_when_name_absent(self):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = [{"id": 3, "alias": "legacy-job"}]
+        with patch("automations.semaphore.requests.get", return_value=mock_resp):
+            result = SemaphoreClient().list_templates()
+        assert result == [{"id": 3, "name": "legacy-job"}]
+
+    def test_prefers_name_over_alias_when_both_present(self):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = [{"id": 4, "name": "current-name", "alias": "old-alias"}]
+        with patch("automations.semaphore.requests.get", return_value=mock_resp):
+            result = SemaphoreClient().list_templates()
+        assert result == [{"id": 4, "name": "current-name"}]
+
+    def test_returns_empty_string_when_neither_name_nor_alias_present(self):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = [{"id": 5}]
+        with patch("automations.semaphore.requests.get", return_value=mock_resp):
+            result = SemaphoreClient().list_templates()
+        assert result == [{"id": 5, "name": ""}]
 
     def test_raises_on_non_2xx(self):
         mock_resp = MagicMock()
