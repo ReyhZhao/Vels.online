@@ -124,8 +124,14 @@ function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
   const [searchQ, setSearchQ] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [searchDone, setSearchDone] = useState(false);
   const [linking, setLinking] = useState(false);
   const [unlinking, setUnlinking] = useState(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createAgentName, setCreateAgentName] = useState('');
+  const [createIp, setCreateIp] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const loadAssets = useCallback(() => {
     api.get(`/api/incidents/${displayId}/`)
@@ -136,6 +142,8 @@ function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
   useEffect(() => { loadAssets(); }, [loadAssets]);
 
   useEffect(() => {
+    setSearchDone(false);
+    setShowCreateForm(false);
     if (!searchQ.trim()) { setSearchResults([]); return; }
     const timer = setTimeout(async () => {
       setSearching(true);
@@ -147,6 +155,7 @@ function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
         setSearchResults([]);
       } finally {
         setSearching(false);
+        setSearchDone(true);
       }
     }, 300);
     return () => clearTimeout(timer);
@@ -159,6 +168,8 @@ function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
       await api.post(`/api/incidents/${displayId}/assets/`, { asset: assetId });
       setSearchQ('');
       setSearchResults([]);
+      setSearchDone(false);
+      setShowCreateForm(false);
       loadAssets();
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to link asset.');
@@ -178,6 +189,38 @@ function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
     } finally {
       setUnlinking(null);
     }
+  }
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    if (!createAgentName.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const createRes = await api.post('/api/assets/', {
+        kind: 'host',
+        organization: orgSlug,
+        name: createName.trim() || createAgentName.trim(),
+        agent_name: createAgentName.trim(),
+        ip_address: createIp.trim() || undefined,
+      });
+      await handleLink(createRes.data.id);
+      setCreateName('');
+      setCreateAgentName('');
+      setCreateIp('');
+      setShowCreateForm(false);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to create asset.');
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function openCreateForm() {
+    setCreateAgentName(searchQ.trim());
+    setCreateName(searchQ.trim());
+    setCreateIp('');
+    setShowCreateForm(true);
   }
 
   return (
@@ -243,7 +286,7 @@ function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
             type="search"
             placeholder="Search assets by name…"
             value={searchQ}
-            onChange={e => setSearchQ(e.target.value)}
+            onChange={e => { setSearchQ(e.target.value); setShowCreateForm(false); }}
             className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
           {searching && <p className="text-xs text-muted-foreground">Searching…</p>}
@@ -264,8 +307,82 @@ function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
               ))}
             </ul>
           )}
-          {searchQ.trim() && !searching && searchResults.length === 0 && (
-            <p className="text-xs text-muted-foreground">No matching assets found.</p>
+          {searchDone && !searching && searchResults.length === 0 && !showCreateForm && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>No matching assets found.</span>
+              <button
+                onClick={openCreateForm}
+                className="text-primary hover:underline font-medium"
+              >
+                Create and link "{searchQ.trim()}"
+              </button>
+            </div>
+          )}
+          {showCreateForm && (
+            <form
+              onSubmit={handleCreate}
+              className="rounded-md border border-border bg-card p-4 space-y-3"
+            >
+              <p className="text-xs font-medium text-foreground">New host asset</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-muted-foreground" htmlFor="asset-agent-name">
+                    Agent / hostname <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="asset-agent-name"
+                    type="text"
+                    required
+                    value={createAgentName}
+                    onChange={e => setCreateAgentName(e.target.value)}
+                    className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    placeholder="e.g. web-prod-01"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-muted-foreground" htmlFor="asset-name">
+                    Display name
+                  </label>
+                  <input
+                    id="asset-name"
+                    type="text"
+                    value={createName}
+                    onChange={e => setCreateName(e.target.value)}
+                    placeholder="Defaults to agent name"
+                    className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-muted-foreground" htmlFor="asset-ip">
+                    IP address
+                  </label>
+                  <input
+                    id="asset-ip"
+                    type="text"
+                    value={createIp}
+                    onChange={e => setCreateIp(e.target.value)}
+                    placeholder="Optional"
+                    className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateForm(false)}
+                  className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating || !createAgentName.trim()}
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {creating ? 'Creating…' : 'Create and link'}
+                </button>
+              </div>
+            </form>
           )}
         </div>
       )}
