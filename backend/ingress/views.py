@@ -6,13 +6,17 @@ from django.conf import settings as django_settings
 
 logger = logging.getLogger(__name__)
 from django.db import IntegrityError
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from security.models import Organization, OrganizationMembership
 
 from .bunkerweb import BunkerWebClient, BunkerWebError
+from .filters import RouteFilterSet
 from .models import Route
 from .serializers import RouteSerializer
 from .tasks import check_route_dns, push_route_settings
@@ -45,14 +49,25 @@ def _resolve_org(request, slug):
     return org, None
 
 
-class RouteListView(APIView):
-    def get(self, request):
-        slug = request.query_params.get("org", "")
-        org, err = _resolve_org(request, slug)
-        if err:
-            return err
-        routes = Route.objects.filter(organization=org).order_by("-created_at")
-        return Response(RouteSerializer(routes, many=True).data)
+class RouteListView(ListAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = RouteFilterSet
+    serializer_class = RouteSerializer
+
+    def get_queryset(self):
+        slug = self.request.query_params.get("org", "")
+        if not slug:
+            raise ValidationError({"detail": "org is required."})
+        try:
+            org = Organization.objects.get(slug=slug)
+        except Organization.DoesNotExist:
+            raise NotFound()
+        if not self.request.user.is_staff:
+            if not OrganizationMembership.objects.filter(
+                user=self.request.user, organization=org
+            ).exists():
+                raise PermissionDenied()
+        return Route.objects.filter(organization=org).order_by("-created_at")
 
     def post(self, request):
         slug = request.query_params.get("org", "")

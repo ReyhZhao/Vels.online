@@ -10,7 +10,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
-from rest_framework.generics import ListAPIView
+from rest_framework.generics import GenericAPIView, ListAPIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -19,7 +19,7 @@ from security.models import Organization, OrganizationMembership
 
 from django.contrib.auth.models import User
 
-from .filters import IncidentFilterSet
+from .filters import AssetFilterSet, IncidentFilterSet, TaskFilterSet, TaskTemplateFilterSet
 from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 from .serializers import (
     AssetSerializer,
@@ -174,16 +174,13 @@ class SubjectDetailView(APIView):
 
 # ── TaskTemplate views ───────────────────────────────────────────────────────
 
-class TaskTemplateListView(APIView):
-    def get(self, request):
-        err = _require_auth(request)
-        if err:
-            return err
-        qs = TaskTemplate.objects.select_related("subject", "created_by").prefetch_related("items")
-        subject_id = request.query_params.get("subject")
-        if subject_id:
-            qs = qs.filter(subject_id=subject_id)
-        return Response(TaskTemplateSerializer(qs, many=True).data)
+class TaskTemplateListView(ListAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = TaskTemplateFilterSet
+    serializer_class = TaskTemplateSerializer
+
+    def get_queryset(self):
+        return TaskTemplate.objects.select_related("subject", "created_by").prefetch_related("items")
 
     def post(self, request):
         err = _require_auth(request)
@@ -421,29 +418,19 @@ class IncidentListView(ListAPIView):
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)
 
 
-class AssetListView(APIView):
-    def get(self, request):
-        err = _require_auth(request)
-        if err:
-            return err
+class AssetListView(ListAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = AssetFilterSet
+    serializer_class = AssetSerializer
 
+    def get_queryset(self):
         qs = Asset.objects.select_related("route", "organization")
-
-        if not request.user.is_staff:
+        if not self.request.user.is_staff:
             member_org_ids = OrganizationMembership.objects.filter(
-                user=request.user
+                user=self.request.user
             ).values_list("organization_id", flat=True)
             qs = qs.filter(organization__in=member_org_ids)
-
-        org_slug = request.query_params.get("org")
-        if org_slug:
-            qs = qs.filter(organization__slug=org_slug)
-
-        q = request.query_params.get("q")
-        if q:
-            qs = qs.filter(name__icontains=q)
-
-        return Response(AssetSerializer(qs, many=True).data)
+        return qs
 
     def post(self, request):
         err = _require_auth(request)
@@ -1016,38 +1003,25 @@ _TASK_SORT_FIELDS = {
 }
 
 
-class TaskListView(APIView):
-    def get(self, request):
-        err = _require_auth(request)
-        if err:
-            return err
+class TaskListView(ListAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = TaskFilterSet
+    serializer_class = TaskSerializer
 
+    def get_queryset(self):
         visible_ids = filter_incidents_for_user(
-            Incident.objects.all(), request.user
+            Incident.objects.all(), self.request.user
         ).values_list("id", flat=True)
-
-        qs = (
+        return (
             Task.objects
             .filter(incident_id__in=visible_ids)
             .select_related("incident", "assignee", "template_item__template")
         )
 
-        q = request.query_params.get("q", "").strip()
-        if q:
-            qs = qs.filter(title__icontains=q)
-
-        state = request.query_params.get("state", "").strip()
-        if state:
-            qs = qs.filter(state=state)
-
-        assignee = request.query_params.get("assignee", "").strip()
-        if assignee == "me":
-            qs = qs.filter(assignee=request.user)
-        elif assignee == "unassigned":
-            qs = qs.filter(assignee__isnull=True)
-
-        sort = request.query_params.get("sort", "")
-        order = request.query_params.get("order", "")
+    def filter_queryset(self, queryset):
+        qs = super().filter_queryset(queryset)
+        sort = self.request.query_params.get("sort", "")
+        order = self.request.query_params.get("order", "")
         if sort in _TASK_SORT_FIELDS:
             field = _TASK_SORT_FIELDS[sort]
             if order == "asc":
@@ -1056,7 +1030,10 @@ class TaskListView(APIView):
                 qs = qs.order_by(F(field).desc(nulls_last=True))
         else:
             qs = qs.order_by("-created_at")
+        return qs
 
+    def list(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset())
         try:
             per_page = min(max(1, int(request.query_params.get("per_page", 25))), 100)
         except (ValueError, TypeError):
@@ -1065,22 +1042,22 @@ class TaskListView(APIView):
             page = max(1, int(request.query_params.get("page", 1)))
         except (ValueError, TypeError):
             page = 1
-
         total = qs.count()
         total_pages = max(1, (total + per_page - 1) // per_page)
         start = (page - 1) * per_page
-        results = qs[start : start + per_page]
-
+        results = qs[start: start + per_page]
         return Response({
             "count": total,
             "page": page,
             "per_page": per_page,
             "total_pages": total_pages,
-            "results": TaskSerializer(results, many=True).data,
+            "results": self.get_serializer(results, many=True).data,
         })
 
 
-class TaskDetailView(APIView):
+class TaskDetailView(GenericAPIView):
+    serializer_class = TaskSerializer
+
     def _get_task(self, request, pk):
         err = _require_auth(request)
         if err:
@@ -1138,6 +1115,7 @@ class TaskDetailView(APIView):
 
 
 class TaskRunView(APIView):
+    @extend_schema(responses=TaskSerializer)
     def post(self, request, pk):
         err = _require_auth(request)
         if err:
@@ -1277,7 +1255,9 @@ class IncidentCommentListView(APIView):
         return Response(CommentSerializer(comment, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
-class TaskCommentListView(APIView):
+class TaskCommentListView(GenericAPIView):
+    serializer_class = CommentSerializer
+
     def _get_task(self, request, pk):
         err = _require_auth(request)
         if err:

@@ -1,20 +1,25 @@
 from django.shortcuts import get_object_or_404
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .filters import AutomationFilterSet
 from .models import Automation
 from .semaphore import SemaphoreAPIError, SemaphoreClient
+from .serializers import AutomationSerializer
 
 
-class AutomationListView(APIView):
+class AutomationListView(ListAPIView):
     permission_classes = [IsAdminUser]
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = AutomationFilterSet
+    serializer_class = AutomationSerializer
 
-    def get(self, request):
-        include_archived = request.query_params.get("include_archived") == "1"
-        qs = Automation.objects.all() if include_archived else Automation.objects.filter(archived=False)
-        data = [_serialize(a) for a in qs]
-        return Response(data)
+    def get_queryset(self):
+        include_archived = self.request.query_params.get("include_archived") == "1"
+        return Automation.objects.all() if include_archived else Automation.objects.filter(archived=False)
 
     def post(self, request):
         errors = {}

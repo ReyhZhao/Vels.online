@@ -150,6 +150,29 @@ def test_get_service_settings_unwraps_settings_envelope(mock_get):
 
 
 @patch("ingress.bunkerweb.requests.get")
+def test_get_service_settings_unwraps_config_envelope(mock_get):
+    """full=true response: envelope key is 'config', values are dicts with a 'value' key."""
+    raw_config = {
+        "USE_MODSECURITY": {"value": "yes", "global": True, "method": "ui", "default": "yes", "template": None},
+        "LIMIT_REQ_RATE": {"value": "100r/s", "global": False, "method": "ui", "default": "50r/s", "template": None},
+    }
+    mock_get.return_value = _ok({"status": "success", "service": "app.example.com", "config": raw_config})
+    result = BunkerWebClient().get_service_settings("app.example.com")
+    assert result == {"USE_MODSECURITY": "yes", "LIMIT_REQ_RATE": "100r/s"}
+
+
+@patch("ingress.bunkerweb.requests.get")
+def test_get_service_settings_extracts_value_from_nested_entries(mock_get):
+    """Even without an envelope key, nested {value: ...} entries are flattened."""
+    payload = {
+        "USE_WHITELIST": {"value": "no", "global": True, "method": "default", "default": "no", "template": None},
+    }
+    mock_get.return_value = _ok(payload)
+    result = BunkerWebClient().get_service_settings("app.example.com")
+    assert result == {"USE_WHITELIST": "no"}
+
+
+@patch("ingress.bunkerweb.requests.get")
 def test_get_service_settings_non_dict_returns_empty(mock_get):
     mock_get.return_value = _ok([])
     result = BunkerWebClient().get_service_settings("app.example.com")

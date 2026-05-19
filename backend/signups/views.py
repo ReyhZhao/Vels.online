@@ -3,7 +3,9 @@ from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
 from django.utils.text import slugify
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status
+from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
@@ -12,6 +14,7 @@ from rest_framework.views import APIView
 from security.models import Organization
 
 from .authentik import AuthentikClient, AuthentikAPIError
+from .filters import SignupRequestFilterSet
 from .models import InvalidTransition, SignupRequest
 from .serializers import (
     ApproveSerializer,
@@ -29,7 +32,11 @@ class SignupThrottle(AnonRateThrottle):
     rate = "3/hour"
 
 
-class SignupRequestListView(APIView):
+class SignupRequestListView(ListAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = SignupRequestFilterSet
+    serializer_class = SignupRequestSerializer
+
     def get_permissions(self):
         if self.request.method == "POST":
             return [AllowAny()]
@@ -40,12 +47,8 @@ class SignupRequestListView(APIView):
             return [SignupThrottle()]
         return []
 
-    def get(self, request):
-        qs = SignupRequest.objects.all()
-        status_filter = request.query_params.get("status", "")
-        if status_filter:
-            qs = qs.filter(status=status_filter)
-        return Response(SignupRequestSerializer(qs, many=True).data)
+    def get_queryset(self):
+        return SignupRequest.objects.all()
 
     def post(self, request):
         ser = SignupSubmitSerializer(data=request.data)

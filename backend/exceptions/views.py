@@ -1,7 +1,9 @@
 import logging
 from dataclasses import asdict
 
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status
+from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -9,6 +11,7 @@ from incidents.models import Incident
 from incidents.services.events import record_event
 from security.models import OrganizationMembership
 
+from .filters import ExceptionRuleFilterSet
 from .llm.factory import get_llm_provider
 from .models import ExceptionRule
 from .serializers import ExceptionRuleSerializer
@@ -18,7 +21,21 @@ from .services_github import push_rule, remove_rule
 logger = logging.getLogger(__name__)
 
 
-class ExceptionRuleListView(APIView):
+class ExceptionRuleListView(ListAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = ExceptionRuleFilterSet
+    serializer_class = ExceptionRuleSerializer
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return ExceptionRule.objects.select_related("organisation", "incident", "created_by")
+        member_org_ids = OrganizationMembership.objects.filter(
+            user=self.request.user
+        ).values_list("organization_id", flat=True)
+        return ExceptionRule.objects.select_related(
+            "organisation", "incident", "created_by"
+        ).filter(organisation_id__in=member_org_ids)
+
     def post(self, request):
         if not request.user.is_staff:
             return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
@@ -74,30 +91,6 @@ class ExceptionRuleListView(APIView):
 
         return Response(ExceptionRuleSerializer(rule).data, status=status.HTTP_201_CREATED)
 
-    def get(self, request):
-        if request.user.is_staff:
-            qs = ExceptionRule.objects.select_related("organisation", "incident", "created_by")
-        else:
-            member_org_ids = OrganizationMembership.objects.filter(
-                user=request.user
-            ).values_list("organization_id", flat=True)
-            qs = ExceptionRule.objects.select_related(
-                "organisation", "incident", "created_by"
-            ).filter(organisation_id__in=member_org_ids)
-
-        status_filter = request.query_params.get("status")
-        if status_filter:
-            qs = qs.filter(status=status_filter)
-
-        org_filter = request.query_params.get("organisation")
-        if org_filter:
-            qs = qs.filter(organisation__slug=org_filter)
-
-        incident_filter = request.query_params.get("incident")
-        if incident_filter:
-            qs = qs.filter(incident__display_id=incident_filter)
-
-        return Response(ExceptionRuleSerializer(qs, many=True).data)
 
 
 class ExceptionRuleDetailView(APIView):

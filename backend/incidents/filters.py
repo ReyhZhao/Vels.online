@@ -5,7 +5,7 @@ import django_filters
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import Incident
+from .models import Asset, Incident, Task, TaskTemplate
 
 
 def _parse_duration(value):
@@ -99,4 +99,39 @@ class IncidentFilterSet(django_filters.FilterSet):
                     qs = qs.filter(**{f"source_ref__{k}": v})
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
+        return qs
+
+
+class TaskTemplateFilterSet(django_filters.FilterSet):
+    subject = django_filters.NumberFilter(field_name="subject_id")
+
+    class Meta:
+        model = TaskTemplate
+        fields = []
+
+
+class AssetFilterSet(django_filters.FilterSet):
+    org = django_filters.CharFilter(field_name="organization__slug", lookup_expr="exact")
+    q = django_filters.CharFilter(field_name="name", lookup_expr="icontains")
+
+    class Meta:
+        model = Asset
+        fields = []
+
+
+class TaskFilterSet(django_filters.FilterSet):
+    q = django_filters.CharFilter(field_name="title", lookup_expr="icontains")
+    state = django_filters.CharFilter(field_name="state", lookup_expr="exact")
+    assignee = django_filters.CharFilter(method="filter_assignee")
+
+    class Meta:
+        model = Task
+        fields = []
+
+    def filter_assignee(self, qs, name, value):
+        if value == "me":
+            if self.request:
+                return qs.filter(assignee=self.request.user)
+        elif value == "unassigned":
+            return qs.filter(assignee__isnull=True)
         return qs

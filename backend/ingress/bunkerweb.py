@@ -75,15 +75,25 @@ class BunkerWebClient:
             logger.warning("BunkerWeb get_service_settings(%s): unexpected response type %s", fqdn, type(data).__name__)
             return {}
 
-        # Unwrap common BunkerWeb envelope patterns e.g. {"data": {...}} or {"settings": {...}}
-        for envelope_key in ("data", "settings", "service"):
+        # Unwrap common BunkerWeb envelope patterns:
+        # {"data": {...}}, {"settings": {...}}, {"config": {...}} (used by full=true response)
+        for envelope_key in ("data", "settings", "config"):
             if envelope_key in data and isinstance(data[envelope_key], dict):
                 logger.debug(
                     "BunkerWeb get_service_settings(%s): unwrapping envelope key %r", fqdn, envelope_key
                 )
-                return data[envelope_key]
+                data = data[envelope_key]
+                break
 
-        return data
+        # With full=true each entry is {"value": "...", "global": ..., "method": ..., "default": ...}.
+        # Extract just the plain value so callers always receive a flat {key: str} mapping.
+        result = {}
+        for key, val in data.items():
+            if isinstance(val, dict) and "value" in val:
+                result[key] = val["value"]
+            elif isinstance(val, str):
+                result[key] = val
+        return result
 
     def update_service_settings(self, fqdn, settings: dict):
         resp = self._patch(f"/services/{fqdn}", json=settings)
