@@ -117,6 +117,46 @@ function IncidentExceptionsSection({ displayId }) {
   );
 }
 
+const IOC_KIND_LABELS = { ip: 'IP Address', domain: 'Domain', url: 'URL' };
+const IOC_KIND_CLASSES = {
+  ip:     'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  domain: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
+  url:    'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+};
+
+function IOCSection({ iocs }) {
+  const grouped = iocs.reduce((acc, ioc) => {
+    if (!acc[ioc.kind]) acc[ioc.kind] = [];
+    acc[ioc.kind].push(ioc);
+    return acc;
+  }, {});
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+      <h2 className="text-base font-semibold text-foreground">Indicators of Compromise</h2>
+      <div className="space-y-3">
+        {['ip', 'domain', 'url'].filter(k => grouped[k]?.length).map(kind => (
+          <div key={kind}>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+              {IOC_KIND_LABELS[kind]}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {grouped[kind].map(ioc => (
+                <span
+                  key={ioc.id}
+                  className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-mono ${IOC_KIND_CLASSES[kind]}`}
+                >
+                  {ioc.value}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
   const [assets, setAssets] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -924,6 +964,11 @@ export default function IncidentDetail() {
                   />
                 </div>
               </div>
+
+              {/* IOCs */}
+              {incident.iocs?.length > 0 && (
+                <IOCSection iocs={incident.iocs} />
+              )}
 
               {/* Exceptions */}
               <IncidentExceptionsSection displayId={displayId} />

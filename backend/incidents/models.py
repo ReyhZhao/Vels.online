@@ -386,3 +386,26 @@ class IncidentAsset(models.Model):
 
     def __str__(self):
         return f"{self.asset} on {self.incident}"
+
+
+class IOC(models.Model):
+    KIND_IP = "ip"
+    KIND_DOMAIN = "domain"
+    KIND_URL = "url"
+    KIND_CHOICES = [
+        (KIND_IP, "IP Address"),
+        (KIND_DOMAIN, "Domain"),
+        (KIND_URL, "URL"),
+    ]
+
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="iocs")
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    value = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["kind", "value"]
+        unique_together = [("incident", "kind", "value")]
+
+    def __str__(self):
+        return f"{self.kind}: {self.value} ({self.incident})"

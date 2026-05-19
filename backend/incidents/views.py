@@ -20,7 +20,7 @@ from security.models import Organization, OrganizationMembership
 from django.contrib.auth.models import User
 
 from .filters import IncidentFilterSet
-from .models import Asset, Attachment, Comment, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
 from .serializers import (
     AssetSerializer,
     AttachmentSerializer,
@@ -45,6 +45,7 @@ from .serializers import (
     TaskTemplateWriteSerializer,
 )
 from .services.assets import link_asset_from_source_ref
+from .services.ioc_extraction import extract_and_save_iocs
 from .services.events import record_event
 from .services.identifiers import next_display_id
 from .services.notifications_wiring import notify_comment, notify_incident_alert_if_needed, notify_severity_bump_if_needed
@@ -414,6 +415,7 @@ class IncidentListView(ListAPIView):
             )
             record_event(incident, "incident_created", actor=request.user)
             link_asset_from_source_ref(incident, incident.source_kind, incident.source_ref)
+            extract_and_save_iocs(incident)
 
         notify_incident_alert_if_needed(incident)
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)

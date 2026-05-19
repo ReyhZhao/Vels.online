@@ -2,7 +2,14 @@ from django.conf import settings
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Asset, Attachment, Comment, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+
+
+class IOCSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IOC
+        fields = ["id", "kind", "value", "created_at"]
+        read_only_fields = ["id", "created_at"]
 
 
 class SubjectSerializer(serializers.ModelSerializer):
@@ -102,6 +109,7 @@ class IncidentSerializer(serializers.ModelSerializer):
     response_sla = serializers.SerializerMethodField()
     resolve_sla = serializers.SerializerMethodField()
     assets = serializers.SerializerMethodField()
+    iocs = serializers.SerializerMethodField()
 
     class Meta:
         model = Incident
@@ -131,12 +139,16 @@ class IncidentSerializer(serializers.ModelSerializer):
             "response_sla",
             "resolve_sla",
             "assets",
+            "iocs",
         ]
         read_only_fields = ["id", "display_id", "org_slug", "created_by", "created_at", "updated_at"]
 
     def get_assets(self, obj):
         qs = obj.incident_assets.select_related("asset__route", "added_by")
         return IncidentAssetSerializer(qs, many=True).data
+
+    def get_iocs(self, obj):
+        return IOCSerializer(obj.iocs.all(), many=True).data
 
     def get_active_delegations(self, obj):
         qs = obj.delegations.filter(returned_at__isnull=True).select_related("user", "delegated_by")
