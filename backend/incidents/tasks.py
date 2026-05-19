@@ -40,6 +40,7 @@ def poll_automated_tasks():
                 automation_error=None,
             )
             done += 1
+            _notify_task_complete(task)
         elif status in ("error", "failed"):
             Task.objects.filter(pk=task.pk).update(
                 state=Task.STATE_NEW,
@@ -49,6 +50,41 @@ def poll_automated_tasks():
             failed += 1
 
     return {"processed": processed, "done": done, "failed": failed}
+
+
+def _notify_task_complete(task):
+    from incidents.models import IncidentDelegation
+    from notifications.services.notifications import notify
+
+    incident = task.incident
+    recipients = []
+
+    if incident.assignee_id:
+        try:
+            from django.contrib.auth.models import User
+            recipients.append(User.objects.get(pk=incident.assignee_id))
+        except Exception:
+            pass
+
+    delegate_ids = IncidentDelegation.objects.filter(
+        incident=incident, returned_at__isnull=True
+    ).values_list("user_id", flat=True)
+    from django.contrib.auth.models import User
+    delegates = list(User.objects.filter(id__in=delegate_ids))
+    all_recipients = list({u.id: u for u in recipients + delegates}.values())
+
+    if all_recipients:
+        notify(
+            "task_complete",
+            all_recipients,
+            incident=incident,
+            task=task,
+            payload={
+                "title": f"Automated task completed: {task.title}",
+                "body": f"{incident.display_id} — {task.title}",
+                "link": f"/incidents/{incident.display_id}",
+            },
+        )
 
 
 @shared_task

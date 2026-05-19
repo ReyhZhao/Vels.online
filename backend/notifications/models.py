@@ -38,11 +38,14 @@ class NotificationPreferences(models.Model):
     inapp_incident_alert = models.BooleanField(default=True)
     email_system_alert = models.BooleanField(default=True)
     inapp_system_alert = models.BooleanField(default=True)
+    email_task_complete = models.BooleanField(default=False)
+    inapp_task_complete = models.BooleanField(default=True)
     push_assignment = models.BooleanField(default=False)
     push_delegation = models.BooleanField(default=False)
     push_comment = models.BooleanField(default=False)
     push_state_change = models.BooleanField(default=False)
     push_incident_alert = models.BooleanField(default=False)
+    push_task_complete = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -67,6 +70,7 @@ class Notification(models.Model):
     KIND_STATE_CHANGE = "state_change"
     KIND_INCIDENT_ALERT = "incident_alert"
     KIND_SYSTEM_ALERT = "system_alert"
+    KIND_TASK_COMPLETE = "task_complete"
     KIND_CHOICES = [
         (KIND_ASSIGNMENT, "Assignment"),
         (KIND_DELEGATION, "Delegation"),
@@ -74,6 +78,7 @@ class Notification(models.Model):
         (KIND_STATE_CHANGE, "State Change"),
         (KIND_INCIDENT_ALERT, "Incident Alert"),
         (KIND_SYSTEM_ALERT, "System Alert"),
+        (KIND_TASK_COMPLETE, "Task Complete"),
     ]
 
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")

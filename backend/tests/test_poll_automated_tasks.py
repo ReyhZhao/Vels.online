@@ -6,6 +6,7 @@ from automations.models import Automation
 from automations.semaphore import SemaphoreAPIError
 from incidents.models import Incident, Task
 from incidents.tasks import poll_automated_tasks
+from notifications.models import Notification
 from security.models import Organization
 
 
@@ -25,11 +26,19 @@ def automation(db, django_user_model):
 
 
 @pytest.fixture
-def incident(acme):
+def assignee(db, django_user_model):
+    return django_user_model.objects.create_user(
+        username="assignee", password="pass", is_staff=True
+    )
+
+
+@pytest.fixture
+def incident(acme, assignee):
     return Incident.objects.create(
         organization=acme,
         title="Test Incident",
         display_id="INC-2026-0001",
+        assignee=assignee,
     )
 
 
@@ -155,3 +164,44 @@ class TestPollAutomatedTasks:
 
         MockClient.return_value.get_job_status.assert_not_called()
         assert result["processed"] == 0
+
+    def test_success_creates_task_complete_notification(self, automated_task, assignee, semaphore_settings):
+        with patch("automations.semaphore.SemaphoreClient") as MockClient:
+            MockClient.return_value.get_job_status.return_value = "success"
+            poll_automated_tasks()
+
+        notif = Notification.objects.filter(
+            recipient=assignee,
+            kind=Notification.KIND_TASK_COMPLETE,
+            task=automated_task,
+        ).first()
+        assert notif is not None
+        assert automated_task.incident.display_id in notif.payload["body"]
+
+    def test_failure_does_not_create_notification(self, automated_task, assignee, semaphore_settings):
+        with patch("automations.semaphore.SemaphoreClient") as MockClient:
+            MockClient.return_value.get_job_status.return_value = "error"
+            poll_automated_tasks()
+
+        assert not Notification.objects.filter(
+            recipient=assignee,
+            kind=Notification.KIND_TASK_COMPLETE,
+        ).exists()
+
+    def test_no_notification_when_incident_has_no_assignee(self, incident, automation, semaphore_settings, django_user_model):
+        incident.assignee = None
+        incident.save()
+        task = Task.objects.create(
+            incident=incident,
+            title="Unassigned scan",
+            task_type=Task.TYPE_AUTOMATED,
+            automation=automation,
+            semaphore_task_id=88,
+            state=Task.STATE_IN_PROGRESS,
+        )
+
+        with patch("automations.semaphore.SemaphoreClient") as MockClient:
+            MockClient.return_value.get_job_status.return_value = "success"
+            poll_automated_tasks()
+
+        assert not Notification.objects.filter(kind=Notification.KIND_TASK_COMPLETE).exists()
