@@ -12,7 +12,7 @@ const STATUS_CLASSES = {
 
 const TABS = [
   { key: 'settings', label: 'Settings' },
-  { key: 'reports',  label: 'Reports' },
+  { key: 'logs',     label: 'Logs' },
 ];
 
 export default function RouteDetail() {
@@ -23,7 +23,7 @@ export default function RouteDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('settings');
-  const [reportsOpened, setReportsOpened] = useState(false);
+  const [logsOpened, setLogsOpened] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
   const [bwTarget, setBwTarget] = useState(null);
@@ -109,7 +109,7 @@ export default function RouteDetail() {
               key={tab.key}
               onClick={() => {
                 setActiveTab(tab.key);
-                if (tab.key === 'reports') setReportsOpened(true);
+                if (tab.key === 'logs') setLogsOpened(true);
               }}
               className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -125,8 +125,8 @@ export default function RouteDetail() {
 
       <div>
         {activeTab === 'settings' && <RouteSettings fqdn={route.fqdn} />}
-        {reportsOpened && (
-          <div className={activeTab !== 'reports' ? 'hidden' : ''}>
+        {logsOpened && (
+          <div className={activeTab !== 'logs' ? 'hidden' : ''}>
             <RouteReports fqdn={route.fqdn} />
           </div>
         )}

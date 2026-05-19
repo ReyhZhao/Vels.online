@@ -9,10 +9,22 @@ vi.mock('../lib/axios', () => ({
 import api from '../lib/axios';
 import RouteReports from './RouteReports';
 
-const ENTRIES = [
-  { timestamp: '2026-05-01T10:00:00Z', ip: '1.2.3.4', rule: 'sqli', action: 'blocked' },
-  { timestamp: '2026-05-01T11:00:00Z', ip: '5.6.7.8', rule: 'xss',  action: 'blocked' },
-];
+const ACCESS_LOG = {
+  _id: 'abc',
+  timestamp: '2026-05-19T10:00:00Z',
+  data: { srcip: '1.2.3.4', http_method: 'GET', http_path: '/api/test', status_code: '200', body_bytes_sent: '512' },
+};
+
+const MODSEC_LOG = {
+  _id: 'def',
+  timestamp: '2026-05-19T11:00:00Z',
+  data: { srcip: '5.6.7.8', http_method: 'GET', http_path: '/.env', ruleid: '949110' },
+  GeoLocation: { country_name: 'Canada' },
+};
+
+function ok(logs, summary = { total: logs.length, blocked: 0 }) {
+  return { data: { logs, total: logs.length, summary } };
+}
 
 function renderPage(fqdn = 'app.example.com') {
   return render(
@@ -28,36 +40,102 @@ describe('RouteReports', () => {
   it('shows loading indicator while fetching', () => {
     api.get.mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByTestId('reports-loading')).toBeInTheDocument();
+    expect(screen.getByTestId('logs-loading')).toBeInTheDocument();
   });
 
-  it('renders report entries with timestamp, IP, rule, and action', async () => {
-    api.get.mockResolvedValue({ data: { entries: ENTRIES } });
+  it('fetches access logs by default', async () => {
+    api.get.mockResolvedValue(ok([]));
+    renderPage('my.service.io');
+    await waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith(
+        expect.stringContaining('/api/ingress/routes/my.service.io/logs/?')
+      );
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('type=accesslog'));
+    });
+  });
+
+  it('renders access log rows with timestamp, IP, request, status, size', async () => {
+    api.get.mockResolvedValue(ok([ACCESS_LOG]));
     renderPage();
     await waitFor(() => {
       expect(screen.getByText('1.2.3.4')).toBeInTheDocument();
+      expect(screen.getByText('GET')).toBeInTheDocument();
+      expect(screen.getByText('/api/test')).toBeInTheDocument();
+      expect(screen.getByText('200')).toBeInTheDocument();
+      expect(screen.getByText('512B')).toBeInTheDocument();
+    });
+  });
+
+  it('shows summary total and blocked', async () => {
+    api.get.mockResolvedValue(ok([ACCESS_LOG], { total: 10, blocked: 3 }));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('10')).toBeInTheDocument();
+      expect(screen.getByText('3')).toBeInTheDocument();
+    });
+  });
+
+  it('switches to WAF Blocks tab and fetches modsecurity logs', async () => {
+    api.get
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok([MODSEC_LOG], { total: 1, blocked: 1 }));
+    renderPage();
+    await waitFor(() => screen.getByText('WAF Blocks'));
+    fireEvent.click(screen.getByText('WAF Blocks'));
+    await waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('type=modsecurity'));
+    });
+  });
+
+  it('renders modsecurity rows with rule ID and country', async () => {
+    api.get
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok([MODSEC_LOG], { total: 1, blocked: 1 }));
+    renderPage();
+    await waitFor(() => screen.getByText('WAF Blocks'));
+    fireEvent.click(screen.getByText('WAF Blocks'));
+    await waitFor(() => {
       expect(screen.getByText('5.6.7.8')).toBeInTheDocument();
-      expect(screen.getByText('sqli')).toBeInTheDocument();
-      expect(screen.getByText('xss')).toBeInTheDocument();
-      expect(screen.getAllByText('blocked')).toHaveLength(2);
+      expect(screen.getByText('949110')).toBeInTheDocument();
+      expect(screen.getByText('Canada')).toBeInTheDocument();
     });
   });
 
-  it('shows empty state when no entries', async () => {
-    api.get.mockResolvedValue({ data: { entries: [] } });
+  it('applies srcip filter on form submit', async () => {
+    api.get.mockResolvedValue(ok([]));
     renderPage();
-    await waitFor(() =>
-      expect(screen.getByText(/No blocked activity recorded/i)).toBeInTheDocument()
-    );
+    await waitFor(() => screen.getByPlaceholderText('Filter by IP…'));
+    fireEvent.change(screen.getByPlaceholderText('Filter by IP…'), {
+      target: { value: '10.0.0.1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    await waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('srcip=10.0.0.1'));
+    });
   });
 
-  it('shows BunkerWeb unavailability message when message field is present', async () => {
-    api.get.mockResolvedValue({
-      data: { entries: [], message: 'BunkerWeb is currently unavailable.' },
+  it('clears srcip filter when Clear is clicked', async () => {
+    api.get.mockResolvedValue(ok([]));
+    renderPage();
+    await waitFor(() => screen.getByPlaceholderText('Filter by IP…'));
+    fireEvent.change(screen.getByPlaceholderText('Filter by IP…'), {
+      target: { value: '10.0.0.1' },
     });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    await waitFor(() => screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    await waitFor(() => {
+      const calls = api.get.mock.calls.map(c => c[0]);
+      const lastCall = calls[calls.length - 1];
+      expect(lastCall).not.toContain('srcip');
+    });
+  });
+
+  it('shows empty state when no logs returned', async () => {
+    api.get.mockResolvedValue(ok([]));
     renderPage();
     await waitFor(() =>
-      expect(screen.getByText('BunkerWeb is currently unavailable.')).toBeInTheDocument()
+      expect(screen.getByText(/No log entries found/i)).toBeInTheDocument()
     );
   });
 
@@ -65,7 +143,7 @@ describe('RouteReports', () => {
     api.get.mockRejectedValue(new Error('network error'));
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText('Failed to load reports.')).toBeInTheDocument();
+      expect(screen.getByText('Failed to load logs.')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
     });
   });
@@ -73,19 +151,11 @@ describe('RouteReports', () => {
   it('retries fetch when Retry button is clicked', async () => {
     api.get
       .mockRejectedValueOnce(new Error('fail'))
-      .mockResolvedValueOnce({ data: { entries: ENTRIES } });
+      .mockResolvedValueOnce(ok([ACCESS_LOG]));
     renderPage();
     await waitFor(() => screen.getByRole('button', { name: 'Retry' }));
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.getByText('1.2.3.4')).toBeInTheDocument());
     expect(api.get).toHaveBeenCalledTimes(2);
-  });
-
-  it('fetches from the correct endpoint', async () => {
-    api.get.mockResolvedValue({ data: { entries: [] } });
-    renderPage('my.service.io');
-    await waitFor(() => {
-      expect(api.get).toHaveBeenCalledWith('/api/ingress/routes/my.service.io/reports/');
-    });
   });
 });

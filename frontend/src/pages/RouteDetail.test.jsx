@@ -59,20 +59,20 @@ describe('RouteDetail', () => {
     await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
   });
 
-  it('renders Settings and Reports tabs', async () => {
+  it('renders Settings and Logs tabs', async () => {
     api.get.mockResolvedValue({ data: ROUTE });
     renderPage();
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Reports' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Logs' })).toBeInTheDocument();
     });
   });
 
-  it('switches to Reports tab on click and shows RouteReports', async () => {
+  it('switches to Logs tab on click and shows RouteReports', async () => {
     api.get.mockResolvedValue({ data: ROUTE });
     renderPage();
-    await waitFor(() => screen.getByRole('button', { name: 'Reports' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Reports' }));
+    await waitFor(() => screen.getByRole('button', { name: 'Logs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Logs' }));
     expect(screen.getByTestId('route-reports')).toBeInTheDocument();
   });
 
@@ -106,20 +106,20 @@ describe('RouteDetail', () => {
     expect(screen.queryByTestId('dns-pending')).not.toBeInTheDocument();
   });
 
-  it('does not fetch reports until Reports tab is opened', async () => {
+  it('does not fetch logs until Logs tab is opened', async () => {
     api.get.mockResolvedValue({ data: ROUTE });
     renderPage();
     await waitFor(() => screen.getByText('app.example.com'));
-    const reportsCalls = api.get.mock.calls.filter(c => c[0].includes('/reports/'));
+    const reportsCalls = api.get.mock.calls.filter(c => c[0].includes('/logs/'));
     expect(reportsCalls).toHaveLength(0);
   });
 
-  it('mounts RouteReports only after Reports tab is clicked', async () => {
+  it('mounts RouteReports only after Logs tab is clicked', async () => {
     api.get.mockResolvedValue({ data: ROUTE });
     renderPage();
     await waitFor(() => screen.getByText('app.example.com'));
     expect(screen.queryByTestId('route-reports')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Reports' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Logs' }));
     expect(screen.getByTestId('route-reports')).toBeInTheDocument();
   });
 
