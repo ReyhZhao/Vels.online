@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Mail } from 'lucide-react';
 import api from '../../lib/axios';
+import { useAuth } from '../../context/AuthContext';
 import usePushSubscription from '../../hooks/usePushSubscription';
 
 const CATEGORIES = [
@@ -8,6 +10,7 @@ const CATEGORIES = [
   { key: 'comment', label: 'Comments', description: 'When someone comments on an incident you are involved in' },
   { key: 'state_change', label: 'State changes', description: "When an incident's state changes" },
   { key: 'incident_alert', label: 'Incident alerts', description: 'High/critical severity incidents affecting your organisation' },
+  { key: 'task_complete', label: 'Task completed', description: 'When an automated task assigned to your incident finishes' },
 ];
 
 const GUARDRAIL_CATEGORIES = new Set(['assignment', 'delegation']);
@@ -33,7 +36,50 @@ function Toggle({ checked, onChange, disabled, label }) {
   );
 }
 
+function EmailDiagnosticsSection() {
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function handleSend() {
+    setSending(true);
+    setResult(null);
+    try {
+      const res = await api.post('/api/admin/test-email/');
+      setResult({ ok: true, message: res.data.detail });
+    } catch (err) {
+      setResult({ ok: false, message: err.response?.data?.detail || 'Failed to send test email.' });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="mt-8">
+      <h2 className="text-base font-semibold text-foreground mb-4 flex items-center gap-2">
+        <Mail className="h-4 w-4 text-muted-foreground" />
+        Email diagnostics
+      </h2>
+      <div className="rounded-lg border border-border p-4 space-y-3">
+        <p className="text-sm text-muted-foreground">Send a test email to verify your email configuration is working correctly.</p>
+        <button
+          onClick={handleSend}
+          disabled={sending}
+          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        >
+          {sending ? 'Sending…' : 'Send test email'}
+        </button>
+        {result && (
+          <p className={`text-sm ${result.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+            {result.message}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function NotificationPreferences() {
+  const { user } = useAuth();
   const { isSubscribed, isSupported, loading: pushLoading, subscribe, unsubscribe } = usePushSubscription();
   const [pushError, setPushError] = useState(null);
 
@@ -237,6 +283,8 @@ export default function NotificationPreferences() {
           {saving ? 'Saving…' : 'Save preferences'}
         </button>
       </div>
+
+      {user?.is_staff && <EmailDiagnosticsSection />}
     </div>
   );
 }
