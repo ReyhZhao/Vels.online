@@ -76,6 +76,7 @@ const TABS = [
   { key: 'tasks',       label: 'Tasks' },
   { key: 'delegations', label: 'Delegations' },
   { key: 'assets',      label: 'Assets' },
+  { key: 'iocs',        label: 'IOCs' },
 ];
 
 const EXCEPTION_STATUS_CLASSES = {
@@ -131,28 +132,34 @@ function IOCSection({ iocs }) {
     return acc;
   }, {});
 
+  const kinds = ['ip', 'domain', 'url'].filter(k => grouped[k]?.length);
+
   return (
     <div className="rounded-lg border border-border bg-card p-6 space-y-4">
       <h2 className="text-base font-semibold text-foreground">Indicators of Compromise</h2>
-      <div className="space-y-3">
-        {['ip', 'domain', 'url'].filter(k => grouped[k]?.length).map(kind => (
-          <div key={kind}>
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
-              {IOC_KIND_LABELS[kind]}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {grouped[kind].map(ioc => (
-                <span
-                  key={ioc.id}
-                  className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-mono ${IOC_KIND_CLASSES[kind]}`}
-                >
-                  {ioc.value}
-                </span>
-              ))}
+      {kinds.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No IOCs were extracted from this incident.</p>
+      ) : (
+        <div className="space-y-3">
+          {kinds.map(kind => (
+            <div key={kind}>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+                {IOC_KIND_LABELS[kind]}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {grouped[kind].map(ioc => (
+                  <span
+                    key={ioc.id}
+                    className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-mono ${IOC_KIND_CLASSES[kind]}`}
+                  >
+                    {ioc.value}
+                  </span>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -965,11 +972,6 @@ export default function IncidentDetail() {
                 </div>
               </div>
 
-              {/* IOCs */}
-              {incident.iocs?.length > 0 && (
-                <IOCSection iocs={incident.iocs} />
-              )}
-
               {/* Exceptions */}
               <IncidentExceptionsSection displayId={displayId} />
             </div>
@@ -1001,6 +1003,9 @@ export default function IncidentDetail() {
               isStaff={user?.is_staff ?? false}
               orgSlug={incident.org_slug}
             />
+          )}
+          {activeTab === 'iocs' && (
+            <IOCSection iocs={incident.iocs ?? []} />
           )}
         </div>
       </div>
