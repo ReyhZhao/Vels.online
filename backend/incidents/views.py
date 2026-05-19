@@ -762,11 +762,7 @@ class IncidentTransitionView(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
         if not request.user.is_staff:
-            membership = OrganizationMembership.objects.filter(
-                user=request.user, organization=incident.organization
-            ).exists()
-            if not membership:
-                return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
 
         target_state = request.data.get("state")
         if not target_state:

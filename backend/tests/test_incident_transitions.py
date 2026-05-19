@@ -269,7 +269,7 @@ def test_transition_endpoint_staff_can_transition(admin_client, acme):
 
 
 @pytest.mark.django_db
-def test_transition_endpoint_member_can_transition(client, member, acme):
+def test_transition_endpoint_member_forbidden(client, member, acme):
     incident = make_incident(acme)
     client.force_login(member)
     response = client.post(
@@ -277,8 +277,7 @@ def test_transition_endpoint_member_can_transition(client, member, acme):
         {"state": "triaged"},
         content_type="application/json",
     )
-    assert response.status_code == 200
-    assert response.json()["state"] == "triaged"
+    assert response.status_code == 403
 
 
 @pytest.mark.django_db

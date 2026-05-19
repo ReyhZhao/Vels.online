@@ -777,7 +777,7 @@ export default function IncidentDetail() {
             <h1 className="mt-1 text-2xl font-semibold text-foreground">{incident.title}</h1>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
-            {nextStates.map(({ state, label }) => (
+            {user?.is_staff && nextStates.map(({ state, label }) => (
               <button
                 key={state}
                 onClick={() => handleActionClick(state)}
@@ -787,7 +787,7 @@ export default function IncidentDetail() {
                 {label}
               </button>
             ))}
-            {RESOLVE_DROPDOWN_STATES.has(incident.state) && (
+            {user?.is_staff && RESOLVE_DROPDOWN_STATES.has(incident.state) && (
               <ResolveDropdown
                 onResolve={() => handleActionClick('resolved')}
                 onNeedsTuning={() => handleActionClick('needs_tuning')}
