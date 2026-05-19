@@ -174,6 +174,27 @@ def test_digest_second_notification_within_window_does_not_queue_second_email(st
     assert Notification.objects.filter(recipient=staff, incident=incident, read_at__isnull=True).count() == 2
 
 
+# ── task_complete preferences ────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_prefs_patch_task_complete_persists(client, staff):
+    client.force_login(staff)
+    response = client.patch(
+        "/api/me/notification-prefs/",
+        {"email_task_complete": False, "inapp_task_complete": False},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email_task_complete"] is False
+    assert data["inapp_task_complete"] is False
+
+    # Confirm persisted on re-fetch
+    response = client.get("/api/me/notification-prefs/")
+    assert response.json()["email_task_complete"] is False
+    assert response.json()["inapp_task_complete"] is False
+
+
 # ── assignment / delegation guardrail ─────────────────────────────────────────
 
 @pytest.mark.django_db
