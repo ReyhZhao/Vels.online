@@ -15,6 +15,8 @@ from rest_framework.views import APIView
 
 from security.models import Organization, OrganizationMembership
 
+from security.opensearch import OpenSearchClient, OpenSearchError
+
 from .bunkerweb import BunkerWebClient, BunkerWebError
 from .filters import RouteFilterSet
 from .models import Route
@@ -246,22 +248,46 @@ class RouteSettingsView(APIView):
         return Response(cleaned)
 
 
-class RouteReportsView(APIView):
+class RouteLogsView(APIView):
+    _VALID_TYPES = {"accesslog", "modsecurity"}
+
     def get(self, request, fqdn):
         _, err = _get_route(request, fqdn)
         if err:
             return err
-        try:
-            data = BunkerWebClient().get_service_reports(fqdn)
-            entries = data if isinstance(data, list) else data.get("entries", [])
-            return Response({"entries": entries})
-        except BunkerWebError:
+
+        log_type = request.query_params.get("type", "accesslog")
+        if log_type not in self._VALID_TYPES:
             return Response(
-                {
-                    "entries": [],
-                    "message": "BunkerWeb is currently unavailable. No report data could be retrieved.",
-                }
+                {"detail": "type must be 'accesslog' or 'modsecurity'"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+        try:
+            hours = int(request.query_params.get("hours", 24))
+            offset = int(request.query_params.get("offset", 0))
+            limit = min(int(request.query_params.get("limit", 50)), 200)
+        except ValueError:
+            return Response(
+                {"detail": "hours, offset, and limit must be integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        srcip = request.query_params.get("srcip") or None
+
+        try:
+            result = OpenSearchClient().get_route_logs(
+                fqdn=fqdn,
+                log_type=log_type,
+                hours=hours,
+                offset=offset,
+                limit=limit,
+                srcip=srcip,
+            )
+        except OpenSearchError:
+            return Response({"logs": [], "total": 0, "summary": {"total": 0, "blocked": 0}})
+
+        return Response(result)
 
 
 class RouteImportView(APIView):

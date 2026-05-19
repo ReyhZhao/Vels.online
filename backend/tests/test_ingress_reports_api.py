@@ -2,9 +2,9 @@ from unittest.mock import patch
 
 import pytest
 
-from ingress.bunkerweb import BunkerWebError
 from ingress.models import Route
 from security.models import Organization, OrganizationMembership
+from security.opensearch import OpenSearchError
 
 # ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -36,70 +36,133 @@ def route(acme):
     )
 
 
-REPORT_ENTRIES = [
-    {"timestamp": "2026-05-01T10:00:00Z", "ip": "1.2.3.4", "rule": "sqli", "action": "blocked"},
-    {"timestamp": "2026-05-01T11:00:00Z", "ip": "5.6.7.8", "rule": "xss", "action": "blocked"},
-]
+_OS_RESULT = {
+    "logs": [{"_id": "abc", "data": {"srcip": "1.2.3.4"}}],
+    "total": 1,
+    "summary": {"total": 1, "blocked": 0},
+}
 
-# ── GET /api/ingress/routes/<fqdn>/reports/ ──────────────────────────────────
-
-
-@pytest.mark.django_db
-def test_reports_requires_auth(client, route):
-    assert client.get("/api/ingress/routes/app.example.com/reports/").status_code == 401
+# ── GET /api/ingress/routes/<fqdn>/logs/ ────────────────────────────────────
 
 
 @pytest.mark.django_db
-def test_reports_non_member_forbidden(client, alice, route):
+def test_logs_requires_auth(client, route):
+    assert client.get("/api/ingress/routes/app.example.com/logs/").status_code == 401
+
+
+@pytest.mark.django_db
+def test_logs_non_member_forbidden(client, alice, route):
     client.force_login(alice)
-    assert client.get("/api/ingress/routes/app.example.com/reports/").status_code == 403
+    assert client.get("/api/ingress/routes/app.example.com/logs/").status_code == 403
 
 
 @pytest.mark.django_db
-@patch("ingress.views.BunkerWebClient")
-def test_reports_returns_entries_from_bunkerweb(MockBW, client, acme_member, route):
-    MockBW.return_value.get_service_reports.return_value = REPORT_ENTRIES
+@patch("ingress.views.OpenSearchClient")
+def test_logs_returns_accesslog_by_default(MockOS, client, acme_member, route):
+    MockOS.return_value.get_route_logs.return_value = _OS_RESULT
     client.force_login(acme_member)
-    res = client.get("/api/ingress/routes/app.example.com/reports/")
+    res = client.get("/api/ingress/routes/app.example.com/logs/")
     assert res.status_code == 200
     data = res.json()
-    assert data["entries"] == REPORT_ENTRIES
-    MockBW.return_value.get_service_reports.assert_called_once_with("app.example.com")
+    assert data["logs"] == _OS_RESULT["logs"]
+    assert data["total"] == 1
+    assert data["summary"] == {"total": 1, "blocked": 0}
+    MockOS.return_value.get_route_logs.assert_called_once_with(
+        fqdn="app.example.com",
+        log_type="accesslog",
+        hours=24,
+        offset=0,
+        limit=50,
+        srcip=None,
+    )
 
 
 @pytest.mark.django_db
-@patch("ingress.views.BunkerWebClient")
-def test_reports_bunkerweb_dict_response_normalised(MockBW, client, acme_member, route):
-    MockBW.return_value.get_service_reports.return_value = {"entries": REPORT_ENTRIES, "total": 2}
+@patch("ingress.views.OpenSearchClient")
+def test_logs_modsecurity_type_forwarded(MockOS, client, acme_member, route):
+    result = {"logs": [], "total": 0, "summary": {"total": 0, "blocked": 0}}
+    MockOS.return_value.get_route_logs.return_value = result
     client.force_login(acme_member)
-    res = client.get("/api/ingress/routes/app.example.com/reports/")
+    res = client.get("/api/ingress/routes/app.example.com/logs/?type=modsecurity")
     assert res.status_code == 200
-    assert res.json()["entries"] == REPORT_ENTRIES
+    MockOS.return_value.get_route_logs.assert_called_once_with(
+        fqdn="app.example.com",
+        log_type="modsecurity",
+        hours=24,
+        offset=0,
+        limit=50,
+        srcip=None,
+    )
 
 
 @pytest.mark.django_db
-@patch("ingress.views.BunkerWebClient")
-def test_reports_bunkerweb_unavailable_returns_empty_not_500(MockBW, client, acme_member, route):
-    MockBW.return_value.get_service_reports.side_effect = BunkerWebError(503, "unavailable")
+def test_logs_invalid_type_returns_400(client, acme_member, route):
     client.force_login(acme_member)
-    res = client.get("/api/ingress/routes/app.example.com/reports/")
+    res = client.get("/api/ingress/routes/app.example.com/logs/?type=nginx")
+    assert res.status_code == 400
+
+
+@pytest.mark.django_db
+@patch("ingress.views.OpenSearchClient")
+def test_logs_srcip_filter_forwarded(MockOS, client, acme_member, route):
+    MockOS.return_value.get_route_logs.return_value = _OS_RESULT
+    client.force_login(acme_member)
+    client.get("/api/ingress/routes/app.example.com/logs/?srcip=1.2.3.4")
+    _, kwargs = MockOS.return_value.get_route_logs.call_args
+    assert kwargs["srcip"] == "1.2.3.4"
+
+
+@pytest.mark.django_db
+@patch("ingress.views.OpenSearchClient")
+def test_logs_hours_offset_limit_forwarded(MockOS, client, acme_member, route):
+    MockOS.return_value.get_route_logs.return_value = _OS_RESULT
+    client.force_login(acme_member)
+    client.get("/api/ingress/routes/app.example.com/logs/?hours=168&offset=50&limit=100")
+    _, kwargs = MockOS.return_value.get_route_logs.call_args
+    assert kwargs["hours"] == 168
+    assert kwargs["offset"] == 50
+    assert kwargs["limit"] == 100
+
+
+@pytest.mark.django_db
+@patch("ingress.views.OpenSearchClient")
+def test_logs_limit_capped_at_200(MockOS, client, acme_member, route):
+    MockOS.return_value.get_route_logs.return_value = _OS_RESULT
+    client.force_login(acme_member)
+    client.get("/api/ingress/routes/app.example.com/logs/?limit=9999")
+    _, kwargs = MockOS.return_value.get_route_logs.call_args
+    assert kwargs["limit"] == 200
+
+
+@pytest.mark.django_db
+def test_logs_invalid_hours_returns_400(client, acme_member, route):
+    client.force_login(acme_member)
+    assert client.get("/api/ingress/routes/app.example.com/logs/?hours=bad").status_code == 400
+
+
+@pytest.mark.django_db
+@patch("ingress.views.OpenSearchClient")
+def test_logs_opensearch_error_returns_empty(MockOS, client, acme_member, route):
+    MockOS.return_value.get_route_logs.side_effect = OpenSearchError("down")
+    client.force_login(acme_member)
+    res = client.get("/api/ingress/routes/app.example.com/logs/")
     assert res.status_code == 200
     data = res.json()
-    assert data["entries"] == []
-    assert "message" in data
-    assert "unavailable" in data["message"].lower()
+    assert data["logs"] == []
+    assert data["total"] == 0
+    assert data["summary"] == {"total": 0, "blocked": 0}
 
 
 @pytest.mark.django_db
-@patch("ingress.views.BunkerWebClient")
-def test_reports_staff_bypass(MockBW, client, route, django_user_model):
+@patch("ingress.views.OpenSearchClient")
+def test_logs_staff_bypass(MockOS, client, route, django_user_model):
     staff = django_user_model.objects.create_user(username="s", password="p", is_staff=True)
-    MockBW.return_value.get_service_reports.return_value = []
+    MockOS.return_value.get_route_logs.return_value = _OS_RESULT
     client.force_login(staff)
-    assert client.get("/api/ingress/routes/app.example.com/reports/").status_code == 200
+    assert client.get("/api/ingress/routes/app.example.com/logs/").status_code == 200
 
 
 @pytest.mark.django_db
-def test_reports_route_not_found(client, acme_member):
+def test_logs_route_not_found(client, acme_member):
     client.force_login(acme_member)
-    assert client.get("/api/ingress/routes/missing.example.com/reports/").status_code == 404
+    assert client.get("/api/ingress/routes/missing.example.com/logs/").status_code == 404

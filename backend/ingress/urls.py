@@ -5,7 +5,7 @@ from .views import (
     RouteDetailView,
     RouteImportView,
     RouteListView,
-    RouteReportsView,
+    RouteLogsView,
     RouteSettingsView,
 )
 
@@ -14,6 +14,6 @@ urlpatterns = [
     path("routes/", RouteListView.as_view()),
     path("routes/import/", RouteImportView.as_view()),
     path("routes/<str:fqdn>/settings/", RouteSettingsView.as_view()),
-    path("routes/<str:fqdn>/reports/", RouteReportsView.as_view()),
+    path("routes/<str:fqdn>/logs/", RouteLogsView.as_view()),
     path("routes/<str:fqdn>/", RouteDetailView.as_view()),
 ]

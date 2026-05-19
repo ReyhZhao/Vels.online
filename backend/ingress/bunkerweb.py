@@ -100,11 +100,6 @@ class BunkerWebClient:
         self._check(resp)
         return resp.json()
 
-    def get_service_reports(self, fqdn):
-        resp = self._get(f"/services/{fqdn}/reports")
-        self._check(resp)
-        return resp.json()
-
     def list_services(self):
         resp = self._get("/services")
         self._check(resp)

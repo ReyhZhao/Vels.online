@@ -387,6 +387,37 @@ class OpenSearchClient:
             "stats": stats,
         }
 
+    def get_route_logs(self, fqdn, log_type, hours=24, offset=0, limit=50, srcip=None):
+        filters = [
+            {"term": {"data.hostname": fqdn}},
+            {"term": {"rule.groups": "bunkerweb"}},
+            {"term": {"rule.groups": log_type}},
+            {"range": {"timestamp": {"gte": f"now-{hours}h"}}},
+        ]
+        if srcip:
+            filters.append({"term": {"data.srcip": srcip}})
+        body = {
+            "query": {"bool": {"filter": filters}},
+            "sort": [{"timestamp": {"order": "desc"}}],
+            "from": offset,
+            "size": limit,
+            "track_total_hits": True,
+            "aggs": {
+                "blocked": {"filter": {"term": {"data.status_code": "403"}}},
+            },
+        }
+        data = self._search(_ALERTS_INDEX, body)
+        hits = data["hits"]
+        total = hits["total"]["value"]
+        aggs = data.get("aggregations", {})
+        # modsecurity events are all blocks; access log blocks are 403s
+        blocked = total if log_type == "modsecurity" else aggs.get("blocked", {}).get("doc_count", 0)
+        return {
+            "logs": [{"_id": h.get("_id", ""), **h["_source"]} for h in hits["hits"]],
+            "total": total,
+            "summary": {"total": total, "blocked": blocked},
+        }
+
     def get_events_count(self, agents, hours=24):
         agent_ids = [a["id"] for a in agents if a.get("status") == "active"]
         if not agent_ids:

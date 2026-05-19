@@ -65,14 +65,6 @@ def test_auth_header_on_update_settings(mock_patch):
     assert kwargs["headers"]["Authorization"] == f"Bearer {_TOKEN}"
 
 
-@patch("ingress.bunkerweb.requests.get")
-def test_auth_header_on_get_reports(mock_get):
-    mock_get.return_value = _ok({"entries": []})
-    BunkerWebClient().get_service_reports("app.example.com")
-    _, kwargs = mock_get.call_args
-    assert kwargs["headers"]["Authorization"] == f"Bearer {_TOKEN}"
-
-
 # -------------------------------------------------------------- create_service
 
 
@@ -191,19 +183,6 @@ def test_update_service_settings_sends_payload(mock_patch):
     url = mock_patch.call_args[0][0]
     assert url == f"{_BASE_URL}/services/app.example.com"
     assert mock_patch.call_args[1]["json"] == new_settings
-
-
-# ---------------------------------------------------------- get_service_reports
-
-
-@patch("ingress.bunkerweb.requests.get")
-def test_get_service_reports_returns_data(mock_get):
-    payload = {"entries": [{"ip": "1.2.3.4", "reason": "sqli"}]}
-    mock_get.return_value = _ok(payload)
-    result = BunkerWebClient().get_service_reports("app.example.com")
-    assert result == payload
-    url = mock_get.call_args[0][0]
-    assert url == f"{_BASE_URL}/services/app.example.com/reports"
 
 
 # ------------------------------------------------------------- list_services
