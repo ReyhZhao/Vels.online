@@ -7,7 +7,7 @@ vi.mock('../lib/axios', () => ({
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }));
 
-const mockUseAuth = vi.fn(() => ({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false }));
+const mockUseAuth = vi.fn(() => ({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => mockUseAuth() }));
 
 vi.mock('../context/OrgContext', () => ({
@@ -45,6 +45,7 @@ const INCIDENT = {
   created_by_username: 'alice',
   created_at: '2026-01-15T10:00:00Z',
   updated_at: '2026-01-15T10:00:00Z',
+  iocs: [],
 };
 
 const SUBJECTS = [
@@ -84,7 +85,7 @@ const STAFF_USERS = [
 describe('IncidentDetail', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false });
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
   });
 
   it('shows loading state while fetching', () => {
@@ -295,6 +296,7 @@ describe('IncidentDetail', () => {
   // ── transfer ──────────────────────────────────────────────────────────────
 
   it('does not show Assign/Transfer button for non-staff users', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false });
     mockGet();
     renderPage();
     await waitFor(() => screen.getByText('INC-2026-0001'));
