@@ -6,6 +6,9 @@ def link_asset_from_source_ref(incident, source_kind, source_ref):
     if source_kind not in ("wazuh_event", "agent_finding"):
         return
 
+    if not isinstance(source_ref, dict):
+        return
+
     agent = source_ref.get("agent") or {}
     agent_name = source_ref.get("agent_name") or agent.get("name")
     if not agent_name:

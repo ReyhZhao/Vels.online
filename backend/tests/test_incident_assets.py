@@ -107,6 +107,14 @@ def test_link_asset_noop_when_agent_name_missing(acme):
     assert Asset.objects.count() == 0
 
 
+@pytest.mark.django_db
+def test_link_asset_noop_when_source_ref_is_string(acme):
+    inc = make_incident(acme, source_kind="wazuh_event", source_ref={})
+    link_asset_from_source_ref(inc, inc.source_kind, "some-string-ref")
+
+    assert Asset.objects.count() == 0
+
+
 # ── GET /api/assets/ ──────────────────────────────────────────────────────────
 
 
