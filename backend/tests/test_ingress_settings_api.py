@@ -86,6 +86,16 @@ def test_get_settings_bunkerweb_error_returns_502(MockBW, client, acme_member, r
 
 @pytest.mark.django_db
 @patch("ingress.views.BunkerWebClient")
+def test_get_settings_returns_empty_when_no_managed_keys(MockBW, client, acme_member, route):
+    MockBW.return_value.get_service_settings.return_value = {"status": "success", "other_key": "value"}
+    client.force_login(acme_member)
+    res = client.get("/api/ingress/routes/app.example.com/settings/")
+    assert res.status_code == 200
+    assert res.json() == {}
+
+
+@pytest.mark.django_db
+@patch("ingress.views.BunkerWebClient")
 def test_get_settings_staff_bypass(MockBW, client, route, django_user_model):
     staff = django_user_model.objects.create_user(username="s", password="p", is_staff=True)
     MockBW.return_value.get_service_settings.return_value = BW_SETTINGS

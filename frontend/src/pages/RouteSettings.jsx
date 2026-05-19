@@ -41,13 +41,20 @@ export default function RouteSettings({ fqdn }) {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [syncWarning, setSyncWarning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
   const [validationError, setValidationError] = useState(null);
 
   useEffect(() => {
     api.get(`/api/ingress/routes/${fqdn}/settings/`)
-      .then(res => setSettings(prev => ({ ...prev, ...res.data })))
+      .then(res => {
+        const data = res.data ?? {};
+        setSettings(prev => ({ ...prev, ...data }));
+        if (Object.keys(data).length === 0) {
+          setSyncWarning(true);
+        }
+      })
       .catch(() => setLoadError('Failed to load settings.'))
       .finally(() => setLoading(false));
   }, [fqdn]);
@@ -87,6 +94,11 @@ export default function RouteSettings({ fqdn }) {
 
   return (
     <form onSubmit={handleSave} className="space-y-6 max-w-md">
+      {syncWarning && (
+        <div className="rounded-md border border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-600 dark:bg-amber-900/20 dark:text-amber-300" data-testid="sync-warning">
+          Current settings could not be loaded from BunkerWeb. Showing defaults — saving will apply these values.
+        </div>
+      )}
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
           Web Application Firewall

@@ -1,7 +1,10 @@
 import ipaddress
+import logging
 import re
 
 from django.conf import settings as django_settings
+
+logger = logging.getLogger(__name__)
 from django.db import IntegrityError
 from rest_framework import status
 from rest_framework.response import Response
@@ -203,8 +206,16 @@ class RouteSettingsView(APIView):
         try:
             all_settings = BunkerWebClient().get_service_settings(fqdn)
         except BunkerWebError as exc:
+            logger.warning("RouteSettingsView: BunkerWeb error for %s: %s", fqdn, exc)
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         filtered = {k: v for k, v in all_settings.items() if k in _MANAGED_SETTINGS}
+        if not filtered:
+            logger.warning(
+                "RouteSettingsView: no managed settings found for %s. "
+                "BunkerWeb returned keys: %s",
+                fqdn,
+                list(all_settings.keys()),
+            )
         return Response(filtered)
 
     def patch(self, request, fqdn):

@@ -133,6 +133,29 @@ def test_get_service_settings_returns_dict(mock_get):
     assert mock_get.call_args[1]["params"] == {"full": "true"}
 
 
+@patch("ingress.bunkerweb.requests.get")
+def test_get_service_settings_unwraps_data_envelope(mock_get):
+    inner = {"USE_MODSECURITY": "yes", "MODSECURITY_CRS_PARANOIA_LEVEL": "3"}
+    mock_get.return_value = _ok({"status": "success", "data": inner})
+    result = BunkerWebClient().get_service_settings("app.example.com")
+    assert result == inner
+
+
+@patch("ingress.bunkerweb.requests.get")
+def test_get_service_settings_unwraps_settings_envelope(mock_get):
+    inner = {"USE_WHITELIST": "no"}
+    mock_get.return_value = _ok({"status": "success", "settings": inner})
+    result = BunkerWebClient().get_service_settings("app.example.com")
+    assert result == inner
+
+
+@patch("ingress.bunkerweb.requests.get")
+def test_get_service_settings_non_dict_returns_empty(mock_get):
+    mock_get.return_value = _ok([])
+    result = BunkerWebClient().get_service_settings("app.example.com")
+    assert result == {}
+
+
 # ------------------------------------------------------ update_service_settings
 
 

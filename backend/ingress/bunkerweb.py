@@ -1,6 +1,10 @@
+import logging
+
 import requests
 from django.conf import settings
 from requests.exceptions import RequestException
+
+logger = logging.getLogger(__name__)
 
 
 class BunkerWebError(Exception):
@@ -64,7 +68,22 @@ class BunkerWebClient:
     def get_service_settings(self, fqdn):
         resp = self._get(f"/services/{fqdn}", params={"full": "true"})
         self._check(resp)
-        return resp.json()
+        data = resp.json()
+        logger.debug("BunkerWeb get_service_settings(%s) raw response: %s", fqdn, data)
+
+        if not isinstance(data, dict):
+            logger.warning("BunkerWeb get_service_settings(%s): unexpected response type %s", fqdn, type(data).__name__)
+            return {}
+
+        # Unwrap common BunkerWeb envelope patterns e.g. {"data": {...}} or {"settings": {...}}
+        for envelope_key in ("data", "settings", "service"):
+            if envelope_key in data and isinstance(data[envelope_key], dict):
+                logger.debug(
+                    "BunkerWeb get_service_settings(%s): unwrapping envelope key %r", fqdn, envelope_key
+                )
+                return data[envelope_key]
+
+        return data
 
     def update_service_settings(self, fqdn, settings: dict):
         resp = self._patch(f"/services/{fqdn}", json=settings)
