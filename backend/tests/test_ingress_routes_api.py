@@ -268,6 +268,45 @@ def test_delete_staff_bypass(MockClient, client, staff, contoso):
     assert client.delete("/api/ingress/routes/app.example.com/").status_code == 204
 
 
+# ── backend_host scheme stripping ───────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.BunkerWebClient")
+def test_create_strips_http_scheme_from_backend_host(MockClient, client, acme_member, acme):
+    MockClient.return_value.create_service.return_value = {}
+    client.force_login(acme_member)
+    payload = {**CREATE_PAYLOAD, "fqdn": "strip1.example.com", "backend_host": "http://10.0.0.5"}
+    res = client.post("/api/ingress/routes/?org=acme", payload, content_type="application/json")
+    assert res.status_code == 201
+    assert res.json()["backend_host"] == "10.0.0.5"
+    MockClient.return_value.create_service.assert_called_once_with(
+        "strip1.example.com", "10.0.0.5", 3000, "http"
+    )
+
+
+@pytest.mark.django_db
+@patch("ingress.views.BunkerWebClient")
+def test_create_strips_https_scheme_from_backend_host(MockClient, client, acme_member, acme):
+    MockClient.return_value.create_service.return_value = {}
+    client.force_login(acme_member)
+    payload = {**CREATE_PAYLOAD, "fqdn": "strip2.example.com", "backend_host": "https://10.0.0.6"}
+    res = client.post("/api/ingress/routes/?org=acme", payload, content_type="application/json")
+    assert res.status_code == 201
+    assert res.json()["backend_host"] == "10.0.0.6"
+
+
+@pytest.mark.django_db
+@patch("ingress.views.BunkerWebClient")
+def test_create_bare_backend_host_unchanged(MockClient, client, acme_member, acme):
+    MockClient.return_value.create_service.return_value = {}
+    client.force_login(acme_member)
+    payload = {**CREATE_PAYLOAD, "fqdn": "strip3.example.com", "backend_host": "10.0.0.7"}
+    res = client.post("/api/ingress/routes/?org=acme", payload, content_type="application/json")
+    assert res.status_code == 201
+    assert res.json()["backend_host"] == "10.0.0.7"
+
+
 # ── GET /api/ingress/settings/ ───────────────────────────────────────────────
 
 
