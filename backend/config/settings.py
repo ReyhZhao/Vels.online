@@ -239,6 +239,9 @@ EXCEPTION_LLM_PROVIDER = os.environ.get(
     "exceptions.llm.gemini.GeminiFlashProvider",
 )
 
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "mistral")
+
 INCIDENT_SLA_TARGETS = {
     "critical": {"response_seconds": 15 * 60,       "resolve_seconds": 4 * 3600},
     "high":     {"response_seconds": 1 * 3600,       "resolve_seconds": 24 * 3600},

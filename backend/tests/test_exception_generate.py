@@ -1,3 +1,4 @@
+import json
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -227,3 +228,104 @@ def test_generate_returns_400_for_empty_source_ref(admin_client, acme):
     )
     assert response.status_code == 400
     assert "no Wazuh alert data" in response.json()["detail"]
+
+
+# ── OllamaProvider ───────────────────────────────────────────────────────────
+
+
+SOURCE_REF = {"rule": {"id": "5763", "description": "Login failed"}, "agent": {"name": "web-01"}}
+
+OLLAMA_RESPONSE_PAYLOAD = {
+    "trigger_rule_id": 5763,
+    "description": "Suppress login failure from web-01",
+    "field_name": "agent.name",
+    "field_value": "web-01",
+    "field_type": "literal",
+    "agent_name": "web-01",
+}
+
+
+def _make_ollama_chat_response(payload: dict):
+    msg = MagicMock()
+    msg.content = json.dumps(payload)
+    resp = MagicMock()
+    resp.message = msg
+    return resp
+
+
+def _make_ollama_client(chat_return):
+    client = MagicMock()
+    client.chat.return_value = chat_return
+    return client
+
+
+@patch("exceptions.llm.ollama.ollama")
+def test_ollama_provider_returns_exception_fields(mock_ollama_mod, settings):
+    settings.OLLAMA_BASE_URL = "http://localhost:11434"
+    settings.OLLAMA_MODEL = "mistral"
+    mock_client = _make_ollama_client(_make_ollama_chat_response(OLLAMA_RESPONSE_PAYLOAD))
+    mock_ollama_mod.Client.return_value = mock_client
+
+    from exceptions.llm.ollama import OllamaProvider
+    provider = OllamaProvider()
+    result = provider.generate_exception(SOURCE_REF)
+
+    assert result.trigger_rule_id == 5763
+    assert result.description == "Suppress login failure from web-01"
+    assert result.field_name == "agent.name"
+    assert result.field_value == "web-01"
+    assert result.field_type == "literal"
+    assert result.agent_name == "web-01"
+    assert result.match_value is None
+
+
+@patch("exceptions.llm.ollama.ollama")
+def test_ollama_provider_strips_markdown_fences(mock_ollama_mod, settings):
+    settings.OLLAMA_BASE_URL = "http://localhost:11434"
+    settings.OLLAMA_MODEL = "mistral"
+    fenced = f"```json\n{json.dumps(OLLAMA_RESPONSE_PAYLOAD)}\n```"
+    msg = MagicMock()
+    msg.content = fenced
+    resp = MagicMock()
+    resp.message = msg
+    mock_client = _make_ollama_client(resp)
+    mock_ollama_mod.Client.return_value = mock_client
+
+    from exceptions.llm.ollama import OllamaProvider
+    provider = OllamaProvider()
+    result = provider.generate_exception(SOURCE_REF)
+
+    assert result.trigger_rule_id == 5763
+
+
+@patch("exceptions.llm.ollama.ollama")
+def test_ollama_provider_passes_source_ref_as_json(mock_ollama_mod, settings):
+    settings.OLLAMA_BASE_URL = "http://localhost:11434"
+    settings.OLLAMA_MODEL = "mistral"
+    mock_client = _make_ollama_client(_make_ollama_chat_response(OLLAMA_RESPONSE_PAYLOAD))
+    mock_ollama_mod.Client.return_value = mock_client
+
+    from exceptions.llm.ollama import OllamaProvider
+    provider = OllamaProvider()
+    provider.generate_exception(SOURCE_REF)
+
+    call_kwargs = mock_client.chat.call_args
+    messages = call_kwargs[1]["messages"] if call_kwargs[1] else call_kwargs[0][1]
+    user_msg = next(m for m in messages if m["role"] == "user")
+    assert json.loads(user_msg["content"]) == SOURCE_REF
+
+
+@patch("exceptions.llm.ollama.ollama")
+def test_ollama_provider_raises_on_invalid_json(mock_ollama_mod, settings):
+    settings.OLLAMA_BASE_URL = "http://localhost:11434"
+    settings.OLLAMA_MODEL = "mistral"
+    msg = MagicMock()
+    msg.content = "not valid json"
+    resp = MagicMock()
+    resp.message = msg
+    mock_ollama_mod.Client.return_value = _make_ollama_client(resp)
+
+    from exceptions.llm.ollama import OllamaProvider
+    provider = OllamaProvider()
+    with pytest.raises(Exception):
+        provider.generate_exception(SOURCE_REF)
