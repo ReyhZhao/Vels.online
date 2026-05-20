@@ -10,6 +10,28 @@ from notifications.email import send_html_email
 
 logger = logging.getLogger(__name__)
 
+STALE_INCIDENT_DAYS = 7
+STALE_INCIDENT_STATES = ["new", "triaged", "resolved"]
+
+
+@shared_task
+def auto_close_stale_incidents():
+    """Close incidents in new/triaged/resolved states that are older than STALE_INCIDENT_DAYS."""
+    from incidents.models import Incident
+    from incidents.services.events import record_event
+
+    cutoff = timezone.now() - timedelta(days=STALE_INCIDENT_DAYS)
+    stale = Incident.objects.filter(state__in=STALE_INCIDENT_STATES, created_at__lt=cutoff)
+
+    closed = 0
+    for incident in stale:
+        incident.state = Incident.STATE_CLOSED
+        incident.save(update_fields=["state"])
+        record_event(incident, "auto_closed", payload={"reason": f"stale after {STALE_INCIDENT_DAYS} days"})
+        closed += 1
+
+    return {"closed": closed}
+
 
 @shared_task
 def poll_automated_tasks():

@@ -227,7 +227,7 @@ def test_create_staff_creates_rule_as_applied(admin_client, acme, pool):
     with patch("exceptions.views.push_rule"):
         response = admin_client.post(
             "/api/exceptions/",
-            {"org": "acme", "description": "Test rule", "scope": "org"},
+            {"org": "acme", "description": "Test rule", "scope": "org", "trigger_rule_id": 100200},
             content_type="application/json",
         )
     assert response.status_code == 201
@@ -242,12 +242,12 @@ def test_create_allocates_id_from_pool(admin_client, acme, pool):
     with patch("exceptions.views.push_rule"):
         admin_client.post(
             "/api/exceptions/",
-            {"org": "acme", "description": "First"},
+            {"org": "acme", "description": "First", "trigger_rule_id": 100201},
             content_type="application/json",
         )
         response = admin_client.post(
             "/api/exceptions/",
-            {"org": "acme", "description": "Second"},
+            {"org": "acme", "description": "Second", "trigger_rule_id": 100202},
             content_type="application/json",
         )
     assert response.json()["wazuh_rule_id"] == 200001
@@ -258,7 +258,7 @@ def test_create_calls_push_rule(admin_client, acme, pool):
     with patch("exceptions.views.push_rule") as mock_push:
         admin_client.post(
             "/api/exceptions/",
-            {"org": "acme", "description": "Test"},
+            {"org": "acme", "description": "Test", "trigger_rule_id": 100203},
             content_type="application/json",
         )
     mock_push.assert_called_once()
@@ -269,7 +269,7 @@ def test_create_rule_saved_even_if_push_fails(admin_client, acme, pool):
     with patch("exceptions.views.push_rule", side_effect=RuntimeError("network error")):
         response = admin_client.post(
             "/api/exceptions/",
-            {"org": "acme", "description": "Test"},
+            {"org": "acme", "description": "Test", "trigger_rule_id": 100204},
             content_type="application/json",
         )
     assert response.status_code == 201
@@ -298,7 +298,7 @@ def test_create_links_incident_when_provided(admin_client, acme, pool):
     with patch("exceptions.views.push_rule"):
         response = admin_client.post(
             "/api/exceptions/",
-            {"org": "acme", "description": "Linked", "incident": "INC-2026-0001"},
+            {"org": "acme", "description": "Linked", "incident": "INC-2026-0001", "trigger_rule_id": 100205},
             content_type="application/json",
         )
     assert response.status_code == 201

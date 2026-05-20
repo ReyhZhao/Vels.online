@@ -52,7 +52,7 @@ def test_create_exception_writes_timeline_event(admin_client, acme, incident, po
     with patch("exceptions.views.push_rule"):
         response = admin_client.post(
             "/api/exceptions/",
-            {"org": "acme", "description": "Suppress brute force", "incident": "INC-2026-0001"},
+            {"org": "acme", "description": "Suppress brute force", "incident": "INC-2026-0001", "trigger_rule_id": 100200},
             content_type="application/json",
         )
     assert response.status_code == 201
@@ -69,7 +69,7 @@ def test_create_exception_without_incident_writes_no_event(admin_client, acme, p
     with patch("exceptions.views.push_rule"):
         response = admin_client.post(
             "/api/exceptions/",
-            {"org": "acme", "description": "No incident linked"},
+            {"org": "acme", "description": "No incident linked", "trigger_rule_id": 100201},
             content_type="application/json",
         )
     assert response.status_code == 201
@@ -114,7 +114,7 @@ def test_timeline_includes_exception_created_event(admin_client, acme, incident,
     with patch("exceptions.views.push_rule"):
         admin_client.post(
             "/api/exceptions/",
-            {"org": "acme", "description": "Timeline test", "incident": "INC-2026-0001"},
+            {"org": "acme", "description": "Timeline test", "incident": "INC-2026-0001", "trigger_rule_id": 100202},
             content_type="application/json",
         )
     response = admin_client.get(f"/api/incidents/{incident.display_id}/timeline/")
