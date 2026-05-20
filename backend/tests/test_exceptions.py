@@ -1,4 +1,6 @@
 import pytest
+from unittest.mock import patch
+
 from security.models import Organization, OrganizationMembership
 from exceptions.models import ExceptionRule, FreedRuleId, WazuhRuleIdPool
 from exceptions.services import allocate_rule_id, free_rule_id
@@ -165,3 +167,96 @@ def test_detail_staff_can_view_any_rule(admin_client, contoso):
     rule = make_rule(contoso)
     response = admin_client.get(f"/api/exceptions/{rule.id}/")
     assert response.status_code == 200
+
+
+# ── _is_placeholder unit tests ────────────────────────────────────────────────
+
+
+def test_is_placeholder_angle_brackets():
+    from exceptions.views import _is_placeholder
+    assert _is_placeholder("<match_value>") is True
+    assert _is_placeholder("real value") is False
+
+
+def test_is_placeholder_square_brackets():
+    from exceptions.views import _is_placeholder
+    assert _is_placeholder("[YOUR_VALUE]") is True
+    assert _is_placeholder("10.0.0.1") is False
+
+
+def test_is_placeholder_all_caps_underscore():
+    from exceptions.views import _is_placeholder
+    assert _is_placeholder("YOUR_VALUE_HERE") is True
+    assert _is_placeholder("MATCH_VALUE") is True
+    assert _is_placeholder("SomeRealValue") is False
+
+
+def test_is_placeholder_empty_string_is_not_placeholder():
+    from exceptions.views import _is_placeholder
+    assert _is_placeholder("") is False
+
+
+# ── POST /api/exceptions/ validation ─────────────────────────────────────────
+
+VALID_POST_PAYLOAD = {
+    "org": "acme",
+    "trigger_rule_id": 100200,
+    "description": "Suppress expected cron noise on agent1",
+    "match_value": "",
+    "field_name": "",
+    "field_value": "",
+    "field_type": "literal",
+    "scope": "org",
+    "agent_name": "",
+}
+
+
+@pytest.mark.django_db
+def test_create_exception_missing_trigger_rule_id(admin_client, acme, pool):
+    payload = {**VALID_POST_PAYLOAD, "trigger_rule_id": None}
+    res = admin_client.post("/api/exceptions/", payload, content_type="application/json")
+    assert res.status_code == 400
+    assert "trigger_rule_id" in res.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_create_exception_empty_description(admin_client, acme, pool):
+    payload = {**VALID_POST_PAYLOAD, "description": "   "}
+    res = admin_client.post("/api/exceptions/", payload, content_type="application/json")
+    assert res.status_code == 400
+    assert "description" in res.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_create_exception_angle_bracket_placeholder(admin_client, acme, pool):
+    payload = {**VALID_POST_PAYLOAD, "match_value": "<match_value>"}
+    res = admin_client.post("/api/exceptions/", payload, content_type="application/json")
+    assert res.status_code == 400
+    assert "match_value" in res.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_create_exception_square_bracket_placeholder(admin_client, acme, pool):
+    payload = {**VALID_POST_PAYLOAD, "field_name": "[FIELD_NAME]"}
+    res = admin_client.post("/api/exceptions/", payload, content_type="application/json")
+    assert res.status_code == 400
+    assert "field_name" in res.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_create_exception_all_caps_placeholder(admin_client, acme, pool):
+    payload = {**VALID_POST_PAYLOAD, "agent_name": "YOUR_AGENT_NAME"}
+    res = admin_client.post("/api/exceptions/", payload, content_type="application/json")
+    assert res.status_code == 400
+    assert "agent_name" in res.json()["detail"]
+
+
+@pytest.mark.django_db
+@patch("exceptions.views.push_rule")
+def test_create_exception_valid_payload_succeeds(mock_push, admin_client, acme, pool):
+    mock_push.return_value = None
+    res = admin_client.post("/api/exceptions/", VALID_POST_PAYLOAD, content_type="application/json")
+    assert res.status_code == 201
+    data = res.json()
+    assert data["trigger_rule_id"] == 100200
+    assert data["description"] == "Suppress expected cron noise on agent1"

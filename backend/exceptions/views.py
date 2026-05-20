@@ -1,4 +1,5 @@
 import logging
+import re
 from dataclasses import asdict
 
 from django_filters.rest_framework import DjangoFilterBackend
@@ -19,6 +20,23 @@ from .services import allocate_rule_id, free_rule_id
 from .services_github import push_rule, remove_rule
 
 logger = logging.getLogger(__name__)
+
+_ANGLE_BRACKET_RE = re.compile(r"<[^>]+>")
+_SQUARE_BRACKET_RE = re.compile(r"\[[^\]]+\]")
+_ALL_CAPS_UNDERSCORE_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
+
+
+def _is_placeholder(value: str) -> bool:
+    """Return True when *value* looks like a template placeholder rather than real data."""
+    if not value:
+        return False
+    if _ANGLE_BRACKET_RE.search(value):
+        return True
+    if _SQUARE_BRACKET_RE.search(value):
+        return True
+    if _ALL_CAPS_UNDERSCORE_RE.match(value.strip()):
+        return True
+    return False
 
 
 class ExceptionRuleListView(ListAPIView):
@@ -50,6 +68,46 @@ class ExceptionRuleListView(ListAPIView):
         except Organization.DoesNotExist:
             return Response({"detail": "Organisation not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        # Validate trigger_rule_id
+        trigger_rule_id_raw = request.data.get("trigger_rule_id")
+        if not trigger_rule_id_raw:
+            return Response(
+                {"detail": "trigger_rule_id is required and must be a positive integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            trigger_rule_id = int(trigger_rule_id_raw)
+            if trigger_rule_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "trigger_rule_id must be a positive integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate description
+        description = request.data.get("description", "").strip()
+        if not description:
+            return Response(
+                {"detail": "description is required and must not be empty."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Detect placeholder values in string fields
+        string_fields = {
+            "description": description,
+            "match_value": request.data.get("match_value") or "",
+            "field_name": request.data.get("field_name") or "",
+            "field_value": request.data.get("field_value") or "",
+            "agent_name": request.data.get("agent_name") or "",
+        }
+        for field_name, field_val in string_fields.items():
+            if _is_placeholder(field_val):
+                return Response(
+                    {"detail": f"'{field_name}' contains a placeholder value and cannot be saved."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         # Resolve optional incident FK
         incident = None
         incident_display_id = request.data.get("incident")
@@ -60,14 +118,14 @@ class ExceptionRuleListView(ListAPIView):
                 return Response({"detail": "Incident not found."}, status=status.HTTP_404_NOT_FOUND)
 
         rule = ExceptionRule.objects.create(
-            trigger_rule_id=request.data.get("trigger_rule_id") or None,
-            description=request.data.get("description", ""),
-            match_value=request.data.get("match_value") or "",
-            field_name=request.data.get("field_name") or "",
-            field_value=request.data.get("field_value") or "",
+            trigger_rule_id=trigger_rule_id,
+            description=description,
+            match_value=string_fields["match_value"],
+            field_name=string_fields["field_name"],
+            field_value=string_fields["field_value"],
             field_type=request.data.get("field_type") or "",
             scope=request.data.get("scope", "org"),
-            agent_name=request.data.get("agent_name") or "",
+            agent_name=string_fields["agent_name"],
             organisation=org,
             incident=incident,
             created_by=request.user,
