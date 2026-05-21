@@ -667,6 +667,8 @@ export default function IncidentDetail() {
   const [badgeError, setBadgeError]       = useState(null);
   const [activeTab, setActiveTab]         = useState('details');
   const [showExceptionSlideOver, setShowExceptionSlideOver] = useState(false);
+  const [triaging, setTriaging]           = useState(false);
+  const [triageError, setTriageError]     = useState(null);
   const pollRef = useRef(null);
 
   useEffect(() => {
@@ -770,6 +772,19 @@ export default function IncidentDetail() {
     }
   }
 
+  async function handleTriage() {
+    setTriaging(true);
+    setTriageError(null);
+    try {
+      const res = await api.post(`/api/incidents/${displayId}/triage/`);
+      setIncident(res.data);
+    } catch (err) {
+      setTriageError(err.response?.data?.detail || 'Triage request failed.');
+    } finally {
+      setTriaging(false);
+    }
+  }
+
   function handleActionClick(targetState) {
     if (targetState === 'closed') {
       setPendingClose(true);
@@ -858,11 +873,21 @@ export default function IncidentDetail() {
                 Create Exception
               </button>
             )}
+            {user?.is_staff && incident.state !== 'closed' && (
+              <button
+                onClick={handleTriage}
+                disabled={triaging || transitioning}
+                className="rounded-md border border-violet-400 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 transition-colors dark:border-violet-600 dark:bg-violet-900/20 dark:text-violet-400 dark:hover:bg-violet-900/40"
+              >
+                {triaging ? 'Triaging…' : 'Run Triage'}
+              </button>
+            )}
           </div>
         </div>
         {transitionError && <p className="text-sm text-red-600">{transitionError}</p>}
         {transferError   && <p className="text-sm text-red-600">{transferError}</p>}
         {badgeError      && <p className="text-sm text-red-600">{badgeError}</p>}
+        {triageError     && <p className="text-sm text-red-600">{triageError}</p>}
       </div>
 
       {/* ── Tabbed content ── */}
