@@ -45,6 +45,12 @@ const TLP_OPTIONS      = ['white', 'green', 'amber', 'red'];
 
 const EMPTY_DATA = { count: 0, page: 1, per_page: 25, total_pages: 1, results: [] };
 
+function formatDatetime(isoString) {
+  if (!isoString) return '—';
+  const d = new Date(isoString);
+  return d.toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 const SORT_COLUMNS = {
   title:      { label: 'Title',    defaultOrder: 'asc'  },
   severity:   { label: 'Severity', defaultOrder: 'desc' },
@@ -537,7 +543,7 @@ export default function IncidentList() {
               </span>
               <span className="text-muted-foreground">{inc.assignee_username || 'Unassigned'}</span>
               <span className="text-muted-foreground ml-auto">
-                {inc.created_at ? new Date(inc.created_at).toLocaleDateString() : '—'}
+                {formatDatetime(inc.created_at)}
               </span>
             </div>
           </div>
@@ -639,12 +645,14 @@ export default function IncidentList() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <SLAPill sla={inc.response_sla} label="Response SLA" />
-                    <SLAPill sla={inc.resolve_sla} label="Resolve SLA" />
+                    <div className="flex flex-wrap gap-1">
+                      <SLAPill sla={inc.response_sla} label="Response SLA" compact />
+                      <SLAPill sla={inc.resolve_sla} label="Resolve SLA" compact />
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-xs">{inc.assignee_username || '—'}</td>
                   <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">
-                    {inc.created_at ? new Date(inc.created_at).toLocaleDateString() : '—'}
+                    {formatDatetime(inc.created_at)}
                   </td>
                 </tr>
               ))
