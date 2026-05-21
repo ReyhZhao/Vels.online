@@ -2,7 +2,7 @@ import json
 
 from django.conf import settings
 
-from .base import BaseTriageProvider, TriageError, TriageResult, VALID_ACTIONS
+from .base import BaseTriageProvider, TriageConfigError, TriageError, TriageResult, VALID_ACTIONS
 
 SYSTEM_PROMPT = """\
 You are a senior security analyst. Given an incident context as JSON, triage the incident and \
@@ -30,9 +30,14 @@ Return only valid JSON. No markdown, no code fences, no explanation.
 
 class GeminiTriageProvider(BaseTriageProvider):
     def __init__(self):
+        api_key = getattr(settings, "GEMINI_API_KEY", "")
+        if not api_key:
+            raise TriageConfigError(
+                "GEMINI_API_KEY is not configured. Set the environment variable to enable AI triage."
+            )
         from google import genai
         from google.genai import types
-        self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self._client = genai.Client(api_key=api_key)
         self._types = types
 
     def triage_incident(self, payload: dict) -> TriageResult:

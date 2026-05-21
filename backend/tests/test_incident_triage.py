@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 from security.models import Organization, OrganizationMembership
 from incidents.models import Comment, Incident
-from incidents.llm.base import TriageError, TriageResult
+from incidents.llm.base import TriageConfigError, TriageError, TriageResult
 from incidents.llm.gemini import _parse_result
 
 
@@ -222,6 +222,29 @@ def test_triage_task_posts_system_comment_on_max_retries_exceeded(acme):
 
     comment = Comment.objects.get(incident=incident, kind=Comment.KIND_SYSTEM)
     assert "API down" in comment.body or "could not be completed" in comment.body
+
+
+@pytest.mark.django_db
+def test_triage_task_posts_system_comment_immediately_on_config_error(acme):
+    incident = make_incident(acme)
+    _run_task(incident.id, provider_error=TriageConfigError("GEMINI_API_KEY is not configured"))
+
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_SYSTEM)
+    assert "misconfigured" in comment.body
+    assert "GEMINI_API_KEY" in comment.body
+
+
+@pytest.mark.django_db
+def test_triage_task_does_not_retry_on_config_error(acme):
+    incident = make_incident(acme)
+    from incidents.tasks import run_incident_triage
+
+    mock_provider = MagicMock()
+    mock_provider.triage_incident.side_effect = TriageConfigError("No key")
+    with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+        run_incident_triage.apply(args=(incident.id,))
+
+    assert mock_provider.triage_incident.call_count == 1
 
 
 @pytest.mark.django_db

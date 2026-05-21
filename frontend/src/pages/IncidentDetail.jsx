@@ -776,8 +776,7 @@ export default function IncidentDetail() {
     setTriaging(true);
     setTriageError(null);
     try {
-      const res = await api.post(`/api/incidents/${displayId}/triage/`);
-      setIncident(res.data);
+      await api.post(`/api/incidents/${displayId}/triage/`);
     } catch (err) {
       setTriageError(err.response?.data?.detail || 'Triage request failed.');
     } finally {

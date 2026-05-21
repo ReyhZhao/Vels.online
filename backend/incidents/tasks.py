@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from incidents.llm.base import SEVERITY_RANK, TriageError
+from incidents.llm.base import SEVERITY_RANK, TriageConfigError, TriageError
 from incidents.llm.factory import get_triage_provider
 from notifications.email import send_html_email
 
@@ -42,6 +42,15 @@ def run_incident_triage(self, incident_id: int):
 
     try:
         result = get_triage_provider().triage_incident(payload)
+    except TriageConfigError as exc:
+        release_triage_lock(incident_id)
+        Comment.objects.create(
+            incident=incident,
+            kind=Comment.KIND_SYSTEM,
+            body=f"AI triage is misconfigured and cannot run: {exc}",
+            is_internal=True,
+        )
+        return
     except TriageError as exc:
         if self.request.retries >= self.max_retries:
             release_triage_lock(incident_id)
