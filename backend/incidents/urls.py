@@ -6,6 +6,7 @@ from .views import (
     IncidentAssetUnlinkView,
     IncidentContactDetailView,
     IncidentContactListView,
+    IncidentContactSendEmailView,
     IncidentAttachmentConfirmView,
     IncidentAttachmentDeleteView,
     IncidentAttachmentDownloadView,
@@ -48,4 +49,5 @@ urlpatterns = [
     path("<str:display_id>/triage/", IncidentTriageView.as_view()),
     path("<str:display_id>/contacts/", IncidentContactListView.as_view()),
     path("<str:display_id>/contacts/<int:pk>/", IncidentContactDetailView.as_view()),
+    path("<str:display_id>/contacts/<int:pk>/send-email/", IncidentContactSendEmailView.as_view()),
 ]

@@ -129,6 +129,40 @@ _INCIDENT_DIGEST_BODY = (
 )
 
 # ---------------------------------------------------------------------------
+# contact_notified
+# Context: contact_name, display_id, title, severity, frontend_url
+# ---------------------------------------------------------------------------
+_CONTACT_NOTIFIED_BODY = (
+    "<h1>Security incident notification</h1>"
+    "<p>Hi {{ contact_name }},</p>"
+    "<p>We wanted to keep you informed about a security incident that may be relevant to you.</p>"
+    "<div class=\"incident-card\">"
+    "<p class=\"incident-id\">{{ display_id }}</p>"
+    "<p class=\"incident-title\">{{ title }}</p>"
+    "<p class=\"meta\">Severity: <span class=\"badge badge-{{ severity }}\">{{ severity }}</span></p>"
+    "</div>"
+    "<p style=\"font-size:13px;color:#64748b;\">No action is required at this time. "
+    "Our team is actively monitoring the situation.</p>"
+)
+
+# ---------------------------------------------------------------------------
+# contact_questioned
+# Context: contact_name, display_id, title, severity, message, frontend_url
+# ---------------------------------------------------------------------------
+_CONTACT_QUESTIONED_BODY = (
+    "<h1>Security incident — your input requested</h1>"
+    "<p>Hi {{ contact_name }},</p>"
+    "<p>Our security team is investigating an incident and would appreciate your assistance.</p>"
+    "<div class=\"incident-card\">"
+    "<p class=\"incident-id\">{{ display_id }}</p>"
+    "<p class=\"incident-title\">{{ title }}</p>"
+    "<p class=\"meta\">Severity: <span class=\"badge badge-{{ severity }}\">{{ severity }}</span></p>"
+    "</div>"
+    "<p>{{ message }}</p>"
+    "<p style=\"font-size:13px;color:#64748b;\">You can reply directly to this email.</p>"
+)
+
+# ---------------------------------------------------------------------------
 # invite
 # Context: full_name, org_name, invite_url, frontend_url
 # ---------------------------------------------------------------------------
@@ -234,6 +268,16 @@ DEFAULT_TEMPLATES = {
         "description": "Sent to staff when a new signup request is submitted",
         "subject": "[vels.online] New signup request: {{ org_name }}",
         "html_body": _base("New signup request", _SIGNUP_REQUEST_BODY),
+    },
+    "contact_notified": {
+        "description": "Sent to a contact when they are linked to an incident with role=notified",
+        "subject": "[vels.online] Security incident notification: {{ display_id }}",
+        "html_body": _base("Security incident notification", _CONTACT_NOTIFIED_BODY),
+    },
+    "contact_questioned": {
+        "description": "Sent to a contact when they are linked to an incident with role=questioned",
+        "subject": "[vels.online] Security incident — your input requested: {{ display_id }}",
+        "html_body": _base("Security incident — your input requested", _CONTACT_QUESTIONED_BODY),
     },
     "test": {
         "description": "Test email sent from the admin dashboard",

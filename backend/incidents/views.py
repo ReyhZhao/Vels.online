@@ -654,6 +654,27 @@ class IncidentContactDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class IncidentContactSendEmailView(APIView):
+    def post(self, request, display_id, pk):
+        err = _require_auth(request)
+        if err:
+            return err
+        try:
+            incident = Incident.objects.get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, incident):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        from contacts.models import IncidentContact
+        try:
+            row = IncidentContact.objects.select_related("contact").get(pk=pk, incident=incident)
+        except IncidentContact.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        from contacts.services import send_contact_email
+        send_contact_email(row)
+        return Response(_serialize_incident_contact(row))
+
+
 class IncidentBulkActionView(APIView):
     def post(self, request):
         err = _require_auth(request)

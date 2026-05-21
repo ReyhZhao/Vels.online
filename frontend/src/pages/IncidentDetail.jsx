@@ -179,6 +179,7 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
   const [addMessage, setAddMessage] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState(null);
+  const [sendingId, setSendingId] = useState(null);
 
   function reload() {
     return api.get(`/api/incidents/${displayId}/contacts/`).then(r => setContacts(r.data));
@@ -225,6 +226,16 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
     }
   }
 
+  async function sendEmail(rowId) {
+    setSendingId(rowId);
+    try {
+      const r = await api.post(`/api/incidents/${displayId}/contacts/${rowId}/send-email/`);
+      setContacts(prev => prev.map(c => c.id === rowId ? r.data : c));
+    } finally {
+      setSendingId(null);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-card p-6 space-y-3">
@@ -246,11 +257,21 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${CONTACT_ROLE_CLASSES[c.role] ?? ''}`}>
                       {c.role}
                     </span>
+                    <button
+                      onClick={() => sendEmail(c.id)}
+                      disabled={sendingId === c.id}
+                      className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50"
+                    >
+                      {sendingId === c.id ? 'Sending…' : 'Send email'}
+                    </button>
                     <button onClick={() => removeContact(c.id)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
                   </div>
                 </div>
                 {c.message && (
                   <p className="text-xs text-muted-foreground italic">"{c.message}"</p>
+                )}
+                {c.sent_at && (
+                  <p className="text-xs text-muted-foreground">Emailed {new Date(c.sent_at).toLocaleString()}</p>
                 )}
               </div>
             ))}

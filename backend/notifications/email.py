@@ -51,7 +51,7 @@ def render_email(template_name, context):
     return subject, html, plain
 
 
-def send_html_email(template_name, context, recipient_list, from_email=None):
+def send_html_email(template_name, context, recipient_list, from_email=None, reply_to=None):
     """Render and send an HTML email with a plain-text fallback."""
     subject, html, plain = render_email(template_name, context)
     msg = EmailMultiAlternatives(
@@ -59,6 +59,7 @@ def send_html_email(template_name, context, recipient_list, from_email=None):
         body=plain,
         from_email=from_email or settings.DEFAULT_FROM_EMAIL,
         to=recipient_list,
+        reply_to=reply_to or [],
     )
     msg.attach_alternative(html, "text/html")
     msg.send()
