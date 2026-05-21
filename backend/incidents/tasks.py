@@ -39,9 +39,10 @@ def run_incident_triage(self, incident_id: int):
         return
 
     payload = _build_triage_payload(incident)
+    extra_context = incident.organization.triage_prompt_context or ""
 
     try:
-        result = get_triage_provider().triage_incident(payload)
+        result = get_triage_provider().triage_incident(payload, extra_context=extra_context)
     except TriageConfigError as exc:
         release_triage_lock(incident_id)
         Comment.objects.create(

@@ -4,9 +4,13 @@ from .models import Download, Organization, RiskAcceptance, WorkPackage, WorkPac
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
+    triage_prompt_context = serializers.CharField(
+        allow_null=True, allow_blank=True, required=False, max_length=4000
+    )
+
     class Meta:
         model = Organization
-        fields = ["id", "name", "slug", "wazuh_group"]
+        fields = ["id", "name", "slug", "wazuh_group", "triage_prompt_context"]
         read_only_fields = ["id", "slug", "wazuh_group"]
 
 

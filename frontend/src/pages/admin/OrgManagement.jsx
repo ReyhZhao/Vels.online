@@ -3,6 +3,7 @@ import { Shield, ChevronDown, ChevronRight, UserPlus, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import api from '@/lib/axios';
 
 const ROLE_LABELS = { member: 'Member', staff: 'Staff', admin: 'Admin' };
@@ -103,11 +104,17 @@ function InviteDialog({ org, onClose, onCreated }) {
   );
 }
 
+const PROMPT_MAX = 4000;
+
 function OrgRow({ org }) {
   const [expanded, setExpanded] = useState(false);
   const [invitations, setInvitations] = useState(null);
   const [loadingInvites, setLoadingInvites] = useState(false);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [triageContext, setTriageContext] = useState(org.triage_prompt_context ?? '');
+  const [savingTriage, setSavingTriage] = useState(false);
+  const [triageSaveError, setTriageSaveError] = useState(null);
+  const [triageSaved, setTriageSaved] = useState(false);
 
   async function loadInvitations() {
     if (invitations !== null) return;
@@ -129,6 +136,23 @@ function OrgRow({ org }) {
 
   function handleInviteCreated(inv) {
     setInvitations(prev => [inv, ...(prev ?? [])]);
+  }
+
+  async function handleSaveTriage(e) {
+    e.preventDefault();
+    setSavingTriage(true);
+    setTriageSaveError(null);
+    setTriageSaved(false);
+    try {
+      await api.patch(`/api/security/organizations/${org.slug}/`, {
+        triage_prompt_context: triageContext || null,
+      });
+      setTriageSaved(true);
+    } catch (err) {
+      setTriageSaveError(err.response?.data?.triage_prompt_context?.[0] ?? 'Failed to save.');
+    } finally {
+      setSavingTriage(false);
+    }
   }
 
   return (
@@ -161,37 +185,70 @@ function OrgRow({ org }) {
 
       {expanded && (
         <tr className="border-b last:border-0 bg-muted/30">
-          <td colSpan={4} className="px-4 py-3">
-            {loadingInvites && <p className="text-sm text-muted-foreground">Loading invitations…</p>}
-            {!loadingInvites && invitations !== null && invitations.length === 0 && (
-              <p className="text-sm text-muted-foreground">No invitations yet.</p>
-            )}
-            {!loadingInvites && invitations && invitations.length > 0 && (
-              <table className="w-full text-xs" aria-label={`Invitations for ${org.name}`}>
-                <thead>
-                  <tr className="text-left text-muted-foreground">
-                    <th className="pb-1 font-medium">Email</th>
-                    <th className="pb-1 font-medium">Name</th>
-                    <th className="pb-1 font-medium">Role</th>
-                    <th className="pb-1 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invitations.map(inv => (
-                    <tr key={inv.id} className="border-t border-border/50">
-                      <td className="py-1.5 text-foreground">{inv.email}</td>
-                      <td className="py-1.5 text-muted-foreground">{inv.full_name}</td>
-                      <td className="py-1.5 text-muted-foreground">{ROLE_LABELS[inv.role] ?? inv.role}</td>
-                      <td className="py-1.5">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[inv.status] ?? ''}`}>
-                          {inv.status}
-                        </span>
-                      </td>
+          <td colSpan={4} className="px-4 py-3 space-y-4">
+            <div>
+              {loadingInvites && <p className="text-sm text-muted-foreground">Loading invitations…</p>}
+              {!loadingInvites && invitations !== null && invitations.length === 0 && (
+                <p className="text-sm text-muted-foreground">No invitations yet.</p>
+              )}
+              {!loadingInvites && invitations && invitations.length > 0 && (
+                <table className="w-full text-xs" aria-label={`Invitations for ${org.name}`}>
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th className="pb-1 font-medium">Email</th>
+                      <th className="pb-1 font-medium">Name</th>
+                      <th className="pb-1 font-medium">Role</th>
+                      <th className="pb-1 font-medium">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  </thead>
+                  <tbody>
+                    {invitations.map(inv => (
+                      <tr key={inv.id} className="border-t border-border/50">
+                        <td className="py-1.5 text-foreground">{inv.email}</td>
+                        <td className="py-1.5 text-muted-foreground">{inv.full_name}</td>
+                        <td className="py-1.5 text-muted-foreground">{ROLE_LABELS[inv.role] ?? inv.role}</td>
+                        <td className="py-1.5">
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[inv.status] ?? ''}`}>
+                            {inv.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <form onSubmit={handleSaveTriage} className="space-y-2 border-t border-border/50 pt-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-foreground" htmlFor={`triage-context-${org.slug}`}>
+                  Custom triage instructions
+                </label>
+                <span className={`text-xs ${triageContext.length > PROMPT_MAX ? 'text-destructive' : 'text-muted-foreground'}`}>
+                  {triageContext.length} / {PROMPT_MAX}
+                </span>
+              </div>
+              <Textarea
+                id={`triage-context-${org.slug}`}
+                rows={4}
+                placeholder="e.g. We are a healthcare provider. Treat PHI-related alerts as critical. Ignore SSH from 10.0.0.5 (jump host)."
+                value={triageContext}
+                onChange={e => { setTriageContext(e.target.value); setTriageSaved(false); }}
+                disabled={savingTriage}
+                className="text-xs resize-y"
+              />
+              {triageSaveError && <p className="text-xs text-destructive">{triageSaveError}</p>}
+              {triageSaved && <p className="text-xs text-green-600 dark:text-green-400">Saved.</p>}
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={savingTriage || triageContext.length > PROMPT_MAX}
+                >
+                  {savingTriage ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </form>
           </td>
         </tr>
       )}

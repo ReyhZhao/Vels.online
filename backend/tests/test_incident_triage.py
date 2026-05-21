@@ -295,6 +295,57 @@ def test_triage_task_missing_incident_exits_cleanly():
     mock_factory.return_value.triage_incident.assert_not_called()
 
 
+# ── prompt context ───────────────────────────────────────────────────────────
+
+
+def test_build_system_prompt_no_context():
+    from incidents.llm.gemini import SYSTEM_PROMPT, _build_system_prompt
+    assert _build_system_prompt("") == SYSTEM_PROMPT
+    assert _build_system_prompt() == SYSTEM_PROMPT
+
+
+def test_build_system_prompt_appends_context():
+    from incidents.llm.gemini import SYSTEM_PROMPT, _build_system_prompt
+    result = _build_system_prompt("treat SSH from 10.0.0.1 as low priority")
+    assert result.startswith(SYSTEM_PROMPT)
+    assert "--- Organisation context ---" in result
+    assert "treat SSH from 10.0.0.1 as low priority" in result
+
+
+@pytest.mark.django_db
+def test_triage_task_passes_prompt_context_to_provider(acme):
+    acme.triage_prompt_context = "Healthcare org — escalate PHI alerts."
+    acme.save()
+    incident = make_incident(acme)
+    result = _make_triage_result()
+
+    from incidents.tasks import run_incident_triage
+    mock_provider = MagicMock()
+    mock_provider.triage_incident.return_value = result
+
+    with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+        run_incident_triage.apply(args=(incident.id,))
+
+    _, kwargs = mock_provider.triage_incident.call_args
+    assert kwargs.get("extra_context") == "Healthcare org — escalate PHI alerts."
+
+
+@pytest.mark.django_db
+def test_triage_task_passes_empty_context_when_unset(acme):
+    incident = make_incident(acme)
+    result = _make_triage_result()
+
+    from incidents.tasks import run_incident_triage
+    mock_provider = MagicMock()
+    mock_provider.triage_incident.return_value = result
+
+    with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+        run_incident_triage.apply(args=(incident.id,))
+
+    _, kwargs = mock_provider.triage_incident.call_args
+    assert kwargs.get("extra_context") == ""
+
+
 # ── post-save signal ──────────────────────────────────────────────────────────
 
 

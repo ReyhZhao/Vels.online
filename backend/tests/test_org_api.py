@@ -174,3 +174,81 @@ def test_slug_collision_appends_number(mock_wazuh_cls, acme, admin_client):
 
     assert response.status_code == 201
     assert response.json()["slug"] == "acme-2"
+
+
+# ---------------------------------------------------------------- GET /api/security/organizations/<slug>/
+
+
+@pytest.mark.django_db
+def test_org_detail_returns_triage_prompt_context(admin_client, acme):
+    acme.triage_prompt_context = "Treat SSH from 10.0.0.1 as low priority."
+    acme.save()
+
+    response = admin_client.get(f"/api/security/organizations/{acme.slug}/")
+
+    assert response.status_code == 200
+    assert response.json()["triage_prompt_context"] == "Treat SSH from 10.0.0.1 as low priority."
+
+
+@pytest.mark.django_db
+def test_org_detail_null_triage_prompt_context(admin_client, acme):
+    response = admin_client.get(f"/api/security/organizations/{acme.slug}/")
+    assert response.status_code == 200
+    assert response.json()["triage_prompt_context"] is None
+
+
+@pytest.mark.django_db
+def test_org_detail_returns_404_for_unknown_slug(admin_client):
+    response = admin_client.get("/api/security/organizations/no-such-org/")
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------- PATCH /api/security/organizations/<slug>/
+
+
+@pytest.mark.django_db
+def test_patch_triage_prompt_context_as_staff(admin_client, acme):
+    response = admin_client.patch(
+        f"/api/security/organizations/{acme.slug}/",
+        {"triage_prompt_context": "Healthcare org — escalate all PHI alerts."},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    acme.refresh_from_db()
+    assert acme.triage_prompt_context == "Healthcare org — escalate all PHI alerts."
+
+
+@pytest.mark.django_db
+def test_patch_triage_prompt_context_clears_when_blank(admin_client, acme):
+    acme.triage_prompt_context = "existing context"
+    acme.save()
+
+    response = admin_client.patch(
+        f"/api/security/organizations/{acme.slug}/",
+        {"triage_prompt_context": ""},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    acme.refresh_from_db()
+    assert acme.triage_prompt_context == ""
+
+
+@pytest.mark.django_db
+def test_patch_triage_prompt_context_requires_staff(client, regular_user, acme):
+    client.force_login(regular_user)
+    response = client.patch(
+        f"/api/security/organizations/{acme.slug}/",
+        {"triage_prompt_context": "not allowed"},
+        content_type="application/json",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_patch_triage_prompt_context_too_long_returns_400(admin_client, acme):
+    response = admin_client.patch(
+        f"/api/security/organizations/{acme.slug}/",
+        {"triage_prompt_context": "x" * 4001},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
