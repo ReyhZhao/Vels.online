@@ -8,4 +8,4 @@ data:
   SEMAPHORE_PROJECT_ID: "1"
   AUTHENTIK_ENROLLMENT_FLOW_SLUG: default-enrollment-flow
   TRIAGE_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
-  OLLAMA_MODEL: gemma4
+  OLLAMA_MODEL: gemma4:31b-cloud
