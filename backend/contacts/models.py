@@ -28,3 +28,26 @@ class AssetOwner(models.Model):
 
     def __str__(self):
         return f"{self.contact} owns {self.asset}"
+
+
+class IncidentContact(models.Model):
+    ROLE_NOTIFIED = "notified"
+    ROLE_QUESTIONED = "questioned"
+    ROLE_CHOICES = [
+        (ROLE_NOTIFIED, "Notified"),
+        (ROLE_QUESTIONED, "Questioned"),
+    ]
+
+    incident = models.ForeignKey("incidents.Incident", on_delete=models.CASCADE, related_name="incident_contacts")
+    contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name="incident_contacts")
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_NOTIFIED)
+    message = models.TextField(blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("incident", "contact")]
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.contact} on {self.incident} ({self.role})"

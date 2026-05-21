@@ -77,6 +77,7 @@ const TABS = [
   { key: 'delegations', label: 'Delegations' },
   { key: 'assets',      label: 'Assets' },
   { key: 'iocs',        label: 'IOCs' },
+  { key: 'contacts',    label: 'Contacts' },
 ];
 
 const EXCEPTION_STATUS_CLASSES = {
@@ -156,6 +157,48 @@ function IOCSection({ iocs }) {
                   </span>
                 ))}
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IncidentContactsPanel({ displayId }) {
+  const [contacts, setContacts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get(`/api/incidents/${displayId}/contacts/`)
+      .then(res => setContacts(res.data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [displayId]);
+
+  const ROLE_CLASSES = {
+    notified:   'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+    questioned: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+      <h2 className="text-base font-semibold text-foreground">Contacts</h2>
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : contacts.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No contacts linked to this incident.</p>
+      ) : (
+        <div className="divide-y divide-border">
+          {contacts.map(c => (
+            <div key={c.id} className="flex items-center justify-between py-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">{c.name}</p>
+                <p className="text-xs text-muted-foreground">{c.email}</p>
+              </div>
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${ROLE_CLASSES[c.role] ?? ''}`}>
+                {c.role}
+              </span>
             </div>
           ))}
         </div>
@@ -1032,6 +1075,9 @@ export default function IncidentDetail() {
           )}
           {activeTab === 'iocs' && (
             <IOCSection iocs={incident.iocs ?? []} />
+          )}
+          {activeTab === 'contacts' && (
+            <IncidentContactsPanel displayId={displayId} />
           )}
         </div>
       </div>

@@ -526,6 +526,8 @@ class IncidentAssetLinkView(APIView):
             return Response({"detail": "Asset already linked to this incident."}, status=status.HTTP_400_BAD_REQUEST)
 
         link = IncidentAsset.objects.create(incident=incident, asset=asset, added_by=request.user)
+        from incidents.services.contacts import auto_link_contacts_for_asset
+        auto_link_contacts_for_asset(incident, asset)
         return Response(IncidentAssetSerializer(link).data, status=status.HTTP_201_CREATED)
 
 
@@ -550,6 +552,34 @@ class IncidentAssetUnlinkView(APIView):
 
         link.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class IncidentContactListView(APIView):
+    def get(self, request, display_id):
+        err = _require_auth(request)
+        if err:
+            return err
+        try:
+            incident = Incident.objects.get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        from contacts.models import IncidentContact
+        rows = IncidentContact.objects.filter(incident=incident).select_related("contact")
+        data = [
+            {
+                "id": r.id,
+                "contact_id": r.contact_id,
+                "name": r.contact.name,
+                "email": r.contact.email,
+                "role": r.role,
+                "sent_at": r.sent_at,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ]
+        return Response(data)
 
 
 class IncidentBulkActionView(APIView):

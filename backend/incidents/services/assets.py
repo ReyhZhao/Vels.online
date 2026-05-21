@@ -28,3 +28,6 @@ def link_asset_from_source_ref(incident, source_kind, source_ref):
         asset=asset,
         defaults={"added_by": None},
     )
+
+    from incidents.services.contacts import auto_link_contacts_for_asset
+    auto_link_contacts_for_asset(incident, asset)
