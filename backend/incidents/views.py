@@ -554,32 +554,104 @@ class IncidentAssetUnlinkView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+def _serialize_incident_contact(r):
+    return {
+        "id": r.id,
+        "contact_id": r.contact_id,
+        "name": r.contact.name,
+        "email": r.contact.email,
+        "role": r.role,
+        "message": r.message,
+        "sent_at": r.sent_at,
+        "created_at": r.created_at,
+    }
+
+
 class IncidentContactListView(APIView):
-    def get(self, request, display_id):
+    def _get_incident(self, request, display_id):
         err = _require_auth(request)
         if err:
-            return err
+            return None, err
         try:
             incident = Incident.objects.get(display_id=display_id)
         except Incident.DoesNotExist:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_incident(request.user, incident):
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return incident, None
+
+    def get(self, request, display_id):
+        incident, err = self._get_incident(request, display_id)
+        if err:
+            return err
         from contacts.models import IncidentContact
         rows = IncidentContact.objects.filter(incident=incident).select_related("contact")
-        data = [
-            {
-                "id": r.id,
-                "contact_id": r.contact_id,
-                "name": r.contact.name,
-                "email": r.contact.email,
-                "role": r.role,
-                "sent_at": r.sent_at,
-                "created_at": r.created_at,
-            }
-            for r in rows
-        ]
-        return Response(data)
+        return Response([_serialize_incident_contact(r) for r in rows])
+
+    def post(self, request, display_id):
+        incident, err = self._get_incident(request, display_id)
+        if err:
+            return err
+        from contacts.models import Contact, IncidentContact
+        contact_id = request.data.get("contact_id")
+        role = request.data.get("role", IncidentContact.ROLE_NOTIFIED)
+        message = request.data.get("message", "")
+        if not contact_id:
+            return Response({"detail": "contact_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if role not in (IncidentContact.ROLE_NOTIFIED, IncidentContact.ROLE_QUESTIONED):
+            return Response({"detail": "role must be 'notified' or 'questioned'."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            contact = Contact.objects.get(pk=contact_id)
+        except Contact.DoesNotExist:
+            return Response({"detail": "Contact not found."}, status=status.HTTP_400_BAD_REQUEST)
+        if contact.organisation_id != incident.organization_id:
+            return Response({"detail": "Contact belongs to a different organisation."}, status=status.HTTP_400_BAD_REQUEST)
+        if IncidentContact.objects.filter(incident=incident, contact=contact).exists():
+            return Response({"detail": "Contact already linked to this incident."}, status=status.HTTP_400_BAD_REQUEST)
+        row = IncidentContact.objects.create(incident=incident, contact=contact, role=role, message=message)
+        row.refresh_from_db()
+        row.contact = contact
+        return Response(_serialize_incident_contact(row), status=status.HTTP_201_CREATED)
+
+
+class IncidentContactDetailView(APIView):
+    def _get_row(self, request, display_id, pk):
+        err = _require_auth(request)
+        if err:
+            return None, err
+        try:
+            incident = Incident.objects.get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return None, Response(status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, incident):
+            return None, Response(status=status.HTTP_404_NOT_FOUND)
+        from contacts.models import IncidentContact
+        try:
+            row = IncidentContact.objects.select_related("contact").get(pk=pk, incident=incident)
+        except IncidentContact.DoesNotExist:
+            return None, Response(status=status.HTTP_404_NOT_FOUND)
+        return row, None
+
+    def patch(self, request, display_id, pk):
+        row, err = self._get_row(request, display_id, pk)
+        if err:
+            return err
+        from contacts.models import IncidentContact
+        role = request.data.get("role", row.role)
+        message = request.data.get("message", row.message)
+        if role not in (IncidentContact.ROLE_NOTIFIED, IncidentContact.ROLE_QUESTIONED):
+            return Response({"detail": "role must be 'notified' or 'questioned'."}, status=status.HTTP_400_BAD_REQUEST)
+        row.role = role
+        row.message = message
+        row.save(update_fields=["role", "message"])
+        return Response(_serialize_incident_contact(row))
+
+    def delete(self, request, display_id, pk):
+        row, err = self._get_row(request, display_id, pk)
+        if err:
+            return err
+        row.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class IncidentBulkActionView(APIView):

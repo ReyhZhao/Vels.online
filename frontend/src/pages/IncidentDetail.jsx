@@ -165,44 +165,149 @@ function IOCSection({ iocs }) {
   );
 }
 
-function IncidentContactsPanel({ displayId }) {
+const CONTACT_ROLE_CLASSES = {
+  notified:   'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  questioned: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+};
+
+function IncidentContactsPanel({ displayId, orgSlug }) {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [allContacts, setAllContacts] = useState([]);
+  const [addSearch, setAddSearch] = useState('');
+  const [addRole, setAddRole] = useState('notified');
+  const [addMessage, setAddMessage] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState(null);
+
+  function reload() {
+    return api.get(`/api/incidents/${displayId}/contacts/`).then(r => setContacts(r.data));
+  }
 
   useEffect(() => {
-    api.get(`/api/incidents/${displayId}/contacts/`)
-      .then(res => setContacts(res.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [displayId]);
+    reload().finally(() => setLoading(false));
+    api.get('/api/contacts/').then(r => setAllContacts(r.data)).catch(() => {});
+  }, [displayId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const ROLE_CLASSES = {
-    notified:   'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-    questioned: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
-  };
+  const linkedIds = new Set(contacts.map(c => c.contact_id));
+  const filteredAdd = allContacts.filter(c =>
+    !linkedIds.has(c.id) &&
+    (c.name.toLowerCase().includes(addSearch.toLowerCase()) ||
+     c.email.toLowerCase().includes(addSearch.toLowerCase()))
+  );
+
+  async function addContact(contactId) {
+    setAdding(true);
+    setAddError(null);
+    try {
+      await api.post(`/api/incidents/${displayId}/contacts/`, {
+        contact_id: contactId,
+        role: addRole,
+        message: addRole === 'questioned' ? addMessage : '',
+      });
+      await reload();
+      setAddSearch('');
+      setAddMessage('');
+      setAddRole('notified');
+    } catch (err) {
+      setAddError(err.response?.data?.detail || 'Failed to add contact.');
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function removeContact(rowId) {
+    try {
+      await api.delete(`/api/incidents/${displayId}/contacts/${rowId}/`);
+      setContacts(prev => prev.filter(c => c.id !== rowId));
+    } catch {
+      // silently ignore
+    }
+  }
 
   return (
-    <div className="rounded-lg border border-border bg-card p-6 space-y-4">
-      <h2 className="text-base font-semibold text-foreground">Contacts</h2>
-      {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : contacts.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No contacts linked to this incident.</p>
-      ) : (
-        <div className="divide-y divide-border">
-          {contacts.map(c => (
-            <div key={c.id} className="flex items-center justify-between py-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">{c.name}</p>
-                <p className="text-xs text-muted-foreground">{c.email}</p>
+    <div className="space-y-4">
+      <div className="rounded-lg border border-border bg-card p-6 space-y-3">
+        <h2 className="text-base font-semibold text-foreground">Contacts</h2>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : contacts.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No contacts linked to this incident.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {contacts.map(c => (
+              <div key={c.id} className="py-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{c.name}</p>
+                    <p className="text-xs text-muted-foreground">{c.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${CONTACT_ROLE_CLASSES[c.role] ?? ''}`}>
+                      {c.role}
+                    </span>
+                    <button onClick={() => removeContact(c.id)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                  </div>
+                </div>
+                {c.message && (
+                  <p className="text-xs text-muted-foreground italic">"{c.message}"</p>
+                )}
               </div>
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${ROLE_CLASSES[c.role] ?? ''}`}>
-                {c.role}
-              </span>
-            </div>
-          ))}
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-foreground">Add Contact</h3>
+        <div className="flex gap-2">
+          <select
+            value={addRole}
+            onChange={e => setAddRole(e.target.value)}
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            aria-label="Role"
+          >
+            <option value="notified">Notified</option>
+            <option value="questioned">Questioned</option>
+          </select>
+          <input
+            type="search"
+            placeholder="Search contacts…"
+            value={addSearch}
+            onChange={e => setAddSearch(e.target.value)}
+            className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
         </div>
-      )}
+        {addRole === 'questioned' && (
+          <textarea
+            placeholder="Message to include in outgoing email…"
+            value={addMessage}
+            onChange={e => setAddMessage(e.target.value)}
+            rows={3}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        )}
+        {addSearch && filteredAdd.length > 0 && (
+          <ul className="rounded-md border border-border bg-background divide-y divide-border max-h-48 overflow-y-auto">
+            {filteredAdd.slice(0, 8).map(c => (
+              <li key={c.id}>
+                <button
+                  onClick={() => addContact(c.id)}
+                  disabled={adding}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-accent/50 text-foreground disabled:opacity-50"
+                >
+                  <span className="font-medium">{c.name}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{c.email}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {addSearch && filteredAdd.length === 0 && (
+          <p className="text-xs text-muted-foreground">No unlinked contacts match.</p>
+        )}
+        {addError && <p className="text-xs text-red-600">{addError}</p>}
+      </div>
     </div>
   );
 }
@@ -1077,7 +1182,7 @@ export default function IncidentDetail() {
             <IOCSection iocs={incident.iocs ?? []} />
           )}
           {activeTab === 'contacts' && (
-            <IncidentContactsPanel displayId={displayId} />
+            <IncidentContactsPanel displayId={displayId} orgSlug={incident.org_slug} />
           )}
         </div>
       </div>
