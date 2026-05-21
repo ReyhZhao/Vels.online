@@ -192,3 +192,4 @@ test.db
 *-lock.*
 *.swp
 /backend/db_dev.sqlite3
+/backend/dev.db
