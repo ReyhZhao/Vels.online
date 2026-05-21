@@ -28,6 +28,12 @@ Return only valid JSON. No markdown, no code fences, no explanation.
 """
 
 
+def _build_system_prompt(extra_context: str = "") -> str:
+    if extra_context:
+        return SYSTEM_PROMPT + "\n--- Organisation context ---\n" + extra_context
+    return SYSTEM_PROMPT
+
+
 class GeminiTriageProvider(BaseTriageProvider):
     def __init__(self):
         api_key = getattr(settings, "GEMINI_API_KEY", "")
@@ -40,14 +46,14 @@ class GeminiTriageProvider(BaseTriageProvider):
         self._client = genai.Client(api_key=api_key)
         self._types = types
 
-    def triage_incident(self, payload: dict) -> TriageResult:
+    def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
         prompt = json.dumps(payload, indent=2)
         try:
             response = self._client.models.generate_content(
                 model=settings.GEMINI_MODEL,
                 contents=prompt,
                 config=self._types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
+                    system_instruction=_build_system_prompt(extra_context),
                 ),
             )
             text = response.text.strip()

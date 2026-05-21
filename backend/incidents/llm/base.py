@@ -36,5 +36,5 @@ class TriageResult:
 
 class BaseTriageProvider(ABC):
     @abstractmethod
-    def triage_incident(self, payload: dict) -> TriageResult:
+    def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
         """Analyse an incident payload and return a triage assessment."""

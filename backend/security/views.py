@@ -270,6 +270,33 @@ class OrganizationListView(APIView):
         return Response(OrganizationSerializer(org).data, status=201)
 
 
+class OrganizationDetailView(APIView):
+    def _get_org(self, request, slug):
+        if request.user.is_staff:
+            return Organization.objects.filter(slug=slug).first()
+        return Organization.objects.filter(
+            slug=slug, memberships__user=request.user
+        ).first()
+
+    def get(self, request, slug):
+        org = self._get_org(request, slug)
+        if org is None:
+            return Response(status=404)
+        return Response(OrganizationSerializer(org).data)
+
+    def patch(self, request, slug):
+        if not request.user.is_staff:
+            return Response(status=403)
+        org = Organization.objects.filter(slug=slug).first()
+        if org is None:
+            return Response(status=404)
+        serializer = OrganizationSerializer(org, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        serializer.save()
+        return Response(serializer.data)
+
+
 class OrgInviteView(APIView):
     """POST /api/security/organizations/<slug>/invite/ — send an invite to join an existing org."""
 

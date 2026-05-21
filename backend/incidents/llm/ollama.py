@@ -4,7 +4,7 @@ import ollama
 from django.conf import settings
 
 from .base import BaseTriageProvider, TriageError, TriageResult
-from .gemini import SYSTEM_PROMPT, _parse_result
+from .gemini import _build_system_prompt, _parse_result
 
 
 class OllamaTriageProvider(BaseTriageProvider):
@@ -15,13 +15,13 @@ class OllamaTriageProvider(BaseTriageProvider):
         self._client = ollama.Client(host=base_url, headers=headers)
         self._model = getattr(settings, "OLLAMA_MODEL", "mistral")
 
-    def triage_incident(self, payload: dict) -> TriageResult:
+    def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
         prompt = json.dumps(payload, indent=2)
         try:
             response = self._client.chat(
                 model=self._model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": _build_system_prompt(extra_context)},
                     {"role": "user", "content": prompt},
                 ],
             )
