@@ -250,14 +250,41 @@ def test_triage_task_does_not_retry_on_config_error(acme):
 @pytest.mark.django_db
 def test_factory_raises_config_error_for_wrong_provider_class(acme):
     from incidents.llm.factory import get_triage_provider
-    with patch("incidents.llm.factory.getattr", side_effect=None):
-        pass  # just ensure import is fine
-
-    # Simulate TRIAGE_LLM_PROVIDER pointing at the exceptions OllamaProvider
     from django.test import override_settings
     with override_settings(TRIAGE_LLM_PROVIDER="exceptions.llm.ollama.OllamaProvider"):
         with pytest.raises(TriageConfigError, match="BaseTriageProvider"):
             get_triage_provider()
+
+
+@pytest.mark.django_db
+def test_factory_raises_config_error_for_bad_module_path(acme):
+    from incidents.llm.factory import get_triage_provider
+    from django.test import override_settings
+    with override_settings(TRIAGE_LLM_PROVIDER="nonexistent.module.SomeProvider"):
+        with pytest.raises(TriageConfigError, match="cannot be imported"):
+            get_triage_provider()
+
+
+@pytest.mark.django_db
+def test_factory_raises_config_error_for_bad_class_name(acme):
+    from incidents.llm.factory import get_triage_provider
+    from django.test import override_settings
+    with override_settings(TRIAGE_LLM_PROVIDER="incidents.llm.ollama.NonExistentProvider"):
+        with pytest.raises(TriageConfigError, match="not found in module"):
+            get_triage_provider()
+
+
+@pytest.mark.django_db
+def test_triage_task_does_not_retry_when_factory_raises_config_error(acme):
+    incident = make_incident(acme)
+    from incidents.tasks import run_incident_triage
+
+    with patch("incidents.tasks.get_triage_provider", side_effect=TriageConfigError("wrong module")):
+        run_incident_triage.apply(args=(incident.id,))
+
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_SYSTEM)
+    assert "misconfigured" in comment.body
+    assert "wrong module" in comment.body
 
 
 @pytest.mark.django_db
