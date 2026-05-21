@@ -333,3 +333,53 @@ def cleanup_orphaned_attachments():
     for obj in client.list_objects("incidents/"):
         if obj["Key"] not in existing_keys and obj["LastModified"] < cutoff:
             client.delete_file(obj["Key"])
+
+
+@shared_task
+def sync_wazuh_agents():
+    import os
+
+    from security.models import Organization
+    from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
+    from incidents.models import Asset
+
+    stale_days = int(os.environ.get("ASSET_STALE_DAYS", 30))
+    now = timezone.now()
+
+    for org in Organization.objects.all():
+        try:
+            raw_agents = WazuhClient().get_agents(org.wazuh_group)
+        except (WazuhAuthError, WazuhAPIError) as exc:
+            logger.exception("sync_wazuh_agents failed for org %s: %s", org.slug, exc)
+            continue
+
+        seen_agent_names = set()
+        for agent in raw_agents:
+            agent_name = agent.get("name")
+            if not agent_name:
+                continue
+            seen_agent_names.add(agent_name)
+            ip_address = agent.get("ip") or None
+            Asset.objects.update_or_create(
+                organization=org,
+                kind=Asset.KIND_HOST,
+                agent_name=agent_name,
+                defaults={
+                    "name": agent_name,
+                    "ip_address": ip_address,
+                    "is_active": True,
+                    "last_seen_at": now,
+                },
+            )
+
+        Asset.objects.filter(
+            organization=org,
+            kind=Asset.KIND_HOST,
+        ).exclude(agent_name__in=seen_agent_names).update(is_active=False)
+
+    cutoff = now - timedelta(days=stale_days)
+    deleted, _ = Asset.objects.filter(
+        kind=Asset.KIND_HOST,
+        last_seen_at__lt=cutoff,
+    ).delete()
+    logger.info("sync_wazuh_agents: deleted %d stale assets", deleted)
