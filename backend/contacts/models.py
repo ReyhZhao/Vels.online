@@ -17,3 +17,14 @@ class Contact(models.Model):
 
     def __str__(self):
         return f"{self.name} <{self.email}>"
+
+
+class AssetOwner(models.Model):
+    contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name="asset_ownerships")
+    asset = models.ForeignKey("incidents.Asset", on_delete=models.CASCADE, related_name="asset_ownerships")
+
+    class Meta:
+        unique_together = [("contact", "asset")]
+
+    def __str__(self):
+        return f"{self.contact} owns {self.asset}"

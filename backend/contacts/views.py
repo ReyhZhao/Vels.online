@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 
 from security.models import OrganizationMembership
 
-from .models import Contact
+from .models import AssetOwner, Contact
 from .serializers import ContactCreateSerializer, ContactPatchSerializer, ContactSerializer
 
 
@@ -96,4 +96,52 @@ class ContactDetailView(APIView):
         if err:
             return err
         contact.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ContactAssetListView(APIView):
+    def _get_contact(self, request, contact_pk):
+        if not request.user.is_authenticated:
+            return None, Response(status=status.HTTP_401_UNAUTHORIZED)
+        return _get_contact_for_user(request.user, contact_pk)
+
+    def get(self, request, contact_pk):
+        contact, err = self._get_contact(request, contact_pk)
+        if err:
+            return err
+        from incidents.models import Asset
+        from incidents.serializers import AssetSerializer
+        assets = Asset.objects.filter(asset_ownerships__contact=contact).select_related("organization", "route")
+        return Response(AssetSerializer(assets, many=True).data)
+
+    def post(self, request, contact_pk):
+        contact, err = self._get_contact(request, contact_pk)
+        if err:
+            return err
+        from incidents.models import Asset
+        from incidents.serializers import AssetSerializer
+        asset_id = request.data.get("asset_id")
+        if not asset_id:
+            return Response({"detail": "asset_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            asset = Asset.objects.get(pk=asset_id)
+        except Asset.DoesNotExist:
+            return Response({"detail": "Asset not found."}, status=status.HTTP_400_BAD_REQUEST)
+        if asset.organization_id != contact.organisation_id:
+            return Response({"detail": "Asset belongs to a different organisation."}, status=status.HTTP_400_BAD_REQUEST)
+        AssetOwner.objects.get_or_create(contact=contact, asset=asset)
+        assets = Asset.objects.filter(asset_ownerships__contact=contact).select_related("organization", "route")
+        return Response(AssetSerializer(assets, many=True).data, status=status.HTTP_201_CREATED)
+
+
+class ContactAssetDetailView(APIView):
+    def delete(self, request, contact_pk, asset_pk):
+        if not request.user.is_authenticated:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+        contact, err = _get_contact_for_user(request.user, contact_pk)
+        if err:
+            return err
+        deleted, _ = AssetOwner.objects.filter(contact=contact, asset_id=asset_pk).delete()
+        if not deleted:
+            return Response(status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)

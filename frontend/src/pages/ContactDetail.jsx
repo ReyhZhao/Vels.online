@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
+import { useOrganization } from '../context/OrgContext';
 
 const FIELDS = [
   { key: 'name', label: 'Name', type: 'text', required: true },
@@ -31,9 +32,107 @@ function ConfirmDeleteModal({ open, onConfirm, onCancel, loading }) {
   );
 }
 
+function OwnedAssetsSection({ contactId, orgSlug }) {
+  const [ownedAssets, setOwnedAssets] = useState([]);
+  const [allAssets, setAllAssets] = useState([]);
+  const [search, setSearch] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState(null);
+
+  useEffect(() => {
+    api.get(`/api/contacts/${contactId}/assets/`).then(r => setOwnedAssets(r.data)).catch(() => {});
+    if (orgSlug) {
+      api.get('/api/assets/', { params: { org: orgSlug } }).then(r => setAllAssets(r.data.results || r.data)).catch(() => {});
+    }
+  }, [contactId, orgSlug]);
+
+  const ownedIds = new Set(ownedAssets.map(a => a.id));
+  const filtered = allAssets.filter(a =>
+    !ownedIds.has(a.id) &&
+    (a.name.toLowerCase().includes(search.toLowerCase()) || (a.agent_name || '').toLowerCase().includes(search.toLowerCase()))
+  );
+
+  async function assign(assetId) {
+    setAssigning(true);
+    setAssignError(null);
+    try {
+      await api.post(`/api/contacts/${contactId}/assets/`, { asset_id: assetId });
+      const res = await api.get(`/api/contacts/${contactId}/assets/`);
+      setOwnedAssets(res.data);
+      setSearch('');
+    } catch (err) {
+      setAssignError(err.response?.data?.detail || 'Failed to assign asset.');
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  async function remove(assetId) {
+    try {
+      await api.delete(`/api/contacts/${contactId}/assets/${assetId}/`);
+      setOwnedAssets(prev => prev.filter(a => a.id !== assetId));
+    } catch {
+      // silently ignore
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+      <h2 className="text-base font-semibold text-foreground">Owned Assets</h2>
+      {ownedAssets.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No owned assets.</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {ownedAssets.map(asset => (
+            <li key={asset.id} className="flex items-center justify-between py-2 text-sm">
+              <div>
+                <span className="font-medium text-foreground">{asset.name}</span>
+                <span className="ml-2 text-xs text-muted-foreground capitalize">{asset.kind}</span>
+                {asset.is_active === false && (
+                  <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs text-muted-foreground">inactive</span>
+                )}
+              </div>
+              <button onClick={() => remove(asset.id)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="space-y-2">
+        <input
+          type="search"
+          placeholder="Search assets to assign…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        {search && filtered.length > 0 && (
+          <ul className="rounded-md border border-border bg-background divide-y divide-border max-h-48 overflow-y-auto">
+            {filtered.slice(0, 10).map(asset => (
+              <li key={asset.id}>
+                <button
+                  onClick={() => assign(asset.id)}
+                  disabled={assigning}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-accent/50 text-foreground disabled:opacity-50"
+                >
+                  {asset.name} <span className="text-xs text-muted-foreground capitalize">({asset.kind})</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {search && filtered.length === 0 && (
+          <p className="text-xs text-muted-foreground">No unassigned assets match.</p>
+        )}
+        {assignError && <p className="text-xs text-red-600">{assignError}</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function ContactDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { selectedOrg } = useOrganization();
   const [contact, setContact] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -134,6 +233,8 @@ export default function ContactDetail() {
           </button>
         </div>
       </form>
+
+      <OwnedAssetsSection contactId={id} orgSlug={selectedOrg?.slug} />
 
       <p className="text-xs text-muted-foreground">
         Created {new Date(contact.created_at).toLocaleString()}
