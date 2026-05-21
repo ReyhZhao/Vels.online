@@ -320,9 +320,9 @@ class CommentSerializer(serializers.ModelSerializer):
         model = Comment
         fields = [
             "id", "incident", "task", "author", "author_username",
-            "body", "is_internal", "created_at", "updated_at", "deleted_at", "can_edit",
+            "kind", "body", "metadata", "is_internal", "created_at", "updated_at", "deleted_at", "can_edit",
         ]
-        read_only_fields = ["id", "incident", "task", "author", "created_at", "updated_at"]
+        read_only_fields = ["id", "incident", "task", "author", "kind", "metadata", "created_at", "updated_at"]
 
     def get_author_username(self, obj):
         return obj.author.username if obj.author else None

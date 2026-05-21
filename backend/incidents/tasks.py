@@ -28,7 +28,7 @@ def release_triage_lock(incident_id: int) -> None:
 @shared_task(bind=True, max_retries=3)
 def run_incident_triage(self, incident_id: int):
     from incidents.models import Comment, Incident
-    from incidents.services.transitions import transition_incident
+    from incidents.services.transitions import ALLOWED_TRANSITIONS, transition_incident
 
     try:
         incident = Incident.objects.select_related("organization").prefetch_related(
@@ -86,6 +86,12 @@ def run_incident_triage(self, incident_id: int):
         except Exception as exc:
             logger.warning("run_incident_triage: auto-close failed for %s: %s", incident_id, exc)
             auto_closed = False
+
+    if not auto_closed and "triaged" in ALLOWED_TRANSITIONS.get(incident.state, set()):
+        try:
+            transition_incident(incident, "triaged", actor=None)
+        except Exception as exc:
+            logger.warning("run_incident_triage: state transition to triaged failed for %s: %s", incident_id, exc)
 
     if SEVERITY_RANK.get(result.severity_recommendation, -1) > SEVERITY_RANK.get(incident.severity, 0):
         incident.severity = result.severity_recommendation

@@ -58,7 +58,9 @@ function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
   return (
     <div className={`rounded-md border p-3 space-y-1 ${comment.is_internal ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-700' : 'border-border bg-muted'}`}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{comment.author_username ?? '[deleted user]'}</span>
+        <span className="font-medium text-foreground">
+          {comment.kind === 'ai_triage' ? 'AI Triage' : comment.kind === 'system' ? 'System' : (comment.author_username ?? '[deleted user]')}
+        </span>
         <span>·</span>
         <span>{new Date(comment.created_at).toLocaleString()}</span>
         {comment.is_internal && (
@@ -67,6 +69,21 @@ function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
           </span>
         )}
       </div>
+
+      {comment.kind === 'ai_triage' && comment.metadata && (comment.metadata.primary_action || comment.metadata.secondary_action) && (
+        <div className="mt-1 flex flex-wrap gap-2">
+          {comment.metadata.primary_action && (
+            <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/30 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:text-blue-300">
+              {comment.metadata.primary_action.replace(/_/g, ' ')}
+            </span>
+          )}
+          {comment.metadata.secondary_action && (
+            <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300">
+              {comment.metadata.secondary_action.replace(/_/g, ' ')}
+            </span>
+          )}
+        </div>
+      )}
 
       {comment.deleted_at ? (
         <p className="text-sm italic text-muted-foreground">[deleted]</p>
