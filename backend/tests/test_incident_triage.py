@@ -1,0 +1,309 @@
+"""
+Tests for the AI incident triage pipeline.
+
+Covers:
+  - incidents/llm/ provider parsing (unit)
+  - run_incident_triage Celery task (integration, mocked provider)
+  - post-save signal (unit, mocked task)
+  - IncidentTriageView API endpoint (integration)
+"""
+import pytest
+from unittest.mock import MagicMock, patch
+
+from security.models import Organization, OrganizationMembership
+from incidents.models import Comment, Incident
+from incidents.llm.base import TriageError, TriageResult
+from incidents.llm.gemini import _parse_result
+
+
+# ── fixtures ─────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def acme(db):
+    return Organization.objects.create(name="Acme", slug="acme", wazuh_group="acme")
+
+
+@pytest.fixture
+def staff_user(db, django_user_model):
+    return django_user_model.objects.create_user(
+        username="staff", password="pass", is_staff=True
+    )
+
+
+@pytest.fixture
+def member_user(db, django_user_model):
+    return django_user_model.objects.create_user(username="member", password="pass")
+
+
+@pytest.fixture
+def member(member_user, acme):
+    OrganizationMembership.objects.create(user=member_user, organization=acme)
+    return member_user
+
+
+def make_incident(acme, state="new", severity="medium", n=None):
+    count = Incident.objects.count() if n is None else n
+    return Incident.objects.create(
+        organization=acme,
+        title="Suspicious login from unknown IP",
+        description="Multiple failed SSH attempts",
+        display_id=f"INC-2026-{count + 1:04d}",
+        source_kind="wazuh_event",
+        source_ref={"rule_id": 5712, "level": 8, "agent_name": "web-01"},
+        state=state,
+        severity=severity,
+    )
+
+
+# ── LLM provider parsing ─────────────────────────────────────────────────────
+
+
+def test_parse_result_valid():
+    data = {
+        "severity_recommendation": "high",
+        "summary": "SSH brute force attempt.",
+        "primary_action": "assign_to_analyst",
+        "secondary_action": "monitor",
+        "false_positive_confidence": 0.1,
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.severity_recommendation == "high"
+    assert result.primary_action == "assign_to_analyst"
+    assert result.secondary_action == "monitor"
+    assert result.false_positive_confidence == 0.1
+    assert result.provider == "gemini"
+
+
+def test_parse_result_invalid_severity_defaults_to_medium():
+    data = {
+        "severity_recommendation": "severe",
+        "summary": "Something.",
+        "primary_action": "monitor",
+        "false_positive_confidence": 0.0,
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.severity_recommendation == "medium"
+
+
+def test_parse_result_invalid_action_defaults_to_assign():
+    data = {
+        "severity_recommendation": "low",
+        "summary": ".",
+        "primary_action": "do_something_weird",
+        "false_positive_confidence": 0.0,
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.primary_action == "assign_to_analyst"
+
+
+def test_parse_result_invalid_secondary_action_cleared():
+    data = {
+        "severity_recommendation": "low",
+        "summary": ".",
+        "primary_action": "monitor",
+        "secondary_action": "invalid_action",
+        "false_positive_confidence": 0.0,
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.secondary_action is None
+
+
+def test_parse_result_confidence_clamped():
+    data = {
+        "severity_recommendation": "low",
+        "summary": ".",
+        "primary_action": "monitor",
+        "false_positive_confidence": 1.5,
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.false_positive_confidence == 1.0
+
+
+# ── run_incident_triage task ──────────────────────────────────────────────────
+
+
+def _make_triage_result(**kwargs):
+    defaults = dict(
+        severity_recommendation="medium",
+        summary="Normal activity.",
+        primary_action="assign_to_analyst",
+        secondary_action=None,
+        false_positive_confidence=0.1,
+        provider="gemini",
+    )
+    defaults.update(kwargs)
+    return TriageResult(**defaults)
+
+
+def _run_task(incident_id, provider_result=None, provider_error=None):
+    """Run run_incident_triage synchronously via apply(), with a mocked provider."""
+    from incidents.tasks import run_incident_triage
+
+    mock_provider = MagicMock()
+    if provider_error:
+        mock_provider.triage_incident.side_effect = provider_error
+    else:
+        mock_provider.triage_incident.return_value = provider_result
+
+    with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+        run_incident_triage.apply(args=(incident_id,))
+
+
+@pytest.mark.django_db
+def test_triage_task_creates_ai_comment(acme):
+    incident = make_incident(acme)
+    result = _make_triage_result(summary="Test summary.", false_positive_confidence=0.1)
+    _run_task(incident.id, provider_result=result)
+
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.body == "Test summary."
+    assert comment.author is None
+    assert comment.metadata["primary_action"] == "assign_to_analyst"
+    assert comment.metadata["auto_closed"] is False
+
+
+@pytest.mark.django_db
+def test_triage_task_auto_closes_on_high_fp_confidence(acme):
+    acme.triage_fp_threshold = 0.95
+    acme.save()
+    incident = make_incident(acme)
+    result = _make_triage_result(
+        primary_action="close_as_false_positive",
+        false_positive_confidence=0.97,
+    )
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.state == Incident.STATE_CLOSED
+    assert incident.closure_reason == Incident.CLOSURE_FALSE_POSITIVE
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["auto_closed"] is True
+
+
+@pytest.mark.django_db
+def test_triage_task_does_not_auto_close_below_threshold(acme):
+    acme.triage_fp_threshold = 0.95
+    acme.save()
+    incident = make_incident(acme)
+    result = _make_triage_result(false_positive_confidence=0.80)
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.state == Incident.STATE_NEW
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["auto_closed"] is False
+
+
+@pytest.mark.django_db
+def test_triage_task_escalates_severity(acme):
+    incident = make_incident(acme, severity="low")
+    result = _make_triage_result(severity_recommendation="critical", false_positive_confidence=0.0)
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.severity == "critical"
+
+
+@pytest.mark.django_db
+def test_triage_task_does_not_downgrade_severity(acme):
+    incident = make_incident(acme, severity="critical")
+    result = _make_triage_result(severity_recommendation="low", false_positive_confidence=0.0)
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.severity == "critical"
+
+
+@pytest.mark.django_db
+def test_triage_task_posts_system_comment_on_max_retries_exceeded(acme):
+    incident = make_incident(acme)
+    # Exhaust all retries by making the provider always fail
+    _run_task(incident.id, provider_error=TriageError("API down"))
+
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_SYSTEM)
+    assert "API down" in comment.body or "could not be completed" in comment.body
+
+
+@pytest.mark.django_db
+def test_triage_task_missing_incident_exits_cleanly():
+    from incidents.tasks import run_incident_triage
+    with patch("incidents.tasks.get_triage_provider") as mock_factory:
+        run_incident_triage.apply(args=(99999,))
+    mock_factory.return_value.triage_incident.assert_not_called()
+
+
+# ── post-save signal ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_signal_enqueues_triage_on_new_incident(acme):
+    with patch("incidents.signals.acquire_triage_lock", return_value=True) as mock_lock:
+        with patch("incidents.signals.run_incident_triage") as mock_task:
+            mock_task.delay = MagicMock()
+            incident = make_incident(acme, state="new")
+            mock_lock.assert_called_once_with(incident.id)
+            mock_task.delay.assert_called_once_with(incident.id)
+
+
+@pytest.mark.django_db
+def test_signal_does_not_enqueue_for_non_new_state(acme):
+    with patch("incidents.signals.acquire_triage_lock", return_value=True):
+        with patch("incidents.signals.run_incident_triage") as mock_task:
+            mock_task.delay = MagicMock()
+            make_incident(acme, state="triaged")
+            mock_task.delay.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_signal_does_not_enqueue_when_lock_taken(acme):
+    with patch("incidents.signals.acquire_triage_lock", return_value=False):
+        with patch("incidents.signals.run_incident_triage") as mock_task:
+            mock_task.delay = MagicMock()
+            make_incident(acme, state="new")
+            mock_task.delay.assert_not_called()
+
+
+# ── IncidentTriageView API ────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_triage_endpoint_requires_auth(client, acme):
+    incident = make_incident(acme)
+    response = client.post(f"/api/incidents/{incident.display_id}/triage/")
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_triage_endpoint_requires_staff(client, member, acme):
+    incident = make_incident(acme)
+    client.force_login(member)
+    response = client.post(f"/api/incidents/{incident.display_id}/triage/")
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_triage_endpoint_returns_202_for_staff(client, staff_user, acme):
+    incident = make_incident(acme)
+    client.force_login(staff_user)
+    with patch("incidents.views.acquire_triage_lock", return_value=True):
+        with patch("incidents.views.run_incident_triage") as mock_task:
+            mock_task.delay = MagicMock()
+            response = client.post(f"/api/incidents/{incident.display_id}/triage/")
+    assert response.status_code == 202
+    mock_task.delay.assert_called_once_with(incident.id)
+
+
+@pytest.mark.django_db
+def test_triage_endpoint_returns_409_when_lock_taken(client, staff_user, acme):
+    incident = make_incident(acme)
+    client.force_login(staff_user)
+    with patch("incidents.views.acquire_triage_lock", return_value=False):
+        response = client.post(f"/api/incidents/{incident.display_id}/triage/")
+    assert response.status_code == 409
+
+
+@pytest.mark.django_db
+def test_triage_endpoint_returns_404_for_unknown_incident(client, staff_user):
+    client.force_login(staff_user)
+    response = client.post("/api/incidents/INC-9999-9999/triage/")
+    assert response.status_code == 404

@@ -282,6 +282,15 @@ class IncidentDelegation(models.Model):
 
 
 class Comment(models.Model):
+    KIND_USER = "user"
+    KIND_AI_TRIAGE = "ai_triage"
+    KIND_SYSTEM = "system"
+    KIND_CHOICES = [
+        (KIND_USER, "User"),
+        (KIND_AI_TRIAGE, "AI Triage"),
+        (KIND_SYSTEM, "System"),
+    ]
+
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="comments")
     task = models.ForeignKey(
         Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="comments"
@@ -290,6 +299,8 @@ class Comment(models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="comments"
     )
     body = models.TextField()
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=KIND_USER)
+    metadata = models.JSONField(null=True, blank=True)
     is_internal = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

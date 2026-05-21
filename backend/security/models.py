@@ -42,6 +42,7 @@ class Organization(models.Model):
     slug = models.SlugField(max_length=255, unique=True)
     wazuh_group = models.CharField(max_length=255)
     max_routes = models.PositiveIntegerField(null=True, blank=True)
+    triage_fp_threshold = models.FloatField(default=0.95)
 
     def save(self, *args, **kwargs):
         if not self.wazuh_group:

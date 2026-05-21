@@ -238,6 +238,10 @@ EXCEPTION_LLM_PROVIDER = os.environ.get(
     "EXCEPTION_LLM_PROVIDER",
     "exceptions.llm.gemini.GeminiFlashProvider",
 )
+TRIAGE_LLM_PROVIDER = os.environ.get(
+    "TRIAGE_LLM_PROVIDER",
+    "incidents.llm.gemini.GeminiTriageProvider",
+)
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "mistral")

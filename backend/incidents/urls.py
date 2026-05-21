@@ -18,6 +18,7 @@ from .views import (
     IncidentTimelineView,
     IncidentTransferView,
     IncidentTransitionView,
+    IncidentTriageView,
     PromoteView,
     StaffUserListView,
 )
@@ -42,4 +43,5 @@ urlpatterns = [
     path("<str:display_id>/attachments/<int:attachment_id>/", IncidentAttachmentDeleteView.as_view()),
     path("<str:display_id>/assets/", IncidentAssetLinkView.as_view()),
     path("<str:display_id>/assets/<int:asset_id>/", IncidentAssetUnlinkView.as_view()),
+    path("<str:display_id>/triage/", IncidentTriageView.as_view()),
 ]

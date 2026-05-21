@@ -56,6 +56,7 @@ from .services.delegation import delegate, return_delegation
 from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
 from .services.visibility import can_view_incident, filter_comments_for_user, filter_events_for_user, filter_incidents_for_user
+from .tasks import acquire_triage_lock, run_incident_triage
 
 logger = logging.getLogger(__name__)
 
@@ -1465,3 +1466,28 @@ class IncidentAttachmentDeleteView(APIView):
             return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class IncidentTriageView(APIView):
+    def post(self, request, display_id):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            incident = Incident.objects.select_related("organization").get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_incident(request.user, incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not acquire_triage_lock(incident.id):
+            return Response(
+                {"detail": "Triage already in progress for this incident."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        run_incident_triage.delay(incident.id)
+        return Response(status=status.HTTP_202_ACCEPTED)

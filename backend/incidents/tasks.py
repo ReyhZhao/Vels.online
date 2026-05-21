@@ -4,11 +4,120 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 
 from celery import shared_task
 from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 
+from incidents.llm.base import SEVERITY_RANK, TriageError
+from incidents.llm.factory import get_triage_provider
 from notifications.email import send_html_email
 
 logger = logging.getLogger(__name__)
+
+_TRIAGE_LOCK_KEY = "triage_lock:{}"
+_TRIAGE_LOCK_TTL = 600  # 10 minutes
+
+
+def acquire_triage_lock(incident_id: int) -> bool:
+    return cache.add(_TRIAGE_LOCK_KEY.format(incident_id), "1", _TRIAGE_LOCK_TTL)
+
+
+def release_triage_lock(incident_id: int) -> None:
+    cache.delete(_TRIAGE_LOCK_KEY.format(incident_id))
+
+
+@shared_task(bind=True, max_retries=3)
+def run_incident_triage(self, incident_id: int):
+    from incidents.models import Comment, Incident
+    from incidents.services.transitions import transition_incident
+
+    try:
+        incident = Incident.objects.select_related("organization").prefetch_related(
+            "incident_assets__asset", "iocs"
+        ).get(id=incident_id)
+    except Incident.DoesNotExist:
+        release_triage_lock(incident_id)
+        return
+
+    payload = _build_triage_payload(incident)
+
+    try:
+        result = get_triage_provider().triage_incident(payload)
+    except TriageError as exc:
+        if self.request.retries >= self.max_retries:
+            release_triage_lock(incident_id)
+            Comment.objects.create(
+                incident=incident,
+                kind=Comment.KIND_SYSTEM,
+                body=f"AI triage could not be completed after {self.max_retries + 1} attempts. Last error: {exc}",
+                is_internal=True,
+            )
+            return
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+    except Exception as exc:
+        if self.request.retries >= self.max_retries:
+            release_triage_lock(incident_id)
+            Comment.objects.create(
+                incident=incident,
+                kind=Comment.KIND_SYSTEM,
+                body=f"AI triage failed unexpectedly after {self.max_retries + 1} attempts. Last error: {exc}",
+                is_internal=True,
+            )
+            return
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+
+    release_triage_lock(incident_id)
+
+    threshold = incident.organization.triage_fp_threshold
+    auto_closed = result.false_positive_confidence >= threshold
+
+    if auto_closed:
+        try:
+            transition_incident(incident, "closed", actor=None, closure_reason="false_positive")
+        except Exception as exc:
+            logger.warning("run_incident_triage: auto-close failed for %s: %s", incident_id, exc)
+            auto_closed = False
+
+    if SEVERITY_RANK.get(result.severity_recommendation, -1) > SEVERITY_RANK.get(incident.severity, 0):
+        incident.severity = result.severity_recommendation
+        incident.save(update_fields=["severity"])
+
+    Comment.objects.create(
+        incident=incident,
+        kind=Comment.KIND_AI_TRIAGE,
+        author=None,
+        body=result.summary,
+        is_internal=True,
+        metadata={
+            "severity_recommendation": result.severity_recommendation,
+            "primary_action": result.primary_action,
+            "secondary_action": result.secondary_action,
+            "false_positive_confidence": result.false_positive_confidence,
+            "provider": result.provider,
+            "incident_severity_at_triage": payload["severity"],
+            "auto_closed": auto_closed,
+        },
+    )
+
+
+def _build_triage_payload(incident) -> dict:
+    assets = [
+        {
+            "name": ia.asset.name,
+            "kind": ia.asset.kind,
+            "agent_name": ia.asset.agent_name,
+            "ip_address": str(ia.asset.ip_address) if ia.asset.ip_address else None,
+        }
+        for ia in incident.incident_assets.all()
+    ]
+    iocs = [{"kind": ioc.kind, "value": ioc.value} for ioc in incident.iocs.all()]
+    return {
+        "source_ref": incident.source_ref,
+        "assets": assets,
+        "iocs": iocs,
+        "title": incident.title,
+        "description": incident.description,
+        "severity": incident.severity,
+    }
 
 STALE_INCIDENT_DAYS = 7
 STALE_INCIDENT_STATES = ["new", "triaged", "resolved"]
