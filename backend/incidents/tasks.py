@@ -157,11 +157,14 @@ def poll_automated_tasks():
     from automations.semaphore import SemaphoreAPIError, SemaphoreClient
     from incidents.models import Task
 
-    tasks = Task.objects.filter(
+    tasks = list(Task.objects.filter(
         task_type=Task.TYPE_AUTOMATED,
         semaphore_task_id__isnull=False,
         state=Task.STATE_IN_PROGRESS,
-    )
+    ))
+
+    if not tasks:
+        return {"processed": 0, "done": 0, "failed": 0}
 
     processed = done = failed = 0
     client = SemaphoreClient()

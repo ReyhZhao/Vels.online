@@ -135,7 +135,7 @@ class TestPollAutomatedTasks:
         assert result["done"] == 1
 
     def test_done_task_is_skipped(self, incident, automation, semaphore_settings):
-        done_task = Task.objects.create(
+        Task.objects.create(
             incident=incident,
             title="Already done",
             task_type=Task.TYPE_AUTOMATED,
@@ -147,7 +147,7 @@ class TestPollAutomatedTasks:
         with patch("automations.semaphore.SemaphoreClient") as MockClient:
             result = poll_automated_tasks()
 
-        MockClient.return_value.get_job_status.assert_not_called()
+        MockClient.assert_not_called()
         assert result["processed"] == 0
 
     def test_manual_task_is_skipped(self, incident, semaphore_settings):
@@ -162,7 +162,7 @@ class TestPollAutomatedTasks:
         with patch("automations.semaphore.SemaphoreClient") as MockClient:
             result = poll_automated_tasks()
 
-        MockClient.return_value.get_job_status.assert_not_called()
+        MockClient.assert_not_called()
         assert result["processed"] == 0
 
     def test_success_creates_task_complete_notification(self, automated_task, assignee, semaphore_settings):
