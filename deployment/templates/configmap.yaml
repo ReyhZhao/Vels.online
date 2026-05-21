@@ -7,3 +7,5 @@ data:
   BUNKERWEB_PUBLIC_FQDN: proxy.vels.online
   SEMAPHORE_PROJECT_ID: "1"
   AUTHENTIK_ENROLLMENT_FLOW_SLUG: default-enrollment-flow
+  TRIAGE_LLM_PROVIDER: exceptions.llm.ollama.OllamaProvider
+  OLLAMA_MODEL: gemma4

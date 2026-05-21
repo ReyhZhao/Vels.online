@@ -3,6 +3,7 @@
     "allow": [
       "Auto approve changes",
       "Edit",
+      "Write",
       "Bash"
     ]
   }
