@@ -10,7 +10,9 @@ from .gemini import SYSTEM_PROMPT
 class OllamaProvider(BaseLLMProvider):
     def __init__(self):
         base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
-        self._client = ollama.Client(host=base_url)
+        api_key = getattr(settings, "OLLAMA_API_KEY", "")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._client = ollama.Client(host=base_url, headers=headers)
         self._model = getattr(settings, "OLLAMA_MODEL", "mistral")
 
     def generate_exception(self, source_ref: dict) -> ExceptionFields:
