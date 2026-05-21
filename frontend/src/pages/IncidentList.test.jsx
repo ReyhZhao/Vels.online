@@ -15,6 +15,12 @@ vi.mock('../components/CreateIncidentModal', () => ({
 const mockUseAuth = vi.fn(() => ({ user: null }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => mockUseAuth() }));
 
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return { ...actual, useNavigate: () => mockNavigate };
+});
+
 import api from '../lib/axios';
 import IncidentList from './IncidentList';
 
@@ -59,6 +65,7 @@ describe('IncidentList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: null });
+    mockNavigate.mockReset();
   });
 
   it('shows loading state while fetching', () => {
@@ -170,42 +177,12 @@ describe('IncidentList', () => {
     );
   });
 
-  it('clicking a row opens the slide-over preview', async () => {
-    // The default-tab useEffect triggers a second list fetch, consuming an extra once-mock
-    api.get
-      .mockResolvedValueOnce(PAGE_RESPONSE())
-      .mockResolvedValueOnce(PAGE_RESPONSE())
-      .mockResolvedValueOnce({ data: INCIDENTS[0] });
+  it('clicking a row navigates directly to the incident detail page', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE());
     renderPage();
     await waitFor(() => screen.getAllByText('INC-2026-0001'));
     fireEvent.click(screen.getAllByText('Suspicious login')[0]);
-    await waitFor(() =>
-      expect(api.get).toHaveBeenCalledWith('/api/incidents/INC-2026-0001/')
-    );
-  });
-
-  it('renders markdown in slide-over description', async () => {
-    api.get
-      .mockResolvedValueOnce(PAGE_RESPONSE())
-      .mockResolvedValueOnce(PAGE_RESPONSE())
-      .mockResolvedValueOnce({ data: { ...INCIDENTS[0], description: '**bold text**' } });
-    renderPage();
-    await waitFor(() => screen.getAllByText('INC-2026-0001'));
-    fireEvent.click(screen.getAllByText('Suspicious login')[0]);
-    await waitFor(() => expect(screen.getByText('bold text')).toBeInTheDocument());
-    expect(screen.getByText('bold text').tagName).toBe('STRONG');
-  });
-
-  it('does not render description section when description is empty', async () => {
-    api.get
-      .mockResolvedValueOnce(PAGE_RESPONSE())
-      .mockResolvedValueOnce(PAGE_RESPONSE())
-      .mockResolvedValueOnce({ data: { ...INCIDENTS[0], description: '' } });
-    renderPage();
-    await waitFor(() => screen.getAllByText('INC-2026-0001'));
-    fireEvent.click(screen.getAllByText('Suspicious login')[0]);
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/incidents/INC-2026-0001/'));
-    expect(screen.queryByRole('article')).not.toBeInTheDocument();
+    expect(mockNavigate).toHaveBeenCalledWith('/incidents/INC-2026-0001');
   });
 
   it('renders pagination buttons when total_pages > 1', async () => {

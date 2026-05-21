@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
-import SlideOver from '../components/SlideOver';
 import SLAPill from '../components/SLAPill';
 import CreateIncidentModal from '../components/CreateIncidentModal';
 
@@ -156,12 +153,11 @@ function BulkReassignDialog({ staffUsers, onConfirm, onCancel, loading }) {
 
 export default function IncidentList() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData]         = useState(EMPTY_DATA);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState(null);
-  const [preview, setPreview]   = useState(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [selectAllPages, setSelectAllPages] = useState(false);
@@ -259,19 +255,6 @@ export default function IncidentList() {
       next.delete('page');
       return next;
     });
-  }
-
-  async function openPreview(displayId) {
-    setPreview({ id: displayId, incident: null });
-    setPreviewLoading(true);
-    try {
-      const res = await api.get(`/api/incidents/${displayId}/`);
-      setPreview({ id: displayId, incident: res.data });
-    } catch {
-      setPreview(null);
-    } finally {
-      setPreviewLoading(false);
-    }
   }
 
   function toggleSelect(id) {
@@ -528,7 +511,7 @@ export default function IncidentList() {
           <div
             key={inc.id}
             className="rounded-lg border border-border bg-card px-4 py-3 space-y-1 cursor-pointer hover:bg-accent/50 transition-colors"
-            onClick={() => openPreview(inc.display_id)}
+            onClick={() => navigate(`/incidents/${inc.display_id}`)}
           >
             <div className="flex items-center justify-between gap-2">
               <span className="font-mono text-xs font-medium text-foreground">{inc.display_id}</span>
@@ -614,7 +597,7 @@ export default function IncidentList() {
                 <tr
                   key={inc.id}
                   className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
-                  onClick={() => openPreview(inc.display_id)}
+                  onClick={() => navigate(`/incidents/${inc.display_id}`)}
                 >
                   {user?.is_staff && (
                     <td className="px-4 py-3 w-8" onClick={e => e.stopPropagation()}>
@@ -689,55 +672,6 @@ export default function IncidentList() {
         </div>
       )}
 
-      <SlideOver
-        open={!!preview}
-        onClose={() => setPreview(null)}
-        title={preview?.incident?.display_id || 'Incident preview'}
-        loading={previewLoading}
-      >
-        {preview?.incident && (
-          <div className="px-6 py-4 space-y-4">
-            <div>
-              <h3 className="text-base font-semibold text-foreground">{preview.incident.title}</h3>
-              {preview.incident.description && (
-                <div className="prose prose-sm dark:prose-invert max-w-none mt-1">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.incident.description}</ReactMarkdown>
-                </div>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">State</p>
-                <p className="text-foreground capitalize">{preview.incident.state?.replace('_', ' ')}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Severity</p>
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[preview.incident.severity] ?? ''}`}>
-                  {preview.incident.severity}
-                </span>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Assignee</p>
-                <p className="text-foreground">{preview.incident.assignee_username || '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Organisation</p>
-                <p className="text-foreground">{preview.incident.org_slug}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Created</p>
-                <p className="text-foreground text-xs">{preview.incident.created_at ? new Date(preview.incident.created_at).toLocaleString() : '—'}</p>
-              </div>
-            </div>
-            <Link
-              to={`/incidents/${preview.incident.display_id}`}
-              className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              Open incident →
-            </Link>
-          </div>
-        )}
-      </SlideOver>
     </div>
   );
 }
