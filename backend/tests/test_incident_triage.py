@@ -189,7 +189,8 @@ def test_triage_task_does_not_auto_close_below_threshold(acme):
     _run_task(incident.id, provider_result=result)
 
     incident.refresh_from_db()
-    assert incident.state == Incident.STATE_NEW
+    # Triage always advances to triaged; auto_close is False because confidence < threshold
+    assert incident.state == Incident.STATE_TRIAGED
     comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
     assert comment.metadata["auto_closed"] is False
 
