@@ -668,6 +668,7 @@ export default function IncidentDetail() {
   const [activeTab, setActiveTab]         = useState('details');
   const [showExceptionSlideOver, setShowExceptionSlideOver] = useState(false);
   const [triaging, setTriaging]           = useState(false);
+  const [triageQueued, setTriageQueued]   = useState(false);
   const [triageError, setTriageError]     = useState(null);
   const pollRef = useRef(null);
 
@@ -777,6 +778,7 @@ export default function IncidentDetail() {
     setTriageError(null);
     try {
       await api.post(`/api/incidents/${displayId}/triage/`);
+      setTriageQueued(true);
     } catch (err) {
       setTriageError(err.response?.data?.detail || 'Triage request failed.');
     } finally {
@@ -875,10 +877,10 @@ export default function IncidentDetail() {
             {user?.is_staff && incident.state !== 'closed' && (
               <button
                 onClick={handleTriage}
-                disabled={triaging || transitioning}
-                className="rounded-md border border-violet-400 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 transition-colors dark:border-violet-600 dark:bg-violet-900/20 dark:text-violet-400 dark:hover:bg-violet-900/40"
+                disabled={triaging || triageQueued || transitioning}
+                className="rounded-md border border-violet-400 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:border-violet-600 dark:bg-violet-900/20 dark:text-violet-400 dark:hover:bg-violet-900/40"
               >
-                {triaging ? 'Triaging…' : 'Run Triage'}
+                {triaging ? 'Triaging…' : triageQueued ? 'Triage queued' : 'Run Triage'}
               </button>
             )}
           </div>
