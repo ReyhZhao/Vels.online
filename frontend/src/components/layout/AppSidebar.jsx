@@ -29,6 +29,7 @@ import {
   History,
   CalendarClock,
   Mail,
+  Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -185,6 +186,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 </SidebarLink>
                 <SidebarLink to="/tasks" icon={ListChecks} collapsed={collapsed}>
                   Tasks
+                </SidebarLink>
+                <SidebarLink to="/contacts" icon={Users} collapsed={collapsed}>
+                  Contacts
                 </SidebarLink>
                 {isStaff && (
                   <>

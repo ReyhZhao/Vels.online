@@ -35,6 +35,8 @@ import TaskHistory from './pages/admin/TaskHistory';
 import ScheduledTasks from './pages/admin/ScheduledTasks';
 import EmailTemplates from './pages/admin/EmailTemplates';
 import TaskListPage from './pages/TaskListPage';
+import ContactsPage from './pages/ContactsPage';
+import ContactDetail from './pages/ContactDetail';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -84,6 +86,8 @@ function App() {
         <Route path="/exceptions" element={<ExceptionList />} />
         <Route path="/routes" element={<RouteList />} />
         <Route path="/routes/:fqdn" element={<RouteDetail />} />
+        <Route path="/contacts" element={<ContactsPage />} />
+        <Route path="/contacts/:id" element={<ContactDetail />} />
 
         <Route path="/account/notifications" element={<NotificationPreferences />} />
       </Route>

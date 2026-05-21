@@ -27,5 +27,6 @@ urlpatterns = [
     path("signups/", include("signups.urls")),
     path("", include("automations.urls")),
     path("admin/celery/", include("celery_tasks.urls")),
+    path("contacts/", include("contacts.urls")),
     path("", include(blog_router.urls)),
 ]

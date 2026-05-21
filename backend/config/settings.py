@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "ingress",
     "signups",
     "automations",
+    "contacts",
     "django_celery_results",
     "django_celery_beat",
     "celery_tasks",
