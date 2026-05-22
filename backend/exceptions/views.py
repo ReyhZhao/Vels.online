@@ -21,8 +21,8 @@ from .services_github import push_rule, remove_rule
 
 logger = logging.getLogger(__name__)
 
-_ANGLE_BRACKET_RE = re.compile(r"<[^>]+>")
-_SQUARE_BRACKET_RE = re.compile(r"\[[^\]]+\]")
+_ANGLE_BRACKET_RE = re.compile(r"<[^<>]+>")
+_SQUARE_BRACKET_RE = re.compile(r"\[[^[\]]+\]")
 _ALL_CAPS_UNDERSCORE_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 
 

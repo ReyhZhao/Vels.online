@@ -107,8 +107,9 @@ class RouteListView(ListAPIView):
         try:
             BunkerWebClient().create_service(fqdn, backend_host, backend_port, backend_protocol)
         except BunkerWebError as exc:
+            logger.exception("BunkerWeb error creating service for fqdn=%s", fqdn)
             return Response(
-                {"detail": f"BunkerWeb rejected the request: {exc}"},
+                {"detail": "BunkerWeb rejected the request."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
@@ -139,8 +140,9 @@ class RouteDetailView(APIView):
         try:
             BunkerWebClient().delete_service(fqdn)
         except BunkerWebError as exc:
+            logger.exception("BunkerWeb error deleting service for fqdn=%s", fqdn)
             return Response(
-                {"detail": f"BunkerWeb rejected the deletion: {exc}"},
+                {"detail": "BunkerWeb rejected the deletion."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
@@ -223,8 +225,8 @@ class RouteSettingsView(APIView):
         try:
             all_settings = BunkerWebClient().get_service_settings(fqdn)
         except BunkerWebError as exc:
-            logger.warning("RouteSettingsView: BunkerWeb error for %s: %s", fqdn, exc)
-            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+            logger.exception("BunkerWeb error fetching settings for fqdn=%s", fqdn)
+            return Response({"detail": "Service error contacting BunkerWeb."}, status=status.HTTP_502_BAD_GATEWAY)
         filtered = {k: v for k, v in all_settings.items() if k in _MANAGED_SETTINGS}
         if not filtered:
             logger.warning(
@@ -301,7 +303,8 @@ class RouteImportView(APIView):
         try:
             services = BunkerWebClient().list_services()
         except BunkerWebError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+            logger.exception("BunkerWeb error listing services in RouteImportView.get")
+            return Response({"detail": "Service error contacting BunkerWeb."}, status=status.HTTP_502_BAD_GATEWAY)
         existing = set(Route.objects.values_list("fqdn", flat=True))
         candidates = [s for s in services if s.get("server_name") not in existing]
         return Response({"candidates": candidates})
@@ -322,7 +325,8 @@ class RouteImportView(APIView):
         try:
             services = BunkerWebClient().list_services()
         except BunkerWebError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+            logger.exception("BunkerWeb error listing services in RouteImportView.post")
+            return Response({"detail": "Service error contacting BunkerWeb."}, status=status.HTTP_502_BAD_GATEWAY)
         bw_map = {s.get("server_name"): s for s in services}
         existing = set(Route.objects.values_list("fqdn", flat=True))
         for fqdn in fqdns:

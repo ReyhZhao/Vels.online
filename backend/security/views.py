@@ -1,3 +1,4 @@
+import logging
 import os
 
 from django.conf import settings
@@ -8,6 +9,8 @@ from django.utils.text import slugify
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from signups.authentik import AuthentikAPIError, AuthentikClient
+
+logger = logging.getLogger(__name__)
 
 from django.db.models import Count, Q
 from security.models import Download, OrgInvitation, Organization, OrganizationMembership, RiskAcceptance, VulnerabilitySnapshot, WorkPackage, WorkPackageItem
@@ -432,7 +435,8 @@ class DashboardView(APIView):
         try:
             raw_agents = WazuhClient().get_agents(org.wazuh_group)
         except (WazuhAuthError, WazuhAPIError) as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("Wazuh error in DashboardView")
+            return Response({"detail": "Security service unavailable."}, status=502)
 
         try:
             os_client = OpenSearchClient()
@@ -506,7 +510,8 @@ class AgentEventsView(APIView):
                 severity=severity, search=search,
             )
         except OpenSearchError as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("OpenSearch error in AgentEventsView")
+            return Response({"detail": "Search service unavailable."}, status=502)
 
         data = PaginatedEventsSerializer({
             "events": [_serialize_event(e) for e in result["events"]],
@@ -533,7 +538,8 @@ class AgentEventDetailView(APIView):
         try:
             event = OpenSearchClient().get_event_by_id(agent_id, event_id)
         except OpenSearchError as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("OpenSearch error in AgentEventDetailView")
+            return Response({"detail": "Search service unavailable."}, status=502)
 
         if event is None:
             return Response(status=404)
@@ -577,7 +583,8 @@ class AgentVulnerabilitiesView(APIView):
                 severity=severity, fix_available=fix_available, search=search,
             )
         except OpenSearchError as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("OpenSearch error in AgentVulnerabilitiesView")
+            return Response({"detail": "Search service unavailable."}, status=502)
 
         cached_agents = cache.get(_agents_cache_key(org.slug)) or []
         agent_raw = next((a for a in cached_agents if str(a.get("id")) == str(agent_id)), {})
@@ -625,7 +632,8 @@ class AgentVulnerabilityDetailView(APIView):
         try:
             vuln = OpenSearchClient().get_vulnerability_by_id(agent_id, vuln_id)
         except OpenSearchError as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("OpenSearch error in AgentVulnerabilityDetailView")
+            return Response({"detail": "Search service unavailable."}, status=502)
 
         if vuln is None:
             return Response(status=404)
@@ -682,7 +690,8 @@ class FleetVulnerabilitiesView(APIView):
         try:
             raw_agents = WazuhClient().get_agents(org.wazuh_group)
         except (WazuhAuthError, WazuhAPIError) as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("Wazuh error in FleetVulnerabilitiesView")
+            return Response({"detail": "Security service unavailable."}, status=502)
 
         agent_ids = [a["id"] for a in raw_agents if a.get("status") == "active"]
 
@@ -699,7 +708,8 @@ class FleetVulnerabilitiesView(APIView):
                 sort_order=sort_order,
             )
         except OpenSearchError as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("OpenSearch error in FleetVulnerabilitiesView")
+            return Response({"detail": "Search service unavailable."}, status=502)
 
         fleet_platforms = {
             normalize_platform(a.get("os", {}).get("platform", "") if isinstance(a.get("os"), dict) else "")
@@ -810,7 +820,8 @@ class FleetEventsView(APIView):
                 agent_id_filter=agent_filter or None,
             )
         except OpenSearchError as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("OpenSearch error in FleetEventsView")
+            return Response({"detail": "Search service unavailable."}, status=502)
 
         data = {
             "events": [_serialize_event(e) for e in result["events"]],
@@ -834,7 +845,8 @@ class CveDetailView(APIView):
         try:
             raw_agents = WazuhClient().get_agents(org.wazuh_group)
         except (WazuhAuthError, WazuhAPIError) as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("Wazuh error in CveDetailView")
+            return Response({"detail": "Security service unavailable."}, status=502)
 
         agent_ids = [a["id"] for a in raw_agents if a.get("status") == "active"]
         agent_map = {str(a["id"]): _serialize_agent(a) for a in raw_agents}
@@ -846,7 +858,8 @@ class CveDetailView(APIView):
                 return Response(status=404)
             affected_docs = os_client.get_cve_affected_agents(agent_ids, cve_id)
         except OpenSearchError as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("OpenSearch error in CveDetailView")
+            return Response({"detail": "Search service unavailable."}, status=502)
 
         v = sample.get("vulnerability", {})
         pkg = sample.get("package", {})

@@ -777,7 +777,7 @@ class IncidentBulkActionView(APIView):
                     )
                     succeeded.append(incident_id)
             except ValidationError as e:
-                msg = e.messages[0] if e.messages else str(e)
+                msg = e.messages[0] if e.messages else "Validation error."
                 failed.append({"id": incident_id, "error": msg})
 
         return Response({"succeeded": succeeded, "failed": failed})
@@ -1273,16 +1273,15 @@ class TaskRunView(APIView):
                 extra_vars=extra_vars,
             )
         except SemaphoreAPIError as exc:
-            logger.error(
-                "launch_job failed for task=%s automation=%s template_id=%s: status=%s body=%r extra_vars=%s",
+            logger.exception(
+                "launch_job failed for task=%s automation=%s template_id=%s: status=%s extra_vars=%s",
                 task.pk,
                 task.automation_id,
                 task.automation.semaphore_template_id,
                 exc.status_code,
-                exc.body,
                 extra_vars,
             )
-            return Response({"detail": f"Semaphore error: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+            return Response({"detail": "Service error launching automation."}, status=status.HTTP_502_BAD_GATEWAY)
 
         Task.objects.filter(pk=task.pk).update(
             semaphore_task_id=semaphore_task_id,
@@ -1507,7 +1506,8 @@ class IncidentAttachmentListView(APIView):
                 incident, filename, content_type, uploader=request.user, is_internal=bool(is_internal)
             )
         except Exception as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception("Error generating upload URL for incident=%s filename=%s", incident.display_id, filename)
+            return Response({"detail": "Internal error processing attachment."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(
             {"attachment": AttachmentSerializer(attachment).data, "upload_url": upload_url},
@@ -1537,7 +1537,8 @@ class IncidentAttachmentConfirmView(APIView):
         try:
             attachment = confirm_upload(attachment)
         except Exception as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.exception("Error confirming upload for attachment=%s", attachment_id)
+            return Response({"detail": "Internal error confirming upload."}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(AttachmentSerializer(attachment).data)
 
@@ -1562,7 +1563,8 @@ class IncidentAttachmentDownloadView(APIView):
         try:
             url = issue_download_url(attachment)
         except Exception as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception("Error generating download URL for attachment=%s", attachment_id)
+            return Response({"detail": "Internal error generating download link."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({"url": url})
 
@@ -1586,7 +1588,8 @@ class IncidentAttachmentDeleteView(APIView):
         try:
             delete_attachment(attachment, actor=request.user)
         except Exception as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception("Error deleting attachment=%s", attachment_id)
+            return Response({"detail": "Internal error deleting attachment."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
