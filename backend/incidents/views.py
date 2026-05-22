@@ -560,10 +560,20 @@ def _serialize_incident_contact(r):
         "contact_id": r.contact_id,
         "name": r.contact.name,
         "email": r.contact.email,
-        "role": r.role,
-        "message": r.message,
-        "sent_at": r.sent_at,
         "created_at": r.created_at,
+    }
+
+
+def _serialize_contact_message(msg):
+    return {
+        "id": msg.id,
+        "contact_id": msg.contact_id,
+        "direction": msg.direction,
+        "role": msg.role,
+        "body": msg.body,
+        "parent_id": msg.parent_id,
+        "read_at": msg.read_at,
+        "created_at": msg.created_at,
     }
 
 
@@ -594,12 +604,8 @@ class IncidentContactListView(APIView):
             return err
         from contacts.models import Contact, IncidentContact
         contact_id = request.data.get("contact_id")
-        role = request.data.get("role", IncidentContact.ROLE_NOTIFIED)
-        message = request.data.get("message", "")
         if not contact_id:
             return Response({"detail": "contact_id is required."}, status=status.HTTP_400_BAD_REQUEST)
-        if role not in (IncidentContact.ROLE_NOTIFIED, IncidentContact.ROLE_QUESTIONED):
-            return Response({"detail": "role must be 'notified' or 'questioned'."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             contact = Contact.objects.get(pk=contact_id)
         except Contact.DoesNotExist:
@@ -608,7 +614,7 @@ class IncidentContactListView(APIView):
             return Response({"detail": "Contact belongs to a different organisation."}, status=status.HTTP_400_BAD_REQUEST)
         if IncidentContact.objects.filter(incident=incident, contact=contact).exists():
             return Response({"detail": "Contact already linked to this incident."}, status=status.HTTP_400_BAD_REQUEST)
-        row = IncidentContact.objects.create(incident=incident, contact=contact, role=role, message=message)
+        row = IncidentContact.objects.create(incident=incident, contact=contact)
         row.refresh_from_db()
         row.contact = contact
         return Response(_serialize_incident_contact(row), status=status.HTTP_201_CREATED)
@@ -632,20 +638,6 @@ class IncidentContactDetailView(APIView):
             return None, Response(status=status.HTTP_404_NOT_FOUND)
         return row, None
 
-    def patch(self, request, display_id, pk):
-        row, err = self._get_row(request, display_id, pk)
-        if err:
-            return err
-        from contacts.models import IncidentContact
-        role = request.data.get("role", row.role)
-        message = request.data.get("message", row.message)
-        if role not in (IncidentContact.ROLE_NOTIFIED, IncidentContact.ROLE_QUESTIONED):
-            return Response({"detail": "role must be 'notified' or 'questioned'."}, status=status.HTTP_400_BAD_REQUEST)
-        row.role = role
-        row.message = message
-        row.save(update_fields=["role", "message"])
-        return Response(_serialize_incident_contact(row))
-
     def delete(self, request, display_id, pk):
         row, err = self._get_row(request, display_id, pk)
         if err:
@@ -654,25 +646,112 @@ class IncidentContactDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class IncidentContactSendEmailView(APIView):
-    def post(self, request, display_id, pk):
+class IncidentContactMessageListView(APIView):
+    def _get_incident(self, request, display_id):
+        err = _require_auth(request)
+        if err:
+            return None, err
+        try:
+            incident = Incident.objects.get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, incident):
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return incident, None
+
+    def get(self, request, display_id):
+        from collections import defaultdict
+
+        incident, err = self._get_incident(request, display_id)
+        if err:
+            return err
+        from contacts.models import ContactMessage, IncidentContact
+
+        messages = (
+            ContactMessage.objects.filter(incident=incident)
+            .select_related("contact")
+            .order_by("created_at")
+        )
+
+        groups = defaultdict(lambda: {"contact_id": None, "name": "", "email": "", "department": "", "messages": []})
+        for msg in messages:
+            g = groups[msg.contact_id]
+            g["contact_id"] = msg.contact_id
+            g["name"] = msg.contact.name
+            g["email"] = msg.contact.email
+            g["department"] = msg.contact.department
+            g["messages"].append(_serialize_contact_message(msg))
+
+        linked = IncidentContact.objects.filter(incident=incident).select_related("contact")
+        for lc in linked:
+            if lc.contact_id not in groups:
+                groups[lc.contact_id] = {
+                    "contact_id": lc.contact_id,
+                    "name": lc.contact.name,
+                    "email": lc.contact.email,
+                    "department": lc.contact.department,
+                    "messages": [],
+                }
+
+        return Response(list(groups.values()))
+
+    def post(self, request, display_id):
+        incident, err = self._get_incident(request, display_id)
+        if err:
+            return err
+        from contacts.models import Contact, ContactMessage
+        from contacts.services import send_contact_message
+
+        contact_id = request.data.get("contact_id")
+        role = request.data.get("role", "")
+        body = request.data.get("body", "")
+
+        if not contact_id:
+            return Response({"detail": "contact_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if role not in (ContactMessage.ROLE_NOTIFIED, ContactMessage.ROLE_QUESTIONED):
+            return Response({"detail": "role must be 'notified' or 'questioned'."}, status=status.HTTP_400_BAD_REQUEST)
+        if not body.strip():
+            return Response({"detail": "body is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            contact = Contact.objects.get(pk=contact_id)
+        except Contact.DoesNotExist:
+            return Response({"detail": "Contact not found."}, status=status.HTTP_400_BAD_REQUEST)
+        if contact.organisation_id != incident.organization_id:
+            return Response({"detail": "Contact belongs to a different organisation."}, status=status.HTTP_400_BAD_REQUEST)
+
+        msg = send_contact_message(incident, contact, role, body)
+        return Response(_serialize_contact_message(msg), status=status.HTTP_201_CREATED)
+
+
+class IncidentContactMessageMarkReadView(APIView):
+    def post(self, request, display_id):
+        from django.utils import timezone
+
         err = _require_auth(request)
         if err:
             return err
         try:
             incident = Incident.objects.get(display_id=display_id)
         except Incident.DoesNotExist:
-            return Response(status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_incident(request.user, incident):
-            return Response(status=status.HTTP_404_NOT_FOUND)
-        from contacts.models import IncidentContact
-        try:
-            row = IncidentContact.objects.select_related("contact").get(pk=pk, incident=incident)
-        except IncidentContact.DoesNotExist:
-            return Response(status=status.HTTP_404_NOT_FOUND)
-        from contacts.services import send_contact_email
-        send_contact_email(row)
-        return Response(_serialize_incident_contact(row))
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        contact_id = request.data.get("contact_id")
+        if not contact_id:
+            return Response({"detail": "contact_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from contacts.models import ContactMessage
+
+        ContactMessage.objects.filter(
+            incident=incident,
+            contact_id=contact_id,
+            direction=ContactMessage.DIRECTION_INBOUND,
+            read_at__isnull=True,
+        ).update(read_at=timezone.now())
+
+        return Response({"status": "ok"})
 
 
 class IncidentBulkActionView(APIView):

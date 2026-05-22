@@ -4,6 +4,7 @@ from incidents.models import Incident
 from security.models import Organization, OrganizationMembership
 
 
+
 @pytest.fixture
 def acme(db):
     return Organization.objects.create(name="Acme", slug="acme", wazuh_group="acme")
@@ -52,13 +53,12 @@ def test_link_contact_creates_row(client, acme_member, acme):
     client.force_login(acme_member)
     resp = client.post(
         f"/api/incidents/{inc.display_id}/contacts/",
-        {"contact_id": c.id, "role": "questioned", "message": "Did you see this?"},
+        {"contact_id": c.id},
         content_type="application/json",
     )
     assert resp.status_code == 201
     data = resp.json()
-    assert data["role"] == "questioned"
-    assert data["message"] == "Did you see this?"
+    assert data["contact_id"] == c.id
     assert IncidentContact.objects.filter(incident=inc, contact=c).exists()
 
 
@@ -69,7 +69,7 @@ def test_link_contact_from_different_org_rejected(client, acme_member, acme, con
     client.force_login(acme_member)
     resp = client.post(
         f"/api/incidents/{inc.display_id}/contacts/",
-        {"contact_id": other.id, "role": "notified"},
+        {"contact_id": other.id},
         content_type="application/json",
     )
     assert resp.status_code == 400
@@ -83,47 +83,10 @@ def test_link_duplicate_contact_rejected(client, acme_member, acme):
     client.force_login(acme_member)
     resp = client.post(
         f"/api/incidents/{inc.display_id}/contacts/",
-        {"contact_id": c.id, "role": "notified"},
+        {"contact_id": c.id},
         content_type="application/json",
     )
     assert resp.status_code == 400
-
-
-# ── PATCH /api/incidents/<display_id>/contacts/<id>/ ─────────────────────────
-
-
-@pytest.mark.django_db
-def test_patch_updates_role_and_message(client, acme_member, acme):
-    inc = make_incident(acme)
-    c = make_contact(acme)
-    row = IncidentContact.objects.create(incident=inc, contact=c, role="notified")
-    client.force_login(acme_member)
-    resp = client.patch(
-        f"/api/incidents/{inc.display_id}/contacts/{row.id}/",
-        {"role": "questioned", "message": "Updated"},
-        content_type="application/json",
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["role"] == "questioned"
-    assert data["message"] == "Updated"
-
-
-@pytest.mark.django_db
-def test_patch_updates_role_only(client, acme_member, acme):
-    inc = make_incident(acme)
-    c = make_contact(acme)
-    row = IncidentContact.objects.create(incident=inc, contact=c, role="notified", message="original")
-    client.force_login(acme_member)
-    resp = client.patch(
-        f"/api/incidents/{inc.display_id}/contacts/{row.id}/",
-        {"role": "questioned"},
-        content_type="application/json",
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["role"] == "questioned"
-    assert data["message"] == "original"
 
 
 # ── DELETE /api/incidents/<display_id>/contacts/<id>/ ────────────────────────
@@ -149,6 +112,26 @@ def test_delete_wrong_incident_returns_404(client, acme_member, acme):
     client.force_login(acme_member)
     resp = client.delete(f"/api/incidents/{inc2.display_id}/contacts/{row.id}/")
     assert resp.status_code == 404
+
+
+# ── GET /api/incidents/<display_id>/contacts/ ─────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_get_contacts_returns_linked(client, acme_member, acme):
+    inc = make_incident(acme)
+    c = make_contact(acme)
+    IncidentContact.objects.create(incident=inc, contact=c)
+    client.force_login(acme_member)
+    resp = client.get(f"/api/incidents/{inc.display_id}/contacts/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["contact_id"] == c.id
+    assert data[0]["name"] == "Carol"
+    assert "role" not in data[0]
+    assert "message" not in data[0]
+    assert "sent_at" not in data[0]
 
 
 # ── org isolation ─────────────────────────────────────────────────────────────

@@ -8,24 +8,14 @@ vi.mock('../lib/axios', () => ({
 
 import api from '../lib/axios';
 
-// We test IncidentContactsPanel by rendering IncidentDetail with a mock incident.
-// Since IncidentContactsPanel is not exported, we test it through the contacts tab.
-// Extract and test just the panel logic by creating a small wrapper.
-
+// We test IncidentContactsPanel by rendering a small wrapper that mirrors the panel logic.
 function ContactsPanelWrapper({ displayId = 'INC-001', orgSlug = 'acme' }) {
-  // Inline recreation of the panel for testing — avoids importing private component
   const { useState, useEffect } = require('react');
-
-  const ROLE_CLASSES = {
-    notified: 'bg-blue-100',
-    questioned: 'bg-amber-100',
-  };
 
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [allContacts, setAllContacts] = useState([]);
   const [addSearch, setAddSearch] = useState('');
-  const [addRole, setAddRole] = useState('notified');
 
   useEffect(() => {
     api.get(`/api/incidents/${displayId}/contacts/`).then(r => setContacts(r.data)).finally(() => setLoading(false));
@@ -36,7 +26,7 @@ function ContactsPanelWrapper({ displayId = 'INC-001', orgSlug = 'acme' }) {
   const filtered = allContacts.filter(c => !linkedIds.has(c.id) && c.name.toLowerCase().includes(addSearch.toLowerCase()));
 
   async function addContact(contactId) {
-    await api.post(`/api/incidents/${displayId}/contacts/`, { contact_id: contactId, role: addRole });
+    await api.post(`/api/incidents/${displayId}/contacts/`, { contact_id: contactId });
     const r = await api.get(`/api/incidents/${displayId}/contacts/`);
     setContacts(r.data);
     setAddSearch('');
@@ -54,16 +44,10 @@ function ContactsPanelWrapper({ displayId = 'INC-001', orgSlug = 'acme' }) {
       {contacts.map(c => (
         <div key={c.id} data-testid="contact-row">
           <span>{c.name}</span>
-          <span className={ROLE_CLASSES[c.role]}>{c.role}</span>
-          {c.message && <span data-testid="msg-preview">{c.message}</span>}
           <button onClick={() => removeContact(c.id)}>Remove</button>
         </div>
       ))}
       {contacts.length === 0 && <p>No contacts linked to this incident.</p>}
-      <select aria-label="Role" value={addRole} onChange={e => setAddRole(e.target.value)}>
-        <option value="notified">Notified</option>
-        <option value="questioned">Questioned</option>
-      </select>
       <input placeholder="Search contacts…" value={addSearch} onChange={e => setAddSearch(e.target.value)} />
       {filtered.map(c => (
         <button key={c.id} onClick={() => addContact(c.id)}>{c.name}</button>
@@ -73,7 +57,7 @@ function ContactsPanelWrapper({ displayId = 'INC-001', orgSlug = 'acme' }) {
 }
 
 const LINKED = [
-  { id: 1, contact_id: 10, name: 'Alice', email: 'alice@a.com', role: 'notified', message: '', created_at: '2026-01-01T00:00:00Z', sent_at: null },
+  { id: 1, contact_id: 10, name: 'Alice', email: 'alice@a.com', created_at: '2026-01-01T00:00:00Z' },
 ];
 const ALL_CONTACTS = [
   { id: 10, name: 'Alice', email: 'alice@a.com' },
@@ -90,7 +74,7 @@ describe('IncidentContactsPanel', () => {
     });
     render(<MemoryRouter><ContactsPanelWrapper /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('contact-row'));
-    expect(screen.getByText('notified')).toBeInTheDocument();
+    expect(screen.getByText('Alice')).toBeInTheDocument();
   });
 
   it('shows empty state when no contacts', async () => {
@@ -111,10 +95,10 @@ describe('IncidentContactsPanel', () => {
     expect(screen.getByText('Bob')).toBeInTheDocument();
   });
 
-  it('adds a contact', async () => {
+  it('adds a contact (no role or message required)', async () => {
     const newLinked = [
       ...LINKED,
-      { id: 2, contact_id: 11, name: 'Bob', email: 'bob@a.com', role: 'notified', message: '', created_at: '2026-01-02T00:00:00Z', sent_at: null },
+      { id: 2, contact_id: 11, name: 'Bob', email: 'bob@a.com', created_at: '2026-01-02T00:00:00Z' },
     ];
     api.get
       .mockResolvedValueOnce({ data: LINKED })
@@ -131,7 +115,7 @@ describe('IncidentContactsPanel', () => {
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/incidents/INC-001/contacts/',
-      expect.objectContaining({ contact_id: 11, role: 'notified' })
+      { contact_id: 11 }
     ));
   });
 

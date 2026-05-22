@@ -32,8 +32,8 @@ class ContactReplyHandler:
             logger.warning("inbound_mail: invalid token in To address %r", message.to_address)
             return
 
-        from contacts.models import Contact
-        from incidents.models import Comment, Incident
+        from contacts.models import Contact, ContactMessage
+        from incidents.models import Incident
 
         try:
             incident = Incident.objects.get(pk=incident_id)
@@ -42,14 +42,21 @@ class ContactReplyHandler:
             logger.warning("inbound_mail: incident %s or contact %s not found", incident_id, contact_id)
             return
 
-        Comment.objects.create(
-            incident=incident,
-            body=message.body_text or message.subject,
-            kind=Comment.KIND_SYSTEM,
-            metadata={
-                "source": "contact_reply",
-                "contact_id": contact.id,
-                "contact_name": contact.name,
-            },
+        parent = (
+            ContactMessage.objects.filter(
+                incident=incident,
+                contact=contact,
+                direction=ContactMessage.DIRECTION_OUTBOUND,
+            )
+            .order_by("-created_at")
+            .first()
         )
-        logger.info("inbound_mail: created comment on %s from contact %s", incident.display_id, contact.name)
+
+        ContactMessage.objects.create(
+            incident=incident,
+            contact=contact,
+            direction=ContactMessage.DIRECTION_INBOUND,
+            body=message.body_text or message.subject,
+            parent=parent,
+        )
+        logger.info("inbound_mail: created contact message on %s from contact %s", incident.display_id, contact.name)

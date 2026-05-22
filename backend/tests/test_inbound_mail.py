@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch, call
 from django.core.signing import BadSignature, SignatureExpired
 
-from contacts.models import Contact, IncidentContact
+from contacts.models import Contact, ContactMessage, IncidentContact
 from contacts.tokens import sign_contact_reply_token
 from incidents.models import Comment, Incident
 from inbound_mail.dataclasses import NormalisedMessage
@@ -118,20 +118,37 @@ def test_imap_adapter_empty_mailbox(monkeypatch):
 # ── ContactReplyHandler ───────────────────────────────────────────────────────
 
 @pytest.mark.django_db
-def test_handler_creates_comment_on_valid_token(incident, contact):
+def test_handler_creates_contact_message_on_valid_token(incident, contact):
     token = sign_contact_reply_token(incident.id, contact.id)
     msg = make_message(to_address=f"soc+{token}@example.com", body_text="I saw that")
 
     ContactReplyHandler().handle(msg)
 
-    comments = Comment.objects.filter(incident=incident)
-    assert comments.count() == 1
-    c = comments.first()
-    assert c.kind == Comment.KIND_SYSTEM
-    assert c.body == "I saw that"
-    assert c.metadata["source"] == "contact_reply"
-    assert c.metadata["contact_id"] == contact.id
-    assert c.metadata["contact_name"] == "Carol"
+    messages = ContactMessage.objects.filter(incident=incident)
+    assert messages.count() == 1
+    cm = messages.first()
+    assert cm.direction == ContactMessage.DIRECTION_INBOUND
+    assert cm.body == "I saw that"
+    assert cm.contact == contact
+    assert cm.parent is None
+
+
+@pytest.mark.django_db
+def test_handler_sets_parent_to_most_recent_outbound(incident, contact):
+    outbound = ContactMessage.objects.create(
+        incident=incident,
+        contact=contact,
+        direction=ContactMessage.DIRECTION_OUTBOUND,
+        role="questioned",
+        body="Did you see this?",
+    )
+    token = sign_contact_reply_token(incident.id, contact.id)
+    msg = make_message(to_address=f"soc+{token}@example.com", body_text="Yes I did")
+
+    ContactReplyHandler().handle(msg)
+
+    cm = ContactMessage.objects.get(incident=incident, direction=ContactMessage.DIRECTION_INBOUND)
+    assert cm.parent == outbound
 
 
 @pytest.mark.django_db
@@ -141,15 +158,15 @@ def test_handler_uses_subject_when_body_empty(incident, contact):
 
     ContactReplyHandler().handle(msg)
 
-    c = Comment.objects.get(incident=incident)
-    assert c.body == "My reply"
+    cm = ContactMessage.objects.get(incident=incident, direction=ContactMessage.DIRECTION_INBOUND)
+    assert cm.body == "My reply"
 
 
 @pytest.mark.django_db
 def test_handler_invalid_token_does_not_raise(caplog):
     msg = make_message(to_address="soc+BADTOKEN@example.com")
     ContactReplyHandler().handle(msg)
-    assert Comment.objects.count() == 0
+    assert ContactMessage.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -160,14 +177,14 @@ def test_handler_expired_token_does_not_raise(incident, contact):
     with patch("inbound_mail.handlers.unsign_contact_reply_token", side_effect=SignatureExpired("expired")):
         ContactReplyHandler().handle(msg)
 
-    assert Comment.objects.count() == 0
+    assert ContactMessage.objects.count() == 0
 
 
 @pytest.mark.django_db
 def test_handler_no_plus_suffix_does_not_raise():
     msg = make_message(to_address="soc@example.com")
     ContactReplyHandler().handle(msg)
-    assert Comment.objects.count() == 0
+    assert ContactMessage.objects.count() == 0
 
 
 # ── route_inbound_message ─────────────────────────────────────────────────────
@@ -176,7 +193,7 @@ def test_handler_no_plus_suffix_does_not_raise():
 def test_route_no_plus_suffix_logs_and_drops(caplog):
     msg = make_message(to_address="soc@example.com")
     route_inbound_message(msg)
-    assert Comment.objects.count() == 0
+    assert ContactMessage.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -186,4 +203,6 @@ def test_route_with_token_delegates_to_handler(incident, contact):
 
     route_inbound_message(msg)
 
-    assert Comment.objects.filter(incident=incident).count() == 1
+    assert ContactMessage.objects.filter(
+        incident=incident, direction=ContactMessage.DIRECTION_INBOUND
+    ).count() == 1

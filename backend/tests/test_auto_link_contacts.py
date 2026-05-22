@@ -47,7 +47,7 @@ def test_creates_incident_contact_for_asset_owner(acme):
     from incidents.services.contacts import auto_link_contacts_for_asset
     auto_link_contacts_for_asset(incident, asset)
 
-    assert IncidentContact.objects.filter(incident=incident, contact=contact, role=IncidentContact.ROLE_NOTIFIED).exists()
+    assert IncidentContact.objects.filter(incident=incident, contact=contact).exists()
 
 
 @pytest.mark.django_db
@@ -139,12 +139,11 @@ def test_get_contacts_requires_auth(client, acme):
 def test_get_contacts_returns_linked_contacts(client, acme_member, acme):
     incident = make_incident(acme)
     contact = make_contact(acme)
-    IncidentContact.objects.create(incident=incident, contact=contact, role=IncidentContact.ROLE_NOTIFIED)
+    IncidentContact.objects.create(incident=incident, contact=contact)
     client.force_login(acme_member)
     data = client.get(f"/api/incidents/{incident.display_id}/contacts/").json()
     assert len(data) == 1
     assert data[0]["name"] == "Contact"
-    assert data[0]["role"] == "notified"
 
 
 @pytest.mark.django_db

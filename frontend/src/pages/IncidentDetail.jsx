@@ -11,6 +11,8 @@ import IncidentTimeline from '../components/IncidentTimeline';
 import IncidentTasks from './IncidentTasks';
 import SLAPill from '../components/SLAPill';
 import CreateExceptionSlideOver from '../components/CreateExceptionSlideOver';
+import ContactMessagesCard from '../components/ContactMessagesCard';
+import ContactComposeModal from '../components/ContactComposeModal';
 
 const TRIAGE_STATES = new Set(['new', 'triaged']);
 
@@ -165,21 +167,14 @@ function IOCSection({ iocs }) {
   );
 }
 
-const CONTACT_ROLE_CLASSES = {
-  notified:   'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-  questioned: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
-};
-
 function IncidentContactsPanel({ displayId, orgSlug }) {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [allContacts, setAllContacts] = useState([]);
   const [addSearch, setAddSearch] = useState('');
-  const [addRole, setAddRole] = useState('notified');
-  const [addMessage, setAddMessage] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState(null);
-  const [sendingId, setSendingId] = useState(null);
+  const [composingFor, setComposingFor] = useState(null);
 
   function reload() {
     return api.get(`/api/incidents/${displayId}/contacts/`).then(r => setContacts(r.data));
@@ -201,15 +196,9 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
     setAdding(true);
     setAddError(null);
     try {
-      await api.post(`/api/incidents/${displayId}/contacts/`, {
-        contact_id: contactId,
-        role: addRole,
-        message: addRole === 'questioned' ? addMessage : '',
-      });
+      await api.post(`/api/incidents/${displayId}/contacts/`, { contact_id: contactId });
       await reload();
       setAddSearch('');
-      setAddMessage('');
-      setAddRole('notified');
     } catch (err) {
       setAddError(err.response?.data?.detail || 'Failed to add contact.');
     } finally {
@@ -226,16 +215,6 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
     }
   }
 
-  async function sendEmail(rowId) {
-    setSendingId(rowId);
-    try {
-      const r = await api.post(`/api/incidents/${displayId}/contacts/${rowId}/send-email/`);
-      setContacts(prev => prev.map(c => c.id === rowId ? r.data : c));
-    } finally {
-      setSendingId(null);
-    }
-  }
-
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-card p-6 space-y-3">
@@ -247,32 +226,27 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
         ) : (
           <div className="divide-y divide-border">
             {contacts.map(c => (
-              <div key={c.id} className="py-3 space-y-1">
+              <div key={c.id} className="py-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-foreground">{c.name}</p>
                     <p className="text-xs text-muted-foreground">{c.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${CONTACT_ROLE_CLASSES[c.role] ?? ''}`}>
-                      {c.role}
-                    </span>
                     <button
-                      onClick={() => sendEmail(c.id)}
-                      disabled={sendingId === c.id}
-                      className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50"
+                      onClick={() => setComposingFor(c)}
+                      className="text-xs text-blue-500 hover:text-blue-700"
                     >
-                      {sendingId === c.id ? 'Sending…' : 'Send email'}
+                      Message
                     </button>
-                    <button onClick={() => removeContact(c.id)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                    <button
+                      onClick={() => removeContact(c.id)}
+                      className="text-xs text-red-500 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
                   </div>
                 </div>
-                {c.message && (
-                  <p className="text-xs text-muted-foreground italic">"{c.message}"</p>
-                )}
-                {c.sent_at && (
-                  <p className="text-xs text-muted-foreground">Emailed {new Date(c.sent_at).toLocaleString()}</p>
-                )}
               </div>
             ))}
           </div>
@@ -281,33 +255,13 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <h3 className="text-sm font-semibold text-foreground">Add Contact</h3>
-        <div className="flex gap-2">
-          <select
-            value={addRole}
-            onChange={e => setAddRole(e.target.value)}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            aria-label="Role"
-          >
-            <option value="notified">Notified</option>
-            <option value="questioned">Questioned</option>
-          </select>
-          <input
-            type="search"
-            placeholder="Search contacts…"
-            value={addSearch}
-            onChange={e => setAddSearch(e.target.value)}
-            className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
-        {addRole === 'questioned' && (
-          <textarea
-            placeholder="Message to include in outgoing email…"
-            value={addMessage}
-            onChange={e => setAddMessage(e.target.value)}
-            rows={3}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-        )}
+        <input
+          type="search"
+          placeholder="Search contacts…"
+          value={addSearch}
+          onChange={e => setAddSearch(e.target.value)}
+          className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
         {addSearch && filteredAdd.length > 0 && (
           <ul className="rounded-md border border-border bg-background divide-y divide-border max-h-48 overflow-y-auto">
             {filteredAdd.slice(0, 8).map(c => (
@@ -329,6 +283,15 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
         )}
         {addError && <p className="text-xs text-red-600">{addError}</p>}
       </div>
+
+      {composingFor && (
+        <ContactComposeModal
+          displayId={displayId}
+          contact={composingFor}
+          onClose={() => setComposingFor(null)}
+          onSent={() => setComposingFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1169,6 +1132,9 @@ export default function IncidentDetail() {
 
               {/* Exceptions */}
               <IncidentExceptionsSection displayId={displayId} />
+
+              {/* Contact Messages */}
+              <ContactMessagesCard displayId={displayId} />
             </div>
           )}
           {activeTab === 'timeline' && (

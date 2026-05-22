@@ -6,5 +6,4 @@ def auto_link_contacts_for_asset(incident, asset):
         IncidentContact.objects.get_or_create(
             incident=incident,
             contact_id=contact_id,
-            defaults={"role": IncidentContact.ROLE_NOTIFIED},
         )
