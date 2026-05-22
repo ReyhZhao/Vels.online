@@ -1,3 +1,4 @@
+import logging
 from smtplib import SMTPException
 
 from django.conf import settings
@@ -5,6 +6,8 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 from .email import send_html_email
 from .email_defaults import DEFAULT_TEMPLATES
@@ -117,9 +120,11 @@ class TestEmailView(APIView):
                 [recipient],
             )
         except SMTPException as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception("SMTP error sending test email to %s", recipient)
+            return Response({"detail": "Failed to send test email."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception("Unexpected error sending test email to %s", recipient)
+            return Response({"detail": "Failed to send test email."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response({"detail": f"Test email sent to {recipient}."})
 
 

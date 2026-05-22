@@ -236,7 +236,8 @@ def _resolve_agent(request, org, agent_id):
         try:
             raw_agents = WazuhClient().get_agents(org.wazuh_group)
         except (WazuhAuthError, WazuhAPIError) as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("Wazuh error in _resolve_agent for agent_id=%s", agent_id)
+            return Response({"detail": "Security service unavailable."}, status=502)
         agent_ids = {str(a.get("id")) for a in raw_agents}
     if str(agent_id) not in agent_ids:
         return Response(status=403)
@@ -268,7 +269,8 @@ class OrganizationListView(APIView):
                 org = Organization.objects.create(name=name, slug=slug)
                 WazuhClient().create_group(org.wazuh_group)
         except (WazuhAPIError, WazuhAuthError) as exc:
-            return Response({"detail": f"Failed to create Wazuh group: {exc}"}, status=400)
+            logger.exception("Wazuh error creating group for org slug=%s", slug)
+            return Response({"detail": "Failed to create Wazuh group."}, status=400)
 
         return Response(OrganizationSerializer(org).data, status=201)
 
@@ -356,20 +358,23 @@ class OrgInviteView(APIView):
             if not group_pk:
                 group_pk = client.create_group(group_name)
         except AuthentikAPIError as exc:
-            return Response({"detail": f"Failed to resolve Authentik group: {exc}"}, status=502)
+            logger.exception("Authentik error resolving group for org=%s", org.slug)
+            return Response({"detail": "Failed to resolve Authentik group."}, status=502)
 
         # Resolve the enrollment flow UUID
         try:
             flow_uuid = client.get_flow_uuid(flow_slug)
         except AuthentikAPIError as exc:
-            return Response({"detail": f"Failed to resolve enrollment flow: {exc}"}, status=502)
+            logger.exception("Authentik error resolving enrollment flow for org=%s", org.slug)
+            return Response({"detail": "Failed to resolve enrollment flow."}, status=502)
 
         # Create an Authentik invitation
         expires_at = timezone.now() + timedelta(days=7)
         try:
             invitation = client.create_invitation(flow_uuid, expires_at, name=f"org-invite-{org.slug}-{slugify(email)}")
         except AuthentikAPIError as exc:
-            return Response({"detail": f"Failed to create invitation: {exc}"}, status=502)
+            logger.exception("Authentik error creating invitation for org=%s email=%s", org.slug, email)
+            return Response({"detail": "Failed to create invitation."}, status=502)
 
         inv = OrgInvitation.objects.create(
             organization=org,
@@ -413,7 +418,8 @@ class AgentListView(APIView):
         try:
             raw_agents = WazuhClient().get_agents(org.wazuh_group)
         except (WazuhAuthError, WazuhAPIError) as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("Wazuh error in AgentListView for org=%s", org.slug)
+            return Response({"detail": "Security service unavailable."}, status=502)
 
         data = AgentSerializer([_serialize_agent(a) for a in raw_agents], many=True).data
         cache.set(cache_key, data, _CACHE_TTL)

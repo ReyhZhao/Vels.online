@@ -1,3 +1,5 @@
+import logging
+
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.generics import ListAPIView
@@ -9,6 +11,8 @@ from .filters import AutomationFilterSet
 from .models import Automation
 from .semaphore import SemaphoreAPIError, SemaphoreClient
 from .serializers import AutomationSerializer
+
+logger = logging.getLogger(__name__)
 
 
 class AutomationListView(ListAPIView):
@@ -83,7 +87,8 @@ class SemaphoreTemplatesView(APIView):
             client = SemaphoreClient()
             templates = client.list_templates()
         except SemaphoreAPIError as exc:
-            return Response({"detail": str(exc)}, status=502)
+            logger.exception("Semaphore error listing templates")
+            return Response({"detail": "Service error contacting Semaphore."}, status=502)
         return Response(templates)
 
 

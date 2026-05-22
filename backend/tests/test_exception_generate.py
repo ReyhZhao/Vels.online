@@ -209,7 +209,7 @@ def test_generate_returns_502_on_provider_error(admin_client, acme):
             content_type="application/json",
         )
     assert response.status_code == 502
-    assert "LLM unavailable" in response.json()["detail"]
+    assert "LLM provider error" in response.json()["detail"]
 
 
 @pytest.mark.django_db

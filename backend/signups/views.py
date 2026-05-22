@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from django.conf import settings
@@ -10,6 +11,8 @@ from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 from security.models import Organization
 
@@ -182,8 +185,9 @@ def _provision_and_approve(req, org_name_override=None):
             group_pk = client.create_group(f"customer:{org_slug}")
             newly_created_group = True
         except AuthentikAPIError as exc:
+            logger.exception("Authentik error creating group for org=%s", org_slug)
             return None, Response(
-                {"detail": f"Failed to create Authentik group: {exc}"},
+                {"detail": "Failed to create Authentik group."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
@@ -196,8 +200,9 @@ def _provision_and_approve(req, org_name_override=None):
                 client.delete_group(group_pk)
             except AuthentikAPIError:
                 pass
+        logger.exception("Authentik error resolving enrollment flow for org=%s", org_slug)
         return None, Response(
-            {"detail": f"Failed to resolve enrollment flow: {exc}"},
+            {"detail": "Failed to resolve enrollment flow."},
             status=status.HTTP_502_BAD_GATEWAY,
         )
 
@@ -219,8 +224,9 @@ def _provision_and_approve(req, org_name_override=None):
                 client.delete_group(group_pk)
             except AuthentikAPIError:
                 pass
+        logger.exception("Authentik error creating invitation for org=%s", org_slug)
         return None, Response(
-            {"detail": f"Failed to create Authentik invitation: {exc}"},
+            {"detail": "Failed to create Authentik invitation."},
             status=status.HTTP_502_BAD_GATEWAY,
         )
 
@@ -292,7 +298,8 @@ class SignupRequestRejectView(APIView):
                 send_email=ser.validated_data.get("send_rejection_email", True),
             )
         except InvalidTransition as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.warning("InvalidTransition for signup request pk=%s: %s", pk, exc)
+            return Response({"detail": "This action is not allowed in the current state."}, status=status.HTTP_400_BAD_REQUEST)
         req.save()
 
         if req.send_rejection_email:

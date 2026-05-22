@@ -277,6 +277,6 @@ class ExceptionGenerateView(APIView):
             fields = provider.generate_exception(incident.source_ref)
         except Exception as exc:
             logger.exception("LLM provider error during exception generation for %s", incident.display_id)
-            return Response({"detail": f"LLM provider error: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+            return Response({"detail": "LLM provider error. Please try again."}, status=status.HTTP_502_BAD_GATEWAY)
 
         return Response(asdict(fields))

@@ -9,6 +9,7 @@ jobs:
   test-backend:
     name: Test Backend
     runs-on: ubuntu-latest
+    permissions: {}
     defaults:
       run:
         working-directory: ./backend
@@ -31,6 +32,7 @@ jobs:
   test-frontend:
     name: Test Frontend
     runs-on: ubuntu-latest
+    permissions: {}
     defaults:
       run:
         working-directory: ./frontend

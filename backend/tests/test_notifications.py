@@ -463,4 +463,4 @@ def test_test_email_smtp_error_returns_500(client, staff):
     with patch("notifications.email.EmailMultiAlternatives.send", side_effect=SMTPException("connection refused")):
         res = client.post("/api/admin/test-email/")
     assert res.status_code == 500
-    assert "connection refused" in res.json()["detail"]
+    assert "Failed to send test email" in res.json()["detail"]
