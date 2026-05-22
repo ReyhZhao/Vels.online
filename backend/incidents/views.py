@@ -961,9 +961,16 @@ class IncidentTransitionView(APIView):
             return Response({"detail": "state is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         closure_reason = request.data.get("closure_reason")
+        duplicate_of_id = request.data.get("duplicate_of")
 
         try:
-            incident = transition_incident(incident, target_state, actor=request.user, closure_reason=closure_reason)
+            incident = transition_incident(
+                incident,
+                target_state,
+                actor=request.user,
+                closure_reason=closure_reason,
+                duplicate_of_id=duplicate_of_id,
+            )
         except ValidationError as exc:
             return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 

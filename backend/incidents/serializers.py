@@ -99,6 +99,12 @@ class IncidentAssetSerializer(serializers.ModelSerializer):
         return obj.added_by.username if obj.added_by else None
 
 
+class IncidentStubSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Incident
+        fields = ["id", "display_id", "title", "state", "severity"]
+
+
 class IncidentSerializer(serializers.ModelSerializer):
     created_by_username = serializers.SerializerMethodField()
     assignee_username = serializers.SerializerMethodField()
@@ -110,6 +116,8 @@ class IncidentSerializer(serializers.ModelSerializer):
     resolve_sla = serializers.SerializerMethodField()
     assets = serializers.SerializerMethodField()
     iocs = serializers.SerializerMethodField()
+    duplicate_of_display_id = serializers.SerializerMethodField()
+    duplicates = serializers.SerializerMethodField()
 
     class Meta:
         model = Incident
@@ -123,6 +131,9 @@ class IncidentSerializer(serializers.ModelSerializer):
             "pap",
             "state",
             "closure_reason",
+            "duplicate_of",
+            "duplicate_of_display_id",
+            "duplicates",
             "subject",
             "subject_slug",
             "subject_name",
@@ -171,6 +182,12 @@ class IncidentSerializer(serializers.ModelSerializer):
 
     def get_resolve_sla(self, obj):
         return _compute_sla(obj, "resolve")
+
+    def get_duplicate_of_display_id(self, obj):
+        return obj.duplicate_of.display_id if obj.duplicate_of_id else None
+
+    def get_duplicates(self, obj):
+        return IncidentStubSerializer(obj.duplicates.all(), many=True).data
 
 
 class IncidentCreateSerializer(serializers.ModelSerializer):

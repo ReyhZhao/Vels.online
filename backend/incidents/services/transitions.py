@@ -17,7 +17,9 @@ ALLOWED_TRANSITIONS = {
 REOPEN_STATES = {"closed", "resolved", "needs_tuning"}
 
 
-def transition_incident(incident, target_state, actor, closure_reason=None):
+def transition_incident(incident, target_state, actor, closure_reason=None, duplicate_of_id=None):
+    from incidents.models import Incident
+
     allowed = ALLOWED_TRANSITIONS.get(incident.state, set())
     if target_state not in allowed:
         raise ValidationError(
@@ -27,8 +29,26 @@ def transition_incident(incident, target_state, actor, closure_reason=None):
     if target_state == "closed" and not closure_reason:
         raise ValidationError("closure_reason is required when closing an incident.")
 
+    if target_state == "closed" and closure_reason == "duplicate" and not duplicate_of_id:
+        raise ValidationError("duplicate_of is required when closing as duplicate.")
+
+    if target_state == "closed" and closure_reason != "duplicate" and duplicate_of_id:
+        raise ValidationError("duplicate_of may only be set when closure_reason is duplicate.")
+
+    canonical = None
+    if duplicate_of_id:
+        if duplicate_of_id == incident.pk:
+            raise ValidationError("An incident cannot be marked as a duplicate of itself.")
+        try:
+            canonical = Incident.objects.get(pk=duplicate_of_id)
+        except Incident.DoesNotExist:
+            raise ValidationError("The referenced incident does not exist.")
+        if canonical.organization_id != incident.organization_id:
+            raise ValidationError("The referenced incident belongs to a different organisation.")
+
     old_state = incident.state
     old_closure_reason = incident.closure_reason
+    old_duplicate_of_id = incident.duplicate_of_id
 
     with transaction.atomic():
         changes = {"state": {"old": old_state, "new": target_state}}
@@ -37,9 +57,16 @@ def transition_incident(incident, target_state, actor, closure_reason=None):
         if target_state == "closed":
             changes["closure_reason"] = {"old": old_closure_reason, "new": closure_reason}
             incident.closure_reason = closure_reason
-        elif target_state == "in_progress" and old_state in REOPEN_STATES and old_closure_reason is not None:
-            changes["closure_reason"] = {"old": old_closure_reason, "new": None}
-            incident.closure_reason = None
+            if canonical is not None:
+                changes["duplicate_of"] = {"old": old_duplicate_of_id, "new": canonical.pk}
+                incident.duplicate_of = canonical
+        elif target_state == "in_progress" and old_state in REOPEN_STATES:
+            if old_closure_reason is not None:
+                changes["closure_reason"] = {"old": old_closure_reason, "new": None}
+                incident.closure_reason = None
+            if old_duplicate_of_id is not None:
+                changes["duplicate_of"] = {"old": old_duplicate_of_id, "new": None}
+                incident.duplicate_of = None
 
         incident.save()
         record_event(incident, "incident_updated", actor=actor, payload={"changes": changes})

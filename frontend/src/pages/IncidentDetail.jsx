@@ -663,8 +663,76 @@ function InlineSelect({ label, value, options, colorClasses, onChange, saving })
   );
 }
 
-function ClosureReasonDialog({ onConfirm, onCancel, transitioning }) {
+function IncidentSearchSelect({ currentDisplayId, value, onChange }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    if (!query.trim()) { setResults([]); return; }
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await api.get('/api/incidents/', { params: { q: query, limit: 20 } });
+        const items = Array.isArray(res.data) ? res.data : (res.data?.results ?? []);
+        setResults(items.filter(i => i.display_id !== currentDisplayId));
+      } catch { setResults([]); }
+      finally { setSearching(false); }
+    }, 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [query, currentDisplayId]);
+
+  const selected = value;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm font-medium text-foreground">Canonical incident</label>
+      {selected ? (
+        <div className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-sm">
+          <span className="font-mono text-xs text-muted-foreground mr-2">{selected.display_id}</span>
+          <span className="flex-1 truncate text-foreground">{selected.title}</span>
+          <button onClick={() => onChange(null)} className="ml-2 text-muted-foreground hover:text-foreground text-xs">✕</button>
+        </div>
+      ) : (
+        <>
+          <input
+            type="text"
+            placeholder="Search by title…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {(results.length > 0 || searching) && (
+            <div className="rounded-md border border-border bg-card shadow-lg max-h-48 overflow-y-auto">
+              {searching && <p className="px-3 py-2 text-xs text-muted-foreground">Searching…</p>}
+              {results.map(inc => (
+                <button
+                  key={inc.id}
+                  type="button"
+                  onClick={() => { onChange(inc); setQuery(''); setResults([]); }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex items-center gap-2"
+                >
+                  <span className="font-mono text-xs text-muted-foreground shrink-0">{inc.display_id}</span>
+                  <span className="flex-1 truncate text-foreground">{inc.title}</span>
+                  {inc.state === 'closed' && (
+                    <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">closed</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ClosureReasonDialog({ onConfirm, onCancel, transitioning, incidentDisplayId }) {
   const [reason, setReason] = useState('');
+  const [duplicateOf, setDuplicateOf] = useState(null);
+  const canConfirm = reason && (reason !== 'duplicate' || duplicateOf);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
@@ -676,7 +744,7 @@ function ClosureReasonDialog({ onConfirm, onCancel, transitioning }) {
           <select
             id="closure-reason"
             value={reason}
-            onChange={e => setReason(e.target.value)}
+            onChange={e => { setReason(e.target.value); setDuplicateOf(null); }}
             className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           >
             <option value="">Select a reason…</option>
@@ -685,6 +753,18 @@ function ClosureReasonDialog({ onConfirm, onCancel, transitioning }) {
             ))}
           </select>
         </div>
+        {reason === 'duplicate' && (
+          <IncidentSearchSelect
+            currentDisplayId={incidentDisplayId}
+            value={duplicateOf}
+            onChange={setDuplicateOf}
+          />
+        )}
+        {reason === 'duplicate' && duplicateOf?.state === 'closed' && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            Warning: the selected incident is already closed.
+          </p>
+        )}
         <div className="flex justify-end gap-3">
           <button
             onClick={onCancel}
@@ -694,8 +774,8 @@ function ClosureReasonDialog({ onConfirm, onCancel, transitioning }) {
             Cancel
           </button>
           <button
-            onClick={() => reason && onConfirm(reason)}
-            disabled={!reason || transitioning}
+            onClick={() => canConfirm && onConfirm(reason, duplicateOf?.id ?? null)}
+            disabled={!canConfirm || transitioning}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {transitioning ? 'Closing…' : 'Close incident'}
@@ -889,12 +969,13 @@ export default function IncidentDetail() {
     }
   }, [displayId]);
 
-  async function handleTransition(targetState, closureReason = undefined) {
+  async function handleTransition(targetState, closureReason = undefined, duplicateOfId = null) {
     setTransitioning(true);
     setTransitionError(null);
     try {
       const payload = { state: targetState };
       if (closureReason) payload.closure_reason = closureReason;
+      if (duplicateOfId) payload.duplicate_of = duplicateOfId;
       const res = await api.post(`/api/incidents/${displayId}/transition/`, payload);
       setIncident(res.data);
     } catch (err) {
@@ -937,7 +1018,8 @@ export default function IncidentDetail() {
       {pendingClose && (
         <ClosureReasonDialog
           transitioning={transitioning}
-          onConfirm={reason => handleTransition('closed', reason)}
+          incidentDisplayId={displayId}
+          onConfirm={(reason, duplicateOfId) => handleTransition('closed', reason, duplicateOfId)}
           onCancel={() => setPendingClose(false)}
         />
       )}
@@ -1081,6 +1163,17 @@ export default function IncidentDetail() {
                 {incident.closure_reason && (
                   <Field label="Closure Reason" value={incident.closure_reason.replace('_', ' ')} />
                 )}
+                {incident.duplicate_of_display_id && (
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Duplicate of</span>
+                    <Link
+                      to={`/incidents/${incident.duplicate_of_display_id}`}
+                      className="text-sm font-mono text-primary hover:underline"
+                    >
+                      {incident.duplicate_of_display_id}
+                    </Link>
+                  </div>
+                )}
                 {incident.response_sla?.applies && (
                   <div className="flex flex-col gap-1">
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Response SLA</span>
@@ -1102,6 +1195,29 @@ export default function IncidentDetail() {
               </div>
 
               {subjectError && <p className="text-sm text-red-600">{subjectError}</p>}
+
+              {/* Duplicates of this incident */}
+              {incident.duplicates?.length > 0 && (
+                <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+                  <h3 className="text-sm font-semibold text-foreground">Duplicates</h3>
+                  <ul className="divide-y divide-border">
+                    {incident.duplicates.map(dup => (
+                      <li key={dup.id} className="flex items-center gap-3 py-2">
+                        <Link
+                          to={`/incidents/${dup.display_id}`}
+                          className="font-mono text-xs text-primary hover:underline shrink-0"
+                        >
+                          {dup.display_id}
+                        </Link>
+                        <span className="flex-1 text-sm text-foreground truncate">{dup.title}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATE_CLASSES[dup.state] ?? ''}`}>
+                          {dup.state.replace('_', ' ')}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {/* Description + Comments */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -115,7 +115,7 @@ def test_close_without_closure_reason_raises(acme, actor):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("reason", ["resolved", "false_positive", "duplicate", "informational", "accepted_risk"])
+@pytest.mark.parametrize("reason", ["resolved", "false_positive", "informational", "accepted_risk"])
 def test_close_with_valid_closure_reason(reason, acme, actor):
     incident = make_incident(acme, state="in_progress")
     result = transition_incident(incident, "closed", actor=actor, closure_reason=reason)
@@ -124,9 +124,19 @@ def test_close_with_valid_closure_reason(reason, acme, actor):
 
 
 @pytest.mark.django_db
-def test_closure_reason_set_on_closed_incident(acme, actor):
+def test_close_with_duplicate_closure_reason(acme, actor):
+    canonical = make_incident(acme, state="in_progress")
     incident = make_incident(acme, state="in_progress")
-    transition_incident(incident, "closed", actor=actor, closure_reason="duplicate")
+    result = transition_incident(incident, "closed", actor=actor, closure_reason="duplicate", duplicate_of_id=canonical.pk)
+    assert result.state == "closed"
+    assert result.closure_reason == "duplicate"
+
+
+@pytest.mark.django_db
+def test_closure_reason_set_on_closed_incident(acme, actor):
+    canonical = make_incident(acme, state="in_progress")
+    incident = make_incident(acme, state="in_progress")
+    transition_incident(incident, "closed", actor=actor, closure_reason="duplicate", duplicate_of_id=canonical.pk)
     incident.refresh_from_db()
     assert incident.closure_reason == "duplicate"
 
@@ -351,3 +361,116 @@ def test_transition_endpoint_non_member_forbidden(client, acme, django_user_mode
         content_type="application/json",
     )
     assert response.status_code == 404
+
+
+# ── duplicate closure ────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_close_as_duplicate_requires_duplicate_of(acme, actor):
+    incident = make_incident(acme, state="in_progress")
+    with pytest.raises(ValidationError) as exc_info:
+        transition_incident(incident, "closed", actor=actor, closure_reason="duplicate")
+    assert "duplicate_of" in str(exc_info.value)
+
+
+@pytest.mark.django_db
+def test_close_as_duplicate_stores_relationship(acme, actor):
+    canonical = make_incident(acme, state="in_progress")
+    duplicate = make_incident(acme, state="in_progress")
+    transition_incident(duplicate, "closed", actor=actor, closure_reason="duplicate", duplicate_of_id=canonical.pk)
+    duplicate.refresh_from_db()
+    assert duplicate.closure_reason == "duplicate"
+    assert duplicate.duplicate_of_id == canonical.pk
+
+
+@pytest.mark.django_db
+def test_close_as_duplicate_self_reference_raises(acme, actor):
+    incident = make_incident(acme, state="in_progress")
+    with pytest.raises(ValidationError):
+        transition_incident(incident, "closed", actor=actor, closure_reason="duplicate", duplicate_of_id=incident.pk)
+
+
+@pytest.mark.django_db
+def test_close_as_duplicate_cross_org_raises(acme, actor, db):
+    from security.models import Organization
+    other_org = Organization.objects.create(name="Other", slug="other", wazuh_group="other")
+    canonical = make_incident(other_org, state="in_progress")
+    duplicate = make_incident(acme, state="in_progress")
+    with pytest.raises(ValidationError):
+        transition_incident(duplicate, "closed", actor=actor, closure_reason="duplicate", duplicate_of_id=canonical.pk)
+
+
+@pytest.mark.django_db
+def test_duplicate_of_on_non_duplicate_closure_raises(acme, actor):
+    canonical = make_incident(acme, state="in_progress")
+    incident = make_incident(acme, state="in_progress")
+    with pytest.raises(ValidationError):
+        transition_incident(incident, "closed", actor=actor, closure_reason="resolved", duplicate_of_id=canonical.pk)
+
+
+@pytest.mark.django_db
+def test_reopen_clears_duplicate_of(acme, actor):
+    canonical = make_incident(acme, state="in_progress")
+    duplicate = make_incident(acme, state="in_progress")
+    transition_incident(duplicate, "closed", actor=actor, closure_reason="duplicate", duplicate_of_id=canonical.pk)
+    transition_incident(duplicate, "in_progress", actor=actor)
+    duplicate.refresh_from_db()
+    assert duplicate.duplicate_of_id is None
+    assert duplicate.closure_reason is None
+
+
+@pytest.mark.django_db
+def test_close_as_duplicate_nonexistent_target_raises(acme, actor):
+    incident = make_incident(acme, state="in_progress")
+    with pytest.raises(ValidationError):
+        transition_incident(incident, "closed", actor=actor, closure_reason="duplicate", duplicate_of_id=99999)
+
+
+# ── duplicate endpoint ───────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_endpoint_close_as_duplicate_requires_duplicate_of(admin_client, acme):
+    incident = make_incident(acme, state="in_progress")
+    response = admin_client.post(
+        f"/api/incidents/{incident.display_id}/transition/",
+        {"state": "closed", "closure_reason": "duplicate"},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert "duplicate_of" in response.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_endpoint_close_as_duplicate_stores_relationship(admin_client, acme):
+    canonical = make_incident(acme, state="in_progress")
+    duplicate = make_incident(acme, state="in_progress")
+    response = admin_client.post(
+        f"/api/incidents/{duplicate.display_id}/transition/",
+        {"state": "closed", "closure_reason": "duplicate", "duplicate_of": canonical.pk},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["closure_reason"] == "duplicate"
+    assert data["duplicate_of"] == canonical.pk
+    assert data["duplicate_of_display_id"] == canonical.display_id
+
+
+@pytest.mark.django_db
+def test_endpoint_canonical_shows_duplicates_list(admin_client, acme):
+    canonical = make_incident(acme, state="in_progress")
+    dup1 = make_incident(acme, state="in_progress")
+    dup2 = make_incident(acme, state="in_progress")
+    for dup in (dup1, dup2):
+        admin_client.post(
+            f"/api/incidents/{dup.display_id}/transition/",
+            {"state": "closed", "closure_reason": "duplicate", "duplicate_of": canonical.pk},
+            content_type="application/json",
+        )
+    response = admin_client.get(f"/api/incidents/{canonical.display_id}/")
+    assert response.status_code == 200
+    dup_ids = {d["display_id"] for d in response.json()["duplicates"]}
+    assert dup1.display_id in dup_ids
+    assert dup2.display_id in dup_ids
