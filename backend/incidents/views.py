@@ -1440,34 +1440,12 @@ class TaskRunView(APIView):
         if not task.automation_id:
             return Response({"detail": "Task has no automation attached."}, status=status.HTTP_400_BAD_REQUEST)
 
-        from automations.incident_vars import UnresolvableVarError, resolve_incident_vars
         from automations.semaphore import SemaphoreAPIError, SemaphoreClient
-        import yaml
 
-        incident = task.incident
-
-        # Layer 1: default_vars parsed from YAML
-        extra_vars = {}
-        if task.automation.default_vars:
-            parsed = yaml.safe_load(task.automation.default_vars)
-            if isinstance(parsed, dict):
-                extra_vars.update(parsed)
-
-        # Layer 2: resolved incident var mappings
-        if task.automation.incident_var_mappings:
-            incident = Incident.objects.prefetch_related("assets", "iocs").get(pk=incident.pk)
-            try:
-                extra_vars.update(resolve_incident_vars(task.automation.incident_var_mappings, incident))
-            except UnresolvableVarError as exc:
-                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Layer 3: hardcoded incident fields
-        extra_vars.update({
-            "incident_id": incident.id,
-            "incident_display_id": incident.display_id,
-            "incident_title": incident.title,
-            "incident_severity": incident.severity,
-        })
+        extra_vars, err = _build_extra_vars(task)
+        if err:
+            # UnresolvableVarError — surface as 400 with "detail" key for run
+            return Response({"detail": err.data["error"]}, status=status.HTTP_400_BAD_REQUEST)
         try:
             client = SemaphoreClient()
             semaphore_task_id = client.launch_job(
@@ -1492,6 +1470,62 @@ class TaskRunView(APIView):
         )
         task.refresh_from_db()
         return Response(TaskSerializer(task).data)
+
+
+def _build_extra_vars(task):
+    """Merge default_vars + resolved mappings + hardcoded incident fields.
+
+    Returns (vars_dict, error_response) — exactly one of the two is None.
+    """
+    from automations.incident_vars import UnresolvableVarError, resolve_incident_vars
+    import yaml
+
+    incident = task.incident
+
+    extra_vars = {}
+    if task.automation.default_vars:
+        parsed = yaml.safe_load(task.automation.default_vars)
+        if isinstance(parsed, dict):
+            extra_vars.update(parsed)
+
+    if task.automation.incident_var_mappings:
+        incident = Incident.objects.prefetch_related("assets", "iocs").get(pk=incident.pk)
+        try:
+            extra_vars.update(resolve_incident_vars(task.automation.incident_var_mappings, incident))
+        except UnresolvableVarError as exc:
+            return None, Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    extra_vars.update({
+        "incident_id": incident.id,
+        "incident_display_id": incident.display_id,
+        "incident_title": incident.title,
+        "incident_severity": incident.severity,
+    })
+    return extra_vars, None
+
+
+class TaskPreviewView(APIView):
+    def get(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            task = Task.objects.select_related("incident", "automation").get(pk=pk)
+        except Task.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, task.incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if task.task_type != Task.TYPE_AUTOMATED:
+            return Response({"detail": "Task is not of type automated."}, status=status.HTTP_400_BAD_REQUEST)
+        if not task.automation_id:
+            return Response({"detail": "Task has no automation attached."}, status=status.HTTP_400_BAD_REQUEST)
+
+        extra_vars, err = _build_extra_vars(task)
+        if err:
+            return err
+        return Response({"vars": extra_vars})
 
 
 # ── Promote view ─────────────────────────────────────────────────────────────
