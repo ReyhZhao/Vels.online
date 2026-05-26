@@ -47,23 +47,27 @@ function automationStatus(task) {
 
 function PreviewModal({ taskId, onClose, onRunSuccess }) {
   const [loadingPreview, setLoadingPreview] = useState(true);
-  const [vars, setVars] = useState(null);
+  const [editedVars, setEditedVars] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState(null);
 
   useEffect(() => {
     api.get(`/api/tasks/${taskId}/preview/`)
-      .then(res => setVars(res.data.vars))
+      .then(res => setEditedVars(res.data.vars))
       .catch(err => setPreviewError(err.response?.data?.error || 'Failed to load preview.'))
       .finally(() => setLoadingPreview(false));
   }, [taskId]);
+
+  function handleVarChange(key, value) {
+    setEditedVars(prev => ({ ...prev, [key]: value }));
+  }
 
   async function handleConfirm() {
     setRunning(true);
     setRunError(null);
     try {
-      const res = await api.post(`/api/tasks/${taskId}/run/`);
+      const res = await api.post(`/api/tasks/${taskId}/run/`, { vars: editedVars });
       onRunSuccess(res.data);
       onClose();
     } catch (err) {
@@ -96,7 +100,7 @@ function PreviewModal({ taskId, onClose, onRunSuccess }) {
           {previewError && (
             <p className="text-sm text-red-600">{previewError}</p>
           )}
-          {vars && (
+          {editedVars && (
             <div className="overflow-hidden rounded border border-border">
               <table className="w-full text-sm">
                 <thead>
@@ -106,10 +110,17 @@ function PreviewModal({ taskId, onClose, onRunSuccess }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(vars).map(([k, v]) => (
+                  {Object.entries(editedVars).map(([k, v]) => (
                     <tr key={k} className="border-b border-border last:border-0">
-                      <td className="px-3 py-2 font-mono text-xs text-foreground">{k}</td>
-                      <td className="px-3 py-2 font-mono text-xs text-muted-foreground break-all">{String(v)}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-foreground align-middle">{k}</td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="text"
+                          value={String(v)}
+                          onChange={e => handleVarChange(k, e.target.value)}
+                          className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>

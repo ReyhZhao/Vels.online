@@ -233,3 +233,76 @@ def test_run_returns_502_on_semaphore_error(client, staff, automated_task):
         resp = client.post(_run_url(automated_task.pk), content_type="application/json")
 
     assert resp.status_code == 502
+
+
+# ── vars override (editable preview) ─────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_run_vars_override_merges_with_computed(client, staff, automated_task):
+    automated_task.automation.default_vars = "scan_mode: quick\nretries: 3"
+    automated_task.automation.save()
+
+    mock_client = MagicMock()
+    mock_client.launch_job.return_value = 88
+    with patch("automations.semaphore.SemaphoreClient", return_value=mock_client):
+        client.force_login(staff)
+        resp = client.post(
+            _run_url(automated_task.pk),
+            {"vars": {"scan_mode": "full", "extra_param": "added"}},
+            content_type="application/json",
+        )
+
+    assert resp.status_code == 200
+    extra_vars = mock_client.launch_job.call_args[1]["extra_vars"]
+    assert extra_vars["scan_mode"] == "full"
+    assert extra_vars["retries"] == 3
+    assert extra_vars["extra_param"] == "added"
+
+
+@pytest.mark.django_db
+def test_run_vars_override_can_change_incident_field(client, staff, automated_task, incident):
+    mock_client = MagicMock()
+    mock_client.launch_job.return_value = 89
+    with patch("automations.semaphore.SemaphoreClient", return_value=mock_client):
+        client.force_login(staff)
+        resp = client.post(
+            _run_url(automated_task.pk),
+            {"vars": {"incident_severity": "low"}},
+            content_type="application/json",
+        )
+
+    assert resp.status_code == 200
+    extra_vars = mock_client.launch_job.call_args[1]["extra_vars"]
+    assert extra_vars["incident_severity"] == "low"
+
+
+@pytest.mark.django_db
+def test_run_vars_non_dict_ignored(client, staff, automated_task):
+    mock_client = MagicMock()
+    mock_client.launch_job.return_value = 90
+    with patch("automations.semaphore.SemaphoreClient", return_value=mock_client):
+        client.force_login(staff)
+        resp = client.post(
+            _run_url(automated_task.pk),
+            {"vars": "not-a-dict"},
+            content_type="application/json",
+        )
+
+    assert resp.status_code == 200
+
+
+@pytest.mark.django_db
+def test_run_no_vars_body_uses_defaults(client, staff, automated_task):
+    automated_task.automation.default_vars = "scan_mode: quick"
+    automated_task.automation.save()
+
+    mock_client = MagicMock()
+    mock_client.launch_job.return_value = 91
+    with patch("automations.semaphore.SemaphoreClient", return_value=mock_client):
+        client.force_login(staff)
+        resp = client.post(_run_url(automated_task.pk), content_type="application/json")
+
+    assert resp.status_code == 200
+    extra_vars = mock_client.launch_job.call_args[1]["extra_vars"]
+    assert extra_vars["scan_mode"] == "quick"

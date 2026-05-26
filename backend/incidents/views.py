@@ -1464,6 +1464,11 @@ class TaskRunView(APIView):
         if err:
             # UnresolvableVarError — surface as 400 with "detail" key for run
             return Response({"detail": err.data["error"]}, status=status.HTTP_400_BAD_REQUEST)
+
+        override_vars = request.data.get("vars")
+        if isinstance(override_vars, dict):
+            extra_vars.update(override_vars)
+
         try:
             client = SemaphoreClient()
             semaphore_task_id = client.launch_job(
