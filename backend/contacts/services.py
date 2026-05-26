@@ -1,3 +1,5 @@
+from django.conf import settings
+
 from notifications.email import send_html_email
 from .tokens import build_reply_to_address
 
@@ -20,6 +22,7 @@ def send_contact_message(incident, contact, role, body):
         "title": incident.title,
         "severity": incident.severity,
         "message": body,
+        "frontend_url": getattr(settings, "FRONTEND_URL", "").rstrip("/"),
     }
 
     kwargs = {}

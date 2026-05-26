@@ -112,3 +112,16 @@ def test_send_contact_message_context_contains_body(acme):
     assert context["message"] == "Hello?"
     assert context["contact_name"] == "Carol"
     assert context["display_id"] == "INC-2026-0001"
+
+
+@pytest.mark.django_db
+def test_send_contact_message_context_contains_frontend_url(acme, settings):
+    settings.FRONTEND_URL = "https://app.example.com"
+    inc = make_incident(acme)
+    contact = make_contact(acme)
+
+    with patch("contacts.services.send_html_email") as mock_send:
+        send_contact_message(inc, contact, "notified", "FYI.")
+
+    context = mock_send.call_args[0][1]
+    assert context["frontend_url"] == "https://app.example.com"
