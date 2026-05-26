@@ -43,12 +43,110 @@ function automationStatus(task) {
   return null;
 }
 
+// ── Pre-run preview modal ─────────────────────────────────────────────────────
+
+function PreviewModal({ taskId, onClose, onRunSuccess }) {
+  const [loadingPreview, setLoadingPreview] = useState(true);
+  const [vars, setVars] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState(null);
+
+  useEffect(() => {
+    api.get(`/api/tasks/${taskId}/preview/`)
+      .then(res => setVars(res.data.vars))
+      .catch(err => setPreviewError(err.response?.data?.error || 'Failed to load preview.'))
+      .finally(() => setLoadingPreview(false));
+  }, [taskId]);
+
+  async function handleConfirm() {
+    setRunning(true);
+    setRunError(null);
+    try {
+      const res = await api.post(`/api/tasks/${taskId}/run/`);
+      onRunSuccess(res.data);
+      onClose();
+    } catch (err) {
+      setRunError(err.response?.data?.detail || 'Failed to launch automation.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const canConfirm = !loadingPreview && !previewError && !running;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="flex w-full max-w-lg flex-col rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <h3 className="text-base font-semibold text-foreground">Pre-run Preview</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close preview"
+            className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {loadingPreview && (
+            <p className="text-sm text-muted-foreground">Loading preview…</p>
+          )}
+          {previewError && (
+            <p className="text-sm text-red-600">{previewError}</p>
+          )}
+          {vars && (
+            <div className="overflow-hidden rounded border border-border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Variable</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(vars).map(([k, v]) => (
+                    <tr key={k} className="border-b border-border last:border-0">
+                      <td className="px-3 py-2 font-mono text-xs text-foreground">{k}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-muted-foreground break-all">{String(v)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {runError && (
+            <p className="text-sm text-red-600">{runError}</p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+          <button
+            onClick={onClose}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={!canConfirm}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {running ? 'Launching…' : 'Confirm'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Task modal ────────────────────────────────────────────────────────────────
 
 function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
   const [currentTask, setCurrentTask] = useState(task);
   const [saving, setSaving] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const [error, setError] = useState(null);
   const [staffUsers, setStaffUsers] = useState(null);
 
@@ -95,18 +193,9 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
     }
   }
 
-  async function runAutomation() {
-    setRunning(true);
-    setError(null);
-    try {
-      const res = await api.post(`/api/tasks/${currentTask.id}/run/`);
-      setCurrentTask(res.data);
-      onUpdate(res.data);
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to launch automation.');
-    } finally {
-      setRunning(false);
-    }
+  function handleRunSuccess(updatedTask) {
+    setCurrentTask(updatedTask);
+    onUpdate(updatedTask);
   }
 
   const isAutomated = currentTask.task_type === 'automated';
@@ -160,11 +249,11 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
           {isAutomated && isStaff && (
             <div className="space-y-2">
               <button
-                onClick={runAutomation}
-                disabled={running || saving}
+                onClick={() => setShowPreview(true)}
+                disabled={saving}
                 className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
               >
-                {running ? 'Launching…' : 'Run Automation'}
+                Run
               </button>
               {autoStatus && (
                 <div className="flex flex-col gap-1">
@@ -235,6 +324,14 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
           </div>
         </div>
       </div>
+
+      {showPreview && (
+        <PreviewModal
+          taskId={currentTask.id}
+          onClose={() => setShowPreview(false)}
+          onRunSuccess={handleRunSuccess}
+        />
+      )}
     </div>
   );
 }
