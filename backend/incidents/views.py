@@ -1440,9 +1440,28 @@ class TaskRunView(APIView):
         if not task.automation_id:
             return Response({"detail": "Task has no automation attached."}, status=status.HTTP_400_BAD_REQUEST)
 
+        from automations.incident_vars import UnresolvableVarError, resolve_incident_vars
         from automations.semaphore import SemaphoreAPIError, SemaphoreClient
+        import yaml
+
         incident = task.incident
-        extra_vars = dict(task.automation.default_vars or {})
+
+        # Layer 1: default_vars parsed from YAML
+        extra_vars = {}
+        if task.automation.default_vars:
+            parsed = yaml.safe_load(task.automation.default_vars)
+            if isinstance(parsed, dict):
+                extra_vars.update(parsed)
+
+        # Layer 2: resolved incident var mappings
+        if task.automation.incident_var_mappings:
+            incident = Incident.objects.prefetch_related("assets", "iocs").get(pk=incident.pk)
+            try:
+                extra_vars.update(resolve_incident_vars(task.automation.incident_var_mappings, incident))
+            except UnresolvableVarError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Layer 3: hardcoded incident fields
         extra_vars.update({
             "incident_id": incident.id,
             "incident_display_id": incident.display_id,
