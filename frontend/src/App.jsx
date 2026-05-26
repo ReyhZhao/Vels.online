@@ -37,6 +37,8 @@ import EmailTemplates from './pages/admin/EmailTemplates';
 import TaskListPage from './pages/TaskListPage';
 import ContactsPage from './pages/ContactsPage';
 import ContactDetail from './pages/ContactDetail';
+import AssetsPage from './pages/AssetsPage';
+import AssetDetail from './pages/AssetDetail';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -88,6 +90,8 @@ function App() {
         <Route path="/routes/:fqdn" element={<RouteDetail />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/contacts/:id" element={<ContactDetail />} />
+        <Route path="/assets" element={<AssetsPage />} />
+        <Route path="/assets/:id" element={<AssetDetail />} />
 
         <Route path="/account/notifications" element={<NotificationPreferences />} />
       </Route>

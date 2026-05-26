@@ -499,6 +499,103 @@ class AssetListView(ListAPIView):
         return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
 
 
+def _get_asset_for_user(user, pk):
+    try:
+        asset = Asset.objects.select_related("organization", "route").get(pk=pk)
+    except Asset.DoesNotExist:
+        return None, Response(status=status.HTTP_404_NOT_FOUND)
+    if not user.is_staff:
+        if not OrganizationMembership.objects.filter(user=user, organization=asset.organization).exists():
+            return None, Response(status=status.HTTP_404_NOT_FOUND)
+    return asset, None
+
+
+class AssetDetailView(APIView):
+    def get(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+        asset, err = _get_asset_for_user(request.user, pk)
+        if err:
+            return err
+        return Response(AssetSerializer(asset).data)
+
+    def patch(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+        asset, err = _get_asset_for_user(request.user, pk)
+        if err:
+            return err
+        allowed = {}
+        if "name" in request.data:
+            allowed["name"] = request.data["name"]
+        if "ip_address" in request.data:
+            allowed["ip_address"] = request.data["ip_address"] or None
+        for field, value in allowed.items():
+            setattr(asset, field, value)
+        asset.save(update_fields=list(allowed.keys()))
+        return Response(AssetSerializer(asset).data)
+
+    def delete(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+        asset, err = _get_asset_for_user(request.user, pk)
+        if err:
+            return err
+        asset.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AssetOwnerListView(APIView):
+    def _get_asset(self, request, pk):
+        if not request.user.is_authenticated:
+            return None, Response(status=status.HTTP_401_UNAUTHORIZED)
+        return _get_asset_for_user(request.user, pk)
+
+    def get(self, request, pk):
+        asset, err = self._get_asset(request, pk)
+        if err:
+            return err
+        from contacts.models import AssetOwner
+        from contacts.serializers import ContactSerializer
+        contacts = asset.asset_ownerships.select_related("contact").values_list("contact", flat=False)
+        from contacts.models import Contact
+        qs = Contact.objects.filter(asset_ownerships__asset=asset)
+        return Response(ContactSerializer(qs, many=True).data)
+
+    def post(self, request, pk):
+        asset, err = self._get_asset(request, pk)
+        if err:
+            return err
+        contact_id = request.data.get("contact_id")
+        if not contact_id:
+            return Response({"detail": "contact_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        from contacts.models import AssetOwner, Contact
+        from contacts.serializers import ContactSerializer
+        try:
+            contact = Contact.objects.get(pk=contact_id)
+        except Contact.DoesNotExist:
+            return Response({"detail": "Contact not found."}, status=status.HTTP_400_BAD_REQUEST)
+        if contact.organisation_id != asset.organization_id:
+            return Response({"detail": "Contact belongs to a different organisation."}, status=status.HTTP_400_BAD_REQUEST)
+        AssetOwner.objects.get_or_create(asset=asset, contact=contact)
+        qs = Contact.objects.filter(asset_ownerships__asset=asset)
+        return Response(ContactSerializer(qs, many=True).data, status=status.HTTP_201_CREATED)
+
+
+class AssetOwnerDetailView(APIView):
+    def delete(self, request, pk, contact_pk):
+        if not request.user.is_authenticated:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+        asset, err = _get_asset_for_user(request.user, pk)
+        if err:
+            return err
+        from contacts.models import AssetOwner
+        deleted, _ = AssetOwner.objects.filter(asset=asset, contact_id=contact_pk).delete()
+        if not deleted:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class IncidentAssetLinkView(APIView):
     def post(self, request, display_id):
         err = _require_auth(request)

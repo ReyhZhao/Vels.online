@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   FileText,
   FilePlus,
+  HardDrive,
   Server,
   Shield,
   Download,
@@ -189,6 +190,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 </SidebarLink>
                 <SidebarLink to="/contacts" icon={Users} collapsed={collapsed}>
                   Contacts
+                </SidebarLink>
+                <SidebarLink to="/assets" icon={HardDrive} collapsed={collapsed}>
+                  Assets
                 </SidebarLink>
                 {isStaff && (
                   <>
