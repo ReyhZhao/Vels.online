@@ -893,6 +893,7 @@ class IncidentBulkActionView(APIView):
             )
 
         closure_reason = None
+        duplicate_of_id = None
         assignee_id = None
 
         if action == "close":
@@ -908,6 +909,23 @@ class IncidentBulkActionView(APIView):
                     {"detail": "Invalid closure_reason."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            if closure_reason == "duplicate":
+                duplicate_of_id = request.data.get("duplicate_of")
+                if not duplicate_of_id:
+                    return Response(
+                        {"detail": "duplicate_of is required when closure_reason is duplicate."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if not isinstance(duplicate_of_id, int):
+                    return Response(
+                        {"detail": "duplicate_of must be an integer."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if ids and duplicate_of_id in ids:
+                    return Response(
+                        {"detail": "The canonical incident cannot be one of the incidents being closed."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
         if action == "reassign":
             if "assignee_id" not in request.data:
@@ -939,7 +957,7 @@ class IncidentBulkActionView(APIView):
 
             try:
                 if action == "close":
-                    transition_incident(incident, "closed", actor=request.user, closure_reason=closure_reason)
+                    transition_incident(incident, "closed", actor=request.user, closure_reason=closure_reason, duplicate_of_id=duplicate_of_id)
                     succeeded.append(incident_id)
                 else:
                     old_assignee_id = incident.assignee_id

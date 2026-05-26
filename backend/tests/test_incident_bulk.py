@@ -163,6 +163,62 @@ def test_bulk_close_records_event(client, staff, acme):
     assert IncidentEvent.objects.filter(incident=inc, kind="incident_updated").exists()
 
 
+# ── duplicate bulk close ──────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_bulk_close_duplicate_requires_duplicate_of(client, staff, acme):
+    inc = make_incident(acme, state="in_progress", display_id="INC-2026-0021")
+    client.force_login(staff)
+    response = client.post(
+        "/api/incidents/bulk/",
+        {"action": "close", "ids": [inc.id], "closure_reason": "duplicate"},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert "duplicate_of" in response.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_bulk_close_duplicate_rejects_canonical_in_ids(client, staff, acme):
+    canonical = make_incident(acme, state="in_progress", display_id="INC-2026-0022")
+    dup = make_incident(acme, state="in_progress", display_id="INC-2026-0023")
+    client.force_login(staff)
+    response = client.post(
+        "/api/incidents/bulk/",
+        {"action": "close", "ids": [dup.id, canonical.id], "closure_reason": "duplicate", "duplicate_of": canonical.id},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert "canonical" in response.json()["detail"].lower()
+
+
+@pytest.mark.django_db
+def test_bulk_close_duplicate_links_to_canonical(client, staff, acme):
+    canonical = make_incident(acme, state="in_progress", display_id="INC-2026-0024")
+    dup1 = make_incident(acme, state="in_progress", display_id="INC-2026-0025")
+    dup2 = make_incident(acme, state="new", display_id="INC-2026-0026")
+    client.force_login(staff)
+    response = client.post(
+        "/api/incidents/bulk/",
+        {"action": "close", "ids": [dup1.id, dup2.id], "closure_reason": "duplicate", "duplicate_of": canonical.id},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert set(data["succeeded"]) == {dup1.id, dup2.id}
+    assert data["failed"] == []
+    dup1.refresh_from_db()
+    dup2.refresh_from_db()
+    canonical.refresh_from_db()
+    assert dup1.state == "closed"
+    assert dup1.closure_reason == "duplicate"
+    assert dup1.duplicate_of_id == canonical.id
+    assert dup2.state == "closed"
+    assert dup2.duplicate_of_id == canonical.id
+    assert canonical.state == "in_progress"  # canonical stays open
+
+
 # ── reassign action ───────────────────────────────────────────────────────────
 
 

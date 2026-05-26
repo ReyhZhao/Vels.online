@@ -64,8 +64,26 @@ const CLOSURE_REASONS = [
   { value: 'accepted_risk',  label: 'Accepted Risk' },
 ];
 
-function BulkCloseDialog({ onConfirm, onCancel, loading }) {
+function BulkCloseDialog({ onConfirm, onCancel, loading, excludeIds }) {
   const [reason, setReason] = useState('');
+  const [duplicateOf, setDuplicateOf] = useState('');
+  const [canonicalIncidents, setCanonicalIncidents] = useState([]);
+  const [canonicalLoading, setCanonicalLoading] = useState(false);
+
+  useEffect(() => {
+    if (reason !== 'duplicate') { setDuplicateOf(''); return; }
+    setCanonicalLoading(true);
+    api.get('/api/incidents/', { params: { page_size: 200, exclude_states: 'closed' } })
+      .then(res => {
+        const items = (res.data.results ?? res.data);
+        setCanonicalIncidents(items.filter(i => !excludeIds.has(i.id)));
+      })
+      .catch(() => setCanonicalIncidents([]))
+      .finally(() => setCanonicalLoading(false));
+  }, [reason]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const canSubmit = reason && (reason !== 'duplicate' || duplicateOf);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
@@ -86,6 +104,30 @@ function BulkCloseDialog({ onConfirm, onCancel, loading }) {
             ))}
           </select>
         </div>
+
+        {reason === 'duplicate' && (
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-foreground" htmlFor="bulk-duplicate-of">
+              Canonical incident <span className="text-red-500">*</span>
+            </label>
+            <p className="text-xs text-muted-foreground">
+              All selected incidents will be linked to this incident as duplicates. It stays open.
+            </p>
+            <select
+              id="bulk-duplicate-of"
+              value={duplicateOf}
+              onChange={e => setDuplicateOf(e.target.value)}
+              disabled={canonicalLoading}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+            >
+              <option value="">{canonicalLoading ? 'Loading…' : 'Select canonical incident…'}</option>
+              {canonicalIncidents.map(i => (
+                <option key={i.id} value={i.id}>{i.display_id} — {i.title}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="flex justify-end gap-3">
           <button
             onClick={onCancel}
@@ -95,8 +137,8 @@ function BulkCloseDialog({ onConfirm, onCancel, loading }) {
             Cancel
           </button>
           <button
-            onClick={() => reason && onConfirm(reason)}
-            disabled={!reason || loading}
+            onClick={() => canSubmit && onConfirm(reason, duplicateOf ? Number(duplicateOf) : null)}
+            disabled={!canSubmit || loading}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {loading ? 'Closing…' : 'Close incidents'}
@@ -341,7 +383,11 @@ export default function IncidentList() {
       {bulkAction === 'close' && (
         <BulkCloseDialog
           loading={bulkLoading}
-          onConfirm={reason => executeBulkAction('close', { closure_reason: reason })}
+          excludeIds={selectedIds}
+          onConfirm={(reason, duplicateOfId) => executeBulkAction('close', {
+            closure_reason: reason,
+            ...(reason === 'duplicate' && duplicateOfId ? { duplicate_of: duplicateOfId } : {}),
+          })}
           onCancel={() => { setBulkAction(null); setBulkError(null); }}
         />
       )}
