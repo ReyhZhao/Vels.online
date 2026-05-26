@@ -288,10 +288,12 @@ class Comment(models.Model):
     KIND_USER = "user"
     KIND_AI_TRIAGE = "ai_triage"
     KIND_SYSTEM = "system"
+    KIND_AI_TASK_SUMMARY = "ai_task_summary"
     KIND_CHOICES = [
         (KIND_USER, "User"),
         (KIND_AI_TRIAGE, "AI Triage"),
         (KIND_SYSTEM, "System"),
+        (KIND_AI_TASK_SUMMARY, "AI Task Summary"),
     ]
 
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="comments")

@@ -269,6 +269,7 @@ def poll_automated_tasks():
                 automation_error=None,
             )
             done += 1
+            _create_task_summary_comment(task, client)
             _notify_task_complete(task)
         elif status in ("error", "failed"):
             Task.objects.filter(pk=task.pk).update(
@@ -277,8 +278,64 @@ def poll_automated_tasks():
                 semaphore_task_id=None,
             )
             failed += 1
+            _create_task_summary_comment(task, client, failed=True)
 
     return {"processed": processed, "done": done, "failed": failed}
+
+
+def _create_task_summary_comment(task, client, failed=False):
+    """Fetch task output from Semaphore, summarise with LLM, and post as a task comment."""
+    from incidents.llm.base import TriageConfigError, TriageError
+    from incidents.models import Comment
+
+    try:
+        raw_output = client.get_job_output(task.semaphore_task_id)
+    except Exception as exc:
+        logger.warning("_create_task_summary_comment: failed to fetch output for task %s: %s", task.id, exc)
+        return
+
+    if not raw_output and not failed:
+        return
+
+    # Fall back to a plain system comment if LLM is unavailable
+    summary_body = None
+    findings = []
+    llm_status = "error" if failed else "success"
+    provider = ""
+
+    if raw_output:
+        try:
+            provider_instance = get_triage_provider()
+            result = provider_instance.summarize_task_output(task.title, raw_output)
+            summary_body = result.summary
+            findings = result.findings
+            llm_status = result.status
+            provider = result.provider
+        except (TriageConfigError, TriageError, Exception) as exc:
+            logger.warning("_create_task_summary_comment: LLM summarisation failed for task %s: %s", task.id, exc)
+
+    if not summary_body:
+        summary_body = (
+            f"Automated task {'failed' if failed else 'completed'}. "
+            f"Output ({len(raw_output)} chars) could not be summarised by the AI."
+            if raw_output
+            else f"Automated task {'failed' if failed else 'completed'} with no output."
+        )
+
+    Comment.objects.create(
+        incident=task.incident,
+        task=task,
+        kind=Comment.KIND_AI_TASK_SUMMARY,
+        author=None,
+        body=summary_body,
+        is_internal=True,
+        metadata={
+            "findings": findings,
+            "status": llm_status,
+            "provider": provider,
+            "raw_output_length": len(raw_output),
+        },
+    )
 
 
 def _notify_task_complete(task):

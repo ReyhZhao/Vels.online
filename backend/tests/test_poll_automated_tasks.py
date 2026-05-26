@@ -4,7 +4,7 @@ import pytest
 
 from automations.models import Automation
 from automations.semaphore import SemaphoreAPIError
-from incidents.models import Incident, Task
+from incidents.models import Comment, Incident, Task
 from incidents.tasks import poll_automated_tasks
 from notifications.models import Notification
 from security.models import Organization
@@ -62,6 +62,11 @@ def semaphore_settings(settings):
 
 
 class TestPollAutomatedTasks:
+    @pytest.fixture(autouse=True)
+    def no_task_summary(self):
+        with patch("incidents.tasks._create_task_summary_comment"):
+            yield
+
     def test_success_sets_done_and_closed_at(self, automated_task, semaphore_settings):
         with patch("automations.semaphore.SemaphoreClient") as MockClient:
             MockClient.return_value.get_job_status.return_value = "success"
@@ -205,3 +210,91 @@ class TestPollAutomatedTasks:
             poll_automated_tasks()
 
         assert not Notification.objects.filter(kind=Notification.KIND_TASK_COMPLETE).exists()
+
+
+# ── _create_task_summary_comment ──────────────────────────────────────────────
+
+
+class TestCreateTaskSummaryComment:
+    @pytest.fixture
+    def task(self, automated_task):
+        return automated_task
+
+    def _run_summary(self, task, semaphore_output="", failed=False, llm_result=None):
+        from incidents.llm.base import TaskSummaryResult
+        from incidents.tasks import _create_task_summary_comment
+
+        mock_client = MagicMock()
+        mock_client.get_job_output.return_value = semaphore_output
+
+        if llm_result is None:
+            llm_result = TaskSummaryResult(
+                summary="Scan completed successfully.",
+                findings=["Open port 22 detected"],
+                status="success",
+                provider="gemini",
+            )
+
+        mock_provider = MagicMock()
+        mock_provider.summarize_task_output.return_value = llm_result
+
+        with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+            _create_task_summary_comment(task, mock_client, failed=failed)
+
+        return mock_provider
+
+    def test_creates_ai_task_summary_comment(self, task, semaphore_settings):
+        self._run_summary(task, semaphore_output="TASK COMPLETED\nAll checks passed")
+
+        comment = Comment.objects.get(task=task, kind=Comment.KIND_AI_TASK_SUMMARY)
+        assert comment.body == "Scan completed successfully."
+        assert comment.metadata["status"] == "success"
+        assert "Open port 22 detected" in comment.metadata["findings"]
+        assert comment.is_internal is True
+
+    def test_no_comment_when_output_empty_and_not_failed(self, task, semaphore_settings):
+        self._run_summary(task, semaphore_output="", failed=False)
+        assert not Comment.objects.filter(task=task, kind=Comment.KIND_AI_TASK_SUMMARY).exists()
+
+    def test_fallback_comment_when_no_output_but_failed(self, task, semaphore_settings):
+        from incidents.tasks import _create_task_summary_comment
+        mock_client = MagicMock()
+        mock_client.get_job_output.return_value = ""
+
+        with patch("incidents.tasks.get_triage_provider") as mock_factory:
+            _create_task_summary_comment(task, mock_client, failed=True)
+
+        mock_factory.assert_not_called()
+        comment = Comment.objects.get(task=task, kind=Comment.KIND_AI_TASK_SUMMARY)
+        assert "failed" in comment.body
+
+    def test_fallback_comment_when_llm_fails(self, task, semaphore_settings):
+        from incidents.tasks import _create_task_summary_comment
+
+        mock_client = MagicMock()
+        mock_client.get_job_output.return_value = "some output"
+
+        mock_provider = MagicMock()
+        mock_provider.summarize_task_output.side_effect = Exception("LLM down")
+
+        with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+            _create_task_summary_comment(task, mock_client, failed=False)
+
+        comment = Comment.objects.get(task=task, kind=Comment.KIND_AI_TASK_SUMMARY)
+        assert "could not be summarised" in comment.body
+        assert comment.metadata["raw_output_length"] == len("some output")
+
+    def test_silently_skips_when_get_job_output_raises(self, task, semaphore_settings):
+        from incidents.tasks import _create_task_summary_comment
+
+        mock_client = MagicMock()
+        mock_client.get_job_output.side_effect = SemaphoreAPIError(500, "connection refused")
+
+        _create_task_summary_comment(task, mock_client)
+
+        assert not Comment.objects.filter(task=task, kind=Comment.KIND_AI_TASK_SUMMARY).exists()
+
+    def test_comment_linked_to_correct_incident(self, task, semaphore_settings):
+        self._run_summary(task, semaphore_output="output data")
+        comment = Comment.objects.get(task=task, kind=Comment.KIND_AI_TASK_SUMMARY)
+        assert comment.incident_id == task.incident_id

@@ -42,6 +42,14 @@ class CorrelationResult:
     max_confidence: float = 0.0
 
 
+@dataclass
+class TaskSummaryResult:
+    summary: str = ""
+    findings: List[str] = field(default_factory=list)
+    status: str = "success"
+    provider: str = ""
+
+
 class BaseTriageProvider(ABC):
     @abstractmethod
     def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
@@ -50,3 +58,7 @@ class BaseTriageProvider(ABC):
     def find_related_incidents(self, payload: dict, candidates: list) -> CorrelationResult:
         """Check for correlations with recent incidents. Override in providers that support it."""
         return CorrelationResult()
+
+    def summarize_task_output(self, task_title: str, task_output: str) -> TaskSummaryResult:
+        """Parse and summarise automated task output. Override in providers that support it."""
+        return TaskSummaryResult()

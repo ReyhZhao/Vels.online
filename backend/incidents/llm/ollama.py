@@ -3,8 +3,15 @@ import json
 import ollama
 from django.conf import settings
 
-from .base import BaseTriageProvider, CorrelationResult, TriageError, TriageResult
-from .gemini import CORRELATION_SYSTEM_PROMPT, _build_system_prompt, _parse_correlation_result, _parse_result
+from .base import BaseTriageProvider, CorrelationResult, TaskSummaryResult, TriageError, TriageResult
+from .gemini import (
+    CORRELATION_SYSTEM_PROMPT,
+    TASK_SUMMARY_SYSTEM_PROMPT,
+    _build_system_prompt,
+    _parse_correlation_result,
+    _parse_result,
+    _parse_task_summary_result,
+)
 
 
 class OllamaTriageProvider(BaseTriageProvider):
@@ -77,3 +84,28 @@ class OllamaTriageProvider(BaseTriageProvider):
             raise TriageError(f"Ollama returned non-JSON for correlation: {text[:200]}") from exc
 
         return _parse_correlation_result(data)
+
+    def summarize_task_output(self, task_title: str, task_output: str) -> TaskSummaryResult:
+        prompt = json.dumps({"task_title": task_title, "output": task_output[:8000]}, indent=2)
+        try:
+            response = self._client.chat(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": TASK_SUMMARY_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            text = response.message.content.strip()
+        except Exception as exc:
+            raise TriageError(f"Ollama task summary error: {exc}") from exc
+
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise TriageError(f"Ollama returned non-JSON for task summary: {text[:200]}") from exc
+
+        return _parse_task_summary_result(data, provider="ollama")

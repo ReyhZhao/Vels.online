@@ -2,7 +2,7 @@ import json
 
 from django.conf import settings
 
-from .base import BaseTriageProvider, CorrelationResult, TriageConfigError, TriageError, TriageResult, VALID_ACTIONS
+from .base import BaseTriageProvider, CorrelationResult, TaskSummaryResult, TriageConfigError, TriageError, TriageResult, VALID_ACTIONS
 
 SYSTEM_PROMPT = """\
 You are a senior security analyst. Given an incident context as JSON, triage the incident and \
@@ -23,6 +23,18 @@ Return a JSON object with exactly these fields:
 close_as_false_positive, monitor, close_as_informational
   secondary_action         (string, optional) — same choices as primary_action, or omit
   false_positive_confidence (float, required) — probability 0.0-1.0 that this is a false positive
+
+Return only valid JSON. No markdown, no code fences, no explanation.
+"""
+
+TASK_SUMMARY_SYSTEM_PROMPT = """\
+You are a security analyst reviewing the output of an automated security task. \
+Given the task title and its raw console output, provide a concise structured assessment.
+
+Return a JSON object with exactly these fields:
+  summary   (string, required) — 2-3 sentence plain-language summary of what was done and the outcome
+  findings  (array of strings, required) — list of notable findings, errors, or warnings; empty list if none
+  status    (string, required) — one of: success, warning, error
 
 Return only valid JSON. No markdown, no code fences, no explanation.
 """
@@ -127,6 +139,43 @@ class GeminiTriageProvider(BaseTriageProvider):
             raise TriageError(f"Gemini returned non-JSON for correlation: {text[:200]}") from exc
 
         return _parse_correlation_result(data)
+
+    def summarize_task_output(self, task_title: str, task_output: str) -> TaskSummaryResult:
+        prompt = json.dumps({"task_title": task_title, "output": task_output[:8000]}, indent=2)
+        try:
+            response = self._client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=TASK_SUMMARY_SYSTEM_PROMPT,
+                ),
+            )
+            text = response.text.strip()
+        except Exception as exc:
+            raise TriageError(f"Gemini task summary error: {exc}") from exc
+
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise TriageError(f"Gemini returned non-JSON for task summary: {text[:200]}") from exc
+
+        return _parse_task_summary_result(data, provider="gemini")
+
+
+def _parse_task_summary_result(data: dict, provider: str) -> TaskSummaryResult:
+    summary = data.get("summary", "") or ""
+    findings = data.get("findings", [])
+    if not isinstance(findings, list):
+        findings = []
+    findings = [str(f) for f in findings if f]
+    status = data.get("status", "success")
+    if status not in ("success", "warning", "error"):
+        status = "success"
+    return TaskSummaryResult(summary=summary, findings=findings, status=status, provider=provider)
 
 
 def _parse_correlation_result(data: dict) -> CorrelationResult:

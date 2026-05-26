@@ -90,3 +90,12 @@ class SemaphoreClient:
         self._check(resp)
         raw = resp.json().get("status", "")
         return _STATUS_MAP.get(raw, "error")
+
+    def get_job_output(self, semaphore_task_id):
+        """Return the raw task output as a single string (may be empty)."""
+        resp = self._get(f"/project/{self._project_id}/tasks/{semaphore_task_id}/output")
+        self._check(resp)
+        items = resp.json()
+        if not isinstance(items, list):
+            return ""
+        return "\n".join(item.get("output", "") for item in items if item.get("output"))
