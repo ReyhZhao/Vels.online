@@ -14,6 +14,7 @@ class AutomationSerializer(serializers.ModelSerializer):
             "semaphore_template_id",
             "semaphore_template_name",
             "default_vars",
+            "incident_var_mappings",
             "archived",
             "created_by",
             "created_at",

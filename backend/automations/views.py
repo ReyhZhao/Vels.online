@@ -41,6 +41,7 @@ class AutomationListView(ListAPIView):
             semaphore_template_id=int(template_id),
             semaphore_template_name=(request.data.get("semaphore_template_name") or "").strip(),
             default_vars=request.data.get("default_vars") or None,
+            incident_var_mappings=request.data.get("incident_var_mappings") or None,
             created_by=request.user,
         )
         return Response(_serialize(automation), status=201)
@@ -64,6 +65,9 @@ class AutomationDetailView(APIView):
         if "default_vars" in request.data:
             automation.default_vars = request.data["default_vars"] or None
             update_fields.append("default_vars")
+        if "incident_var_mappings" in request.data:
+            automation.incident_var_mappings = request.data["incident_var_mappings"] or None
+            update_fields.append("incident_var_mappings")
         if "archived" in request.data:
             automation.archived = bool(request.data["archived"])
             update_fields.append("archived")
@@ -99,6 +103,7 @@ def _serialize(automation):
         "semaphore_template_id": automation.semaphore_template_id,
         "semaphore_template_name": automation.semaphore_template_name,
         "default_vars": automation.default_vars,
+        "incident_var_mappings": automation.incident_var_mappings,
         "archived": automation.archived,
         "created_by": automation.created_by_id,
         "created_at": automation.created_at.isoformat() if automation.created_at else None,
