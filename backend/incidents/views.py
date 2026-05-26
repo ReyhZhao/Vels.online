@@ -1486,11 +1486,14 @@ class TaskRunView(APIView):
             )
             return Response({"detail": "Service error launching automation."}, status=status.HTTP_502_BAD_GATEWAY)
 
-        Task.objects.filter(pk=task.pk).update(
+        update_fields = dict(
             semaphore_task_id=semaphore_task_id,
             state=Task.STATE_IN_PROGRESS,
             automation_error=None,
         )
+        if not task.assignee_id:
+            update_fields["assignee"] = request.user
+        Task.objects.filter(pk=task.pk).update(**update_fields)
         task.refresh_from_db()
         return Response(TaskSerializer(task).data)
 

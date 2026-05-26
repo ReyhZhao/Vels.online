@@ -306,3 +306,37 @@ def test_run_no_vars_body_uses_defaults(client, staff, automated_task):
     assert resp.status_code == 200
     extra_vars = mock_client.launch_job.call_args[1]["extra_vars"]
     assert extra_vars["scan_mode"] == "quick"
+
+
+# ── auto-assign on run ────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_run_auto_assigns_to_requesting_user(client, staff, automated_task):
+    assert automated_task.assignee is None
+
+    mock_client = MagicMock()
+    mock_client.launch_job.return_value = 100
+    with patch("automations.semaphore.SemaphoreClient", return_value=mock_client):
+        client.force_login(staff)
+        resp = client.post(_run_url(automated_task.pk), content_type="application/json")
+
+    assert resp.status_code == 200
+    automated_task.refresh_from_db()
+    assert automated_task.assignee_id == staff.id
+
+
+@pytest.mark.django_db
+def test_run_does_not_overwrite_existing_assignee(client, staff, automated_task, regular_user):
+    automated_task.assignee = regular_user
+    automated_task.save()
+
+    mock_client = MagicMock()
+    mock_client.launch_job.return_value = 101
+    with patch("automations.semaphore.SemaphoreClient", return_value=mock_client):
+        client.force_login(staff)
+        resp = client.post(_run_url(automated_task.pk), content_type="application/json")
+
+    assert resp.status_code == 200
+    automated_task.refresh_from_db()
+    assert automated_task.assignee_id == regular_user.id
