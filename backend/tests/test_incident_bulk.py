@@ -157,7 +157,7 @@ def test_bulk_close_records_event(client, staff, acme):
     client.force_login(staff)
     client.post(
         "/api/incidents/bulk/",
-        {"action": "close", "ids": [inc.id], "closure_reason": "duplicate"},
+        {"action": "close", "ids": [inc.id], "closure_reason": "resolved"},
         content_type="application/json",
     )
     assert IncidentEvent.objects.filter(incident=inc, kind="incident_updated").exists()
