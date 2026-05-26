@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from incidents.llm.base import SEVERITY_RANK, TriageConfigError, TriageError
+from incidents.llm.base import RANK_TO_SEV, SEVERITY_RANK, TriageConfigError, TriageError
 from incidents.llm.factory import get_triage_provider
 from notifications.email import send_html_email
 
@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 _TRIAGE_LOCK_KEY = "triage_lock:{}"
 _TRIAGE_LOCK_TTL = 600  # 10 minutes
+_CORRELATION_THRESHOLD = 0.7
+_CORRELATION_LOOKBACK_DAYS = 30
+_CORRELATION_CANDIDATE_LIMIT = 50
 
 
 def acquire_triage_lock(incident_id: int) -> bool:
@@ -23,6 +26,17 @@ def acquire_triage_lock(incident_id: int) -> bool:
 
 def release_triage_lock(incident_id: int) -> None:
     cache.delete(_TRIAGE_LOCK_KEY.format(incident_id))
+
+
+def _clamp_severity(current: str, recommended: str) -> str:
+    """Return the recommended severity clamped to at most 2 rank levels from the current."""
+    current_rank = SEVERITY_RANK.get(current, 2)
+    recommended_rank = SEVERITY_RANK.get(recommended, current_rank)
+    delta = recommended_rank - current_rank
+    if delta == 0:
+        return current
+    capped_rank = current_rank + max(-2, min(2, delta))
+    return RANK_TO_SEV.get(capped_rank, current)
 
 
 @shared_task(bind=True, max_retries=3)
@@ -42,7 +56,8 @@ def run_incident_triage(self, incident_id: int):
     extra_context = incident.organization.triage_prompt_context or ""
 
     try:
-        result = get_triage_provider().triage_incident(payload, extra_context=extra_context)
+        provider = get_triage_provider()
+        result = provider.triage_incident(payload, extra_context=extra_context)
     except TriageConfigError as exc:
         release_triage_lock(incident_id)
         Comment.objects.create(
@@ -77,6 +92,22 @@ def run_incident_triage(self, incident_id: int):
 
     release_triage_lock(incident_id)
 
+    # Related incident correlation search (best-effort — failures do not block triage)
+    related_incident_ids = []
+    correlation_summary = ""
+    try:
+        candidates = _build_correlation_candidates(incident)
+        if candidates:
+            correlation = provider.find_related_incidents(payload, candidates)
+            if correlation.max_confidence >= _CORRELATION_THRESHOLD and correlation.related_incident_ids:
+                related_incident_ids = correlation.related_incident_ids
+                correlation_summary = correlation.correlation_summary
+                related_context = _build_related_context(related_incident_ids, correlation_summary)
+                augmented_context = "\n".join(filter(None, [extra_context, related_context]))
+                result = provider.triage_incident(payload, extra_context=augmented_context)
+    except Exception as exc:
+        logger.warning("run_incident_triage: correlation search failed for %s: %s", incident_id, exc)
+
     threshold = incident.organization.triage_fp_threshold
     auto_closed = result.false_positive_confidence >= threshold
 
@@ -93,8 +124,9 @@ def run_incident_triage(self, incident_id: int):
         except Exception as exc:
             logger.warning("run_incident_triage: state transition to triaged failed for %s: %s", incident_id, exc)
 
-    if SEVERITY_RANK.get(result.severity_recommendation, -1) > SEVERITY_RANK.get(incident.severity, 0):
-        incident.severity = result.severity_recommendation
+    new_severity = _clamp_severity(incident.severity, result.severity_recommendation)
+    if new_severity != incident.severity:
+        incident.severity = new_severity
         incident.save(update_fields=["severity"])
 
     Comment.objects.create(
@@ -111,6 +143,8 @@ def run_incident_triage(self, incident_id: int):
             "provider": result.provider,
             "incident_severity_at_triage": payload["severity"],
             "auto_closed": auto_closed,
+            "related_incident_ids": related_incident_ids,
+            "correlation_summary": correlation_summary,
         },
     )
 
@@ -134,6 +168,51 @@ def _build_triage_payload(incident) -> dict:
         "description": incident.description,
         "severity": incident.severity,
     }
+
+def _build_correlation_candidates(incident) -> list:
+    """Return summary dicts for recent non-current incidents in the same org."""
+    from incidents.models import Incident
+    cutoff = timezone.now() - timedelta(days=_CORRELATION_LOOKBACK_DAYS)
+    recent = (
+        Incident.objects
+        .filter(organization=incident.organization, created_at__gte=cutoff)
+        .exclude(pk=incident.pk)
+        .exclude(closure_reason=Incident.CLOSURE_FALSE_POSITIVE)
+        .prefetch_related("incident_assets__asset", "iocs")
+        [:_CORRELATION_CANDIDATE_LIMIT]
+    )
+    return [
+        {
+            "id": inc.id,
+            "title": inc.title,
+            "assets": [
+                {
+                    "name": ia.asset.name,
+                    "agent_name": ia.asset.agent_name,
+                    "ip_address": str(ia.asset.ip_address) if ia.asset.ip_address else None,
+                }
+                for ia in inc.incident_assets.all()
+            ],
+            "iocs": [{"kind": ioc.kind, "value": ioc.value} for ioc in inc.iocs.all()],
+            "severity": inc.severity,
+            "created_at": inc.created_at.isoformat(),
+        }
+        for inc in recent
+    ]
+
+
+def _build_related_context(related_ids: list, correlation_summary: str) -> str:
+    if not related_ids:
+        return ""
+    from incidents.models import Incident
+    related = list(Incident.objects.filter(id__in=related_ids).only("display_id", "title", "severity"))
+    lines = ["Related incidents detected:"]
+    for inc in related:
+        lines.append(f"  - {inc.display_id}: {inc.title} ({inc.severity})")
+    if correlation_summary:
+        lines.append(f"Correlation: {correlation_summary}")
+    return "\n".join(lines)
+
 
 STALE_INCIDENT_DAYS = 7
 STALE_INCIDENT_STATES = ["new", "triaged", "resolved"]

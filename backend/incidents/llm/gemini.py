@@ -2,7 +2,7 @@ import json
 
 from django.conf import settings
 
-from .base import BaseTriageProvider, TriageConfigError, TriageError, TriageResult, VALID_ACTIONS
+from .base import BaseTriageProvider, CorrelationResult, TriageConfigError, TriageError, TriageResult, VALID_ACTIONS
 
 SYSTEM_PROMPT = """\
 You are a senior security analyst. Given an incident context as JSON, triage the incident and \
@@ -25,6 +25,25 @@ close_as_false_positive, monitor, close_as_informational
   false_positive_confidence (float, required) — probability 0.0-1.0 that this is a false positive
 
 Return only valid JSON. No markdown, no code fences, no explanation.
+"""
+
+CORRELATION_SYSTEM_PROMPT = """\
+You are a senior security analyst specialising in threat intelligence correlation. \
+Given a current incident and a list of recent incidents, identify which recent incidents \
+are likely related to the current one based on:
+  - Shared attack infrastructure (same IPs, domains, file hashes in IOCs)
+  - Same or similar attack techniques or patterns
+  - Same affected assets or asset groups
+  - Temporal patterns suggesting coordinated or persistent threat activity
+
+Return a JSON object with exactly these fields:
+  related_incidents  (array, required) — list of objects, each with: \
+id (integer), confidence (float 0.0-1.0), reason (string)
+  correlation_summary  (string, required) — 1-2 sentences describing the overall correlation, \
+or empty string if none found
+
+Return only valid JSON. No markdown, no code fences, no explanation.
+If no correlations are found return: {"related_incidents": [], "correlation_summary": ""}
 """
 
 
@@ -70,6 +89,69 @@ class GeminiTriageProvider(BaseTriageProvider):
             raise TriageError(f"Gemini returned non-JSON: {text[:200]}") from exc
 
         return _parse_result(data, provider="gemini")
+
+    def find_related_incidents(self, payload: dict, candidates: list) -> CorrelationResult:
+        if not candidates:
+            return CorrelationResult()
+        prompt = json.dumps(
+            {
+                "current_incident": {
+                    "title": payload.get("title"),
+                    "assets": payload.get("assets", []),
+                    "iocs": payload.get("iocs", []),
+                    "severity": payload.get("severity"),
+                },
+                "recent_incidents": candidates,
+            },
+            indent=2,
+        )
+        try:
+            response = self._client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=CORRELATION_SYSTEM_PROMPT,
+                ),
+            )
+            text = response.text.strip()
+        except Exception as exc:
+            raise TriageError(f"Gemini correlation error: {exc}") from exc
+
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise TriageError(f"Gemini returned non-JSON for correlation: {text[:200]}") from exc
+
+        return _parse_correlation_result(data)
+
+
+def _parse_correlation_result(data: dict) -> CorrelationResult:
+    related = data.get("related_incidents", [])
+    summary = data.get("correlation_summary", "") or ""
+    related_ids = []
+    max_confidence = 0.0
+    for item in related:
+        if not isinstance(item, dict):
+            continue
+        confidence = float(item.get("confidence", 0.0))
+        confidence = max(0.0, min(1.0, confidence))
+        if confidence > max_confidence:
+            max_confidence = confidence
+        inc_id = item.get("id")
+        if inc_id is not None:
+            try:
+                related_ids.append(int(inc_id))
+            except (ValueError, TypeError):
+                pass
+    return CorrelationResult(
+        related_incident_ids=related_ids,
+        correlation_summary=summary if isinstance(summary, str) else "",
+        max_confidence=max_confidence,
+    )
 
 
 def _parse_result(data: dict, provider: str) -> TriageResult:

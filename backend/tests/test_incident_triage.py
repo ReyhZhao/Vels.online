@@ -196,8 +196,20 @@ def test_triage_task_does_not_auto_close_below_threshold(acme):
 
 
 @pytest.mark.django_db
-def test_triage_task_escalates_severity(acme):
+def test_triage_task_escalates_severity_within_cap(acme):
+    # low (1) → critical (4) is 3 levels; capped to 2 → result is high (3)
     incident = make_incident(acme, severity="low")
+    result = _make_triage_result(severity_recommendation="critical", false_positive_confidence=0.0)
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.severity == "high"
+
+
+@pytest.mark.django_db
+def test_triage_task_escalates_severity_within_2_levels(acme):
+    # medium (2) → critical (4) is exactly 2 levels; applied directly
+    incident = make_incident(acme, severity="medium")
     result = _make_triage_result(severity_recommendation="critical", false_positive_confidence=0.0)
     _run_task(incident.id, provider_result=result)
 
@@ -206,13 +218,35 @@ def test_triage_task_escalates_severity(acme):
 
 
 @pytest.mark.django_db
-def test_triage_task_does_not_downgrade_severity(acme):
+def test_triage_task_downgrades_severity_within_cap(acme):
+    # critical (4) → low (1) is 3 levels; capped to 2 → result is medium (2)
     incident = make_incident(acme, severity="critical")
     result = _make_triage_result(severity_recommendation="low", false_positive_confidence=0.0)
     _run_task(incident.id, provider_result=result)
 
     incident.refresh_from_db()
-    assert incident.severity == "critical"
+    assert incident.severity == "medium"
+
+
+@pytest.mark.django_db
+def test_triage_task_downgrades_severity_within_2_levels(acme):
+    # critical (4) → medium (2) is exactly 2 levels; applied directly
+    incident = make_incident(acme, severity="critical")
+    result = _make_triage_result(severity_recommendation="medium", false_positive_confidence=0.0)
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.severity == "medium"
+
+
+@pytest.mark.django_db
+def test_triage_task_no_severity_change_when_same(acme):
+    incident = make_incident(acme, severity="medium")
+    result = _make_triage_result(severity_recommendation="medium", false_positive_confidence=0.0)
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.severity == "medium"
 
 
 @pytest.mark.django_db
@@ -422,3 +456,147 @@ def test_triage_endpoint_returns_404_for_unknown_incident(client, staff_user):
     client.force_login(staff_user)
     response = client.post("/api/incidents/INC-9999-9999/triage/")
     assert response.status_code == 404
+
+
+# ── related incident correlation ─────────────────────────────────────────────
+
+
+def _run_task_with_correlation(incident_id, triage_result, correlation_result=None):
+    """Run triage task with mocked provider supporting correlation."""
+    from incidents.models import Incident as _Incident
+    from incidents.llm.base import CorrelationResult
+    from incidents.tasks import run_incident_triage
+
+    if correlation_result is None:
+        correlation_result = CorrelationResult()
+
+    mock_provider = MagicMock()
+    mock_provider.triage_incident.return_value = triage_result
+    mock_provider.find_related_incidents.return_value = correlation_result
+
+    with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+        run_incident_triage.apply(args=(incident_id,))
+
+    return mock_provider
+
+
+@pytest.mark.django_db
+def test_correlation_not_called_when_no_candidates(acme):
+    incident = make_incident(acme)
+    result = _make_triage_result()
+    mock_provider = _run_task_with_correlation(incident.id, result)
+    mock_provider.find_related_incidents.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_correlation_triggers_retriage_when_high_confidence(acme):
+    from incidents.llm.base import CorrelationResult
+
+    older = make_incident(acme, n=0)
+    incident = make_incident(acme, n=1)
+
+    correlation = CorrelationResult(
+        related_incident_ids=[older.id],
+        correlation_summary="Same source IP seen in both incidents.",
+        max_confidence=0.85,
+    )
+    first_result = _make_triage_result(summary="Initial triage.")
+    second_result = _make_triage_result(summary="Re-triage with correlation context.")
+    mock_provider = MagicMock()
+    mock_provider.triage_incident.side_effect = [first_result, second_result]
+    mock_provider.find_related_incidents.return_value = correlation
+
+    from incidents.tasks import run_incident_triage
+    with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+        run_incident_triage.apply(args=(incident.id,))
+
+    assert mock_provider.triage_incident.call_count == 2
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.body == "Re-triage with correlation context."
+    assert older.id in comment.metadata["related_incident_ids"]
+    assert comment.metadata["correlation_summary"] == "Same source IP seen in both incidents."
+
+
+@pytest.mark.django_db
+def test_correlation_skipped_when_confidence_below_threshold(acme):
+    from incidents.llm.base import CorrelationResult
+
+    older = make_incident(acme, n=0)
+    incident = make_incident(acme, n=1)
+
+    correlation = CorrelationResult(
+        related_incident_ids=[older.id],
+        correlation_summary="Possible link.",
+        max_confidence=0.5,
+    )
+    result = _make_triage_result(summary="No re-triage expected.")
+    mock_provider = MagicMock()
+    mock_provider.triage_incident.return_value = result
+    mock_provider.find_related_incidents.return_value = correlation
+
+    from incidents.tasks import run_incident_triage
+    with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+        run_incident_triage.apply(args=(incident.id,))
+
+    assert mock_provider.triage_incident.call_count == 1
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["related_incident_ids"] == []
+
+
+@pytest.mark.django_db
+def test_correlation_failure_does_not_block_triage(acme):
+    incident = make_incident(acme)
+    result = _make_triage_result(summary="Triage completed despite correlation error.")
+    mock_provider = MagicMock()
+    mock_provider.triage_incident.return_value = result
+    mock_provider.find_related_incidents.side_effect = Exception("LLM error")
+
+    from incidents.tasks import run_incident_triage
+    with patch("incidents.tasks.get_triage_provider", return_value=mock_provider):
+        # Force a candidate to exist so find_related_incidents is called
+        with patch("incidents.tasks._build_correlation_candidates", return_value=[{"id": 999}]):
+            run_incident_triage.apply(args=(incident.id,))
+
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.body == "Triage completed despite correlation error."
+    assert comment.metadata["related_incident_ids"] == []
+
+
+# ── _clamp_severity unit tests ────────────────────────────────────────────────
+
+
+def test_clamp_severity_no_change_same():
+    from incidents.tasks import _clamp_severity
+    assert _clamp_severity("medium", "medium") == "medium"
+
+
+def test_clamp_severity_1_level_up():
+    from incidents.tasks import _clamp_severity
+    assert _clamp_severity("low", "medium") == "medium"
+
+
+def test_clamp_severity_2_levels_up_applied():
+    from incidents.tasks import _clamp_severity
+    assert _clamp_severity("low", "high") == "high"
+
+
+def test_clamp_severity_3_levels_up_capped():
+    from incidents.tasks import _clamp_severity
+    # low(1) → critical(4): delta 3 → capped at 2 → high(3)
+    assert _clamp_severity("low", "critical") == "high"
+
+
+def test_clamp_severity_1_level_down():
+    from incidents.tasks import _clamp_severity
+    assert _clamp_severity("high", "medium") == "medium"
+
+
+def test_clamp_severity_2_levels_down_applied():
+    from incidents.tasks import _clamp_severity
+    assert _clamp_severity("critical", "medium") == "medium"
+
+
+def test_clamp_severity_3_levels_down_capped():
+    from incidents.tasks import _clamp_severity
+    # critical(4) → low(1): delta -3 → capped at -2 → medium(2)
+    assert _clamp_severity("critical", "low") == "medium"

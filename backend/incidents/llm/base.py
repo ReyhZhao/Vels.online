@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 
 VALID_ACTIONS = {
@@ -13,6 +13,7 @@ VALID_ACTIONS = {
 }
 
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+RANK_TO_SEV = {v: k for k, v in SEVERITY_RANK.items()}
 
 
 class TriageError(Exception):
@@ -34,7 +35,18 @@ class TriageResult:
     provider: str = ""
 
 
+@dataclass
+class CorrelationResult:
+    related_incident_ids: List[int] = field(default_factory=list)
+    correlation_summary: str = ""
+    max_confidence: float = 0.0
+
+
 class BaseTriageProvider(ABC):
     @abstractmethod
     def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
         """Analyse an incident payload and return a triage assessment."""
+
+    def find_related_incidents(self, payload: dict, candidates: list) -> CorrelationResult:
+        """Check for correlations with recent incidents. Override in providers that support it."""
+        return CorrelationResult()

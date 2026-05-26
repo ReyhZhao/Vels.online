@@ -3,8 +3,8 @@ import json
 import ollama
 from django.conf import settings
 
-from .base import BaseTriageProvider, TriageError, TriageResult
-from .gemini import _build_system_prompt, _parse_result
+from .base import BaseTriageProvider, CorrelationResult, TriageError, TriageResult
+from .gemini import CORRELATION_SYSTEM_PROMPT, _build_system_prompt, _parse_correlation_result, _parse_result
 
 
 class OllamaTriageProvider(BaseTriageProvider):
@@ -39,3 +39,41 @@ class OllamaTriageProvider(BaseTriageProvider):
             raise TriageError(f"Ollama returned non-JSON: {text[:200]}") from exc
 
         return _parse_result(data, provider="ollama")
+
+    def find_related_incidents(self, payload: dict, candidates: list) -> CorrelationResult:
+        if not candidates:
+            return CorrelationResult()
+        prompt = json.dumps(
+            {
+                "current_incident": {
+                    "title": payload.get("title"),
+                    "assets": payload.get("assets", []),
+                    "iocs": payload.get("iocs", []),
+                    "severity": payload.get("severity"),
+                },
+                "recent_incidents": candidates,
+            },
+            indent=2,
+        )
+        try:
+            response = self._client.chat(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": CORRELATION_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            text = response.message.content.strip()
+        except Exception as exc:
+            raise TriageError(f"Ollama correlation error: {exc}") from exc
+
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise TriageError(f"Ollama returned non-JSON for correlation: {text[:200]}") from exc
+
+        return _parse_correlation_result(data)
