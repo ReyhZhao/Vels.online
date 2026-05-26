@@ -1,7 +1,7 @@
 import pytest
 from security.models import Organization, OrganizationMembership
-from incidents.models import Incident
-from incidents.services.promote import build_promote_payload, find_open_incidents
+from incidents.models import Asset, Incident, IncidentAsset
+from incidents.services.promote import build_promote_payload, find_open_incidents, link_source_assets
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────
@@ -306,3 +306,114 @@ def test_source_ref_contains_invalid_json_ignored(client, member, acme):
     client.force_login(member)
     response = client.get("/api/incidents/?source_ref_contains=not-json")
     assert response.status_code == 200
+
+
+# ── link_source_assets ───────────────────────────────────────────────────────
+
+
+def make_asset(org, agent_name):
+    return Asset.objects.create(
+        organization=org,
+        kind=Asset.KIND_HOST,
+        name=agent_name,
+        agent_name=agent_name,
+    )
+
+
+@pytest.mark.django_db
+def test_link_source_assets_wazuh_event(acme):
+    asset = make_asset(acme, "ws-01")
+    inc = make_incident(acme, source_kind="wazuh_event", source_ref={"agent_name": "ws-01"})
+    link_source_assets(inc, acme)
+    assert IncidentAsset.objects.filter(incident=inc, asset=asset).exists()
+
+
+@pytest.mark.django_db
+def test_link_source_assets_agent_finding(acme):
+    asset = make_asset(acme, "db-02")
+    inc = make_incident(acme, source_kind="agent_finding", source_ref={"agent_name": "db-02", "cve_id": "CVE-2025-1"})
+    link_source_assets(inc, acme)
+    assert IncidentAsset.objects.filter(incident=inc, asset=asset).exists()
+
+
+@pytest.mark.django_db
+def test_link_source_assets_vulnerability_list_of_names(acme):
+    a1 = make_asset(acme, "web-01")
+    a2 = make_asset(acme, "web-02")
+    inc = make_incident(
+        acme,
+        source_kind="vulnerability",
+        source_ref={"cve_id": "CVE-2025-1", "affected_agents": ["web-01", "web-02"]},
+    )
+    link_source_assets(inc, acme)
+    assert IncidentAsset.objects.filter(incident=inc, asset=a1).exists()
+    assert IncidentAsset.objects.filter(incident=inc, asset=a2).exists()
+
+
+@pytest.mark.django_db
+def test_link_source_assets_vulnerability_list_of_dicts(acme):
+    asset = make_asset(acme, "web-03")
+    inc = make_incident(
+        acme,
+        source_kind="vulnerability",
+        source_ref={"cve_id": "CVE-2025-2", "affected_agents": [{"agent_name": "web-03", "installed_version": "1.0"}]},
+    )
+    link_source_assets(inc, acme)
+    assert IncidentAsset.objects.filter(incident=inc, asset=asset).exists()
+
+
+@pytest.mark.django_db
+def test_link_source_assets_no_matching_asset_skips_silently(acme):
+    inc = make_incident(acme, source_kind="wazuh_event", source_ref={"agent_name": "unknown-host"})
+    link_source_assets(inc, acme)
+    assert IncidentAsset.objects.filter(incident=inc).count() == 0
+
+
+@pytest.mark.django_db
+def test_link_source_assets_no_agent_name_skips(acme):
+    inc = make_incident(acme, source_kind="vulnerability", source_ref={"cve_id": "CVE-2025-3"})
+    link_source_assets(inc, acme)
+    assert IncidentAsset.objects.filter(incident=inc).count() == 0
+
+
+@pytest.mark.django_db
+def test_link_source_assets_idempotent(acme):
+    asset = make_asset(acme, "ws-04")
+    inc = make_incident(acme, source_kind="wazuh_event", source_ref={"agent_name": "ws-04"})
+    link_source_assets(inc, acme)
+    link_source_assets(inc, acme)
+    assert IncidentAsset.objects.filter(incident=inc, asset=asset).count() == 1
+
+
+@pytest.mark.django_db
+def test_promote_commit_links_wazuh_agent_asset(admin_client, acme):
+    make_asset(acme, "ws-01")
+    ref = {"event_id": "e1", "rule_description": "Brute force", "agent_name": "ws-01", "level": 9}
+    response = admin_client.post(
+        "/api/incidents/promote/",
+        {"source_kind": "wazuh_event", "source_ref": ref, "commit": True, "org": "acme"},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    inc = Incident.objects.get(display_id=response.json()["display_id"])
+    assert inc.incident_assets.filter(asset__agent_name="ws-01").exists()
+
+
+@pytest.mark.django_db
+def test_promote_commit_links_vulnerability_affected_agents(admin_client, acme):
+    make_asset(acme, "web-01")
+    make_asset(acme, "web-02")
+    ref = {
+        "cve_id": "CVE-2025-12345",
+        "cvss_score": 9.8,
+        "affected_agents": ["web-01", "web-02"],
+    }
+    response = admin_client.post(
+        "/api/incidents/promote/",
+        {"source_kind": "vulnerability", "source_ref": ref, "commit": True, "org": "acme"},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    inc = Incident.objects.get(display_id=response.json()["display_id"])
+    linked_names = set(inc.incident_assets.values_list("asset__agent_name", flat=True))
+    assert linked_names == {"web-01", "web-02"}

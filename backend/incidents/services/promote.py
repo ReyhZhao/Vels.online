@@ -1,4 +1,4 @@
-from incidents.models import Incident
+from incidents.models import Asset, Incident, IncidentAsset
 
 
 def _wazuh_level_to_severity(level):
@@ -64,6 +64,38 @@ def build_promote_payload(source_kind, source_ref):
         "source_kind": source_kind,
         "source_ref": source_ref,
     }
+
+
+def link_source_assets(incident, org):
+    """Create IncidentAsset entries for agents referenced in the incident's source_ref."""
+    source_ref = incident.source_ref or {}
+    source_kind = incident.source_kind
+
+    agent_names = []
+    if source_kind in ("wazuh_event", "agent_finding"):
+        name = source_ref.get("agent_name")
+        if name:
+            agent_names = [name]
+    elif source_kind == "vulnerability":
+        raw = source_ref.get("affected_agents", [])
+        if isinstance(raw, list):
+            for entry in raw:
+                if isinstance(entry, str):
+                    agent_names.append(entry)
+                elif isinstance(entry, dict) and entry.get("agent_name"):
+                    agent_names.append(entry["agent_name"])
+
+    agent_names = [n for n in agent_names if n]
+    if not agent_names:
+        return
+
+    assets = Asset.objects.filter(
+        organization=org,
+        kind=Asset.KIND_HOST,
+        agent_name__in=agent_names,
+    )
+    for asset in assets:
+        IncidentAsset.objects.get_or_create(incident=incident, asset=asset, defaults={"added_by": None})
 
 
 def find_open_incidents(source_kind, source_ref):

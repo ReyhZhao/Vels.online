@@ -89,7 +89,12 @@ export default function CveDetail() {
         <div className="flex shrink-0 gap-2">
           <PromoteToIncidentButton
             sourceKind="vulnerability"
-            sourceRef={{ cve_id: detail.cve, cvss_score: detail.cvss_score, description: detail.description }}
+            sourceRef={{
+              cve_id: detail.cve,
+              cvss_score: detail.cvss_score,
+              description: detail.description,
+              affected_agents: (detail.affected_agents || []).map(a => a.agent_name).filter(Boolean),
+            }}
             orgSlug={orgSlug}
           />
           <button

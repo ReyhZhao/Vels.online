@@ -49,7 +49,7 @@ from .services.ioc_extraction import extract_and_save_iocs
 from .services.events import record_event
 from .services.identifiers import next_display_id
 from .services.notifications_wiring import notify_comment, notify_incident_alert_if_needed, notify_severity_bump_if_needed
-from .services.promote import build_promote_payload, find_open_incidents
+from .services.promote import build_promote_payload, find_open_incidents, link_source_assets
 from .services.templates import apply_template, auto_apply_for_subject, cancel_template_tasks_on_subject_change
 from .services.attachments import confirm_upload, delete_attachment, issue_download_url, issue_upload_url
 from .services.delegation import delegate, return_delegation
@@ -1596,6 +1596,7 @@ class PromoteView(APIView):
                 display_id=display_id,
                 created_by=request.user,
             )
+            link_source_assets(incident, org)
             record_event(incident, "incident_created", actor=request.user)
 
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)
