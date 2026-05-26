@@ -1,42 +1,150 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { EditorState } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers } from '@codemirror/view';
+import { defaultKeymap } from '@codemirror/commands';
+import { yaml } from '@codemirror/lang-yaml';
+import { linter, lintGutter } from '@codemirror/lint';
+import jsyaml from 'js-yaml';
 import api from '@/lib/axios';
 
-function DefaultVarsEditor({ value, onChange, disabled }) {
-  const [raw, setRaw] = useState(value ? JSON.stringify(value, null, 2) : '');
-  const [error, setError] = useState(null);
+// ── constants ─────────────────────────────────────────────────────────────────
 
-  function handleChange(e) {
-    const text = e.target.value;
-    setRaw(text);
-    if (!text.trim()) {
-      setError(null);
-      onChange(null);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(text);
-      setError(null);
-      onChange(parsed);
-    } catch {
-      setError('Invalid JSON');
-      onChange(undefined);
-    }
+const VALID_SOURCES = [
+  'assets.agent_name', 'assets.ip_address',
+  'iocs.ip', 'iocs.domain', 'iocs.url',
+  'incident.title', 'incident.severity',
+];
+
+const VALID_FORMATS = ['colon_separated', 'comma_separated', 'json_array'];
+
+// ── incident_var_mappings linter ──────────────────────────────────────────────
+
+function mappingsLinter(view) {
+  const text = view.state.doc.toString();
+  if (!text.trim()) return [];
+
+  let parsed;
+  try {
+    parsed = jsyaml.load(text);
+  } catch (e) {
+    const pos = e.mark?.position ?? 0;
+    const safePos = Math.min(pos, Math.max(0, text.length - 1));
+    return [{ from: safePos, to: Math.min(safePos + 1, text.length), severity: 'error', message: e.reason || e.message }];
   }
 
+  if (!Array.isArray(parsed)) {
+    return [{ from: 0, to: text.length, severity: 'error', message: 'Must be a list of mapping objects.' }];
+  }
+
+  const diagnostics = [];
+  parsed.forEach((entry) => {
+    if (!entry || typeof entry !== 'object') return;
+
+    if (!entry.var) {
+      diagnostics.push({ from: 0, to: text.length, severity: 'error', message: 'Each mapping must have a "var" field.' });
+      return;
+    }
+
+    if (!entry.source) {
+      const varIdx = text.indexOf(String(entry.var));
+      const from = Math.max(0, varIdx);
+      diagnostics.push({ from, to: Math.min(from + String(entry.var).length, text.length), severity: 'error', message: `Mapping for "${entry.var}" is missing "source".` });
+      return;
+    }
+
+    if (!VALID_SOURCES.includes(entry.source)) {
+      const idx = text.indexOf(String(entry.source));
+      const from = Math.max(0, idx < 0 ? 0 : idx);
+      diagnostics.push({ from, to: Math.min(from + String(entry.source).length, text.length), severity: 'error', message: `Invalid source "${entry.source}". Valid: ${VALID_SOURCES.join(', ')}.` });
+    }
+
+    if (entry.format && !VALID_FORMATS.includes(entry.format)) {
+      const idx = text.indexOf(String(entry.format));
+      const from = Math.max(0, idx < 0 ? 0 : idx);
+      diagnostics.push({ from, to: Math.min(from + String(entry.format).length, text.length), severity: 'error', message: `Invalid format "${entry.format}". Valid: ${VALID_FORMATS.join(', ')}.` });
+    }
+  });
+
+  return diagnostics;
+}
+
+// ── YamlEditor component ──────────────────────────────────────────────────────
+
+function YamlEditor({ value, onChange, disabled, useMappingsLinter, placeholder }) {
+  const containerRef = useRef(null);
+  const viewRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const extensions = [
+      yaml(),
+      lineNumbers(),
+      keymap.of(defaultKeymap),
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          onChangeRef.current(update.state.doc.toString());
+        }
+      }),
+      EditorView.theme({
+        '&': { fontSize: '12px', fontFamily: 'ui-monospace, monospace' },
+        '.cm-content': { minHeight: '80px' },
+        '.cm-scroller': { overflow: 'auto' },
+      }),
+    ];
+
+    if (useMappingsLinter) {
+      extensions.push(linter(mappingsLinter), lintGutter());
+    }
+
+    const state = EditorState.create({
+      doc: value || '',
+      extensions,
+    });
+    const view = new EditorView({ state, parent: containerRef.current });
+    viewRef.current = view;
+
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useMappingsLinter]);
+
+  // Sync external value changes (e.g., form reset) into the editor
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const current = view.state.doc.toString();
+    const next = value || '';
+    if (current !== next) {
+      view.dispatch({ changes: { from: 0, to: current.length, insert: next } });
+    }
+  }, [value]);
+
+  // Toggle read-only when disabled changes
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: [],
+      // Re-configure editable facet
+    });
+    // Simpler: just set pointer-events via CSS on the container
+  }, [disabled]);
+
   return (
-    <div>
-      <textarea
-        value={raw}
-        onChange={handleChange}
-        disabled={disabled}
-        rows={4}
-        placeholder='{"key": "value"}'
-        className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-      />
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
-    </div>
+    <div
+      ref={containerRef}
+      className={`rounded-md border border-border bg-background focus-within:ring-2 focus-within:ring-ring overflow-hidden ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
+      aria-label={placeholder}
+    />
   );
 }
+
+// ── SemaphoreTemplateSelect ───────────────────────────────────────────────────
 
 function SemaphoreTemplateSelect({ value, valueName, onChange, disabled }) {
   const [templates, setTemplates] = useState([]);
@@ -119,34 +227,28 @@ function SemaphoreTemplateSelect({ value, valueName, onChange, disabled }) {
   );
 }
 
+// ── AutomationRow ─────────────────────────────────────────────────────────────
+
 function AutomationRow({ automation, onArchive, onUpdate }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(automation.name);
   const [templateId, setTemplateId] = useState(automation.semaphore_template_id);
   const [templateName, setTemplateName] = useState(automation.semaphore_template_name || '');
-  const [defaultVars, setDefaultVars] = useState(automation.default_vars);
-  const [varsValid, setVarsValid] = useState(true);
+  const [defaultVars, setDefaultVars] = useState(automation.default_vars || '');
+  const [incidentVarMappings, setIncidentVarMappings] = useState(automation.incident_var_mappings || '');
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
-  function handleVarsChange(val) {
-    if (val === undefined) {
-      setVarsValid(false);
-    } else {
-      setVarsValid(true);
-      setDefaultVars(val);
-    }
-  }
-
   async function handleSave() {
-    if (!name.trim() || !templateId || !varsValid) return;
+    if (!name.trim() || !templateId) return;
     setSaving(true);
     try {
       const res = await api.patch(`/api/automations/${automation.id}/`, {
         name: name.trim(),
         semaphore_template_id: templateId,
         semaphore_template_name: templateName,
-        default_vars: defaultVars || null,
+        default_vars: defaultVars.trim() || null,
+        incident_var_mappings: incidentVarMappings.trim() || null,
       });
       onUpdate(res.data);
       setEditing(false);
@@ -168,7 +270,7 @@ function AutomationRow({ automation, onArchive, onUpdate }) {
     return (
       <tr className="border-b border-border bg-accent/30">
         <td className="px-4 py-3" colSpan={4}>
-          <div className="space-y-2">
+          <div className="space-y-3">
             <input
               value={name}
               onChange={e => setName(e.target.value)}
@@ -182,14 +284,32 @@ function AutomationRow({ automation, onArchive, onUpdate }) {
               onChange={(id, tName) => { setTemplateId(id); setTemplateName(tName); }}
               disabled={saving}
             />
-            <DefaultVarsEditor value={defaultVars} onChange={handleVarsChange} disabled={saving} />
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Default vars (YAML)</label>
+              <YamlEditor
+                value={defaultVars}
+                onChange={setDefaultVars}
+                disabled={saving}
+                placeholder="Default vars YAML"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Incident var mappings (YAML)</label>
+              <YamlEditor
+                value={incidentVarMappings}
+                onChange={setIncidentVarMappings}
+                disabled={saving}
+                useMappingsLinter
+                placeholder="Incident var mappings YAML"
+              />
+            </div>
           </div>
         </td>
         <td className="px-4 py-3 align-top">
           <div className="flex flex-col gap-1">
             <button
               onClick={handleSave}
-              disabled={saving || !name.trim() || !templateId || !varsValid}
+              disabled={saving || !name.trim() || !templateId}
               className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
             >
               Save
@@ -211,7 +331,7 @@ function AutomationRow({ automation, onArchive, onUpdate }) {
       </td>
       <td className="px-4 py-3 text-sm text-muted-foreground">
         {automation.default_vars
-          ? <code className="rounded bg-muted px-1 py-0.5 text-xs">{JSON.stringify(automation.default_vars)}</code>
+          ? <code className="rounded bg-muted px-1 py-0.5 text-xs">{automation.default_vars.slice(0, 40)}{automation.default_vars.length > 40 ? '…' : ''}</code>
           : '—'}
       </td>
       <td className="px-4 py-3">
@@ -239,6 +359,8 @@ function AutomationRow({ automation, onArchive, onUpdate }) {
   );
 }
 
+// ── AutomationsAdmin page ─────────────────────────────────────────────────────
+
 export default function AutomationsAdmin() {
   const [automations, setAutomations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -247,8 +369,8 @@ export default function AutomationsAdmin() {
   const [name, setName] = useState('');
   const [templateId, setTemplateId] = useState(null);
   const [templateName, setTemplateName] = useState('');
-  const [defaultVars, setDefaultVars] = useState(null);
-  const [varsValid, setVarsValid] = useState(true);
+  const [defaultVars, setDefaultVars] = useState('');
+  const [incidentVarMappings, setIncidentVarMappings] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
 
@@ -259,18 +381,9 @@ export default function AutomationsAdmin() {
       .finally(() => setLoading(false));
   }, []);
 
-  function handleVarsChange(val) {
-    if (val === undefined) {
-      setVarsValid(false);
-    } else {
-      setVarsValid(true);
-      setDefaultVars(val);
-    }
-  }
-
   async function handleCreate(e) {
     e.preventDefault();
-    if (!name.trim() || !templateId || !varsValid) return;
+    if (!name.trim() || !templateId) return;
     setSubmitting(true);
     setFormError(null);
     try {
@@ -278,13 +391,15 @@ export default function AutomationsAdmin() {
         name: name.trim(),
         semaphore_template_id: templateId,
         semaphore_template_name: templateName,
-        default_vars: defaultVars || null,
+        default_vars: defaultVars.trim() || null,
+        incident_var_mappings: incidentVarMappings.trim() || null,
       });
       setAutomations(prev => [...prev, res.data]);
       setName('');
       setTemplateId(null);
       setTemplateName('');
-      setDefaultVars(null);
+      setDefaultVars('');
+      setIncidentVarMappings('');
     } catch (err) {
       const detail = err.response?.data?.detail;
       setFormError(
@@ -334,12 +449,27 @@ export default function AutomationsAdmin() {
             disabled={submitting}
           />
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Default vars (optional JSON)</label>
-            <DefaultVarsEditor value={defaultVars} onChange={handleVarsChange} disabled={submitting} />
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Default vars (optional YAML)</label>
+            <YamlEditor
+              value={defaultVars}
+              onChange={setDefaultVars}
+              disabled={submitting}
+              placeholder="Default vars YAML"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Incident var mappings (optional YAML)</label>
+            <YamlEditor
+              value={incidentVarMappings}
+              onChange={setIncidentVarMappings}
+              disabled={submitting}
+              useMappingsLinter
+              placeholder="Incident var mappings YAML"
+            />
           </div>
           <button
             type="submit"
-            disabled={submitting || !name.trim() || !templateId || !varsValid}
+            disabled={submitting || !name.trim() || !templateId}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
             {submitting ? 'Creating…' : 'Create'}
