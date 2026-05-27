@@ -600,3 +600,59 @@ def test_clamp_severity_3_levels_down_capped():
     from incidents.tasks import _clamp_severity
     # critical(4) → low(1): delta -3 → capped at -2 → medium(2)
     assert _clamp_severity("critical", "low") == "medium"
+
+
+# ── triage_running / triage_started_at in incident serializer ────────────────
+
+
+@pytest.mark.django_db
+def test_incident_detail_triage_running_false_when_no_lock(admin_client, acme):
+    """incident.triage_running is False when no triage lock is set."""
+    # Use state="triaged" to avoid triggering the post-save signal that would set the lock
+    incident = make_incident(acme, state="triaged")
+    response = admin_client.get(f"/api/incidents/{incident.display_id}/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["triage_running"] is False
+    assert data["triage_started_at"] is None
+
+
+@pytest.mark.django_db
+def test_incident_detail_triage_running_true_when_lock_set(admin_client, acme):
+    """incident.triage_running is True and triage_started_at is set when lock is held."""
+    incident = make_incident(acme)
+    from incidents.tasks import acquire_triage_lock, release_triage_lock
+    acquire_triage_lock(incident.id)
+    try:
+        response = admin_client.get(f"/api/incidents/{incident.display_id}/")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["triage_running"] is True
+        assert data["triage_started_at"] is not None
+    finally:
+        release_triage_lock(incident.id)
+
+
+@pytest.mark.django_db
+def test_acquire_triage_lock_stores_iso_timestamp(acme):
+    """acquire_triage_lock stores an ISO-format timestamp as the lock value."""
+    incident = make_incident(acme)
+    from incidents.tasks import acquire_triage_lock, get_triage_lock_started_at, release_triage_lock
+    acquire_triage_lock(incident.id)
+    try:
+        started_at = get_triage_lock_started_at(incident.id)
+        assert started_at is not None
+        # Should be parseable as an ISO datetime
+        from datetime import datetime
+        datetime.fromisoformat(started_at)
+    finally:
+        release_triage_lock(incident.id)
+
+
+@pytest.mark.django_db
+def test_get_triage_lock_started_at_returns_none_when_no_lock(acme):
+    """get_triage_lock_started_at returns None when no lock is held."""
+    # Use state="triaged" to avoid triggering the post-save signal that would set the lock
+    incident = make_incident(acme, state="triaged")
+    from incidents.tasks import get_triage_lock_started_at
+    assert get_triage_lock_started_at(incident.id) is None

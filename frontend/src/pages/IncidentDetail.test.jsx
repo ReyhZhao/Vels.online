@@ -46,6 +46,8 @@ const INCIDENT = {
   created_at: '2026-01-15T10:00:00Z',
   updated_at: '2026-01-15T10:00:00Z',
   iocs: [],
+  triage_running: false,
+  triage_started_at: null,
 };
 
 const SUBJECTS = [
@@ -541,5 +543,27 @@ describe('IncidentDetail', () => {
     renderPage();
     await waitFor(() => screen.getByText('Exceptions'));
     expect(screen.getByRole('link', { name: /view/i })).toHaveAttribute('href', '/exceptions');
+  });
+
+  // ── triage running banner ─────────────────────────────────────────────────
+
+  it('hides triage-running banner when triage_running is false', async () => {
+    mockGet({ ...INCIDENT, triage_running: false, triage_started_at: null });
+    renderPage();
+    await waitFor(() => screen.getByText('Suspicious login attempt'));
+    expect(screen.queryByText('Automated triage is running')).not.toBeInTheDocument();
+  });
+
+  it('shows triage-running banner when triage_running is true', async () => {
+    mockGet({ ...INCIDENT, triage_running: true, triage_started_at: '2026-01-15T10:05:00Z' });
+    renderPage();
+    await waitFor(() => screen.getByText('Automated triage is running'));
+  });
+
+  it('disables Run Triage button when triage_running is true', async () => {
+    mockGet({ ...INCIDENT, triage_running: true, triage_started_at: '2026-01-15T10:05:00Z' });
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /triage running/i }));
+    expect(screen.getByRole('button', { name: /triage running/i })).toBeDisabled();
   });
 });

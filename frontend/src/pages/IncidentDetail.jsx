@@ -1091,10 +1091,10 @@ export default function IncidentDetail() {
             {user?.is_staff && incident.state !== 'closed' && (
               <button
                 onClick={handleTriage}
-                disabled={triaging || triageQueued || transitioning}
+                disabled={triaging || triageQueued || incident.triage_running || transitioning}
                 className="rounded-md border border-violet-400 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:border-violet-600 dark:bg-violet-900/20 dark:text-violet-400 dark:hover:bg-violet-900/40"
               >
-                {triaging ? 'Triaging…' : triageQueued ? 'Triage queued' : 'Run Triage'}
+                {triaging ? 'Triaging…' : (triageQueued || incident.triage_running) ? 'Triage running…' : 'Run Triage'}
               </button>
             )}
           </div>
@@ -1104,6 +1104,30 @@ export default function IncidentDetail() {
         {badgeError      && <p className="text-sm text-red-600">{badgeError}</p>}
         {triageError     && <p className="text-sm text-red-600">{triageError}</p>}
       </div>
+
+      {/* ── Triage-running banner ── */}
+      {(triageQueued || incident.triage_running) && (
+        <div className="flex items-center gap-3 rounded-lg border border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30 px-4 py-3 text-sm text-violet-800 dark:text-violet-300">
+          <svg
+            className="h-4 w-4 shrink-0 animate-spin text-violet-600 dark:text-violet-400"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="font-medium">Automated triage is running</span>
+          {incident.triage_started_at && (
+            <span className="text-violet-600 dark:text-violet-400">
+              · started {new Date(incident.triage_started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+          <span className="ml-auto text-xs text-violet-500 dark:text-violet-500">
+            This page polls automatically — results will appear when triage completes.
+          </span>
+        </div>
+      )}
 
       {/* ── Tabbed content ── */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">

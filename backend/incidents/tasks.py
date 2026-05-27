@@ -21,11 +21,18 @@ _CORRELATION_CANDIDATE_LIMIT = 50
 
 
 def acquire_triage_lock(incident_id: int) -> bool:
-    return cache.add(_TRIAGE_LOCK_KEY.format(incident_id), "1", _TRIAGE_LOCK_TTL)
+    """Atomically set the triage lock.  Returns True if the lock was acquired."""
+    started_at = timezone.now().isoformat()
+    return cache.add(_TRIAGE_LOCK_KEY.format(incident_id), started_at, _TRIAGE_LOCK_TTL)
 
 
 def release_triage_lock(incident_id: int) -> None:
     cache.delete(_TRIAGE_LOCK_KEY.format(incident_id))
+
+
+def get_triage_lock_started_at(incident_id: int) -> str | None:
+    """Return the ISO-format start timestamp if triage is running, else None."""
+    return cache.get(_TRIAGE_LOCK_KEY.format(incident_id))
 
 
 def _clamp_severity(current: str, recommended: str) -> str:

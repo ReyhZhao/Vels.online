@@ -3,6 +3,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .tasks import get_triage_lock_started_at
 
 
 class IOCSerializer(serializers.ModelSerializer):
@@ -118,6 +119,8 @@ class IncidentSerializer(serializers.ModelSerializer):
     iocs = serializers.SerializerMethodField()
     duplicate_of_display_id = serializers.SerializerMethodField()
     duplicates = serializers.SerializerMethodField()
+    triage_running = serializers.SerializerMethodField()
+    triage_started_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Incident
@@ -151,6 +154,8 @@ class IncidentSerializer(serializers.ModelSerializer):
             "resolve_sla",
             "assets",
             "iocs",
+            "triage_running",
+            "triage_started_at",
         ]
         read_only_fields = ["id", "display_id", "org_slug", "created_by", "created_at", "updated_at"]
 
@@ -188,6 +193,12 @@ class IncidentSerializer(serializers.ModelSerializer):
 
     def get_duplicates(self, obj):
         return IncidentStubSerializer(obj.duplicates.all(), many=True).data
+
+    def get_triage_running(self, obj):
+        return get_triage_lock_started_at(obj.id) is not None
+
+    def get_triage_started_at(self, obj):
+        return get_triage_lock_started_at(obj.id)
 
 
 class IncidentCreateSerializer(serializers.ModelSerializer):
