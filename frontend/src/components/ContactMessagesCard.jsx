@@ -9,13 +9,18 @@ const ROLE_CLASSES = {
 
 export default function ContactMessagesCard({ displayId }) {
   const [groups, setGroups] = useState([]);
+  const [contacts, setContacts] = useState([]);  // all linked contacts (with or without messages)
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
   const [composingFor, setComposingFor] = useState(null);
 
   async function reload() {
-    const r = await api.get(`/api/incidents/${displayId}/contact-messages/`);
-    setGroups(r.data);
+    const [msgRes, contactRes] = await Promise.all([
+      api.get(`/api/incidents/${displayId}/contact-messages/`),
+      api.get(`/api/incidents/${displayId}/contacts/`),
+    ]);
+    setGroups(msgRes.data);
+    setContacts(contactRes.data);
   }
 
   useEffect(() => {
@@ -40,13 +45,31 @@ export default function ContactMessagesCard({ displayId }) {
   }
 
   if (loading) return null;
-  if (groups.length === 0) return null;
+
+  // Merge: contacts with existing message groups take the group data;
+  // contacts without messages are shown with an empty messages list.
+  const groupsByContactId = Object.fromEntries(groups.map(g => [g.contact_id, g]));
+  const mergedGroups = contacts.map(c => groupsByContactId[c.contact_id] ?? {
+    contact_id: c.contact_id,
+    name: c.name,
+    email: c.email,
+    department: c.department ?? '',
+    messages: [],
+  });
+
+  // Also include any groups whose contact was removed from the incident (orphans)
+  const linkedContactIds = new Set(contacts.map(c => c.contact_id));
+  groups.forEach(g => {
+    if (!linkedContactIds.has(g.contact_id)) mergedGroups.push(g);
+  });
+
+  if (mergedGroups.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-border bg-card p-6 space-y-3">
-      <h2 className="text-base font-semibold text-foreground">Contact Messages</h2>
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <h3 className="text-sm font-semibold text-foreground">Contact Messages</h3>
       <div className="divide-y divide-border">
-        {groups.map(g => {
+        {mergedGroups.map(g => {
           const hasUnread = g.messages.some(m => m.direction === 'inbound' && !m.read_at);
           const isExpanded = !!expanded[g.contact_id];
 
@@ -59,18 +82,24 @@ export default function ContactMessagesCard({ displayId }) {
           });
 
           return (
-            <div key={g.contact_id} className="py-3">
+            <div key={g.contact_id} className="py-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => handleToggle(g.contact_id)}
-                    className="text-sm font-medium text-foreground flex items-center gap-1 hover:text-primary transition-colors"
+                    onClick={() => g.messages.length > 0 && handleToggle(g.contact_id)}
+                    disabled={g.messages.length === 0}
+                    className={`text-sm font-medium text-foreground flex items-center gap-1 transition-colors ${g.messages.length > 0 ? 'hover:text-primary' : 'cursor-default'}`}
                   >
-                    <span className="text-xs">{isExpanded ? '▾' : '▸'}</span>
+                    {g.messages.length > 0 && (
+                      <span className="text-xs">{isExpanded ? '▾' : '▸'}</span>
+                    )}
                     <span>{g.name}</span>
                   </button>
                   {g.department && (
                     <span className="text-xs text-muted-foreground">{g.department}</span>
+                  )}
+                  {g.messages.length > 0 && (
+                    <span className="text-xs text-muted-foreground">({g.messages.filter(m => m.direction === 'outbound').length} sent)</span>
                   )}
                   {hasUnread && (
                     <span
@@ -88,13 +117,13 @@ export default function ContactMessagesCard({ displayId }) {
               </div>
 
               {isExpanded && (
-                <div className="mt-3 space-y-3 pl-4 border-l border-border">
+                <div className="mt-2 space-y-2 pl-3 border-l border-border">
                   {outbound.length === 0 && Object.values(inboundByParent).flat().length === 0 && (
                     <p className="text-xs text-muted-foreground italic">No messages yet.</p>
                   )}
                   {outbound.map(msg => (
-                    <div key={msg.id} className="space-y-2">
-                      <div className="rounded-md bg-muted/50 p-3">
+                    <div key={msg.id} className="space-y-1">
+                      <div className="rounded-md bg-muted/50 p-2.5">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-medium text-foreground">Outbound</span>
                           {msg.role && (
@@ -109,7 +138,7 @@ export default function ContactMessagesCard({ displayId }) {
                         <p className="text-sm text-foreground whitespace-pre-wrap">{msg.body}</p>
                       </div>
                       {(inboundByParent[msg.id] ?? []).map(reply => (
-                        <div key={reply.id} className="ml-6 rounded-md bg-background border border-border p-3">
+                        <div key={reply.id} className="ml-4 rounded-md bg-background border border-border p-2.5">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-xs font-medium text-foreground">{g.name}</span>
                             <span className="text-xs text-muted-foreground">
@@ -122,7 +151,7 @@ export default function ContactMessagesCard({ displayId }) {
                     </div>
                   ))}
                   {(inboundByParent['orphan'] ?? []).map(reply => (
-                    <div key={reply.id} className="rounded-md bg-background border border-border p-3">
+                    <div key={reply.id} className="rounded-md bg-background border border-border p-2.5">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs font-medium text-foreground">{g.name}</span>
                         <span className="text-xs text-muted-foreground">

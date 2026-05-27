@@ -17,6 +17,8 @@ vi.mock('./ContactComposeModal', () => ({
 import api from '../lib/axios';
 import ContactMessagesCard from './ContactMessagesCard';
 
+const CAROL_CONTACT = { id: 99, contact_id: 10, name: 'Carol', email: 'carol@example.com', department: 'IT' };
+
 const GROUP_WITH_MESSAGES = [
   {
     contact_id: 10,
@@ -56,6 +58,14 @@ const GROUP_NO_MESSAGES = [
   },
 ];
 
+function mockBothEndpoints({ messages = [], contacts = [] } = {}) {
+  api.get.mockImplementation(url => {
+    if (url.endsWith('/contact-messages/')) return Promise.resolve({ data: messages });
+    if (url.endsWith('/contacts/'))        return Promise.resolve({ data: contacts });
+    return Promise.resolve({ data: [] });
+  });
+}
+
 describe('ContactMessagesCard', () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -65,29 +75,36 @@ describe('ContactMessagesCard', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders nothing when no groups returned', async () => {
-    api.get.mockResolvedValue({ data: [] });
+  it('renders nothing when no contacts and no messages', async () => {
+    mockBothEndpoints({ messages: [], contacts: [] });
     const { container } = render(<ContactMessagesCard displayId="INC-001" />);
     await waitFor(() => {});
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders contact row with Message button', async () => {
-    api.get.mockResolvedValue({ data: GROUP_NO_MESSAGES });
+  it('renders contact row with Message button even when no messages sent yet', async () => {
+    mockBothEndpoints({ messages: [], contacts: [CAROL_CONTACT] });
+    render(<ContactMessagesCard displayId="INC-001" />);
+    await waitFor(() => screen.getByText('Carol'));
+    expect(screen.getByText('Message')).toBeInTheDocument();
+  });
+
+  it('renders contact row with Message button when message group has no messages', async () => {
+    mockBothEndpoints({ messages: GROUP_NO_MESSAGES, contacts: [CAROL_CONTACT] });
     render(<ContactMessagesCard displayId="INC-001" />);
     await waitFor(() => screen.getByText('Carol'));
     expect(screen.getByText('Message')).toBeInTheDocument();
   });
 
   it('shows unread badge when an inbound message has no read_at', async () => {
-    api.get.mockResolvedValue({ data: GROUP_WITH_MESSAGES });
+    mockBothEndpoints({ messages: GROUP_WITH_MESSAGES, contacts: [CAROL_CONTACT] });
     render(<ContactMessagesCard displayId="INC-001" />);
     await waitFor(() => screen.getByTitle('Unread reply'));
     expect(screen.getByTitle('Unread reply')).toBeInTheDocument();
   });
 
   it('expands thread and calls mark-read when row is toggled open', async () => {
-    api.get.mockResolvedValue({ data: GROUP_WITH_MESSAGES });
+    mockBothEndpoints({ messages: GROUP_WITH_MESSAGES, contacts: [CAROL_CONTACT] });
     api.post.mockResolvedValue({});
 
     render(<ContactMessagesCard displayId="INC-001" />);
@@ -107,7 +124,7 @@ describe('ContactMessagesCard', () => {
   });
 
   it('hides unread badge after expanding (mark-read clears it)', async () => {
-    api.get.mockResolvedValue({ data: GROUP_WITH_MESSAGES });
+    mockBothEndpoints({ messages: GROUP_WITH_MESSAGES, contacts: [CAROL_CONTACT] });
     api.post.mockResolvedValue({});
 
     render(<ContactMessagesCard displayId="INC-001" />);
@@ -119,7 +136,7 @@ describe('ContactMessagesCard', () => {
   });
 
   it('renders inbound reply indented under outbound parent', async () => {
-    api.get.mockResolvedValue({ data: GROUP_WITH_MESSAGES });
+    mockBothEndpoints({ messages: GROUP_WITH_MESSAGES, contacts: [CAROL_CONTACT] });
     render(<ContactMessagesCard displayId="INC-001" />);
     await waitFor(() => screen.getByText('Carol'));
 
@@ -130,7 +147,7 @@ describe('ContactMessagesCard', () => {
   });
 
   it('opens compose modal when Message button is clicked', async () => {
-    api.get.mockResolvedValue({ data: GROUP_WITH_MESSAGES });
+    mockBothEndpoints({ messages: GROUP_WITH_MESSAGES, contacts: [CAROL_CONTACT] });
     render(<ContactMessagesCard displayId="INC-001" />);
     await waitFor(() => screen.getByText('Message'));
 
@@ -141,7 +158,7 @@ describe('ContactMessagesCard', () => {
   });
 
   it('closes compose modal when onClose is triggered', async () => {
-    api.get.mockResolvedValue({ data: GROUP_WITH_MESSAGES });
+    mockBothEndpoints({ messages: GROUP_WITH_MESSAGES, contacts: [CAROL_CONTACT] });
     render(<ContactMessagesCard displayId="INC-001" />);
     await waitFor(() => screen.getByText('Message'));
 
@@ -149,5 +166,13 @@ describe('ContactMessagesCard', () => {
     fireEvent.click(screen.getByText('Close Modal'));
 
     expect(screen.queryByTestId('compose-modal')).not.toBeInTheDocument();
+  });
+
+  it('shows contact from contacts list that has no messages yet', async () => {
+    const newContact = { id: 77, contact_id: 20, name: 'Dave', email: 'dave@example.com', department: 'HR' };
+    mockBothEndpoints({ messages: GROUP_WITH_MESSAGES, contacts: [CAROL_CONTACT, newContact] });
+    render(<ContactMessagesCard displayId="INC-001" />);
+    await waitFor(() => screen.getByText('Carol'));
+    expect(screen.getByText('Dave')).toBeInTheDocument();
   });
 });

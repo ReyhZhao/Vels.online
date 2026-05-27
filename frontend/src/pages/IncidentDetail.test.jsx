@@ -63,6 +63,7 @@ function mockGet(incident = INCIDENT, subjects = SUBJECTS, exceptions = []) {
     if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
     if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
     if (url.endsWith('/contact-messages/')) return Promise.resolve({ data: [] });
+    if (url.endsWith('/contacts/')) return Promise.resolve({ data: [] });
     if (url === '/api/exceptions/') return Promise.resolve({ data: exceptions });
     return Promise.resolve({ data: incident });
   });
@@ -322,6 +323,7 @@ describe('IncidentDetail', () => {
       if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
       if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/contact-messages/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contacts/')) return Promise.resolve({ data: [] });
       return Promise.resolve({ data: ASSIGNED });
     });
     renderPage();
@@ -339,6 +341,7 @@ describe('IncidentDetail', () => {
       if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
       if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/contact-messages/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contacts/')) return Promise.resolve({ data: [] });
       return Promise.resolve({ data: INCIDENT });
     });
     const user = userEvent.setup();
@@ -361,6 +364,7 @@ describe('IncidentDetail', () => {
       if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
       if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/contact-messages/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contacts/')) return Promise.resolve({ data: [] });
       return Promise.resolve({ data: INCIDENT });
     });
     api.post.mockResolvedValue({ data: TRANSFERRED });
@@ -384,6 +388,7 @@ describe('IncidentDetail', () => {
       if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
       if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
       if (url.endsWith('/contact-messages/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contacts/')) return Promise.resolve({ data: [] });
       return Promise.resolve({ data: INCIDENT });
     });
     const user = userEvent.setup();

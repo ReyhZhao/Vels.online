@@ -1219,7 +1219,7 @@ export default function IncidentDetail() {
                 </div>
               )}
 
-              {/* Description + Comments */}
+              {/* Description + Activity (comments + contact messages) */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <div>
@@ -1237,20 +1237,19 @@ export default function IncidentDetail() {
                     <span>Updated: {incident.updated_at ? new Date(incident.updated_at).toLocaleString() : '—'}</span>
                   </div>
                 </div>
-                <div>
+                {/* Right column: comments and contact messages form the unified activity feed */}
+                <div className="space-y-4">
                   <IncidentComments
                     incidentId={displayId}
                     currentUserId={user?.id}
                     isStaff={user?.is_staff ?? false}
                   />
+                  <ContactMessagesCard displayId={displayId} />
                 </div>
               </div>
 
               {/* Exceptions */}
               <IncidentExceptionsSection displayId={displayId} />
-
-              {/* Contact Messages */}
-              <ContactMessagesCard displayId={displayId} />
             </div>
           )}
           {activeTab === 'timeline' && (
