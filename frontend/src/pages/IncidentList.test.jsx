@@ -344,6 +344,89 @@ describe('IncidentList', () => {
 
 });
 
+// ── filter/sort preference storage ───────────────────────────────────────────
+
+describe('IncidentList — preference storage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    mockUseAuth.mockReturnValue({ user: { id: 42, is_staff: false } });
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+  });
+
+  it('restores saved preferences from localStorage on mount when URL has no params', async () => {
+    localStorage.setItem('incident_list_prefs_42', JSON.stringify({
+      tab: 'unassigned',
+      severity: 'high',
+      created_within: '24h',
+    }));
+    renderPage('/');
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/incidents/', expect.objectContaining({
+        params: expect.objectContaining({ tab: 'unassigned', severity: 'high', created_within: '24h' }),
+      }))
+    );
+  });
+
+  it('does not override URL params with saved preferences when params are already present', async () => {
+    localStorage.setItem('incident_list_prefs_42', JSON.stringify({
+      tab: 'unassigned',
+      severity: 'critical',
+    }));
+    renderPage('/incidents?severity=high&tab=my_queue');
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/incidents/', expect.objectContaining({
+        params: expect.objectContaining({ severity: 'high', tab: 'my_queue' }),
+      }))
+    );
+    // Should NOT contain the saved severity=critical
+    const calls = api.get.mock.calls.filter(c => c[0] === '/api/incidents/');
+    const lastParams = calls[calls.length - 1]?.[1]?.params ?? {};
+    expect(lastParams.severity).not.toBe('critical');
+  });
+
+  it('saves preferences to localStorage when a filter is changed', async () => {
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Severity filter'));
+    fireEvent.change(screen.getByLabelText('Severity filter'), { target: { value: 'critical' } });
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem('incident_list_prefs_42') ?? '{}');
+      expect(saved.severity).toBe('critical');
+    });
+  });
+
+  it('saves preferences to localStorage when sort column is clicked', async () => {
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Sort by Title'));
+    fireEvent.click(screen.getByLabelText('Sort by Title'));
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem('incident_list_prefs_42') ?? '{}');
+      expect(saved.sort).toBe('title');
+      expect(saved.order).toBe('asc');
+    });
+  });
+
+  it('uses user-specific storage key', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 99, is_staff: false } });
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Severity filter'));
+    fireEvent.change(screen.getByLabelText('Severity filter'), { target: { value: 'low' } });
+    await waitFor(() => {
+      expect(localStorage.getItem('incident_list_prefs_99')).toBeTruthy();
+      expect(localStorage.getItem('incident_list_prefs_42')).toBeNull();
+    });
+  });
+
+  it('defaults to my_queue tab when no saved preferences exist', async () => {
+    renderPage('/');
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/incidents/', expect.objectContaining({
+        params: expect.objectContaining({ tab: 'my_queue' }),
+      }))
+    );
+  });
+});
+
 // ── silent background poll ────────────────────────────────────────────────────
 // Use a spy to capture the 30-second setInterval callback so we can fire it
 // manually without fake timers (which break waitFor's internal polling).

@@ -5,6 +5,35 @@ import { useAuth } from '../context/AuthContext';
 import SLAPill from '../components/SLAPill';
 import CreateIncidentModal from '../components/CreateIncidentModal';
 
+// Keys that are persisted as user preferences (excludes transient keys like page, q)
+const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'created_within', 'sort', 'order'];
+
+function getPrefsStorageKey(userId) {
+  return `incident_list_prefs_${userId ?? 'anon'}`;
+}
+
+function loadPrefs(userId) {
+  try {
+    const raw = localStorage.getItem(getPrefsStorageKey(userId));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePrefs(userId, searchParams) {
+  try {
+    const prefs = {};
+    PREF_KEYS.forEach(k => {
+      const v = searchParams.get(k);
+      if (v) prefs[k] = v;
+    });
+    localStorage.setItem(getPrefsStorageKey(userId), JSON.stringify(prefs));
+  } catch {
+    // Ignore storage errors (private mode, quota exceeded, etc.)
+  }
+}
+
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
   high:     'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
@@ -212,15 +241,33 @@ export default function IncidentList() {
 
   const activeTab = searchParams.get('tab') ?? '';
 
+  // Track whether initialization (pref restore) is done so we know when to start saving
+  const isFirstSaveRef = useRef(true);
+
+  // On mount: restore saved preferences if the URL has no filter/sort params
   useEffect(() => {
-    if (!searchParams.has('tab')) {
-      setSearchParams(prev => {
-        const next = new URLSearchParams(prev);
-        next.set('tab', 'my_queue');
-        return next;
-      }, { replace: true });
-    }
+    const hasParams = PREF_KEYS.some(k => searchParams.has(k));
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (!hasParams) {
+        const saved = loadPrefs(user?.id);
+        if (saved) {
+          Object.entries(saved).forEach(([k, v]) => next.set(k, v));
+        }
+      }
+      if (!next.has('tab')) next.set('tab', 'my_queue');
+      return next;
+    }, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save preferences whenever the user changes filters/sort (skip the very first render)
+  useEffect(() => {
+    if (isFirstSaveRef.current) {
+      isFirstSaveRef.current = false;
+      return;
+    }
+    savePrefs(user?.id, searchParams);
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchIncidents = useCallback(async (params, { silent = false } = {}) => {
     if (!silent) {
