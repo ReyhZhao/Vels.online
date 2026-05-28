@@ -109,17 +109,17 @@ def test_xml_no_match_block_when_empty(acme):
 
 def test_rule_file_path_org_scoped(acme):
     rule = make_rule(acme, scope="org")
-    assert rule_file_path(rule) == "rules/acme_exceptions.xml"
+    assert rule_file_path(rule) == "wazuh/files/rules/acme_exceptions.xml"
 
 
 def test_rule_file_path_global():
     rule = make_rule(scope="global")
-    assert rule_file_path(rule) == "rules/global_exceptions.xml"
+    assert rule_file_path(rule) == "wazuh/files/rules/global_exceptions.xml"
 
 
 def test_rule_file_path_no_org():
     rule = make_rule(scope="org")  # org=None
-    assert rule_file_path(rule) == "rules/global_exceptions.xml"
+    assert rule_file_path(rule) == "wazuh/files/rules/global_exceptions.xml"
 
 
 # ── GitHub push service ──────────────────────────────────────────────────────

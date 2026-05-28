@@ -8,7 +8,7 @@ from django.conf import settings
 
 from .services_xml import rule_file_path, rule_to_xml
 
-REPO        = "ReyhZhao/security-monitoring"
+REPO        = "ReyhZhao/argocd-deployments"
 BRANCH      = "main"
 API_BASE    = f"https://api.github.com/repos/{REPO}/contents"
 _EMPTY_FILE = '<?xml version="1.0" encoding="UTF-8"?>\n<group name="exceptions">\n</group>\n'

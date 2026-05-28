@@ -1,5 +1,6 @@
 from django.conf import settings
 
+from incidents.services.events import record_event
 from notifications.email import send_html_email
 from .tokens import build_reply_to_address
 
@@ -14,6 +15,12 @@ def send_contact_message(incident, contact, role, body):
         role=role,
         body=body,
     )
+
+    record_event(incident, "contact_message_sent", payload={
+        "contact_id": contact.id,
+        "contact_name": contact.name,
+        "role": role,
+    })
 
     template = "contact_questioned" if role == "questioned" else "contact_notified"
     context = {

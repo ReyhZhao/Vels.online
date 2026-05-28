@@ -419,6 +419,7 @@ class IOC(models.Model):
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="iocs")
     kind = models.CharField(max_length=10, choices=KIND_CHOICES)
     value = models.TextField()
+    enrichment_data = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -387,29 +387,32 @@ def test_triage_task_passes_empty_context_when_unset(acme):
 @pytest.mark.django_db
 def test_signal_enqueues_triage_on_new_incident(acme):
     with patch("incidents.signals.acquire_triage_lock", return_value=True) as mock_lock:
-        with patch("incidents.signals.run_incident_triage") as mock_task:
-            mock_task.delay = MagicMock()
-            incident = make_incident(acme, state="new")
-            mock_lock.assert_called_once_with(incident.id)
-            mock_task.delay.assert_called_once_with(incident.id)
+        with patch("incidents.signals.enrich_iocs_then_triage") as mock_task:
+            with patch("incidents.signals.transaction.on_commit", side_effect=lambda f: f()):
+                mock_task.delay = MagicMock()
+                incident = make_incident(acme, state="new")
+                mock_lock.assert_called_once_with(incident.id)
+                mock_task.delay.assert_called_once_with(incident.id)
 
 
 @pytest.mark.django_db
 def test_signal_does_not_enqueue_for_non_new_state(acme):
     with patch("incidents.signals.acquire_triage_lock", return_value=True):
-        with patch("incidents.signals.run_incident_triage") as mock_task:
-            mock_task.delay = MagicMock()
-            make_incident(acme, state="triaged")
-            mock_task.delay.assert_not_called()
+        with patch("incidents.signals.enrich_iocs_then_triage") as mock_task:
+            with patch("incidents.signals.transaction.on_commit", side_effect=lambda f: f()):
+                mock_task.delay = MagicMock()
+                make_incident(acme, state="triaged")
+                mock_task.delay.assert_not_called()
 
 
 @pytest.mark.django_db
 def test_signal_does_not_enqueue_when_lock_taken(acme):
     with patch("incidents.signals.acquire_triage_lock", return_value=False):
-        with patch("incidents.signals.run_incident_triage") as mock_task:
-            mock_task.delay = MagicMock()
-            make_incident(acme, state="new")
-            mock_task.delay.assert_not_called()
+        with patch("incidents.signals.enrich_iocs_then_triage") as mock_task:
+            with patch("incidents.signals.transaction.on_commit", side_effect=lambda f: f()):
+                mock_task.delay = MagicMock()
+                make_incident(acme, state="new")
+                mock_task.delay.assert_not_called()
 
 
 # ── IncidentTriageView API ────────────────────────────────────────────────────

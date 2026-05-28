@@ -60,3 +60,9 @@ class ContactReplyHandler:
             parent=parent,
         )
         logger.info("inbound_mail: created contact message on %s from contact %s", incident.display_id, contact.name)
+
+        from incidents.services.events import record_event
+        record_event(incident, "contact_message_received", payload={
+            "contact_id": contact.id,
+            "contact_name": contact.name,
+        })

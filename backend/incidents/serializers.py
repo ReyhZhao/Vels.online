@@ -9,8 +9,8 @@ from .tasks import get_triage_lock_started_at
 class IOCSerializer(serializers.ModelSerializer):
     class Meta:
         model = IOC
-        fields = ["id", "kind", "value", "created_at"]
-        read_only_fields = ["id", "created_at"]
+        fields = ["id", "kind", "value", "enrichment_data", "created_at"]
+        read_only_fields = ["id", "enrichment_data", "created_at"]
 
 
 class SubjectSerializer(serializers.ModelSerializer):

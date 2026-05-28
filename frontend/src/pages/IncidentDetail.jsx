@@ -128,6 +128,117 @@ const IOC_KIND_CLASSES = {
   url:    'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
 };
 
+function enrichmentScore(ioc) {
+  const d = ioc.enrichment_data;
+  if (!d || Object.keys(d).length === 0) return { state: 'pending' };
+  if (ioc.kind === 'ip') {
+    const ab = d.abuseipdb;
+    if (!ab) return { state: 'pending' };
+    if (ab.status === 'failed') return { state: 'failed', error: ab.error };
+    const score = ab.abuse_confidence_score ?? 0;
+    const color = score >= 75 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                : score >= 25 ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+    return { state: 'done', label: `${score}/100`, color, detail: ab };
+  }
+  if (ioc.kind === 'domain' || ioc.kind === 'url') {
+    const vt = d.virustotal;
+    if (!vt) return { state: 'pending' };
+    if (vt.status === 'failed') return { state: 'failed', error: vt.error };
+    const mal = vt.malicious ?? 0;
+    const total = vt.total ?? 0;
+    const ratio = total > 0 ? mal / total : 0;
+    const color = ratio >= 0.1 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                : ratio > 0    ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+    return { state: 'done', label: `${mal}/${total}`, color, detail: vt };
+  }
+  return { state: 'pending' };
+}
+
+function EnrichmentBadge({ ioc }) {
+  const s = enrichmentScore(ioc);
+  if (s.state === 'pending') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] bg-muted text-muted-foreground">
+        <svg className="h-2.5 w-2.5 animate-spin" viewBox="0 0 24 24" fill="none">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+        pending
+      </span>
+    );
+  }
+  if (s.state === 'failed') {
+    return (
+      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-muted text-muted-foreground">
+        unavailable
+      </span>
+    );
+  }
+  return (
+    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${s.color}`}>
+      {s.label}
+    </span>
+  );
+}
+
+function EnrichmentDetail({ ioc }) {
+  const s = enrichmentScore(ioc);
+  if (s.state === 'pending') {
+    return <p className="text-xs text-muted-foreground">Enrichment is pending…</p>;
+  }
+  if (s.state === 'failed') {
+    return <p className="text-xs text-muted-foreground">Enrichment unavailable: {s.error || 'unknown error'}</p>;
+  }
+  const d = s.detail;
+  if (ioc.kind === 'ip') {
+    return (
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        <dt className="text-muted-foreground">Abuse confidence</dt><dd className="text-foreground tabular-nums">{d.abuse_confidence_score}/100</dd>
+        <dt className="text-muted-foreground">Total reports</dt><dd className="text-foreground tabular-nums">{d.total_reports ?? '—'}</dd>
+        <dt className="text-muted-foreground">Country</dt><dd className="text-foreground">{d.country_code ?? '—'}</dd>
+        <dt className="text-muted-foreground">Usage type</dt><dd className="text-foreground">{d.usage_type ?? '—'}</dd>
+      </dl>
+    );
+  }
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+      <dt className="text-muted-foreground">Malicious engines</dt><dd className="text-foreground tabular-nums">{d.malicious ?? '—'}</dd>
+      <dt className="text-muted-foreground">Suspicious engines</dt><dd className="text-foreground tabular-nums">{d.suspicious ?? '—'}</dd>
+      <dt className="text-muted-foreground">Total engines</dt><dd className="text-foreground tabular-nums">{d.total ?? '—'}</dd>
+    </dl>
+  );
+}
+
+function IOCRow({ ioc, kindClass }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="rounded border border-border bg-background">
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label={expanded ? 'Collapse' : 'Expand'}
+        >
+          <svg className={`h-3 w-3 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+        <span className={`font-mono text-xs ${kindClass}`}>{ioc.value}</span>
+        <div className="ml-auto">
+          <EnrichmentBadge ioc={ioc} />
+        </div>
+      </div>
+      {expanded && (
+        <div className="border-t border-border px-3 py-2">
+          <EnrichmentDetail ioc={ioc} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IOCSection({ iocs }) {
   const grouped = iocs.reduce((acc, ioc) => {
     if (!acc[ioc.kind]) acc[ioc.kind] = [];
@@ -143,20 +254,15 @@ function IOCSection({ iocs }) {
       {kinds.length === 0 ? (
         <p className="text-sm text-muted-foreground">No IOCs were extracted from this incident.</p>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {kinds.map(kind => (
-            <div key={kind}>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+            <div key={kind} className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 {IOC_KIND_LABELS[kind]}
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="space-y-1">
                 {grouped[kind].map(ioc => (
-                  <span
-                    key={ioc.id}
-                    className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-mono ${IOC_KIND_CLASSES[kind]}`}
-                  >
-                    {ioc.value}
-                  </span>
+                  <IOCRow key={ioc.id} ioc={ioc} kindClass={IOC_KIND_CLASSES[kind]} />
                 ))}
               </div>
             </div>
@@ -1131,7 +1237,7 @@ export default function IncidentDetail() {
 
       {/* ── Tabbed content ── */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
-        <div className="flex overflow-x-auto border-b border-border scrollbar-none">
+        <div className="flex overflow-x-auto border-b border-border no-scrollbar">
           {TABS.map(tab => (
             <button
               key={tab.key}

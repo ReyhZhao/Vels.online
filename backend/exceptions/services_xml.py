@@ -41,5 +41,5 @@ def rule_to_xml(rule) -> str:
 def rule_file_path(rule) -> str:
     """Return the repo-relative file path for this rule's XML file."""
     if rule.scope == "global" or rule.organisation is None:
-        return "rules/global_exceptions.xml"
-    return f"rules/{rule.organisation.slug}_exceptions.xml"
+        return "wazuh/files/rules/global_exceptions.xml"
+    return f"wazuh/files/rules/{rule.organisation.slug}_exceptions.xml"

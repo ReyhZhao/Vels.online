@@ -56,7 +56,7 @@ from .services.delegation import delegate, return_delegation
 from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
 from .services.visibility import can_view_incident, filter_comments_for_user, filter_events_for_user, filter_incidents_for_user
-from .tasks import acquire_triage_lock, run_incident_triage
+from .tasks import acquire_triage_lock, enrich_iocs_then_triage, run_incident_triage
 
 logger = logging.getLogger(__name__)
 
@@ -1605,7 +1605,11 @@ class PromoteView(APIView):
                 created_by=request.user,
             )
             link_source_assets(incident, org)
+            extract_and_save_iocs(incident)
             record_event(incident, "incident_created", actor=request.user)
+            if acquire_triage_lock(incident.id):
+                incident_id = incident.id
+                transaction.on_commit(lambda: enrich_iocs_then_triage.delay(incident_id))
 
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)
 

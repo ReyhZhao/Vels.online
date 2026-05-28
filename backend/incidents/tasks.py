@@ -46,6 +46,27 @@ def _clamp_severity(current: str, recommended: str) -> str:
     return RANK_TO_SEV.get(capped_rank, current)
 
 
+@shared_task
+def enrich_iocs_then_triage(incident_id: int):
+    """Coordinator: enrich all IOCs then dispatch triage.
+
+    Currently a pass-through; enrichment logic is added in subsequent slices.
+    """
+    from incidents.services.ioc_enrichment import enrich_ioc
+    from incidents.models import IOC
+
+    for ioc in IOC.objects.filter(incident_id=incident_id):
+        try:
+            result = enrich_ioc(ioc)
+            if result:
+                ioc.enrichment_data = result
+                ioc.save(update_fields=["enrichment_data"])
+        except Exception as exc:
+            logger.warning("enrich_iocs_then_triage: enrichment failed for IOC %s: %s", ioc.id, exc)
+
+    run_incident_triage.delay(incident_id)
+
+
 @shared_task(bind=True, max_retries=3)
 def run_incident_triage(self, incident_id: int):
     from incidents.models import Comment, Incident
@@ -156,6 +177,31 @@ def run_incident_triage(self, incident_id: int):
     )
 
 
+def _ioc_enrichment_annotation(ioc) -> str | None:
+    """Return a compact enrichment annotation string for the IOC, or None if unavailable."""
+    data = ioc.enrichment_data
+    if not data:
+        return None
+    if ioc.kind == "ip":
+        ab = data.get("abuseipdb", {})
+        if ab.get("status") != "done":
+            return None
+        parts = [f"AbuseIPDB: {ab['abuse_confidence_score']}/100"]
+        if ab.get("total_reports") is not None:
+            parts.append(f"{ab['total_reports']} reports")
+        if ab.get("usage_type"):
+            parts.append(ab["usage_type"])
+        if ab.get("country_code"):
+            parts.append(ab["country_code"])
+        return f"{ioc.value} ({', '.join(parts)})"
+    if ioc.kind in ("domain", "url"):
+        vt = data.get("virustotal", {})
+        if vt.get("status") != "done":
+            return None
+        return f"{ioc.value} (VirusTotal: {vt['malicious']}/{vt['total']} engines malicious)"
+    return None
+
+
 def _build_triage_payload(incident) -> dict:
     assets = [
         {
@@ -166,7 +212,10 @@ def _build_triage_payload(incident) -> dict:
         }
         for ia in incident.incident_assets.all()
     ]
-    iocs = [{"kind": ioc.kind, "value": ioc.value} for ioc in incident.iocs.all()]
+    iocs = []
+    for ioc in incident.iocs.all():
+        annotation = _ioc_enrichment_annotation(ioc)
+        iocs.append({"kind": ioc.kind, "value": annotation or ioc.value})
     return {
         "source_ref": incident.source_ref,
         "assets": assets,

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   AlertCircle, FilePen, MessageSquare, Pencil, Trash2,
   UserCheck, CornerDownLeft, ArrowLeftRight, LayoutTemplate,
-  SquareCheck, RefreshCw, CircleX, ShieldCheck,
+  SquareCheck, RefreshCw, CircleX, ShieldCheck, Mail, MailOpen,
 } from 'lucide-react';
 import api from '../lib/axios';
 
@@ -76,6 +76,17 @@ export function renderExceptionCreated(payload) {
   return `Exception rule created: ${desc}.`;
 }
 
+export function renderContactMessageSent(payload) {
+  const name = payload?.contact_name ?? `contact #${payload?.contact_id ?? '?'}`;
+  const role = payload?.role ? ` (${payload.role})` : '';
+  return `Message sent to ${name}${role}.`;
+}
+
+export function renderContactMessageReceived(payload) {
+  const name = payload?.contact_name ?? `contact #${payload?.contact_id ?? '?'}`;
+  return `Reply received from ${name}.`;
+}
+
 const KIND_RENDERERS = {
   incident_updated: renderIncidentUpdated,
   incident_created: () => 'Incident created.',
@@ -91,6 +102,8 @@ const KIND_RENDERERS = {
   task_state_changed: renderTaskStateChanged,
   task_auto_cancelled: renderTaskAutoCancelled,
   exception_created: renderExceptionCreated,
+  contact_message_sent: renderContactMessageSent,
+  contact_message_received: renderContactMessageReceived,
 };
 
 export function renderEvent(kind, payload) {
@@ -116,6 +129,8 @@ const KIND_CONFIG = {
   task_state_changed:           { Icon: RefreshCw,      badge: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',   label: 'TASK'      },
   task_auto_cancelled:          { Icon: CircleX,        badge: 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-300',   label: 'TASK'      },
   exception_created:            { Icon: ShieldCheck,    badge: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',       label: 'EXCEPTION' },
+  contact_message_sent:         { Icon: Mail,           badge: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400',                label: 'MESSAGE'   },
+  contact_message_received:     { Icon: MailOpen,       badge: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',               label: 'REPLY'     },
 };
 
 const DEFAULT_CONFIG = { Icon: AlertCircle, badge: 'bg-muted text-muted-foreground', label: 'EVENT' };
