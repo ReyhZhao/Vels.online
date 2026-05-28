@@ -1519,7 +1519,10 @@ def _build_extra_vars(task):
         try:
             extra_vars.update(resolve_incident_vars(task.automation.incident_var_mappings, incident))
         except UnresolvableVarError as exc:
-            return None, Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return None, Response(
+                {"error": f"Mapping for '{exc.var_name}' (source: {exc.source}) resolved to no values."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     extra_vars.update({
         "incident_id": incident.id,

@@ -21,10 +21,7 @@ function TemplateEditor({ template, onSave, onReset, onBack }) {
 
   useEffect(() => {
     if (preview && iframeRef.current) {
-      const doc = iframeRef.current.contentDocument;
-      doc.open();
-      doc.write(html);
-      doc.close();
+      iframeRef.current.srcdoc = html;
     }
   }, [preview, html]);
 
