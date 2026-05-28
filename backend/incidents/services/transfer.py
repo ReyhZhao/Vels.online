@@ -9,6 +9,7 @@ def transfer_incident(incident, new_assignee, actor):
     if not new_assignee.is_staff:
         raise ValidationError("new_assignee must be a staff user.")
 
+    old_assignee = incident.assignee
     old_assignee_id = incident.assignee_id
 
     with transaction.atomic():
@@ -18,7 +19,12 @@ def transfer_incident(incident, new_assignee, actor):
             incident,
             "incident_assignee_changed",
             actor=actor,
-            payload={"from": old_assignee_id, "to": new_assignee.id},
+            payload={
+                "from": old_assignee_id,
+                "from_username": old_assignee.username if old_assignee else None,
+                "to": new_assignee.id,
+                "to_username": new_assignee.username,
+            },
         )
 
     _notify_transfer(incident, new_assignee, old_assignee_id)

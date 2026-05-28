@@ -85,6 +85,58 @@ function CreateAssetModal({ open, onClose, orgSlug, onCreated }) {
   );
 }
 
+function AssetRow({ asset, onDeleted }) {
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!confirm(`Delete asset "${asset.name}"?`)) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/api/assets/${asset.id}/`);
+      onDeleted(asset.id);
+    } catch {
+      alert('Failed to delete asset.');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+      <td className="px-4 py-3 font-medium text-foreground">
+        <Link to={`/assets/${asset.id}`} className="hover:underline">{asset.name}</Link>
+      </td>
+      <td className="px-4 py-3 text-muted-foreground capitalize">{asset.kind}</td>
+      <td className="px-4 py-3 text-muted-foreground">{asset.agent_name || '—'}</td>
+      <td className="px-4 py-3 text-muted-foreground">{asset.ip_address || '—'}</td>
+      <td className="px-4 py-3">
+        {asset.is_active === false ? (
+          <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs text-muted-foreground">inactive</span>
+        ) : (
+          <span className="inline-flex items-center rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">active</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-muted-foreground text-xs">
+        {asset.last_seen_at ? new Date(asset.last_seen_at).toLocaleString() : '—'}
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex gap-2">
+          <Link to={`/assets/${asset.id}`} className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors">
+            Edit
+          </Link>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 export default function AssetsPage() {
   const { selectedOrg } = useOrganization();
   const [assets, setAssets] = useState([]);
@@ -140,7 +192,8 @@ export default function AssetsPage() {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-max">
           <thead>
             <tr className="border-b border-border">
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
@@ -149,41 +202,26 @@ export default function AssetsPage() {
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">IP Address</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Last Seen</th>
+              <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                   {search ? 'No assets match your search.' : 'No assets yet.'}
                 </td>
               </tr>
             ) : filtered.map(asset => (
-              <tr key={asset.id} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
-                <td className="px-4 py-3 font-medium text-foreground">
-                  <Link to={`/assets/${asset.id}`} className="hover:underline">{asset.name}</Link>
-                </td>
-                <td className="px-4 py-3 text-muted-foreground capitalize">{asset.kind}</td>
-                <td className="px-4 py-3 text-muted-foreground">{asset.agent_name || '—'}</td>
-                <td className="px-4 py-3 text-muted-foreground">{asset.ip_address || '—'}</td>
-                <td className="px-4 py-3">
-                  {asset.is_active === false ? (
-                    <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs text-muted-foreground">inactive</span>
-                  ) : (
-                    <span className="inline-flex items-center rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">active</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground text-xs">
-                  {asset.last_seen_at ? new Date(asset.last_seen_at).toLocaleString() : '—'}
-                </td>
-              </tr>
+              <AssetRow key={asset.id} asset={asset} onDeleted={id => setAssets(prev => prev.filter(a => a.id !== id))} />
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

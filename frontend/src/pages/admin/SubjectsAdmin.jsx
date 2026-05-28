@@ -117,7 +117,8 @@ export default function SubjectsAdmin() {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-max">
           <thead>
             <tr className="border-b border-border">
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
@@ -143,6 +144,7 @@ export default function SubjectsAdmin() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

@@ -46,9 +46,9 @@ export function renderIncidentDelegationReturned(payload) {
 }
 
 export function renderIncidentAssigneeChanged(payload) {
-  const from = payload?.from != null ? `#${payload.from}` : '(unassigned)';
-  const to = payload?.to != null ? `#${payload.to}` : '(unassigned)';
-  return `Transferred from ${from} to ${to}.`;
+  const from = payload?.from_username ?? (payload?.from != null ? `#${payload.from}` : null);
+  const to = payload?.to_username ?? (payload?.to != null ? `#${payload.to}` : null);
+  return `Transferred from ${from ?? '(unassigned)'} to ${to ?? '(unassigned)'}.`;
 }
 
 export function renderTemplateApplied(payload) {
