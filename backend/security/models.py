@@ -44,6 +44,9 @@ class Organization(models.Model):
     max_routes = models.PositiveIntegerField(null=True, blank=True)
     triage_fp_threshold = models.FloatField(default=0.95)
     triage_prompt_context = models.TextField(null=True, blank=True)
+    alert_match_lookback_days = models.PositiveIntegerField(default=30)
+    alert_auto_promote_threshold = models.PositiveIntegerField(default=5)
+    alert_auto_promote_window_minutes = models.PositiveIntegerField(default=60)
 
     def save(self, *args, **kwargs):
         if not self.wazuh_group:

@@ -703,7 +703,16 @@ export default function IncidentList() {
                       />
                     </td>
                   )}
-                  <td className="px-4 py-3 font-mono text-xs font-medium text-foreground">{inc.display_id}</td>
+                  <td className="px-4 py-3 font-mono text-xs font-medium text-foreground">
+                    <div className="flex items-center gap-1.5">
+                      {inc.display_id}
+                      {inc.linked_alert_count > 0 && (
+                        <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/30 px-1.5 py-0.5 text-xs font-semibold text-blue-700 dark:text-blue-400" title={`${inc.linked_alert_count} linked alert${inc.linked_alert_count === 1 ? '' : 's'}`}>
+                          {inc.linked_alert_count}
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-foreground max-w-xs truncate">{inc.title}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[inc.severity] ?? ''}`}>

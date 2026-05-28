@@ -1133,6 +1133,39 @@ class StaffUserListView(APIView):
         return Response(data)
 
 
+class IncidentLinkedAlertsView(APIView):
+    """GET /api/incidents/<display_id>/alerts/ — linked alerts for an incident."""
+
+    def get(self, request, display_id):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            incident = Incident.objects.select_related("organization", "assignee").get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_incident(request.user, incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        from alerts.models import Alert
+
+        alerts = Alert.objects.filter(incident=incident).select_related("acknowledged_by").order_by("-created_at")
+        data = [
+            {
+                "display_id": a.display_id,
+                "title": a.title,
+                "severity": a.severity,
+                "source_kind": a.source_kind,
+                "state": a.state,
+                "created_at": a.created_at.isoformat(),
+                "agent_name": (a.source_ref or {}).get("agent_name"),
+            }
+            for a in alerts
+        ]
+        return Response(data)
+
+
 class IncidentTimelineView(APIView):
     PAGE_SIZE = 50
 

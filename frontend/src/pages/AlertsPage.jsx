@@ -1,0 +1,577 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import api from '../lib/axios';
+import { useAuth } from '../context/AuthContext';
+import SlideOver from '../components/SlideOver';
+
+const SEVERITY_CLASSES = {
+  critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+  high:     'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+  medium:   'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+  low:      'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  info:     'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+};
+
+const STATE_CLASSES = {
+  new:          'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  acknowledged: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
+  imported:     'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+  ignored:      'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500',
+};
+
+const SOURCE_KIND_LABELS = {
+  wazuh_event:   'Wazuh',
+  vulnerability: 'CVE',
+  agent_finding: 'Agent',
+  api:           'API',
+};
+
+function formatDatetime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function AlertDetailPanel({ alert, onClose, onStateChange, orgSlug }) {
+  const [relinkOpen, setRelinkOpen] = useState(false);
+  const [incidents, setIncidents] = useState([]);
+  const [incidentQuery, setIncidentQuery] = useState('');
+  const [relinking, setRelinking] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
+
+  const handleTransition = async (newState) => {
+    setTransitioning(true);
+    try {
+      const resp = await api.patch(`/api/alerts/${alert.display_id}/`, { state: newState });
+      onStateChange(resp.data);
+    } catch {
+      // ignore
+    } finally {
+      setTransitioning(false);
+    }
+  };
+
+  const openRelink = () => {
+    setRelinkOpen(true);
+    setIncidentQuery('');
+    api.get('/api/incidents/', { params: { per_page: 50, state: 'new,triaged,in_progress,on_hold' } })
+      .then(r => setIncidents(r.data.results ?? []))
+      .catch(() => {});
+  };
+
+  const handleRelink = async (incidentDisplayId) => {
+    setRelinking(true);
+    try {
+      const resp = await api.patch(`/api/alerts/${alert.display_id}/`, { incident: incidentDisplayId });
+      onStateChange(resp.data);
+      setRelinkOpen(false);
+    } catch {
+      // ignore
+    } finally {
+      setRelinking(false);
+    }
+  };
+
+  const filteredIncidents = incidents.filter(i =>
+    i.display_id.toLowerCase().includes(incidentQuery.toLowerCase()) ||
+    i.title.toLowerCase().includes(incidentQuery.toLowerCase())
+  );
+
+  if (!alert) return null;
+
+  return (
+    <div className="flex flex-col gap-4 px-6 py-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-mono text-xs font-semibold text-muted-foreground">{alert.display_id}</span>
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[alert.severity] ?? ''}`}>
+          {alert.severity}
+        </span>
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATE_CLASSES[alert.state] ?? ''}`}>
+          {alert.state}
+        </span>
+        <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+          {SOURCE_KIND_LABELS[alert.source_kind] ?? alert.source_kind}
+        </span>
+      </div>
+
+      <h3 className="text-sm font-medium text-foreground">{alert.title}</h3>
+
+      <div className="text-xs text-muted-foreground">{formatDatetime(alert.created_at)}</div>
+
+      {alert.incident_display_id && (
+        <div className="text-sm">
+          <span className="text-muted-foreground">Linked incident: </span>
+          <Link
+            to={`/incidents/${alert.incident_display_id}`}
+            className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+            onClick={onClose}
+          >
+            {alert.incident_display_id}
+          </Link>
+        </div>
+      )}
+
+      {/* Source ref details */}
+      {alert.source_ref && Object.keys(alert.source_ref).length > 0 && (
+        <div className="rounded-md border border-border bg-muted/30 p-3">
+          <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">Source Details</p>
+          <dl className="space-y-1">
+            {Object.entries(alert.source_ref).map(([k, v]) => (
+              <div key={k} className="flex gap-2 text-xs">
+                <dt className="text-muted-foreground min-w-[100px] shrink-0">{k}</dt>
+                <dd className="text-foreground font-mono break-all">{String(v)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex flex-col gap-2 pt-2">
+        {alert.state === 'new' && (
+          <>
+            <button
+              onClick={() => handleTransition('acknowledged')}
+              disabled={transitioning}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              Acknowledge
+            </button>
+            <button
+              onClick={() => handleTransition('ignored')}
+              disabled={transitioning}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              Ignore
+            </button>
+          </>
+        )}
+        {alert.state === 'acknowledged' && (
+          <button
+            onClick={() => handleTransition('ignored')}
+            disabled={transitioning}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50"
+          >
+            Ignore
+          </button>
+        )}
+        {alert.state === 'imported' && (
+          <button
+            onClick={openRelink}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+          >
+            Re-link to incident…
+          </button>
+        )}
+      </div>
+
+      {/* Re-link incident picker */}
+      {relinkOpen && (
+        <div className="rounded-md border border-border bg-background p-3 flex flex-col gap-2">
+          <p className="text-sm font-medium text-foreground">Select incident</p>
+          <input
+            type="search"
+            placeholder="Search incidents…"
+            value={incidentQuery}
+            onChange={e => setIncidentQuery(e.target.value)}
+            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <div className="max-h-48 overflow-y-auto flex flex-col gap-1">
+            {filteredIncidents.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-2">No incidents found.</p>
+            ) : filteredIncidents.map(inc => (
+              <button
+                key={inc.id}
+                onClick={() => handleRelink(inc.display_id)}
+                disabled={relinking}
+                className="text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                <span className="font-mono text-xs text-muted-foreground">{inc.display_id}</span>
+                {' '}
+                <span className="text-foreground">{inc.title}</span>
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setRelinkOpen(false)}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low', 'info'];
+const STATE_OPTIONS = ['new', 'acknowledged', 'imported', 'ignored'];
+const SOURCE_KIND_OPTIONS = ['wazuh_event', 'vulnerability', 'agent_finding', 'api'];
+
+const EMPTY_DATA = { count: 0, page: 1, per_page: 25, total_pages: 1, results: [] };
+
+function AlertsPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  const [data, setData] = useState(EMPTY_DATA);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+
+  // Filters
+  const [filterState, setFilterState] = useState('');
+  const [filterSeverity, setFilterSeverity] = useState('');
+  const [filterSourceKind, setFilterSourceKind] = useState('');
+  const [showIgnored, setShowIgnored] = useState(false);
+
+  // Selection
+  const [selectedIds, setSelectedIds] = useState(new Set());
+
+  // Detail panel
+  const [selectedAlert, setSelectedAlert] = useState(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  // Bulk promote
+  const [promoting, setPromoting] = useState(false);
+
+  const fetchAlerts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = { page, per_page: 25 };
+      if (filterState) params.state = filterState;
+      if (filterSeverity) params.severity = filterSeverity;
+      if (filterSourceKind) params.source_kind = filterSourceKind;
+
+      const resp = await api.get('/api/alerts/', { params });
+      let results = resp.data.results ?? [];
+
+      // Filter out ignored unless explicitly showing them or filtering for them
+      if (!showIgnored && !filterState) {
+        results = results.filter(a => a.state !== 'ignored');
+      }
+
+      setData({ ...resp.data, results });
+    } catch {
+      setData(EMPTY_DATA);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, filterState, filterSeverity, filterSourceKind, showIgnored]);
+
+  useEffect(() => {
+    fetchAlerts();
+  }, [fetchAlerts]);
+
+  const openDetail = (alert) => {
+    setSelectedAlert(alert);
+    setPanelOpen(true);
+  };
+
+  const handleStateChange = (updatedAlert) => {
+    setData(prev => ({
+      ...prev,
+      results: prev.results.map(a => a.display_id === updatedAlert.display_id ? updatedAlert : a),
+    }));
+    setSelectedAlert(updatedAlert);
+  };
+
+  const toggleSelect = (displayId) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(displayId)) next.delete(displayId);
+      else next.add(displayId);
+      return next;
+    });
+  };
+
+  const allVisible = data.results.filter(a => a.state !== 'imported').map(a => a.display_id);
+  const allSelected = allVisible.length > 0 && allVisible.every(id => selectedIds.has(id));
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(allVisible));
+    }
+  };
+
+  const handleBulkPromote = async () => {
+    const eligibleIds = [...selectedIds].filter(id => {
+      const a = data.results.find(r => r.display_id === id);
+      return a && a.state !== 'imported' && a.state !== 'ignored';
+    });
+
+    if (eligibleIds.length === 0) return;
+
+    if (!user?.org_slug) {
+      // Try to get the org from the first alert
+      const firstAlert = data.results.find(a => selectedIds.has(a.display_id));
+      if (!firstAlert?.org_slug) return;
+    }
+
+    const orgSlug = data.results.find(a => selectedIds.has(a.display_id))?.org_slug;
+    if (!orgSlug) return;
+
+    setPromoting(true);
+    try {
+      const resp = await api.post('/api/alerts/bulk-promote/', {
+        alerts: eligibleIds,
+        org: orgSlug,
+      });
+      setSelectedIds(new Set());
+      navigate(`/incidents/${resp.data.display_id}`);
+    } catch {
+      // ignore
+    } finally {
+      setPromoting(false);
+    }
+  };
+
+  const handleQuickAction = async (e, alert, newState) => {
+    e.stopPropagation();
+    try {
+      const resp = await api.patch(`/api/alerts/${alert.display_id}/`, { state: newState });
+      handleStateChange(resp.data);
+    } catch {
+      // ignore
+    }
+  };
+
+  const totalCount = data.count;
+  const { results, total_pages } = data;
+
+  const newCount = results.filter(a => a.state === 'new').length;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold text-foreground">Alert Inbox</h1>
+          {newCount > 0 && (
+            <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 text-xs font-medium text-blue-800 dark:text-blue-400">
+              {newCount} new
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-muted/20">
+        <select
+          value={filterSeverity}
+          onChange={e => { setFilterSeverity(e.target.value); setPage(1); }}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground"
+        >
+          <option value="">All severities</option>
+          {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+
+        <select
+          value={filterState}
+          onChange={e => { setFilterState(e.target.value); setPage(1); }}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground"
+        >
+          <option value="">All states</option>
+          {STATE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+
+        <select
+          value={filterSourceKind}
+          onChange={e => { setFilterSourceKind(e.target.value); setPage(1); }}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground"
+        >
+          <option value="">All sources</option>
+          {SOURCE_KIND_OPTIONS.map(s => <option key={s} value={s}>{SOURCE_KIND_LABELS[s] ?? s}</option>)}
+        </select>
+
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showIgnored}
+            onChange={e => { setShowIgnored(e.target.checked); setPage(1); }}
+            className="rounded border-border"
+          />
+          Show ignored
+        </label>
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-muted/50 backdrop-blur border-b border-border">
+            <tr>
+              <th className="px-4 py-2 w-8">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  className="rounded border-border"
+                  aria-label="Select all"
+                />
+              </th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">ID</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Title</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Severity</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">State</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Source</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Incident</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Created</th>
+              <th className="px-4 py-2 w-24" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {loading ? (
+              <tr>
+                <td colSpan={9} className="px-4 py-8 text-center text-sm text-muted-foreground">Loading…</td>
+              </tr>
+            ) : results.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  No alerts. {showIgnored ? '' : 'Ignored alerts are hidden — toggle above to show them.'}
+                </td>
+              </tr>
+            ) : results.map(alert => (
+              <tr
+                key={alert.display_id}
+                className="hover:bg-muted/30 cursor-pointer transition-colors group"
+                onClick={() => openDetail(alert)}
+              >
+                <td className="px-4 py-3 w-8" onClick={e => e.stopPropagation()}>
+                  {alert.state !== 'imported' && (
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(alert.display_id)}
+                      onChange={() => toggleSelect(alert.display_id)}
+                      className="rounded border-border"
+                      aria-label={`Select ${alert.display_id}`}
+                    />
+                  )}
+                </td>
+                <td className="px-4 py-3 font-mono text-xs font-medium text-foreground whitespace-nowrap">
+                  {alert.display_id}
+                </td>
+                <td className="px-4 py-3 text-foreground max-w-xs truncate">{alert.title}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[alert.severity] ?? ''}`}>
+                    {alert.severity}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATE_CLASSES[alert.state] ?? ''}`}>
+                    {alert.state}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                    {SOURCE_KIND_LABELS[alert.source_kind] ?? alert.source_kind}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  {alert.incident_display_id ? (
+                    <Link
+                      to={`/incidents/${alert.incident_display_id}`}
+                      className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {alert.incident_display_id}
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground text-xs">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">
+                  {formatDatetime(alert.created_at)}
+                </td>
+                <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                  {alert.state === 'new' && (
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={e => handleQuickAction(e, alert, 'acknowledged')}
+                        className="rounded px-2 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50 transition-colors"
+                        title="Acknowledge"
+                      >
+                        Ack
+                      </button>
+                      <button
+                        onClick={e => handleQuickAction(e, alert, 'ignored')}
+                        className="rounded px-2 py-1 text-xs bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
+                        title="Ignore"
+                      >
+                        Ignore
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {total_pages > 1 && (
+        <div className="flex items-center justify-between px-6 py-3 border-t border-border text-sm text-muted-foreground">
+          <span>{totalCount} alerts</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="rounded-md border border-border px-3 py-1 hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="px-2 py-1">Page {page} of {total_pages}</span>
+            <button
+              onClick={() => setPage(p => Math.min(total_pages, p + 1))}
+              disabled={page === total_pages}
+              className="rounded-md border border-border px-3 py-1 hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating bulk action toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 rounded-xl border border-border bg-background px-6 py-3 shadow-2xl">
+          <span className="text-sm text-foreground">
+            {selectedIds.size} selected
+          </span>
+          <button
+            onClick={handleBulkPromote}
+            disabled={promoting}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+          >
+            {promoting ? 'Creating…' : `Create incident from selected (${selectedIds.size})`}
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Detail slide-over */}
+      <SlideOver
+        open={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        title={selectedAlert?.display_id ?? 'Alert'}
+      >
+        {selectedAlert && (
+          <AlertDetailPanel
+            alert={selectedAlert}
+            onClose={() => setPanelOpen(false)}
+            onStateChange={handleStateChange}
+            orgSlug={selectedAlert.org_slug}
+          />
+        )}
+      </SlideOver>
+    </div>
+  );
+}
+
+export default AlertsPage;

@@ -104,6 +104,14 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   const [adminOpen, setAdminOpen] = useState(() => readLS('sidebar:admin:open', true));
   const [reportOpen, setReportOpen] = useState(false);
   const [pendingSignups, setPendingSignups] = useState(0);
+  const [newAlertCount, setNewAlertCount] = useState(0);
+
+  const fetchNewAlertCount = useCallback(() => {
+    api
+      .get('/api/alerts/', { params: { state: 'new', per_page: 1 } })
+      .then((res) => setNewAlertCount(res.data.count ?? 0))
+      .catch(() => {});
+  }, []);
 
   const fetchPendingCount = useCallback(() => {
     if (!isStaff) return;
@@ -115,7 +123,10 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
 
   useEffect(() => {
     fetchPendingCount();
-  }, [fetchPendingCount]);
+    fetchNewAlertCount();
+    const interval = setInterval(fetchNewAlertCount, 60000);
+    return () => clearInterval(interval);
+  }, [fetchPendingCount, fetchNewAlertCount]);
 
   useEffect(() => {
     window.addEventListener('signuprequest:changed', fetchPendingCount);
@@ -185,6 +196,31 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 <SidebarLink to="/incidents" icon={AlertTriangle} collapsed={collapsed}>
                   Incidents
                 </SidebarLink>
+                <NavLink
+                  to="/alerts"
+                  title={collapsed ? 'Alert Inbox' : undefined}
+                  className={({ isActive }) =>
+                    cn(
+                      'flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                      collapsed ? 'justify-center px-2 gap-0' : 'gap-3',
+                      isActive
+                        ? 'bg-accent text-accent-foreground'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                    )
+                  }
+                >
+                  <Bell className="h-4 w-4 shrink-0" />
+                  {!collapsed && (
+                    <>
+                      <span>Alert Inbox</span>
+                      {newAlertCount > 0 && (
+                        <span className="ml-auto rounded-full bg-blue-600 px-1.5 py-0.5 text-xs font-semibold text-white">
+                          {newAlertCount}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </NavLink>
                 <SidebarLink to="/tasks" icon={ListChecks} collapsed={collapsed}>
                   Tasks
                 </SidebarLink>

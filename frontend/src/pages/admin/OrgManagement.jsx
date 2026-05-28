@@ -116,6 +116,13 @@ function OrgRow({ org }) {
   const [triageSaveError, setTriageSaveError] = useState(null);
   const [triageSaved, setTriageSaved] = useState(false);
 
+  const [alertLookback, setAlertLookback] = useState(org.alert_match_lookback_days ?? 30);
+  const [alertThreshold, setAlertThreshold] = useState(org.alert_auto_promote_threshold ?? 5);
+  const [alertWindow, setAlertWindow] = useState(org.alert_auto_promote_window_minutes ?? 60);
+  const [savingAlerts, setSavingAlerts] = useState(false);
+  const [alertSaveError, setAlertSaveError] = useState(null);
+  const [alertSaved, setAlertSaved] = useState(false);
+
   async function loadInvitations() {
     if (invitations !== null) return;
     setLoadingInvites(true);
@@ -152,6 +159,25 @@ function OrgRow({ org }) {
       setTriageSaveError(err.response?.data?.triage_prompt_context?.[0] ?? 'Failed to save.');
     } finally {
       setSavingTriage(false);
+    }
+  }
+
+  async function handleSaveAlertSettings(e) {
+    e.preventDefault();
+    setSavingAlerts(true);
+    setAlertSaveError(null);
+    setAlertSaved(false);
+    try {
+      await api.patch(`/api/security/organizations/${org.slug}/`, {
+        alert_match_lookback_days: Number(alertLookback),
+        alert_auto_promote_threshold: Number(alertThreshold),
+        alert_auto_promote_window_minutes: Number(alertWindow),
+      });
+      setAlertSaved(true);
+    } catch (err) {
+      setAlertSaveError('Failed to save alert settings.');
+    } finally {
+      setSavingAlerts(false);
     }
   }
 
@@ -246,6 +272,61 @@ function OrgRow({ org }) {
                   disabled={savingTriage || triageContext.length > PROMPT_MAX}
                 >
                   {savingTriage ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </form>
+
+            <form onSubmit={handleSaveAlertSettings} className="space-y-3 border-t border-border/50 pt-3 mt-3">
+              <p className="text-xs font-semibold text-foreground uppercase tracking-wider">Alert Settings</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`alert-lookback-${org.slug}`}>
+                    Match lookback (days)
+                  </label>
+                  <input
+                    id={`alert-lookback-${org.slug}`}
+                    type="number"
+                    min={1}
+                    value={alertLookback}
+                    onChange={e => { setAlertLookback(e.target.value); setAlertSaved(false); }}
+                    disabled={savingAlerts}
+                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`alert-threshold-${org.slug}`}>
+                    Auto-promote threshold
+                  </label>
+                  <input
+                    id={`alert-threshold-${org.slug}`}
+                    type="number"
+                    min={1}
+                    value={alertThreshold}
+                    onChange={e => { setAlertThreshold(e.target.value); setAlertSaved(false); }}
+                    disabled={savingAlerts}
+                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`alert-window-${org.slug}`}>
+                    Promote window (min)
+                  </label>
+                  <input
+                    id={`alert-window-${org.slug}`}
+                    type="number"
+                    min={1}
+                    value={alertWindow}
+                    onChange={e => { setAlertWindow(e.target.value); setAlertSaved(false); }}
+                    disabled={savingAlerts}
+                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+                  />
+                </div>
+              </div>
+              {alertSaveError && <p className="text-xs text-destructive">{alertSaveError}</p>}
+              {alertSaved && <p className="text-xs text-green-600 dark:text-green-400">Saved.</p>}
+              <div className="flex justify-end">
+                <Button type="submit" size="sm" disabled={savingAlerts}>
+                  {savingAlerts ? 'Saving…' : 'Save alert settings'}
                 </Button>
               </div>
             </form>

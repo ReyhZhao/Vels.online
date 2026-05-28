@@ -121,6 +121,7 @@ class IncidentSerializer(serializers.ModelSerializer):
     duplicates = serializers.SerializerMethodField()
     triage_running = serializers.SerializerMethodField()
     triage_started_at = serializers.SerializerMethodField()
+    linked_alert_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Incident
@@ -156,6 +157,7 @@ class IncidentSerializer(serializers.ModelSerializer):
             "iocs",
             "triage_running",
             "triage_started_at",
+            "linked_alert_count",
         ]
         read_only_fields = ["id", "display_id", "org_slug", "created_by", "created_at", "updated_at"]
 
@@ -199,6 +201,10 @@ class IncidentSerializer(serializers.ModelSerializer):
 
     def get_triage_started_at(self, obj):
         return get_triage_lock_started_at(obj.id)
+
+    def get_linked_alert_count(self, obj):
+        # Use the reverse relation set up by Alert.incident FK (related_name='alerts')
+        return obj.alerts.count()
 
 
 class IncidentCreateSerializer(serializers.ModelSerializer):

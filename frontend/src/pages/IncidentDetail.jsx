@@ -72,14 +72,15 @@ const CLOSURE_REASONS = [
 ];
 
 const TABS = [
-  { key: 'details',     label: 'Details' },
-  { key: 'timeline',    label: 'Timeline' },
-  { key: 'attachments', label: 'Attachments' },
-  { key: 'tasks',       label: 'Tasks' },
-  { key: 'delegations', label: 'Delegations' },
-  { key: 'assets',      label: 'Assets' },
-  { key: 'iocs',        label: 'IOCs' },
-  { key: 'contacts',    label: 'Contacts' },
+  { key: 'details',       label: 'Details' },
+  { key: 'timeline',      label: 'Timeline' },
+  { key: 'attachments',   label: 'Attachments' },
+  { key: 'tasks',         label: 'Tasks' },
+  { key: 'delegations',   label: 'Delegations' },
+  { key: 'assets',        label: 'Assets' },
+  { key: 'iocs',          label: 'IOCs' },
+  { key: 'contacts',      label: 'Contacts' },
+  { key: 'linked_alerts', label: 'Linked Alerts' },
 ];
 
 const EXCEPTION_STATUS_CLASSES = {
@@ -1416,8 +1417,113 @@ export default function IncidentDetail() {
           {activeTab === 'contacts' && (
             <IncidentContactsPanel displayId={displayId} orgSlug={incident.org_slug} />
           )}
+          {activeTab === 'linked_alerts' && (
+            <LinkedAlertsPanel displayId={displayId} linkedAlertCount={incident.linked_alert_count ?? 0} />
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+const ALERT_SEVERITY_CLASSES = {
+  critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+  high:     'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+  medium:   'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+  low:      'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  info:     'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+};
+
+const ALERT_STATE_CLASSES = {
+  new:          'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  acknowledged: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
+  imported:     'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+  ignored:      'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500',
+};
+
+const ALERT_SOURCE_LABELS = {
+  wazuh_event:   'Wazuh',
+  vulnerability: 'CVE',
+  agent_finding: 'Agent',
+  api:           'API',
+};
+
+function LinkedAlertsPanel({ displayId, linkedAlertCount }) {
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    api.get(`/api/incidents/${displayId}/alerts/`)
+      .then(res => { setAlerts(Array.isArray(res.data) ? res.data : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [displayId]);
+
+  const formatDt = (iso) => {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <div className="p-4">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex w-full items-center justify-between rounded-md px-2 py-1 text-sm font-semibold text-foreground hover:bg-accent transition-colors"
+      >
+        <span>Linked Alerts ({linkedAlertCount})</span>
+        <span className="text-muted-foreground">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3">
+          {loading ? (
+            <p className="text-sm text-muted-foreground px-2">Loading…</p>
+          ) : alerts.length === 0 ? (
+            <p className="text-sm text-muted-foreground px-2">No linked alerts.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">ID</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Title</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Severity</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Source</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Agent</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">State</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Created</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {alerts.map(a => (
+                    <tr key={a.display_id} className="hover:bg-muted/30">
+                      <td className="px-2 py-2 font-mono text-xs font-medium">{a.display_id}</td>
+                      <td className="px-2 py-2 text-foreground max-w-xs truncate">{a.title}</td>
+                      <td className="px-2 py-2">
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${ALERT_SEVERITY_CLASSES[a.severity] ?? ''}`}>
+                          {a.severity}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2">
+                        <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                          {ALERT_SOURCE_LABELS[a.source_kind] ?? a.source_kind}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-xs text-muted-foreground font-mono">{a.agent_name ?? '—'}</td>
+                      <td className="px-2 py-2">
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${ALERT_STATE_CLASSES[a.state] ?? ''}`}>
+                          {a.state}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-xs text-muted-foreground whitespace-nowrap">{formatDt(a.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

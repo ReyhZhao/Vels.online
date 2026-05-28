@@ -17,6 +17,7 @@ from .views import (
     IncidentDelegateView,
     IncidentDelegationReturnView,
     IncidentDetailView,
+    IncidentLinkedAlertsView,
     IncidentListView,
     IncidentTaskListView,
     IncidentTimelineView,
@@ -52,4 +53,5 @@ urlpatterns = [
     path("<str:display_id>/contacts/<int:pk>/", IncidentContactDetailView.as_view()),
     path("<str:display_id>/contact-messages/", IncidentContactMessageListView.as_view()),
     path("<str:display_id>/contact-messages/mark-read/", IncidentContactMessageMarkReadView.as_view()),
+    path("<str:display_id>/alerts/", IncidentLinkedAlertsView.as_view()),
 ]
