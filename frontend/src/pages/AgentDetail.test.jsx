@@ -645,7 +645,7 @@ describe('AgentDetail — VulnerabilitySlideOver', () => {
 
     await waitFor(() => screen.getByText('References'));
     const links = screen.getAllByRole('link');
-    expect(links.some(l => l.href.includes('nvd.nist.gov'))).toBe(true);
+    expect(links.some(l => { try { const u = new URL(l.href); return u.hostname === 'nvd.nist.gov' || u.hostname.endsWith('.nvd.nist.gov'); } catch { return false; } })).toBe(true);
   });
 
   it('does not render References section when absent from response', async () => {
