@@ -63,8 +63,60 @@ def test_detect_forward_outlook_inline():
     assert detect_forward(msg) is True
 
 
+def test_detect_forward_fwd_subject_no_body_markers():
+    # "Fwd:" subject alone is enough — covers HTML-only forwarded emails
+    msg = NormalisedMessage(
+        from_address="user@corp.com",
+        to_address="soc@vels.online",
+        reply_to=None,
+        subject="Fwd: [argoproj/argo-cd] Release v3.4.3",
+        body_text="",
+        body_html="<html><body><p>See below.</p></body></html>",
+        raw_bytes=b"",
+        attachments=[],
+    )
+    assert detect_forward(msg) is True
+
+
+def test_detect_forward_gmail_html_quote_class():
+    msg = NormalisedMessage(
+        from_address="user@corp.com",
+        to_address="soc@vels.online",
+        reply_to=None,
+        subject="Fw: phishing",
+        body_text="",
+        body_html='<div class="gmail_quote">original message</div>',
+        raw_bytes=b"",
+        attachments=[],
+    )
+    assert detect_forward(msg) is True
+
+
+def test_detect_forward_apple_mail_blockquote():
+    msg = NormalisedMessage(
+        from_address="user@corp.com",
+        to_address="soc@vels.online",
+        reply_to=None,
+        subject="Fwd: something",
+        body_text="",
+        body_html='<blockquote type="cite"><div>From: phisher@evil.com</div></blockquote>',
+        raw_bytes=b"",
+        attachments=[],
+    )
+    assert detect_forward(msg) is True
+
+
 def test_detect_forward_plain_email():
-    msg = _msg(body_text="Hello, just a regular email.")
+    msg = NormalisedMessage(
+        from_address="user@corp.com",
+        to_address="soc@vels.online",
+        reply_to=None,
+        subject="Hello",
+        body_text="Hello, just a regular email.",
+        body_html="",
+        raw_bytes=b"",
+        attachments=[],
+    )
     assert detect_forward(msg) is False
 
 
@@ -133,12 +185,67 @@ def test_extract_returns_none_when_not_found():
     assert result is None
 
 
+def test_extract_from_html_body_apple_mail():
+    html = (
+        '<blockquote type="cite">'
+        "<div><b>From: </b>Phisher &lt;phisher@evil.com&gt;</div>"
+        "</blockquote>"
+    )
+    msg = NormalisedMessage(
+        from_address="user@corp.com",
+        to_address="soc@vels.online",
+        reply_to=None,
+        subject="Fwd: evil",
+        body_text="",
+        body_html=html,
+        raw_bytes=b"",
+        attachments=[],
+    )
+    result = extract_original_sender(msg, forwarder_address="user@corp.com")
+    assert result == "phisher@evil.com"
+
+
+def test_extract_from_html_body_gmail():
+    html = (
+        '<div class="gmail_quote">'
+        '<div class="gmail_attr">---------- Forwarded message ---------<br>'
+        "From: Phisher <phisher@evil.com><br></div>"
+        "</div>"
+    )
+    msg = NormalisedMessage(
+        from_address="user@corp.com",
+        to_address="soc@vels.online",
+        reply_to=None,
+        subject="Fwd: evil",
+        body_text="",
+        body_html=html,
+        raw_bytes=b"",
+        attachments=[],
+    )
+    result = extract_original_sender(msg, forwarder_address="user@corp.com")
+    assert result == "phisher@evil.com"
+
+
 # ── resolve_org ───────────────────────────────────────────────────────────────
 
 @pytest.mark.django_db
 def test_resolve_org_unknown_email():
     result = resolve_org("nobody@unknown.com")
     assert result is None
+
+
+@pytest.mark.django_db
+def test_resolve_org_display_name_format():
+    """resolve_org must parse 'Name <addr>' From headers."""
+    from django.contrib.auth.models import User
+    from security.models import Organization, OrganizationMembership
+
+    org = Organization.objects.create(name="DispOrg", slug="disporg", wazuh_group="disporg")
+    user = User.objects.create_user(username="disp", email="disp@corp.com", password="x")
+    OrganizationMembership.objects.create(user=user, organization=org)
+
+    result = resolve_org("Display Name <disp@corp.com>")
+    assert result == org
 
 
 @pytest.mark.django_db

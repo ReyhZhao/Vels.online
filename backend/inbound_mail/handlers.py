@@ -85,7 +85,7 @@ class PhishingIngestionHandler:
           "phishing:dropped:unknown_sender"    — sender not in any org
           "phishing:dropped:no_original_sender"— couldn't extract the original phishing sender
         """
-        from .phishing import detect_forward, resolve_org, normalise_subject, extract_original_sender
+        from .phishing import detect_forward, resolve_org, normalise_subject, extract_original_sender, _bare_address
 
         ctx = "from=%r subject=%r attachments=%d"
         ctx_args = (message.from_address, message.subject, len(message.attachments))
@@ -103,7 +103,9 @@ class PhishingIngestionHandler:
             )
             return "phishing:dropped:unknown_sender"
 
-        forwarder_address = message.from_address
+        # Use the bare address so "Name <addr>" display-name format works correctly
+        # for org lookup exclusion and dedup source_ref storage.
+        forwarder_address = _bare_address(message.from_address)
         sender_address = extract_original_sender(message, forwarder_address)
         if sender_address is None:
             logger.warning(
