@@ -133,7 +133,7 @@ def run_claude(issue_number: int, issue_title: str) -> None:
     print(f"Triaging issue #{issue_number}: {issue_title}")
     print(f"{'='*60}")
     subprocess.run(
-        ["claude", "-p", prompt, "--dangerously-skip-permissions"],
+        ["claude", "-p", prompt],
         check=False,  # don't abort the loop if one issue fails
     )
 
