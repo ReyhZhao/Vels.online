@@ -77,25 +77,42 @@ class ContactReplyHandler:
 
 class PhishingIngestionHandler:
     def handle(self, message):
+        """
+        Process a candidate phishing email. Returns an outcome string:
+          "phishing:created"           — new incident created
+          "phishing:dedup"             — linked to existing incident
+          "phishing:dropped:not_forward"       — message is not a forwarded email
+          "phishing:dropped:unknown_sender"    — sender not in any org
+          "phishing:dropped:no_original_sender"— couldn't extract the original phishing sender
+        """
         from .phishing import detect_forward, resolve_org, normalise_subject, extract_original_sender
 
+        ctx = "from=%r subject=%r attachments=%d"
+        ctx_args = (message.from_address, message.subject, len(message.attachments))
+
         if not detect_forward(message):
-            logger.info("inbound_mail: phishing: not a forwarded email — dropping")
-            return
+            logger.warning(
+                "inbound_mail: phishing: dropped — not a forwarded email " + ctx, *ctx_args,
+            )
+            return "phishing:dropped:not_forward"
 
         org = resolve_org(message.from_address)
         if org is None:
-            logger.info(
-                "inbound_mail: phishing: unknown or ambiguous sender %r — dropping",
-                message.from_address,
+            logger.warning(
+                "inbound_mail: phishing: dropped — sender unknown or ambiguous org " + ctx, *ctx_args,
             )
-            return
+            return "phishing:dropped:unknown_sender"
 
         forwarder_address = message.from_address
         sender_address = extract_original_sender(message, forwarder_address)
         if sender_address is None:
-            logger.info("inbound_mail: phishing: could not extract original sender — dropping")
-            return
+            logger.warning(
+                "inbound_mail: phishing: dropped — could not extract original sender " + ctx
+                + " body_preview=%r",
+                *ctx_args,
+                (message.body_text or "")[:200],
+            )
+            return "phishing:dropped:no_original_sender"
 
         subject_normalised = normalise_subject(message.subject)
         source_ref = {
@@ -120,8 +137,25 @@ class PhishingIngestionHandler:
         alert.refresh_from_db()
 
         incident = alert.incident
-        if incident and message.raw_bytes:
-            self._attach_raw_email(incident, message.raw_bytes, sender_address)
+        if incident:
+            is_dedup = incident.alerts.filter(source_kind="inbound_email").exclude(pk=alert.pk).exists()
+            outcome = "phishing:dedup" if is_dedup else "phishing:created"
+            logger.info(
+                "inbound_mail: phishing: %s org=%r sender=%r subject=%r incident=%s alert=%s",
+                outcome, org.slug, sender_address, subject_normalised,
+                incident.display_id, alert.display_id,
+            )
+            if message.raw_bytes:
+                self._attach_raw_email(incident, message.raw_bytes, sender_address)
+            return outcome
+
+        # route_alert didn't create/link an incident (medium-severity path, shouldn't happen here)
+        logger.warning(
+            "inbound_mail: phishing: alert %s created but not linked to an incident "
+            "org=%r sender=%r",
+            alert.display_id, org.slug, sender_address,
+        )
+        return "phishing:created"
 
     def _attach_raw_email(self, incident, raw_bytes, sender_address):
         try:
@@ -143,5 +177,12 @@ class PhishingIngestionHandler:
                 sha256=sha256,
                 confirmed_at=timezone.now(),
             )
+            logger.info(
+                "inbound_mail: phishing: attached raw .eml (%d bytes) to incident %s",
+                len(raw_bytes), incident.display_id,
+            )
         except Exception:
-            logger.exception("inbound_mail: phishing: failed to attach raw email to incident %s", incident.display_id)
+            logger.exception(
+                "inbound_mail: phishing: failed to attach raw email to incident %s",
+                incident.display_id,
+            )

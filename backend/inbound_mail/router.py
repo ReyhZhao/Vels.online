@@ -1,3 +1,4 @@
+import email.utils
 import logging
 import os
 
@@ -13,16 +14,41 @@ def _bare_soc_address():
     return os.environ.get("INBOUND_IMAP_USER", "")
 
 
+def _parse_address(raw):
+    """Return the bare email address from a possibly "Name <addr>" header value."""
+    _, addr = email.utils.parseaddr(raw or "")
+    return addr.lower() if addr else (raw or "").lower()
+
+
 def route_inbound_message(message):
-    """Route a single NormalisedMessage to the appropriate handler."""
+    """
+    Route a NormalisedMessage to the appropriate handler.
+    Returns an outcome string for stats tracking:
+      "contact_reply", "phishing:created", "phishing:dedup",
+      "phishing:dropped:<reason>", "dropped:unrecognised_to"
+    """
+    # Token extraction uses the raw To value — parseaddr mangles colon-delimited tokens.
     token = _extract_token(message.to_address)
     if token is not None:
+        logger.debug(
+            "inbound_mail: routing to ContactReplyHandler from=%r subject=%r",
+            message.from_address, message.subject,
+        )
         _contact_handler.handle(message)
-        return
+        return "contact_reply"
 
-    bare_soc = _bare_soc_address()
-    if bare_soc and message.to_address and message.to_address.lower() == bare_soc.lower():
-        _phishing_handler.handle(message)
-        return
+    # For bare-address comparison, parse out any display name ("SOC <soc@vels.online>").
+    bare_soc = _bare_soc_address().lower()
+    to_parsed = _parse_address(message.to_address)
+    if bare_soc and to_parsed == bare_soc:
+        logger.debug(
+            "inbound_mail: routing to PhishingIngestionHandler from=%r subject=%r",
+            message.from_address, message.subject,
+        )
+        return _phishing_handler.handle(message)
 
-    logger.info("inbound_mail: unrecognised To %r — dropping", message.to_address)
+    logger.warning(
+        "inbound_mail: unrecognised To address — from=%r to=%r to_parsed=%r subject=%r bare_soc=%r",
+        message.from_address, message.to_address, to_parsed, message.subject, bare_soc,
+    )
+    return "dropped:unrecognised_to"
