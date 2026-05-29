@@ -52,6 +52,12 @@ def build_promote_payload(source_kind, source_ref):
             else f"Finding on agent {agent_name}."
         )
         severity = _cvss_to_severity(source_ref.get("cvss_score"))
+    elif source_kind == "inbound_email":
+        subject = source_ref.get("subject_normalised") or "phishing email"
+        sender = source_ref.get("sender_address", "unknown sender")
+        title = f"Phishing: {subject}"
+        description = f"Forwarded phishing email from {sender}."
+        severity = "high"
     else:
         title = ""
         description = ""

@@ -3,7 +3,7 @@ import imaplib
 import logging
 import os
 
-from .dataclasses import NormalisedMessage
+from .dataclasses import NormalisedAttachment, NormalisedMessage
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,31 @@ def _extract_body(msg):
         else:
             body_text = payload
     return body_text, body_html
+
+
+def _extract_attachments(msg):
+    """Return list of NormalisedAttachment for all non-body MIME parts."""
+    attachments = []
+    if not msg.is_multipart():
+        return attachments
+    body_content_types = {"text/plain", "text/html"}
+    for part in msg.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        ct = part.get_content_type()
+        disposition = part.get_content_disposition() or ""
+        if ct in body_content_types and disposition != "attachment":
+            continue
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            payload = b""
+        filename = part.get_filename() or ""
+        attachments.append(NormalisedAttachment(
+            filename=filename,
+            content_type=ct,
+            payload=payload,
+        ))
+    return attachments
 
 
 class ImapAdapter:
@@ -72,6 +97,8 @@ class ImapAdapter:
                     subject=msg.get("Subject", ""),
                     body_text=body_text,
                     body_html=body_html,
+                    raw_bytes=raw,
+                    attachments=_extract_attachments(msg),
                 )
                 conn.store(uid, "+FLAGS", "\\Seen")
         finally:

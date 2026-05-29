@@ -7,6 +7,7 @@ SOURCE_CHOICES = [
     ("vulnerability", "Vulnerability"),
     ("agent_finding", "Agent Finding"),
     ("api", "API"),
+    ("inbound_email", "Inbound Email"),
 ]
 
 SEVERITY_CRITICAL = "critical"

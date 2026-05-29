@@ -179,6 +179,8 @@ def run_incident_triage(self, incident_id: int):
 
 def _ioc_enrichment_annotation(ioc) -> str | None:
     """Return a compact enrichment annotation string for the IOC, or None if unavailable."""
+    if ioc.kind == "email":
+        return ioc.value
     data = ioc.enrichment_data
     if not data:
         return None

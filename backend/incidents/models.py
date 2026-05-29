@@ -67,12 +67,14 @@ class Incident(models.Model):
     SOURCE_WAZUH_EVENT = "wazuh_event"
     SOURCE_VULNERABILITY = "vulnerability"
     SOURCE_AGENT_FINDING = "agent_finding"
+    SOURCE_INBOUND_EMAIL = "inbound_email"
     SOURCE_CHOICES = [
         (SOURCE_MANUAL, "Manual"),
         (SOURCE_API, "API"),
         (SOURCE_WAZUH_EVENT, "Wazuh Event"),
         (SOURCE_VULNERABILITY, "Vulnerability"),
         (SOURCE_AGENT_FINDING, "Agent Finding"),
+        (SOURCE_INBOUND_EMAIL, "Inbound Email"),
     ]
 
     SEVERITY_CRITICAL = "critical"
@@ -410,10 +412,12 @@ class IOC(models.Model):
     KIND_IP = "ip"
     KIND_DOMAIN = "domain"
     KIND_URL = "url"
+    KIND_EMAIL = "email"
     KIND_CHOICES = [
         (KIND_IP, "IP Address"),
         (KIND_DOMAIN, "Domain"),
         (KIND_URL, "URL"),
+        (KIND_EMAIL, "Email Address"),
     ]
 
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="iocs")

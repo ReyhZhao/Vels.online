@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "contacts",
     "inbound_mail",
     "alerts",
+    "core",
     "django_celery_results",
     "django_celery_beat",
     "celery_tasks",

@@ -9,16 +9,12 @@ from incidents.models import Incident
 def find_matching_incident(alert):
     """
     Find the most recent open incident matching the alert's source_kind and source_ref.
-
-    Matching criteria:
-      - Same organization
-      - Same source_kind
-      - Created within org.alert_match_lookback_days
-      - Not closed
-      - source_ref rule_id OR rule_description matches
     """
     org = alert.organization
     lookback = timezone.now() - timedelta(days=org.alert_match_lookback_days)
+
+    if alert.source_kind == "inbound_email":
+        return _find_matching_inbound_email_incident(alert, org, lookback)
 
     source_ref = alert.source_ref or {}
     rule_id = source_ref.get('rule_id')
@@ -40,3 +36,25 @@ def find_matching_incident(alert):
         q |= Q(source_ref__rule_description=rule_description)
 
     return qs.filter(q).order_by('-created_at').first()
+
+
+def _find_matching_inbound_email_incident(alert, org, lookback):
+    source_ref = alert.source_ref or {}
+    sender_address = source_ref.get("sender_address")
+    subject_normalised = source_ref.get("subject_normalised")
+
+    if not sender_address or not subject_normalised:
+        return None
+
+    return (
+        Incident.objects.filter(
+            organization=org,
+            source_kind="inbound_email",
+            created_at__gte=lookback,
+            source_ref__sender_address=sender_address,
+            source_ref__subject_normalised=subject_normalised,
+        )
+        .exclude(state="closed")
+        .order_by("-created_at")
+        .first()
+    )
