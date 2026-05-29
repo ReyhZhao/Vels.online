@@ -179,6 +179,19 @@ def test_extract_never_returns_soc_address():
     assert result is None
 
 
+def test_extract_from_dutch_thunderbird_forward():
+    body = (
+        "Test phishing mail.\r\n\r\n\r\n"
+        "-------- Oorspronkelijke bericht --------\r\n"
+        "Onderwerp: 4 voordelen van uw creditcard\r\n"
+        "Datum: 2026-05-29 09:51\r\n"
+        "Afzender: \"International Card Services\" <ics@mail.icscards.nl>\r\n"
+    )
+    msg = _msg(body_text=body)
+    result = extract_original_sender(msg, forwarder_address="user@corp.com")
+    assert result == "ics@mail.icscards.nl"
+
+
 def test_extract_returns_none_when_not_found():
     msg = _msg(body_text="No forwarding info here.")
     result = extract_original_sender(msg, forwarder_address="user@corp.com")

@@ -8,14 +8,30 @@ import re
 
 _SOC_RE = re.compile(r"^soc[@+]", re.IGNORECASE)
 
-# Text-body inline-forward markers (lowercased for comparison)
+# Text-body inline-forward markers (lowercased for comparison).
+# Covers English and common localisations seen in the wild.
 _FORWARD_INLINE_MARKERS = [
+    # English
     "---------- forwarded message",
     "-----original message-----",
     "begin forwarded message",
     "-------- forwarded message --------",
-    "________________________________",  # Outlook separator variant
-    "forwarded message",                 # generic fallback
+    "________________________________",          # Outlook separator variant
+    # Dutch (Thunderbird, Evolution, Apple Mail NL)
+    "-------- oorspronkelijke bericht",
+    "-------- doorgestuurd bericht",
+    "doorgestuurd bericht",
+    # German
+    "-------- weitergeleitete nachricht",
+    "-------- weitergeleitete e-mail",
+    "-----ursprüngliche nachricht-----",
+    # French
+    "-------- message transmis",
+    "---------- message transféré",
+    "de : ",                                     # Outlook FR attribution prefix
+    # Spanish / Portuguese
+    "-------- mensaje reenviado",
+    "mensagem reencaminhada",
 ]
 
 # HTML-specific markers written by common mail clients
@@ -33,7 +49,11 @@ _HTML_FORWARD_MARKERS = [
 # Matches a "Fwd:" / "Fw:" subject prefix (not Re:, which isn't a forward)
 _SUBJECT_FWD_RE = re.compile(r"^\s*Fwd?:", re.IGNORECASE)
 
-_FWD_FROM_RE = re.compile(r"^\s*from:\s*(.+)", re.IGNORECASE | re.MULTILINE)
+# "From:" field label in various languages used by common mail clients
+_FWD_FROM_RE = re.compile(
+    r"^\s*(?:from|afzender|van|von|de|da|fra|från|expediteur|expéditeur|mittente|gönderen):\s*(.+)",
+    re.IGNORECASE | re.MULTILINE,
+)
 _HTML_TAG_RE = re.compile(r"<[^@>]+>")
 # Block/line elements that should become newlines, not spaces, when stripped
 _HTML_NEWLINE_RE = re.compile(
@@ -182,7 +202,7 @@ def extract_original_sender(msg, forwarder_address: str) -> str | None:
 
 
 def _scan_body_for_sender(body: str, forwarder_address: str) -> str | None:
-    """Scan plain text for a From: line after a forward marker, or anywhere in the body."""
+    """Scan plain text for a sender address after a forward marker, or anywhere in the body."""
     body_lower = body.lower()
 
     # First pass: anchored to a known forward marker
@@ -190,15 +210,24 @@ def _scan_body_for_sender(body: str, forwarder_address: str) -> str | None:
         idx = body_lower.find(marker)
         if idx == -1:
             continue
-        snippet = body[idx: idx + 500]
+        snippet = body[idx: idx + 600]
+
+        # Try a labelled From:/Afzender:/Von:/etc. line first
         m = _FWD_FROM_RE.search(snippet)
         if m:
             addr = _extract_address(m.group(1))
             if addr and not _is_excluded(addr, forwarder_address):
                 return addr
 
-    # Second pass: no marker — search the whole body for the first From: line
-    # that isn't the forwarder (handles clients that don't add a separator)
+        # Language-agnostic fallback: first non-excluded email address in the window.
+        # Handles any localisation where we don't know the "From:" field name.
+        for m in _BARE_ADDR_RE.finditer(snippet):
+            addr = m.group(0)
+            if not _is_excluded(addr, forwarder_address):
+                return addr
+
+    # Second pass: no marker found — search the whole body for the first
+    # labelled From: line that isn't the forwarder.
     for m in _FWD_FROM_RE.finditer(body):
         addr = _extract_address(m.group(1))
         if addr and not _is_excluded(addr, forwarder_address):
