@@ -223,7 +223,7 @@ function TimelineCard({ event }) {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-export default function IncidentTimeline({ incidentId }) {
+export default function IncidentTimeline({ incidentId, refreshKey = 0 }) {
   const [data, setData] = useState(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -247,7 +247,7 @@ export default function IncidentTimeline({ incidentId }) {
     }
   }, [incidentId]);
 
-  useEffect(() => { load(1); }, [load]);
+  useEffect(() => { load(1); }, [load, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading timeline…</p>;
   if (error) return <p className="text-sm text-muted-foreground italic">{error}</p>;

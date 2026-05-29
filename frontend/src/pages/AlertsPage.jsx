@@ -241,16 +241,10 @@ function AlertsPage() {
       if (filterState) params.state = filterState;
       if (filterSeverity) params.severity = filterSeverity;
       if (filterSourceKind) params.source_kind = filterSourceKind;
+      if (!showIgnored && !filterState) params.exclude_state = 'ignored';
 
       const resp = await api.get('/api/alerts/', { params });
-      let results = resp.data.results ?? [];
-
-      // Filter out ignored unless explicitly showing them or filtering for them
-      if (!showIgnored && !filterState) {
-        results = results.filter(a => a.state !== 'ignored');
-      }
-
-      setData({ ...resp.data, results });
+      setData(resp.data);
     } catch {
       setData(EMPTY_DATA);
     } finally {
@@ -428,7 +422,11 @@ function AlertsPage() {
             ) : results.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  No alerts. {showIgnored ? '' : 'Ignored alerts are hidden — toggle above to show them.'}
+                  {filterState || filterSeverity || filterSourceKind
+                    ? 'No alerts match the current filters.'
+                    : showIgnored
+                      ? 'No alerts.'
+                      : 'No alerts. Ignored alerts are hidden — toggle above to show them.'}
                 </td>
               </tr>
             ) : results.map(alert => (

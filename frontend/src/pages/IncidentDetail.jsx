@@ -978,6 +978,8 @@ export default function IncidentDetail() {
   const [savingSubject, setSavingSubject] = useState(false);
   const [subjectError, setSubjectError]   = useState(null);
   const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
+  const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
+  const [commentsRefreshKey, setCommentsRefreshKey] = useState(0);
   const [showTransferDialog, setShowTransferDialog] = useState(false);
   const [staffUsers, setStaffUsers]       = useState([]);
   const [transferring, setTransferring]   = useState(false);
@@ -990,6 +992,7 @@ export default function IncidentDetail() {
   const [triageQueued, setTriageQueued]   = useState(false);
   const [triageError, setTriageError]     = useState(null);
   const pollRef = useRef(null);
+  const incidentRef = useRef(null);
 
   useEffect(() => {
     async function load() {
@@ -1010,16 +1013,38 @@ export default function IncidentDetail() {
     }
     load();
 
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => {
-      if (document.visibilityState !== 'hidden') {
-        api.get(`/api/incidents/${displayId}/`)
-          .then(res => setIncident(prev => prev ? res.data : prev))
-          .catch(() => {});
-      }
-    }, 30000);
-    return () => clearInterval(pollRef.current);
+    if (pollRef.current) clearTimeout(pollRef.current);
+
+    function schedulePoll() {
+      const delay = incidentRef.current?.triage_running ? 5000 : 30000;
+      pollRef.current = setTimeout(() => {
+        if (document.visibilityState !== 'hidden') {
+          api.get(`/api/incidents/${displayId}/`)
+            .then(res => {
+              setIncident(prev => {
+                if (!prev) return prev;
+                if (res.data.updated_at !== prev.updated_at) {
+                  setTasksRefreshKey(k => k + 1);
+                  setTimelineRefreshKey(k => k + 1);
+                  setCommentsRefreshKey(k => k + 1);
+                }
+                incidentRef.current = res.data;
+                return res.data;
+              });
+            })
+            .catch(() => {})
+            .finally(schedulePoll);
+        } else {
+          schedulePoll();
+        }
+      }, delay);
+    }
+
+    schedulePoll();
+    return () => clearTimeout(pollRef.current);
   }, [displayId]);
+
+  useEffect(() => { incidentRef.current = incident; }, [incident]);
 
   async function handleOpenTransfer() {
     if (staffUsers.length === 0) {
@@ -1374,6 +1399,7 @@ export default function IncidentDetail() {
                     incidentId={displayId}
                     currentUserId={user?.id}
                     isStaff={user?.is_staff ?? false}
+                    refreshKey={commentsRefreshKey}
                   />
                   <ContactMessagesCard displayId={displayId} />
                 </div>
@@ -1384,7 +1410,7 @@ export default function IncidentDetail() {
             </div>
           )}
           {activeTab === 'timeline' && (
-            <IncidentTimeline incidentId={displayId} />
+            <IncidentTimeline incidentId={displayId} refreshKey={timelineRefreshKey} />
           )}
           {activeTab === 'attachments' && (
             <IncidentAttachments incidentId={displayId} />

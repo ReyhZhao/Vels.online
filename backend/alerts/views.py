@@ -3,6 +3,8 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import serializers as _s
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -95,6 +97,26 @@ class AlertListIngestView(APIView):
         ser = AlertSerializer(page, many=True)
         return paginator.get_paginated_response(ser.data)
 
+    @extend_schema(
+        summary="Ingest alert (staff only)",
+        description="Create a new alert for an organisation and run routing. Staff only.",
+        request=inline_serializer(
+            name="AlertIngestRequest",
+            fields={
+                "org": _s.CharField(help_text="Organisation slug"),
+                "source_kind": _s.ChoiceField(
+                    choices=["wazuh_event", "vulnerability", "agent_finding", "api"],
+                    help_text="Alert source type",
+                ),
+                "source_ref": _s.DictField(
+                    required=False,
+                    allow_null=True,
+                    help_text="Source-specific metadata (e.g. agent_name, rule_id)",
+                ),
+            },
+        ),
+        responses={201: AlertSerializer},
+    )
     def post(self, request):
         err = _require_auth(request)
         if err:

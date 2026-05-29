@@ -209,7 +209,7 @@ function CommentForm({ onSubmit }) {
   );
 }
 
-export default function IncidentComments({ incidentId, taskId, currentUserId, isStaff }) {
+export default function IncidentComments({ incidentId, taskId, currentUserId, isStaff, refreshKey = 0 }) {
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -226,7 +226,7 @@ export default function IncidentComments({ incidentId, taskId, currentUserId, is
       .finally(() => setLoading(false));
   }, [url]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handlePost(data) {
     const postUrl = taskId

@@ -8,7 +8,8 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from rest_framework import serializers as _s
 from rest_framework import status
 from rest_framework.generics import GenericAPIView, ListAPIView
 from rest_framework.pagination import PageNumberPagination
@@ -386,6 +387,37 @@ class IncidentListView(ListAPIView):
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
+    @extend_schema(
+        summary="Create incident",
+        description="Create a new incident for an organisation. Requires staff or org membership.",
+        request=inline_serializer(
+            name="IncidentCreateRequest",
+            fields={
+                "org": _s.CharField(help_text="Organisation slug"),
+                "title": _s.CharField(),
+                "description": _s.CharField(required=False, allow_blank=True),
+                "severity": _s.ChoiceField(
+                    choices=["critical", "high", "medium", "low", "info"],
+                    help_text="Severity level",
+                ),
+                "tlp": _s.ChoiceField(
+                    choices=["white", "green", "amber", "red"],
+                    required=False,
+                    help_text="TLP classification",
+                ),
+                "pap": _s.ChoiceField(
+                    choices=["white", "green", "amber", "red"],
+                    required=False,
+                    help_text="PAP classification",
+                ),
+                "source_kind": _s.CharField(required=False, allow_blank=True, allow_null=True),
+                "source_ref": _s.DictField(required=False, allow_null=True, help_text="Source-specific metadata"),
+                "subject": _s.IntegerField(required=False, allow_null=True, help_text="Subject PK"),
+                "assignee": _s.IntegerField(required=False, allow_null=True, help_text="Assignee user PK"),
+            },
+        ),
+        responses={201: IncidentSerializer},
+    )
     def post(self, request):
         org_slug = request.data.get("org")
         if not org_slug:
