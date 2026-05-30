@@ -161,6 +161,43 @@ def test_list_filter_by_source_kind(client, member, acme):
     assert data["results"][0]["source_kind"] == "vulnerability"
 
 
+def test_list_exclude_state_hides_ignored_by_default(client, member, acme):
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event", title="A", severity="medium", state="new")
+    Alert.objects.create(organization=acme, display_id="AL-0002", source_kind="wazuh_event", title="B", severity="medium", state="ignored")
+    client.force_login(member)
+    resp = client.get("/api/alerts/", {"exclude_state": "ignored"})
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["results"][0]["state"] == "new"
+
+
+def test_list_show_ignored_returns_all(client, member, acme):
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event", title="A", severity="medium", state="new")
+    Alert.objects.create(organization=acme, display_id="AL-0002", source_kind="wazuh_event", title="B", severity="medium", state="ignored")
+    client.force_login(member)
+    resp = client.get("/api/alerts/")
+    data = resp.json()
+    assert data["count"] == 2
+
+
+def test_list_staff_without_membership_sees_all_alerts(client, staff_user, acme):
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event", title="A", severity="medium", state="new")
+    client.force_login(staff_user)
+    resp = client.get("/api/alerts/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["results"][0]["display_id"] == "AL-0001"
+
+
+def test_detail_staff_without_membership_can_get_alert(client, staff_user, acme):
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event", title="A", severity="medium", state="new")
+    client.force_login(staff_user)
+    resp = client.get("/api/alerts/AL-0001/")
+    assert resp.status_code == 200
+    assert resp.json()["display_id"] == "AL-0001"
+
+
 # ── PATCH /api/alerts/<display_id>/ — state transitions ─────────────────────
 
 

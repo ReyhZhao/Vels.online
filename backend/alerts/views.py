@@ -76,15 +76,14 @@ class AlertListIngestView(APIView):
         if err:
             return err
 
-        org = _get_org_for_user(request)
-        if org is None:
-            return Response({
-                "count": 0, "page": 1, "per_page": 25, "total_pages": 1, "results": []
-            })
-
-        qs = Alert.objects.filter(organization=org).select_related(
-            "organization", "incident", "acknowledged_by"
-        )
+        qs = Alert.objects.select_related("organization", "incident", "acknowledged_by")
+        if not request.user.is_staff:
+            org = _get_org_for_user(request)
+            if org is None:
+                return Response({
+                    "count": 0, "page": 1, "per_page": 25, "total_pages": 1, "results": []
+                })
+            qs = qs.filter(organization=org)
 
         # Apply filters manually
         filterset = AlertFilterSet(request.GET, queryset=qs, request=request)
@@ -175,13 +174,14 @@ class AlertDetailView(APIView):
     """
 
     def _get_alert(self, request, display_id):
-        org = _get_org_for_user(request)
-        if org is None:
-            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         try:
-            return Alert.objects.select_related(
-                "organization", "incident", "acknowledged_by"
-            ).get(display_id=display_id, organization=org), None
+            qs = Alert.objects.select_related("organization", "incident", "acknowledged_by")
+            if not request.user.is_staff:
+                org = _get_org_for_user(request)
+                if org is None:
+                    return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+                qs = qs.filter(organization=org)
+            return qs.get(display_id=display_id), None
         except Alert.DoesNotExist:
             return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
