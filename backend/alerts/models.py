@@ -8,6 +8,30 @@ SOURCE_CHOICES = [
     ("agent_finding", "Agent Finding"),
     ("api", "API"),
     ("inbound_email", "Inbound Email"),
+    ("workflow", "Workflow"),
+    ("external", "External"),
+]
+
+TLP_WHITE = "white"
+TLP_GREEN = "green"
+TLP_AMBER = "amber"
+TLP_RED = "red"
+TLP_CHOICES = [
+    (TLP_WHITE, "TLP:WHITE"),
+    (TLP_GREEN, "TLP:GREEN"),
+    (TLP_AMBER, "TLP:AMBER"),
+    (TLP_RED, "TLP:RED"),
+]
+
+PAP_WHITE = "white"
+PAP_GREEN = "green"
+PAP_AMBER = "amber"
+PAP_RED = "red"
+PAP_CHOICES = [
+    (PAP_WHITE, "PAP:WHITE"),
+    (PAP_GREEN, "PAP:GREEN"),
+    (PAP_AMBER, "PAP:AMBER"),
+    (PAP_RED, "PAP:RED"),
 ]
 
 SEVERITY_CRITICAL = "critical"
@@ -49,8 +73,11 @@ class Alert(models.Model):
     )
     source_kind = models.CharField(max_length=20, choices=SOURCE_CHOICES)
     source_ref = models.JSONField(default=dict, blank=True)
-    title = models.CharField(max_length=500, blank=True)
-    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, default=SEVERITY_MEDIUM)
+    title = models.CharField(max_length=500, blank=True, null=True)
+    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
+    pap = models.CharField(max_length=10, choices=PAP_CHOICES, null=True, blank=True)
+    tlp = models.CharField(max_length=10, choices=TLP_CHOICES, null=True, blank=True)
     state = models.CharField(max_length=20, choices=STATE_CHOICES, default=STATE_NEW)
     incident = models.ForeignKey(
         "incidents.Incident",
