@@ -68,6 +68,8 @@ class Incident(models.Model):
     SOURCE_VULNERABILITY = "vulnerability"
     SOURCE_AGENT_FINDING = "agent_finding"
     SOURCE_INBOUND_EMAIL = "inbound_email"
+    SOURCE_WORKFLOW = "workflow"
+    SOURCE_EXTERNAL = "external"
     SOURCE_CHOICES = [
         (SOURCE_MANUAL, "Manual"),
         (SOURCE_API, "API"),
@@ -75,6 +77,8 @@ class Incident(models.Model):
         (SOURCE_VULNERABILITY, "Vulnerability"),
         (SOURCE_AGENT_FINDING, "Agent Finding"),
         (SOURCE_INBOUND_EMAIL, "Inbound Email"),
+        (SOURCE_WORKFLOW, "Workflow"),
+        (SOURCE_EXTERNAL, "External"),
     ]
 
     SEVERITY_CRITICAL = "critical"

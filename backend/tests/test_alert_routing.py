@@ -15,16 +15,17 @@ def acme(db):
     )
 
 
-def _make_alert(org, severity="medium", source_kind="wazuh_event", source_ref=None, state="new"):
+def _make_alert(org, severity="medium", source_kind="wazuh_event", source_ref=None, state="new", **kwargs):
     count = Alert.objects.count()
     return Alert.objects.create(
         organization=org,
         display_id=f"AL-{count + 1:04d}",
         source_kind=source_kind,
         source_ref=source_ref or {"rule_id": "100002", "rule_description": "Test rule", "agent_name": "web-01"},
-        title="Test alert",
+        title=None,
         severity=severity,
         state=state,
+        **kwargs,
     )
 
 
@@ -157,3 +158,113 @@ def test_route_does_not_lower_incident_severity(acme):
 
     inc.refresh_from_db()
     assert inc.severity == "critical"
+
+
+# ── Explicit alert fields override auto-derived (#326) ─────────────���─────────
+
+
+def _make_workflow_alert(org, **kwargs):
+    count = Alert.objects.count()
+    defaults = dict(
+        organization=org,
+        display_id=f"AL-{count + 1:04d}",
+        source_kind="workflow",
+        source_ref={},
+        title="Workflow alert",
+        severity="high",
+        state="new",
+    )
+    defaults.update(kwargs)
+    return Alert.objects.create(**defaults)
+
+
+def test_explicit_description_used_in_promoted_incident(acme):
+    alert = _make_workflow_alert(acme, description="N8N crafted this description.")
+    route_alert(alert)
+    alert.refresh_from_db()
+    assert alert.incident.description == "N8N crafted this description."
+
+
+def test_null_description_falls_back_to_auto_derived(acme):
+    source_ref = {"rule_id": "X", "rule_description": "Brute force", "agent_name": "web-01", "level": 9}
+    count = Alert.objects.count()
+    alert = Alert.objects.create(
+        organization=acme,
+        display_id=f"AL-{count + 1:04d}",
+        source_kind="wazuh_event",
+        source_ref=source_ref,
+        title="Test",
+        severity="high",
+        description=None,
+        state="new",
+    )
+    route_alert(alert)
+    alert.refresh_from_db()
+    # Auto-derived description for wazuh_event includes the rule and agent
+    assert "Brute force" in alert.incident.description
+    assert "web-01" in alert.incident.description
+
+
+def test_explicit_severity_overrides_auto_derived(acme):
+    alert = _make_workflow_alert(acme, severity="critical")
+    route_alert(alert)
+    alert.refresh_from_db()
+    assert alert.incident.severity == "critical"
+
+
+def test_explicit_pap_propagates_to_incident(acme):
+    alert = _make_workflow_alert(acme, pap="red")
+    route_alert(alert)
+    alert.refresh_from_db()
+    assert alert.incident.pap == "red"
+
+
+def test_null_pap_incident_gets_amber_default(acme):
+    alert = _make_workflow_alert(acme, pap=None)
+    route_alert(alert)
+    alert.refresh_from_db()
+    assert alert.incident.pap == "amber"
+
+
+def test_explicit_tlp_propagates_to_incident(acme):
+    alert = _make_workflow_alert(acme, tlp="green")
+    route_alert(alert)
+    alert.refresh_from_db()
+    assert alert.incident.tlp == "green"
+
+
+def test_null_tlp_incident_gets_amber_default(acme):
+    alert = _make_workflow_alert(acme, tlp=None)
+    route_alert(alert)
+    alert.refresh_from_db()
+    assert alert.incident.tlp == "amber"
+
+
+def test_explicit_title_used_in_promoted_incident(acme):
+    alert = _make_workflow_alert(acme, title="Explicit workflow title")
+    route_alert(alert)
+    alert.refresh_from_db()
+    assert alert.incident.title == "Explicit workflow title"
+
+
+def test_deduplication_does_not_overwrite_incident_fields(acme):
+    """Linking an enriched alert to an existing incident must not modify the incident's fields."""
+    inc = _make_incident(acme, source_ref={"rule_id": "100002"})
+    inc.pap = "white"
+    inc.tlp = "red"
+    inc.description = "Original analyst description."
+    inc.save()
+
+    alert = _make_workflow_alert(
+        acme,
+        source_ref={"rule_id": "100002"},
+        pap="amber",
+        tlp="green",
+        description="N8N description that should NOT overwrite.",
+    )
+    route_alert(alert)
+
+    inc.refresh_from_db()
+    assert inc.pap == "white"
+    assert inc.tlp == "red"
+    assert inc.description == "Original analyst description."

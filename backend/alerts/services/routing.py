@@ -14,8 +14,22 @@ from .threshold import check_asset_threshold, _get_asset_key, _asset_key_filter
 
 
 def _create_incident_from_alert(alert, org):
-    """Create a new Incident from an alert's source_ref and return it."""
+    """Create a new Incident from an alert, preferring explicit alert fields over auto-derived values."""
     payload = build_promote_payload(alert.source_kind, alert.source_ref or {})
+
+    # Explicit fields set on the alert always override auto-derived values.
+    # NULL means "not explicitly set — keep the auto-derived fallback."
+    if alert.title:
+        payload["title"] = alert.title
+    if alert.description is not None:
+        payload["description"] = alert.description
+    if alert.severity is not None:
+        payload["severity"] = alert.severity
+    if alert.pap is not None:
+        payload["pap"] = alert.pap
+    if alert.tlp is not None:
+        payload["tlp"] = alert.tlp
+
     ser = IncidentCreateSerializer(data=payload)
     ser.is_valid(raise_exception=True)
 
