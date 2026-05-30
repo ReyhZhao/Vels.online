@@ -367,3 +367,120 @@ def test_incident_linked_alerts_endpoint(client, member, acme):
     assert data[0]["display_id"] == "AL-0001"
     assert data[0]["severity"] == "high"
     assert data[0]["agent_name"] == "web-01"
+
+
+# ── Workflow / external source kinds and enrichment fields (#325) ────────────
+
+
+def test_ingest_workflow_alert_with_all_fields(client, staff_user, acme):
+    client.force_login(staff_user)
+    resp = client.post("/api/alerts/", {
+        "source_kind": "workflow",
+        "source_ref": {"workflow_id": "wf-001"},
+        "org": "acme",
+        "title": "Suspicious login from new country",
+        "description": "User logged in from IP 1.2.3.4 which geolocates to Russia.",
+        "severity": "high",
+        "pap": "amber",
+        "tlp": "green",
+    }, content_type="application/json")
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["title"] == "Suspicious login from new country"
+    assert data["description"] == "User logged in from IP 1.2.3.4 which geolocates to Russia."
+    assert data["severity"] == "high"
+    assert data["pap"] == "amber"
+    assert data["tlp"] == "green"
+    assert data["source_kind"] == "workflow"
+
+
+def test_ingest_external_alert_with_title(client, staff_user, acme):
+    client.force_login(staff_user)
+    resp = client.post("/api/alerts/", {
+        "source_kind": "external",
+        "source_ref": {},
+        "org": "acme",
+        "title": "Alert from SIEM",
+    }, content_type="application/json")
+    assert resp.status_code == 201
+    assert resp.json()["source_kind"] == "external"
+    assert resp.json()["title"] == "Alert from SIEM"
+
+
+def test_ingest_workflow_without_title_returns_400(client, staff_user, acme):
+    client.force_login(staff_user)
+    resp = client.post("/api/alerts/", {
+        "source_kind": "workflow",
+        "source_ref": {},
+        "org": "acme",
+    }, content_type="application/json")
+    assert resp.status_code == 400
+
+
+def test_ingest_external_without_title_returns_400(client, staff_user, acme):
+    client.force_login(staff_user)
+    resp = client.post("/api/alerts/", {
+        "source_kind": "external",
+        "source_ref": {},
+        "org": "acme",
+    }, content_type="application/json")
+    assert resp.status_code == 400
+
+
+def test_ingest_invalid_pap_returns_400(client, staff_user, acme):
+    client.force_login(staff_user)
+    resp = client.post("/api/alerts/", {
+        "source_kind": "workflow",
+        "source_ref": {},
+        "org": "acme",
+        "title": "Test",
+        "pap": "purple",
+    }, content_type="application/json")
+    assert resp.status_code == 400
+
+
+def test_ingest_invalid_tlp_returns_400(client, staff_user, acme):
+    client.force_login(staff_user)
+    resp = client.post("/api/alerts/", {
+        "source_kind": "workflow",
+        "source_ref": {},
+        "org": "acme",
+        "title": "Test",
+        "tlp": "black",
+    }, content_type="application/json")
+    assert resp.status_code == 400
+
+
+def test_ingest_api_source_kind_without_title_still_works(client, staff_user, acme):
+    """api source_kind retains backwards-compatible optional title."""
+    client.force_login(staff_user)
+    resp = client.post("/api/alerts/", {
+        "source_kind": "api",
+        "source_ref": {},
+        "org": "acme",
+    }, content_type="application/json")
+    assert resp.status_code == 201
+
+
+def test_ingest_workflow_omitted_fields_are_null(client, staff_user, acme):
+    client.force_login(staff_user)
+    resp = client.post("/api/alerts/", {
+        "source_kind": "workflow",
+        "source_ref": {},
+        "org": "acme",
+        "title": "Minimal workflow alert",
+    }, content_type="application/json")
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["description"] is None
+    assert data["pap"] is None
+    assert data["tlp"] is None
+    assert data["severity"] is None
+
+
+def test_ingest_wazuh_alert_derives_severity_as_before(client, staff_user, acme):
+    """Platform-native alerts still auto-derive and store severity."""
+    client.force_login(staff_user)
+    resp = client.post("/api/alerts/", _wazuh_payload(level=14), content_type="application/json")
+    assert resp.status_code == 201
+    assert resp.json()["severity"] == "critical"

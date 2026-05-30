@@ -17,7 +17,10 @@ from incidents.services.events import record_event
 from incidents.services.promote import build_promote_payload
 
 from .filters import AlertFilterSet
-from .models import Alert, SEVERITY_ORDER, STATE_NEW, STATE_ACKNOWLEDGED, STATE_IMPORTED, STATE_IGNORED
+from .models import (
+    Alert, SEVERITY_ORDER, STATE_NEW, STATE_ACKNOWLEDGED, STATE_IMPORTED, STATE_IGNORED,
+    SEVERITY_CHOICES, PAP_CHOICES, TLP_CHOICES,
+)
 from .serializers import AlertSerializer
 from .services.identifiers import next_alert_display_id
 from .services.routing import route_alert, _create_incident_from_alert
@@ -130,12 +133,36 @@ class AlertListIngestView(APIView):
         if not source_kind:
             return Response({"detail": "source_kind is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        valid_kinds = {"wazuh_event", "vulnerability", "agent_finding", "api"}
+        valid_kinds = {"wazuh_event", "vulnerability", "agent_finding", "api", "workflow", "external"}
         if source_kind not in valid_kinds:
             return Response({"detail": f"source_kind must be one of {sorted(valid_kinds)}."}, status=status.HTTP_400_BAD_REQUEST)
 
         if not org_slug:
             return Response({"detail": "org is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Explicit optional enrichment fields
+        explicit_title = request.data.get("title") or None
+        explicit_severity = request.data.get("severity") or None
+        explicit_description = request.data.get("description") or None
+        explicit_pap = request.data.get("pap") or None
+        explicit_tlp = request.data.get("tlp") or None
+
+        # title is required for workflow/external (no auto-derive fallback exists)
+        if source_kind in {"workflow", "external"} and not explicit_title:
+            return Response({"detail": "title is required for workflow and external source kinds."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate enum values
+        valid_severities = {c[0] for c in SEVERITY_CHOICES}
+        if explicit_severity and explicit_severity not in valid_severities:
+            return Response({"detail": f"severity must be one of {sorted(valid_severities)}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        valid_pap = {c[0] for c in PAP_CHOICES}
+        if explicit_pap and explicit_pap not in valid_pap:
+            return Response({"detail": f"pap must be one of {sorted(valid_pap)}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        valid_tlp = {c[0] for c in TLP_CHOICES}
+        if explicit_tlp and explicit_tlp not in valid_tlp:
+            return Response({"detail": f"tlp must be one of {sorted(valid_tlp)}."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             org = Organization.objects.get(slug=org_slug)
@@ -143,8 +170,18 @@ class AlertListIngestView(APIView):
             return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
 
         payload = build_promote_payload(source_kind, source_ref)
-        title = payload["title"]
-        severity = payload["severity"]
+
+        # Explicit fields take precedence; fall back to auto-derived for platform-native kinds
+        external_kinds = {"api", "workflow", "external"}
+        title = explicit_title or payload["title"]
+        # For external kinds, null severity means "not set" — routing/promotion will derive it.
+        # For platform-native kinds, always store the auto-derived value so routing thresholds work.
+        if explicit_severity:
+            severity = explicit_severity
+        elif source_kind in external_kinds:
+            severity = None
+        else:
+            severity = payload["severity"]
 
         with transaction.atomic():
             display_id = next_alert_display_id()
@@ -155,6 +192,9 @@ class AlertListIngestView(APIView):
                 source_ref=source_ref,
                 title=title,
                 severity=severity,
+                description=explicit_description,
+                pap=explicit_pap,
+                tlp=explicit_tlp,
                 state=STATE_NEW,
             )
 
