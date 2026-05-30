@@ -3,7 +3,8 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.openapi import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers as _s
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
@@ -74,6 +75,21 @@ class AlertListIngestView(APIView):
     POST /api/alerts/  — staff-only ingest endpoint
     """
 
+    @extend_schema(
+        summary="List alerts",
+        description="Returns a paginated list of alerts scoped to the authenticated user's organisation. Staff users see all alerts.",
+        parameters=[
+            OpenApiParameter("state", OpenApiTypes.STR, description="Filter by state: new | acknowledged | imported | ignored"),
+            OpenApiParameter("severity", OpenApiTypes.STR, description="Filter by severity: critical | high | medium | low | info"),
+            OpenApiParameter("source_kind", OpenApiTypes.STR, description="Filter by source: wazuh_event | vulnerability | agent_finding | api | workflow | external | inbound_email"),
+            OpenApiParameter("date_from", OpenApiTypes.DATE, description="Created on or after this date (YYYY-MM-DD)"),
+            OpenApiParameter("date_to", OpenApiTypes.DATE, description="Created on or before this date (YYYY-MM-DD)"),
+            OpenApiParameter("exclude_state", OpenApiTypes.STR, description="Comma-separated states to exclude, e.g. closed,ignored"),
+            OpenApiParameter("page", OpenApiTypes.INT, description="Page number (default: 1)"),
+            OpenApiParameter("per_page", OpenApiTypes.INT, description="Page size (default: 25, max: 100)"),
+        ],
+        responses={200: AlertSerializer(many=True)},
+    )
     def get(self, request):
         err = _require_auth(request)
         if err:
@@ -101,13 +117,20 @@ class AlertListIngestView(APIView):
 
     @extend_schema(
         summary="Ingest alert (staff only)",
-        description="Create a new alert for an organisation and run routing. Staff only.",
+        description=(
+            "Create a new alert for an organisation and run routing. Staff only.\n\n"
+            "**Enrichment fields** (`title`, `description`, `severity`, `pap`, `tlp`) are optional "
+            "for platform-native source kinds (`wazuh_event`, `vulnerability`, `agent_finding`) — "
+            "values are auto-derived from `source_ref` when omitted. "
+            "For `workflow` and `external` source kinds `title` is required and severity/pap/tlp "
+            "remain `null` unless explicitly supplied."
+        ),
         request=inline_serializer(
             name="AlertIngestRequest",
             fields={
                 "org": _s.CharField(help_text="Organisation slug"),
                 "source_kind": _s.ChoiceField(
-                    choices=["wazuh_event", "vulnerability", "agent_finding", "api"],
+                    choices=["wazuh_event", "vulnerability", "agent_finding", "api", "workflow", "external"],
                     help_text="Alert source type",
                 ),
                 "source_ref": _s.DictField(
@@ -115,9 +138,42 @@ class AlertListIngestView(APIView):
                     allow_null=True,
                     help_text="Source-specific metadata (e.g. agent_name, rule_id)",
                 ),
+                "title": _s.CharField(
+                    required=False,
+                    allow_null=True,
+                    help_text="Human-readable title. Required for workflow/external; overrides auto-derived value for other kinds.",
+                ),
+                "description": _s.CharField(
+                    required=False,
+                    allow_null=True,
+                    help_text="Free-text description of the alert. Stored as-is; not auto-derived.",
+                ),
+                "severity": _s.ChoiceField(
+                    choices=["critical", "high", "medium", "low", "info"],
+                    required=False,
+                    allow_null=True,
+                    help_text="Severity override. For workflow/external kinds, omitting this stores null.",
+                ),
+                "pap": _s.ChoiceField(
+                    choices=["white", "green", "amber", "red"],
+                    required=False,
+                    allow_null=True,
+                    help_text="PAP classification override.",
+                ),
+                "tlp": _s.ChoiceField(
+                    choices=["white", "green", "amber", "red"],
+                    required=False,
+                    allow_null=True,
+                    help_text="TLP classification override.",
+                ),
             },
         ),
-        responses={201: AlertSerializer},
+        responses={
+            201: AlertSerializer,
+            400: inline_serializer(name="AlertIngestError", fields={"detail": _s.CharField()}),
+            403: inline_serializer(name="AlertIngestForbidden", fields={"detail": _s.CharField()}),
+            404: inline_serializer(name="AlertIngestNotFound", fields={"detail": _s.CharField()}),
+        },
     )
     def post(self, request):
         err = _require_auth(request)
@@ -225,6 +281,14 @@ class AlertDetailView(APIView):
         except Alert.DoesNotExist:
             return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
+    @extend_schema(
+        summary="Retrieve alert",
+        description="Returns the full detail of a single alert by its display ID.",
+        responses={
+            200: AlertSerializer,
+            404: inline_serializer(name="AlertDetailNotFound", fields={"detail": _s.CharField()}),
+        },
+    )
     def get(self, request, display_id):
         err = _require_auth(request)
         if err:
@@ -234,6 +298,36 @@ class AlertDetailView(APIView):
             return err
         return Response(AlertSerializer(alert).data)
 
+    @extend_schema(
+        summary="Update alert state or incident link",
+        description=(
+            "Performs one of two mutually exclusive operations:\n\n"
+            "- **State transition** (`state` field): moves the alert through its lifecycle. "
+            "Valid transitions: `new` → `acknowledged` or `ignored`; `acknowledged` → `ignored`.\n"
+            "- **Incident re-link** (`incident` field): reassigns the alert to a different incident. "
+            "Only allowed when the alert is in `imported` state."
+        ),
+        request=inline_serializer(
+            name="AlertPatchRequest",
+            fields={
+                "state": _s.ChoiceField(
+                    choices=["acknowledged", "ignored"],
+                    required=False,
+                    help_text="Target state for the transition.",
+                ),
+                "incident": _s.CharField(
+                    required=False,
+                    allow_null=True,
+                    help_text="Display ID of the target incident (re-link; only for imported alerts).",
+                ),
+            },
+        ),
+        responses={
+            200: AlertSerializer,
+            400: inline_serializer(name="AlertPatchError", fields={"detail": _s.CharField()}),
+            404: inline_serializer(name="AlertPatchNotFound", fields={"detail": _s.CharField()}),
+        },
+    )
     def patch(self, request, display_id):
         err = _require_auth(request)
         if err:
@@ -322,6 +416,63 @@ class AlertBulkPromoteView(APIView):
     Creates one incident from the highest-severity alert.
     """
 
+    @extend_schema(
+        summary="Bulk-promote alerts to an incident",
+        description=(
+            "Creates a single incident from one or more alerts and marks all of them as `imported`. "
+            "The incident fields are derived from the highest-severity alert in the selection. "
+            "Any of the five incident fields can be overridden by including them in the request body — "
+            "call `POST /api/alerts/bulk-promote/preview/` first to get the auto-derived defaults.\n\n"
+            "All supplied alerts must belong to the given organisation and must not already be in "
+            "`imported` or `ignored` state."
+        ),
+        request=inline_serializer(
+            name="AlertBulkPromoteRequest",
+            fields={
+                "alerts": _s.ListField(
+                    child=_s.CharField(),
+                    help_text="List of alert display IDs to promote (e.g. ['AL-001', 'AL-005']).",
+                ),
+                "org": _s.CharField(help_text="Organisation slug that owns the alerts."),
+                "title": _s.CharField(
+                    required=False,
+                    allow_null=True,
+                    help_text="Incident title override. Defaults to the auto-derived value.",
+                ),
+                "description": _s.CharField(
+                    required=False,
+                    allow_null=True,
+                    help_text="Incident description override.",
+                ),
+                "severity": _s.ChoiceField(
+                    choices=["critical", "high", "medium", "low", "info"],
+                    required=False,
+                    allow_null=True,
+                    help_text="Severity override. Defaults to the highest severity across selected alerts.",
+                ),
+                "pap": _s.ChoiceField(
+                    choices=["white", "green", "amber", "red"],
+                    required=False,
+                    allow_null=True,
+                    help_text="PAP classification override.",
+                ),
+                "tlp": _s.ChoiceField(
+                    choices=["white", "green", "amber", "red"],
+                    required=False,
+                    allow_null=True,
+                    help_text="TLP classification override.",
+                ),
+            },
+        ),
+        responses={
+            201: inline_serializer(
+                name="AlertBulkPromoteResponse",
+                fields={"display_id": _s.CharField(help_text="Display ID of the newly created incident.")},
+            ),
+            400: inline_serializer(name="AlertBulkPromoteError", fields={"detail": _s.CharField()}),
+            404: inline_serializer(name="AlertBulkPromoteNotFound", fields={"detail": _s.CharField()}),
+        },
+    )
     def post(self, request):
         err = _require_auth(request)
         if err:
@@ -423,6 +574,48 @@ class AlertBulkPromotePreviewView(APIView):
     Returns the incident fields that would be created by bulk-promote, without writing anything.
     """
 
+    @extend_schema(
+        summary="Preview bulk-promote incident fields",
+        description=(
+            "Dry-run companion to `POST /api/alerts/bulk-promote/`. "
+            "Returns the five incident fields (`title`, `description`, `severity`, `pap`, `tlp`) "
+            "that would be derived from the selected alerts without creating anything. "
+            "Use this to pre-populate a confirmation dialog before calling the promote endpoint."
+        ),
+        request=inline_serializer(
+            name="AlertBulkPromotePreviewRequest",
+            fields={
+                "alerts": _s.ListField(
+                    child=_s.CharField(),
+                    help_text="List of alert display IDs to preview (e.g. ['AL-001', 'AL-005']).",
+                ),
+                "org": _s.CharField(help_text="Organisation slug that owns the alerts."),
+            },
+        ),
+        responses={
+            200: inline_serializer(
+                name="AlertBulkPromotePreviewResponse",
+                fields={
+                    "title": _s.CharField(help_text="Derived incident title."),
+                    "description": _s.CharField(help_text="Derived incident description."),
+                    "severity": _s.ChoiceField(
+                        choices=["critical", "high", "medium", "low", "info"],
+                        help_text="Derived severity (highest across selected alerts).",
+                    ),
+                    "pap": _s.ChoiceField(
+                        choices=["white", "green", "amber", "red"],
+                        help_text="Derived PAP classification.",
+                    ),
+                    "tlp": _s.ChoiceField(
+                        choices=["white", "green", "amber", "red"],
+                        help_text="Derived TLP classification.",
+                    ),
+                },
+            ),
+            400: inline_serializer(name="AlertBulkPreviewError", fields={"detail": _s.CharField()}),
+            404: inline_serializer(name="AlertBulkPreviewNotFound", fields={"detail": _s.CharField()}),
+        },
+    )
     def post(self, request):
         err = _require_auth(request)
         if err:
