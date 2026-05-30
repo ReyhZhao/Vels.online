@@ -23,7 +23,7 @@ from .models import (
 )
 from .serializers import AlertSerializer
 from .services.identifiers import next_alert_display_id
-from .services.routing import route_alert, _create_incident_from_alert
+from .services.routing import route_alert, _create_incident_from_alert, derive_incident_fields
 from .services.side_effects import apply_link_side_effects
 
 logger = logging.getLogger(__name__)
@@ -327,52 +327,11 @@ class AlertBulkPromoteView(APIView):
         if err:
             return err
 
-        display_ids = request.data.get("alerts", [])
-        org_slug = request.data.get("org")
+        alerts, org, err = _resolve_bulk_promote_alerts(request)
+        if err:
+            return err
 
-        if not display_ids or not isinstance(display_ids, list):
-            return Response({"detail": "alerts must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not org_slug:
-            return Response({"detail": "org is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            org = Organization.objects.get(slug=org_slug)
-        except Organization.DoesNotExist:
-            return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        if not request.user.is_staff:
-            # Non-staff: verify user belongs to org
-            if not OrganizationMembership.objects.filter(user=request.user, organization=org).exists():
-                return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        alerts = list(
-            Alert.objects.filter(
-                display_id__in=display_ids,
-                organization=org,
-            ).select_related("organization")
-        )
-
-        if len(alerts) != len(display_ids):
-            # Some alerts not found or belong to different org
-            return Response({"detail": "One or more alerts not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        already_imported = [a.display_id for a in alerts if a.state == STATE_IMPORTED]
-        if already_imported:
-            return Response(
-                {"detail": f"Already-imported alerts cannot be bulk-promoted: {already_imported}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        ignored = [a.display_id for a in alerts if a.state == STATE_IGNORED]
-        if ignored:
-            return Response(
-                {"detail": f"Ignored alerts cannot be bulk-promoted: {ignored}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Derive title/severity from the highest-severity alert in the selection
-        lead = max(alerts, key=lambda a: SEVERITY_ORDER.get(a.severity, 0))
+        lead = max(alerts, key=lambda a: SEVERITY_ORDER.get(a.severity or "info", 0))
 
         try:
             incident = _create_incident_from_alert(lead, org)
@@ -389,3 +348,77 @@ class AlertBulkPromoteView(APIView):
 
         from incidents.serializers import IncidentSerializer
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)
+
+
+def _resolve_bulk_promote_alerts(request):
+    """
+    Shared validation for bulk-promote and preview endpoints.
+    Returns (alerts, org, error_response).
+    """
+    display_ids = request.data.get("alerts", [])
+    org_slug = request.data.get("org")
+
+    if not display_ids or not isinstance(display_ids, list):
+        return None, None, Response({"detail": "alerts must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not org_slug:
+        return None, None, Response({"detail": "org is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        org = Organization.objects.get(slug=org_slug)
+    except Organization.DoesNotExist:
+        return None, None, Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_staff:
+        if not OrganizationMembership.objects.filter(user=request.user, organization=org).exists():
+            return None, None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    alerts = list(
+        Alert.objects.filter(display_id__in=display_ids, organization=org).select_related("organization")
+    )
+
+    if len(alerts) != len(display_ids):
+        return None, None, Response({"detail": "One or more alerts not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    already_imported = [a.display_id for a in alerts if a.state == STATE_IMPORTED]
+    if already_imported:
+        return None, None, Response(
+            {"detail": f"Already-imported alerts cannot be bulk-promoted: {already_imported}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    ignored = [a.display_id for a in alerts if a.state == STATE_IGNORED]
+    if ignored:
+        return None, None, Response(
+            {"detail": f"Ignored alerts cannot be bulk-promoted: {ignored}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return alerts, org, None
+
+
+class AlertBulkPromotePreviewView(APIView):
+    """
+    POST /api/alerts/bulk-promote/preview/
+    Returns the incident fields that would be created by bulk-promote, without writing anything.
+    """
+
+    def post(self, request):
+        err = _require_auth(request)
+        if err:
+            return err
+
+        alerts, org, err = _resolve_bulk_promote_alerts(request)
+        if err:
+            return err
+
+        lead = max(alerts, key=lambda a: SEVERITY_ORDER.get(a.severity or "info", 0))
+        fields = derive_incident_fields(lead)
+
+        return Response({
+            "title": fields.get("title", ""),
+            "description": fields.get("description", ""),
+            "severity": fields.get("severity", "medium"),
+            "pap": fields.get("pap", "amber"),
+            "tlp": fields.get("tlp", "amber"),
+        })

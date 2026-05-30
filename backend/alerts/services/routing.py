@@ -13,12 +13,12 @@ from .side_effects import apply_link_side_effects
 from .threshold import check_asset_threshold, _get_asset_key, _asset_key_filter
 
 
-def _create_incident_from_alert(alert, org):
-    """Create a new Incident from an alert, preferring explicit alert fields over auto-derived values."""
+def derive_incident_fields(alert):
+    """
+    Return a dict of incident fields derived from an alert.
+    Explicit alert fields take precedence over auto-derived values from build_promote_payload.
+    """
     payload = build_promote_payload(alert.source_kind, alert.source_ref or {})
-
-    # Explicit fields set on the alert always override auto-derived values.
-    # NULL means "not explicitly set — keep the auto-derived fallback."
     if alert.title:
         payload["title"] = alert.title
     if alert.description is not None:
@@ -29,6 +29,12 @@ def _create_incident_from_alert(alert, org):
         payload["pap"] = alert.pap
     if alert.tlp is not None:
         payload["tlp"] = alert.tlp
+    return payload
+
+
+def _create_incident_from_alert(alert, org):
+    """Create a new Incident from an alert, preferring explicit alert fields over auto-derived values."""
+    payload = derive_incident_fields(alert)
 
     ser = IncidentCreateSerializer(data=payload)
     ser.is_valid(raise_exception=True)

@@ -484,3 +484,127 @@ def test_ingest_wazuh_alert_derives_severity_as_before(client, staff_user, acme)
     resp = client.post("/api/alerts/", _wazuh_payload(level=14), content_type="application/json")
     assert resp.status_code == 201
     assert resp.json()["severity"] == "critical"
+
+
+# ── Bulk promote preview endpoint (#327) ─────────────────────────────────────
+
+
+def test_preview_returns_suggested_fields(client, staff_user, acme):
+    client.force_login(staff_user)
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+        source_ref={"agent_name": "web-01", "rule_description": "Brute force", "level": 9},
+        severity="high", state="new",
+    )
+    resp = client.post(
+        "/api/alerts/bulk-promote/preview/",
+        {"alerts": ["AL-0001"], "org": "acme"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "title" in data
+    assert "description" in data
+    assert "severity" in data
+    assert "pap" in data
+    assert "tlp" in data
+    assert data["severity"] == "high"
+    assert "web-01" in data["title"]
+
+
+def test_preview_uses_highest_severity_alert_as_lead(client, staff_user, acme):
+    client.force_login(staff_user)
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+        source_ref={"agent_name": "web-01", "rule_description": "Minor", "level": 3},
+        severity="low", state="new",
+    )
+    Alert.objects.create(
+        organization=acme, display_id="AL-0002", source_kind="wazuh_event",
+        source_ref={"agent_name": "db-01", "rule_description": "Critical breach", "level": 12},
+        severity="critical", state="new",
+    )
+    resp = client.post(
+        "/api/alerts/bulk-promote/preview/",
+        {"alerts": ["AL-0001", "AL-0002"], "org": "acme"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["severity"] == "critical"
+    assert "db-01" in data["title"]
+
+
+def test_preview_prefers_explicit_alert_fields(client, staff_user, acme):
+    client.force_login(staff_user)
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="workflow",
+        source_ref={},
+        title="Explicit workflow title",
+        description="N8N crafted description.",
+        severity="high",
+        pap="red",
+        tlp="green",
+        state="new",
+    )
+    resp = client.post(
+        "/api/alerts/bulk-promote/preview/",
+        {"alerts": ["AL-0001"], "org": "acme"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["title"] == "Explicit workflow title"
+    assert data["description"] == "N8N crafted description."
+    assert data["pap"] == "red"
+    assert data["tlp"] == "green"
+
+
+def test_preview_does_not_create_incident_or_change_state(client, staff_user, acme):
+    client.force_login(staff_user)
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+        source_ref={"agent_name": "web-01", "rule_description": "X", "level": 9},
+        severity="high", state="new",
+    )
+    from incidents.models import Incident
+    before = Incident.objects.count()
+    client.post(
+        "/api/alerts/bulk-promote/preview/",
+        {"alerts": ["AL-0001"], "org": "acme"},
+        content_type="application/json",
+    )
+    client.post(
+        "/api/alerts/bulk-promote/preview/",
+        {"alerts": ["AL-0001"], "org": "acme"},
+        content_type="application/json",
+    )
+    assert Incident.objects.count() == before
+    from alerts.models import Alert as AlertModel
+    a = AlertModel.objects.get(display_id="AL-0001")
+    assert a.state == "new"
+
+
+def test_preview_rejects_imported_alert(client, staff_user, acme):
+    client.force_login(staff_user)
+    inc = Incident.objects.create(organization=acme, display_id="INC-2026-0001", title="I", severity="medium", state="new")
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+        title="A", severity="high", state="imported", incident=inc,
+    )
+    resp = client.post(
+        "/api/alerts/bulk-promote/preview/",
+        {"alerts": ["AL-0001"], "org": "acme"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+def test_preview_rejects_empty_list(client, staff_user, acme):
+    client.force_login(staff_user)
+    resp = client.post(
+        "/api/alerts/bulk-promote/preview/",
+        {"alerts": [], "org": "acme"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
