@@ -1264,19 +1264,37 @@ export default function IncidentDetail() {
       {/* ── Tabbed content ── */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="flex overflow-x-auto border-b border-border no-scrollbar">
-          {TABS.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`shrink-0 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === tab.key
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {(() => {
+            const tabCounts = {
+              attachments:   incident.attachment_count   ?? 0,
+              tasks:         incident.task_count         ?? 0,
+              contacts:      incident.contact_count      ?? 0,
+              iocs:          incident.iocs?.length       ?? 0,
+              assets:        incident.assets?.length     ?? 0,
+              linked_alerts: incident.linked_alert_count ?? 0,
+            };
+            return TABS.map(tab => {
+              const count = tabCounts[tab.key] ?? 0;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`shrink-0 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors inline-flex items-center gap-1.5 ${
+                    activeTab === tab.key
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {tab.label}
+                  {count > 0 && (
+                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground leading-none">
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            });
+          })()}
         </div>
         <div className="p-6">
           {activeTab === 'details' && (

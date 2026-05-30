@@ -122,6 +122,9 @@ class IncidentSerializer(serializers.ModelSerializer):
     triage_running = serializers.SerializerMethodField()
     triage_started_at = serializers.SerializerMethodField()
     linked_alert_count = serializers.SerializerMethodField()
+    attachment_count = serializers.SerializerMethodField()
+    task_count = serializers.SerializerMethodField()
+    contact_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Incident
@@ -158,6 +161,9 @@ class IncidentSerializer(serializers.ModelSerializer):
             "triage_running",
             "triage_started_at",
             "linked_alert_count",
+            "attachment_count",
+            "task_count",
+            "contact_count",
         ]
         read_only_fields = ["id", "display_id", "org_slug", "created_by", "created_at", "updated_at"]
 
@@ -203,8 +209,16 @@ class IncidentSerializer(serializers.ModelSerializer):
         return get_triage_lock_started_at(obj.id)
 
     def get_linked_alert_count(self, obj):
-        # Use the reverse relation set up by Alert.incident FK (related_name='alerts')
         return obj.alerts.count()
+
+    def get_attachment_count(self, obj):
+        return obj.attachments.count()
+
+    def get_task_count(self, obj):
+        return obj.tasks.count()
+
+    def get_contact_count(self, obj):
+        return obj.incident_contacts.count()
 
 
 class IncidentCreateSerializer(serializers.ModelSerializer):
