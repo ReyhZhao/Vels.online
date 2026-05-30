@@ -110,11 +110,16 @@ function AssetRow({ asset, onDeleted }) {
       <td className="px-4 py-3 text-muted-foreground">{asset.agent_name || '—'}</td>
       <td className="px-4 py-3 text-muted-foreground">{asset.ip_address || '—'}</td>
       <td className="px-4 py-3">
-        {asset.is_active === false ? (
-          <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs text-muted-foreground">inactive</span>
-        ) : (
-          <span className="inline-flex items-center rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">active</span>
-        )}
+        <div className="flex flex-wrap gap-1">
+          {asset.is_active === false ? (
+            <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs text-muted-foreground">inactive</span>
+          ) : (
+            <span className="inline-flex items-center rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">active</span>
+          )}
+          {asset.is_permanent && (
+            <span className="inline-flex items-center rounded-full bg-violet-100 dark:bg-violet-900/30 px-2 py-0.5 text-xs text-violet-700 dark:text-violet-400">permanent</span>
+          )}
+        </div>
       </td>
       <td className="px-4 py-3 text-muted-foreground text-xs">
         {asset.last_seen_at ? new Date(asset.last_seen_at).toLocaleString() : '—'}

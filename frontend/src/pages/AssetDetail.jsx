@@ -137,7 +137,7 @@ export default function AssetDetail() {
     api.get(`/api/assets/${id}/`)
       .then(res => {
         setAsset(res.data);
-        setForm({ name: res.data.name, ip_address: res.data.ip_address || '' });
+        setForm({ name: res.data.name, ip_address: res.data.ip_address || '', is_permanent: res.data.is_permanent ?? false });
       })
       .catch(() => setError('Asset not found.'))
       .finally(() => setLoading(false));
@@ -200,6 +200,9 @@ export default function AssetDetail() {
           ) : (
             <span className="inline-flex items-center rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">active</span>
           )}
+          {asset.is_permanent && (
+            <span className="inline-flex items-center rounded-full bg-violet-100 dark:bg-violet-900/30 px-2 py-0.5 text-xs text-violet-700 dark:text-violet-400">permanent</span>
+          )}
         </div>
         <button
           onClick={() => setDeleteOpen(true)}
@@ -249,6 +252,21 @@ export default function AssetDetail() {
             Last seen {new Date(asset.last_seen_at).toLocaleString()}
           </p>
         )}
+        <div className="flex items-center gap-3">
+          <label className="relative inline-flex cursor-pointer items-center">
+            <input
+              type="checkbox"
+              className="peer sr-only"
+              checked={form.is_permanent}
+              onChange={e => set('is_permanent', e.target.checked)}
+            />
+            <div className="h-5 w-9 rounded-full bg-border peer-checked:bg-primary transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
+          </label>
+          <div>
+            <p className="text-sm font-medium text-foreground">Permanent</p>
+            <p className="text-xs text-muted-foreground">Permanent assets are never removed by automated cleanup.</p>
+          </div>
+        </div>
         {saveError && <p className="text-sm text-red-600">{saveError}</p>}
         {isHost && (
           <div className="flex justify-end">

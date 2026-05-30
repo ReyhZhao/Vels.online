@@ -575,5 +575,6 @@ def sync_wazuh_agents():
     deleted, _ = Asset.objects.filter(
         kind=Asset.KIND_HOST,
         last_seen_at__lt=cutoff,
+        is_permanent=False,
     ).delete()
     logger.info("sync_wazuh_agents: deleted %d stale assets", deleted)
