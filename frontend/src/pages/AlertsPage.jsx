@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import SlideOver from '../components/SlideOver';
+import BulkPromoteModal from '../components/BulkPromoteModal';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -231,8 +232,8 @@ function AlertsPage() {
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
 
-  // Bulk promote
-  const [promoting, setPromoting] = useState(false);
+  const [promoteModalOpen, setPromoteModalOpen] = useState(false);
+  const [promoteOrgSlug, setPromoteOrgSlug] = useState(null);
 
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
@@ -289,36 +290,11 @@ function AlertsPage() {
     }
   };
 
-  const handleBulkPromote = async () => {
-    const eligibleIds = [...selectedIds].filter(id => {
-      const a = data.results.find(r => r.display_id === id);
-      return a && a.state !== 'imported' && a.state !== 'ignored';
-    });
-
-    if (eligibleIds.length === 0) return;
-
-    if (!user?.org_slug) {
-      // Try to get the org from the first alert
-      const firstAlert = data.results.find(a => selectedIds.has(a.display_id));
-      if (!firstAlert?.org_slug) return;
-    }
-
+  const handleBulkPromote = () => {
     const orgSlug = data.results.find(a => selectedIds.has(a.display_id))?.org_slug;
     if (!orgSlug) return;
-
-    setPromoting(true);
-    try {
-      const resp = await api.post('/api/alerts/bulk-promote/', {
-        alerts: eligibleIds,
-        org: orgSlug,
-      });
-      setSelectedIds(new Set());
-      navigate(`/incidents/${resp.data.display_id}`);
-    } catch {
-      // ignore
-    } finally {
-      setPromoting(false);
-    }
+    setPromoteOrgSlug(orgSlug);
+    setPromoteModalOpen(true);
   };
 
   const handleQuickAction = async (e, alert, newState) => {
@@ -539,10 +515,9 @@ function AlertsPage() {
           </span>
           <button
             onClick={handleBulkPromote}
-            disabled={promoting}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
           >
-            {promoting ? 'Creating…' : `Create incident from selected (${selectedIds.size})`}
+            {`Create incident from selected (${selectedIds.size})`}
           </button>
           <button
             onClick={() => setSelectedIds(new Set())}
@@ -552,6 +527,21 @@ function AlertsPage() {
           </button>
         </div>
       )}
+
+      <BulkPromoteModal
+        open={promoteModalOpen}
+        alertIds={[...selectedIds].filter(id => {
+          const a = data.results.find(r => r.display_id === id);
+          return a && a.state !== 'imported' && a.state !== 'ignored';
+        })}
+        orgSlug={promoteOrgSlug}
+        onClose={() => setPromoteModalOpen(false)}
+        onSuccess={(incidentId) => {
+          setSelectedIds(new Set());
+          setPromoteModalOpen(false);
+          navigate(`/incidents/${incidentId}`);
+        }}
+      />
 
       {/* Detail slide-over */}
       <SlideOver
