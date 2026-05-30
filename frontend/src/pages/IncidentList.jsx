@@ -93,6 +93,94 @@ const CLOSURE_REASONS = [
   { value: 'accepted_risk',  label: 'Accepted Risk' },
 ];
 
+function CanonicalIncidentCombobox({ incidents, loading, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const containerRef = useRef(null);
+
+  const selected = incidents.find(i => String(i.id) === String(value));
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  const filtered = incidents.filter(i => {
+    const q = search.toLowerCase();
+    return (
+      i.display_id?.toLowerCase().includes(q) ||
+      i.title?.toLowerCase().includes(q)
+    );
+  });
+
+  function select(incident) {
+    onChange(String(incident.id));
+    setSearch('');
+    setOpen(false);
+  }
+
+  function handleInputChange(e) {
+    setSearch(e.target.value);
+    onChange('');
+    if (!open) setOpen(true);
+  }
+
+  function handleInputFocus() {
+    setOpen(true);
+  }
+
+  const displayValue = open ? search : (selected ? `${selected.display_id} — ${selected.title}` : '');
+
+  return (
+    <div ref={containerRef} className="relative">
+      <input
+        type="text"
+        role="combobox"
+        aria-expanded={open}
+        aria-autocomplete="list"
+        aria-label="Canonical incident"
+        id="bulk-duplicate-of"
+        value={displayValue}
+        onChange={handleInputChange}
+        onFocus={handleInputFocus}
+        disabled={loading}
+        placeholder={loading ? 'Loading…' : 'Search incidents…'}
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+        autoComplete="off"
+      />
+      {open && !loading && (
+        <ul
+          role="listbox"
+          className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-border bg-card shadow-lg"
+        >
+          {filtered.length === 0 ? (
+            <li className="px-3 py-2 text-sm text-muted-foreground">No incidents found</li>
+          ) : (
+            filtered.map(i => (
+              <li
+                key={i.id}
+                role="option"
+                aria-selected={String(i.id) === String(value)}
+                onMouseDown={e => { e.preventDefault(); select(i); }}
+                className={`cursor-pointer px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground ${String(i.id) === String(value) ? 'bg-accent/50' : ''}`}
+              >
+                <span className="font-medium">{i.display_id}</span>
+                <span className="text-muted-foreground"> — {i.title}</span>
+              </li>
+            ))
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function BulkCloseDialog({ onConfirm, onCancel, loading, excludeIds }) {
   const [reason, setReason] = useState('');
   const [duplicateOf, setDuplicateOf] = useState('');
@@ -102,7 +190,7 @@ function BulkCloseDialog({ onConfirm, onCancel, loading, excludeIds }) {
   useEffect(() => {
     if (reason !== 'duplicate') { setDuplicateOf(''); return; }
     setCanonicalLoading(true);
-    api.get('/api/incidents/', { params: { page_size: 200, exclude_states: 'closed' } })
+    api.get('/api/incidents/', { params: { page_size: 500, exclude_states: 'closed' } })
       .then(res => {
         const items = (res.data.results ?? res.data);
         setCanonicalIncidents(items.filter(i => !excludeIds.has(i.id)));
@@ -142,18 +230,12 @@ function BulkCloseDialog({ onConfirm, onCancel, loading, excludeIds }) {
             <p className="text-xs text-muted-foreground">
               All selected incidents will be linked to this incident as duplicates. It stays open.
             </p>
-            <select
-              id="bulk-duplicate-of"
+            <CanonicalIncidentCombobox
+              incidents={canonicalIncidents}
+              loading={canonicalLoading}
               value={duplicateOf}
-              onChange={e => setDuplicateOf(e.target.value)}
-              disabled={canonicalLoading}
-              className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-            >
-              <option value="">{canonicalLoading ? 'Loading…' : 'Select canonical incident…'}</option>
-              {canonicalIncidents.map(i => (
-                <option key={i.id} value={i.id}>{i.display_id} — {i.title}</option>
-              ))}
-            </select>
+              onChange={setDuplicateOf}
+            />
           </div>
         )}
 
