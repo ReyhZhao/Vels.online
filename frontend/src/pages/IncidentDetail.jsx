@@ -122,11 +122,12 @@ function IncidentExceptionsSection({ displayId }) {
   );
 }
 
-const IOC_KIND_LABELS = { ip: 'IP Address', domain: 'Domain', url: 'URL' };
+const IOC_KIND_LABELS = { ip: 'IP Address', domain: 'Domain', url: 'URL', email: 'Email Address' };
 const IOC_KIND_CLASSES = {
   ip:     'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
   domain: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
   url:    'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+  email:  'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',
 };
 
 function enrichmentScore(ioc) {
@@ -247,7 +248,7 @@ function IOCSection({ iocs }) {
     return acc;
   }, {});
 
-  const kinds = ['ip', 'domain', 'url'].filter(k => grouped[k]?.length);
+  const kinds = ['ip', 'domain', 'url', 'email'].filter(k => grouped[k]?.length);
 
   return (
     <div className="rounded-lg border border-border bg-card p-6 space-y-4">
