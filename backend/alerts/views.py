@@ -331,10 +331,30 @@ class AlertBulkPromoteView(APIView):
         if err:
             return err
 
+        # Validate and collect optional analyst overrides
+        override_severity = request.data.get("severity") or None
+        override_pap = request.data.get("pap") or None
+        override_tlp = request.data.get("tlp") or None
+
+        if override_severity and override_severity not in {c[0] for c in SEVERITY_CHOICES}:
+            return Response({"detail": f"Invalid severity: {override_severity}."}, status=status.HTTP_400_BAD_REQUEST)
+        if override_pap and override_pap not in {c[0] for c in PAP_CHOICES}:
+            return Response({"detail": f"Invalid pap: {override_pap}."}, status=status.HTTP_400_BAD_REQUEST)
+        if override_tlp and override_tlp not in {c[0] for c in TLP_CHOICES}:
+            return Response({"detail": f"Invalid tlp: {override_tlp}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        overrides = {
+            "title": request.data.get("title") or None,
+            "description": request.data.get("description") or None,
+            "severity": override_severity,
+            "pap": override_pap,
+            "tlp": override_tlp,
+        }
+
         lead = max(alerts, key=lambda a: SEVERITY_ORDER.get(a.severity or "info", 0))
 
         try:
-            incident = _create_incident_from_alert(lead, org)
+            incident = _create_incident_from_alert(lead, org, overrides=overrides)
         except Exception:
             logger.exception("bulk-promote: failed to create incident")
             return Response({"detail": "Failed to create incident."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

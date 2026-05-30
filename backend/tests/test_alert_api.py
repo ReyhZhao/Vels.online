@@ -608,3 +608,103 @@ def test_preview_rejects_empty_list(client, staff_user, acme):
         content_type="application/json",
     )
     assert resp.status_code == 400
+
+
+# ── Bulk promote with override fields (#328) ──────────────────────────────────
+
+
+def test_bulk_promote_with_all_overrides(client, staff_user, acme):
+    client.force_login(staff_user)
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+        source_ref={"agent_name": "web-01", "rule_description": "X", "level": 6},
+        severity="medium", state="new",
+    )
+    resp = client.post(
+        "/api/alerts/bulk-promote/",
+        {
+            "alerts": ["AL-0001"],
+            "org": "acme",
+            "title": "Analyst title",
+            "description": "Analyst description.",
+            "severity": "critical",
+            "pap": "white",
+            "tlp": "red",
+        },
+        content_type="application/json",
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["title"] == "Analyst title"
+    assert data["description"] == "Analyst description."
+    assert data["severity"] == "critical"
+    assert data["pap"] == "white"
+    assert data["tlp"] == "red"
+
+
+def test_bulk_promote_without_overrides_uses_derived_values(client, staff_user, acme):
+    client.force_login(staff_user)
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+        source_ref={"agent_name": "web-01", "rule_description": "Lateral movement", "level": 12},
+        severity="critical", state="new",
+    )
+    resp = client.post(
+        "/api/alerts/bulk-promote/",
+        {"alerts": ["AL-0001"], "org": "acme"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["severity"] == "critical"
+    assert "web-01" in data["title"]
+
+
+def test_bulk_promote_partial_overrides(client, staff_user, acme):
+    """Only supplied override fields apply; omitted fields use derived values."""
+    client.force_login(staff_user)
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+        source_ref={"agent_name": "db-01", "rule_description": "SQL injection", "level": 9},
+        severity="high", state="new",
+    )
+    resp = client.post(
+        "/api/alerts/bulk-promote/",
+        {"alerts": ["AL-0001"], "org": "acme", "pap": "white"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["pap"] == "white"
+    assert data["severity"] == "high"
+    assert "db-01" in data["title"]
+
+
+def test_bulk_promote_invalid_override_severity_returns_400(client, staff_user, acme):
+    client.force_login(staff_user)
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+        source_ref={"agent_name": "web-01", "rule_description": "X", "level": 6},
+        severity="medium", state="new",
+    )
+    resp = client.post(
+        "/api/alerts/bulk-promote/",
+        {"alerts": ["AL-0001"], "org": "acme", "severity": "extreme"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+def test_bulk_promote_invalid_override_pap_returns_400(client, staff_user, acme):
+    client.force_login(staff_user)
+    Alert.objects.create(
+        organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+        source_ref={"agent_name": "web-01", "rule_description": "X", "level": 6},
+        severity="medium", state="new",
+    )
+    resp = client.post(
+        "/api/alerts/bulk-promote/",
+        {"alerts": ["AL-0001"], "org": "acme", "pap": "purple"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400

@@ -32,9 +32,15 @@ def derive_incident_fields(alert):
     return payload
 
 
-def _create_incident_from_alert(alert, org):
-    """Create a new Incident from an alert, preferring explicit alert fields over auto-derived values."""
+def _create_incident_from_alert(alert, org, overrides=None):
+    """Create a new Incident from an alert, preferring explicit alert fields over auto-derived values.
+
+    overrides: optional dict of analyst-supplied fields (e.g. from bulk-promote dialog)
+    that take highest precedence over both auto-derived and alert-level explicit values.
+    """
     payload = derive_incident_fields(alert)
+    if overrides:
+        payload.update({k: v for k, v in overrides.items() if v is not None})
 
     ser = IncidentCreateSerializer(data=payload)
     ser.is_valid(raise_exception=True)
