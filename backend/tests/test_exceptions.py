@@ -260,3 +260,87 @@ def test_create_exception_valid_payload_succeeds(mock_push, admin_client, acme, 
     data = res.json()
     assert data["trigger_rule_id"] == 100200
     assert data["description"] == "Suppress expected cron noise on agent1"
+
+
+@pytest.mark.django_db
+@patch("exceptions.views.push_rule")
+def test_create_exception_github_push_failure_returns_502(mock_push, admin_client, acme, pool):
+    mock_push.side_effect = Exception("404 Not Found")
+    res = admin_client.post("/api/exceptions/", VALID_POST_PAYLOAD, content_type="application/json")
+    assert res.status_code == 502
+    assert "detail" in res.json()
+
+
+@pytest.mark.django_db
+@patch("exceptions.views.push_rule")
+def test_create_exception_github_push_failure_rolls_back_db(mock_push, admin_client, acme, pool):
+    mock_push.side_effect = Exception("404 Not Found")
+    admin_client.post("/api/exceptions/", VALID_POST_PAYLOAD, content_type="application/json")
+    assert ExceptionRule.objects.count() == 0
+
+
+@pytest.mark.django_db
+@patch("exceptions.views.push_rule")
+def test_create_exception_github_push_failure_frees_rule_id(mock_push, admin_client, acme, pool):
+    mock_push.side_effect = Exception("404 Not Found")
+    admin_client.post("/api/exceptions/", VALID_POST_PAYLOAD, content_type="application/json")
+    # After rollback the ID is freed; the next allocation should reuse it
+    assert allocate_rule_id() == 200000
+
+
+# ── POST /api/exceptions/<id>/approve/ ───────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("exceptions.views.push_rule")
+def test_approve_github_push_failure_returns_502(mock_push, admin_client, acme):
+    rule = make_rule(acme, status="pending")
+    mock_push.side_effect = Exception("502 Bad Gateway")
+    res = admin_client.post(f"/api/exceptions/{rule.id}/approve/")
+    assert res.status_code == 502
+    assert "detail" in res.json()
+
+
+@pytest.mark.django_db
+@patch("exceptions.views.push_rule")
+def test_approve_github_push_failure_leaves_rule_pending(mock_push, admin_client, acme):
+    rule = make_rule(acme, status="pending")
+    mock_push.side_effect = Exception("502 Bad Gateway")
+    admin_client.post(f"/api/exceptions/{rule.id}/approve/")
+    rule.refresh_from_db()
+    assert rule.status == "pending"
+
+
+# ── POST /api/exceptions/<id>/disable/ ───────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("exceptions.views.remove_rule")
+def test_disable_github_remove_failure_returns_502(mock_remove, admin_client, acme):
+    rule = make_rule(acme, status="applied")
+    mock_remove.side_effect = Exception("500 Server Error")
+    res = admin_client.post(f"/api/exceptions/{rule.id}/disable/")
+    assert res.status_code == 502
+    assert "detail" in res.json()
+
+
+@pytest.mark.django_db
+@patch("exceptions.views.remove_rule")
+def test_disable_github_remove_failure_leaves_rule_applied(mock_remove, admin_client, acme):
+    rule = make_rule(acme, status="applied")
+    mock_remove.side_effect = Exception("500 Server Error")
+    admin_client.post(f"/api/exceptions/{rule.id}/disable/")
+    rule.refresh_from_db()
+    assert rule.status == "applied"
+
+
+@pytest.mark.django_db
+@patch("exceptions.views.remove_rule")
+def test_disable_github_remove_failure_does_not_free_rule_id(mock_remove, admin_client, acme, pool):
+    rule = make_rule(acme, status="applied")
+    rule.wazuh_rule_id = 200001
+    rule.save()
+    mock_remove.side_effect = Exception("500 Server Error")
+    admin_client.post(f"/api/exceptions/{rule.id}/disable/")
+    # ID should NOT have been freed — FreedRuleId table should be empty
+    assert FreedRuleId.objects.filter(rule_id=200001).count() == 0

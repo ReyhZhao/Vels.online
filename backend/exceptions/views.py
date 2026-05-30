@@ -144,8 +144,13 @@ class ExceptionRuleListView(ListAPIView):
         try:
             push_rule(rule)
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("GitHub push failed for rule %s: %s", rule.id, exc)
+            logger.error("GitHub push failed for rule %s: %s", rule.id, exc)
+            free_rule_id(rule.wazuh_rule_id)
+            rule.delete()
+            return Response(
+                {"detail": f"Exception rule saved but could not be pushed to GitHub: {exc}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         return Response(ExceptionRuleSerializer(rule).data, status=status.HTTP_201_CREATED)
 
@@ -209,14 +214,17 @@ class ExceptionApproveView(APIView):
         if rule.status != "pending":
             return Response({"detail": "Rule must be in pending status."}, status=status.HTTP_400_BAD_REQUEST)
 
-        rule.status = "applied"
-        rule.save(update_fields=["status"])
-
         try:
             push_rule(rule)
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("GitHub push failed for rule %s: %s", rule.id, exc)
+            logger.error("GitHub push failed for rule %s: %s", rule.id, exc)
+            return Response(
+                {"detail": f"Could not push exception rule to GitHub: {exc}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        rule.status = "applied"
+        rule.save(update_fields=["status"])
 
         return Response(ExceptionRuleSerializer(rule).data)
 
@@ -236,8 +244,11 @@ class ExceptionDisableView(APIView):
         try:
             remove_rule(rule)
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("GitHub remove failed for rule %s: %s", rule.id, exc)
+            logger.error("GitHub remove failed for rule %s: %s", rule.id, exc)
+            return Response(
+                {"detail": f"Could not remove exception rule from GitHub: {exc}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         free_rule_id(rule.wazuh_rule_id)
         rule.status = "disabled"
