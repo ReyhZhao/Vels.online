@@ -198,6 +198,171 @@ def test_push_rule_targets_global_file():
     assert "global_exceptions.xml" in url
 
 
+# ── apps-values.yaml volume mount injection ───────────────────────────────────
+
+_SAMPLE_VALUES_YAML = """\
+wazuh:
+  wazuh:
+    master:
+      additionalVolumes:
+        - name: dynamic-rule-config
+          configMap:
+            name: rules-configmap
+      additionalVolumeMounts:
+        - name: dynamic-rule-config
+          mountPath: /wazuh-config-mount/etc/rules/custom_rules.xml
+          subPath: custom_rules.xml
+    worker:
+      annotations:
+        #reloader.stakater.com/auto: "true"
+        configmap.reloader.stakater.com/reload: "rules-configmap"
+"""
+
+
+def _make_values_get_response(yaml_content: str):
+    """Return a mock GET response for the apps-values.yaml file."""
+    encoded = base64.b64encode(yaml_content.encode()).decode()
+    mock = MagicMock(status_code=200)
+    mock.raise_for_status = MagicMock()
+    mock.json.return_value = {"content": encoded, "sha": "abc123"}
+    return mock
+
+
+@pytest.mark.django_db
+def test_push_rule_calls_ensure_volume_mount_for_new_file(acme):
+    rule = ExceptionRule.objects.create(
+        wazuh_rule_id=200010,
+        description="New file rule",
+        scope="org",
+        organisation=acme,
+        status="applied",
+    )
+
+    mock_404 = MagicMock(status_code=404)
+    mock_put = MagicMock(status_code=201)
+    mock_put.raise_for_status = MagicMock()
+
+    with patch("exceptions.services_github.requests.get", return_value=mock_404), \
+         patch("exceptions.services_github.requests.put", return_value=mock_put), \
+         patch("exceptions.services_github._ensure_volume_mount") as mock_ensure:
+        from exceptions.services_github import push_rule
+        push_rule(rule)
+
+    mock_ensure.assert_called_once_with("wazuh/files/rules/acme_exceptions.xml")
+
+
+@pytest.mark.django_db
+def test_push_rule_skips_ensure_volume_mount_for_existing_file(acme):
+    rule = ExceptionRule.objects.create(
+        wazuh_rule_id=200011,
+        description="Existing file rule",
+        scope="org",
+        organisation=acme,
+        status="applied",
+    )
+
+    existing_content = base64.b64encode(b"<group></group>").decode()
+    mock_200 = MagicMock(status_code=200)
+    mock_200.raise_for_status = MagicMock()
+    mock_200.json.return_value = {"content": existing_content, "sha": "existingsha"}
+    mock_put = MagicMock(status_code=200)
+    mock_put.raise_for_status = MagicMock()
+
+    with patch("exceptions.services_github.requests.get", return_value=mock_200), \
+         patch("exceptions.services_github.requests.put", return_value=mock_put), \
+         patch("exceptions.services_github._ensure_volume_mount") as mock_ensure:
+        from exceptions.services_github import push_rule
+        push_rule(rule)
+
+    mock_ensure.assert_not_called()
+
+
+def test_ensure_volume_mount_adds_to_master():
+    mock_get = _make_values_get_response(_SAMPLE_VALUES_YAML)
+    mock_put = MagicMock(status_code=200)
+    mock_put.raise_for_status = MagicMock()
+
+    with patch("exceptions.services_github.requests.get", return_value=mock_get), \
+         patch("exceptions.services_github.requests.put", return_value=mock_put) as mock_put_call:
+        from exceptions.services_github import _ensure_volume_mount
+        _ensure_volume_mount("wazuh/files/rules/acme_exceptions.xml")
+
+    mock_put_call.assert_called_once()
+    payload = mock_put_call.call_args[1]["json"]
+    assert payload["sha"] == "abc123"
+    assert "acme_exceptions.xml" in payload["message"]
+
+    updated_yaml = base64.b64decode(payload["content"]).decode()
+    from ruamel.yaml import YAML
+    ryaml = YAML()
+    data = ryaml.load(updated_yaml)
+    master = data["wazuh"]["wazuh"]["master"]
+    assert any(m["subPath"] == "acme_exceptions.xml" for m in master["additionalVolumeMounts"])
+    assert "#reloader.stakater.com/auto" in updated_yaml  # comment preserved
+
+
+def test_ensure_volume_mount_does_not_touch_worker():
+    mock_get = _make_values_get_response(_SAMPLE_VALUES_YAML)
+    mock_put = MagicMock(status_code=200)
+    mock_put.raise_for_status = MagicMock()
+
+    with patch("exceptions.services_github.requests.get", return_value=mock_get), \
+         patch("exceptions.services_github.requests.put", return_value=mock_put) as mock_put_call:
+        from exceptions.services_github import _ensure_volume_mount
+        _ensure_volume_mount("wazuh/files/rules/acme_exceptions.xml")
+
+    updated_yaml = base64.b64decode(mock_put_call.call_args[1]["json"]["content"]).decode()
+    from ruamel.yaml import YAML
+    ryaml = YAML()
+    data = ryaml.load(updated_yaml)
+    worker = data["wazuh"]["wazuh"]["worker"]
+    assert "additionalVolumeMounts" not in worker
+
+
+def test_ensure_volume_mount_idempotent_when_already_present():
+    yaml_with_entry = """\
+wazuh:
+  wazuh:
+    master:
+      additionalVolumes:
+        - name: dynamic-rule-config
+          configMap:
+            name: rules-configmap
+      additionalVolumeMounts:
+        - name: dynamic-rule-config
+          mountPath: /wazuh-config-mount/etc/rules/custom_rules.xml
+          subPath: custom_rules.xml
+        - name: dynamic-rule-config
+          mountPath: /wazuh-config-mount/etc/rules/acme_exceptions.xml
+          subPath: acme_exceptions.xml
+    worker:
+      annotations:
+        configmap.reloader.stakater.com/reload: "rules-configmap"
+"""
+    mock_get = _make_values_get_response(yaml_with_entry)
+    mock_put = MagicMock(status_code=200)
+    mock_put.raise_for_status = MagicMock()
+
+    with patch("exceptions.services_github.requests.get", return_value=mock_get), \
+         patch("exceptions.services_github.requests.put", return_value=mock_put) as mock_put_call:
+        from exceptions.services_github import _ensure_volume_mount
+        _ensure_volume_mount("wazuh/files/rules/acme_exceptions.xml")
+
+    mock_put_call.assert_not_called()
+
+
+def test_ensure_volume_mount_does_nothing_when_values_file_missing():
+    mock_404 = MagicMock(status_code=404)
+    mock_put = MagicMock(status_code=200)
+
+    with patch("exceptions.services_github.requests.get", return_value=mock_404), \
+         patch("exceptions.services_github.requests.put", return_value=mock_put) as mock_put_call:
+        from exceptions.services_github import _ensure_volume_mount
+        _ensure_volume_mount("wazuh/files/rules/acme_exceptions.xml")
+
+    mock_put_call.assert_not_called()
+
+
 # ── POST /api/exceptions/ ────────────────────────────────────────────────────
 
 

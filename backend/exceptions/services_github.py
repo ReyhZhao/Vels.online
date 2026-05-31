@@ -2,9 +2,11 @@
 import base64
 import re
 import xml.etree.ElementTree as ET
+from io import StringIO
 
 import requests
 from django.conf import settings
+from ruamel.yaml import YAML
 
 from .services_xml import rule_file_path, rule_to_xml
 
@@ -85,12 +87,78 @@ def remove_rule(rule) -> None:
     resp.raise_for_status()
 
 
+_APPS_VALUES_PATH = "wazuh/apps-values.yaml"
+_RULE_VOLUME_NAME = "dynamic-rule-config"
+_RULES_CONFIGMAP  = "rules-configmap"
+
+
+def _ensure_volume_mount(file_path: str) -> None:
+    """Add additionalVolumeMounts (and additionalVolumes if absent) for *file_path*
+    to both master and worker sections of apps-values.yaml."""
+    filename = file_path.split("/")[-1]
+
+    content, sha = _get_file(_APPS_VALUES_PATH)
+    if content is None or sha is None:
+        return
+
+    ryaml = YAML()
+    ryaml.preserve_quotes = True
+    data = ryaml.load(content)
+
+    new_volume = {"name": _RULE_VOLUME_NAME, "configMap": {"name": _RULES_CONFIGMAP}}
+    new_mount  = {
+        "name":       _RULE_VOLUME_NAME,
+        "mountPath":  f"/wazuh-config-mount/etc/rules/{filename}",
+        "subPath":    filename,
+    }
+
+    changed = False
+    master = data["wazuh"]["wazuh"]["master"]
+
+    volumes = master.get("additionalVolumes") or []
+    if not any(v.get("name") == _RULE_VOLUME_NAME for v in volumes):
+        if "additionalVolumes" not in master or master["additionalVolumes"] is None:
+            master["additionalVolumes"] = [new_volume]
+        else:
+            master["additionalVolumes"].append(new_volume)
+        changed = True
+
+    mounts = master.get("additionalVolumeMounts") or []
+    if not any(m.get("subPath") == filename for m in mounts):
+        if "additionalVolumeMounts" not in master or master["additionalVolumeMounts"] is None:
+            master["additionalVolumeMounts"] = [new_mount]
+        else:
+            master["additionalVolumeMounts"].append(new_mount)
+        changed = True
+
+    if not changed:
+        return
+
+    buf = StringIO()
+    ryaml.dump(data, buf)
+    encoded = base64.b64encode(buf.getvalue().encode()).decode()
+
+    resp = requests.put(
+        f"{API_BASE}/{_APPS_VALUES_PATH}",
+        json={
+            "message": f"exception: add {filename} volume mount to Wazuh deployment",
+            "content": encoded,
+            "branch":  BRANCH,
+            "sha":     sha,
+        },
+        headers=_headers(),
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
 def push_rule(rule) -> None:
     """Commit the rule's XML element to the security-monitoring repo."""
     path    = rule_file_path(rule)
     xml_str = rule_to_xml(rule)
 
     content, sha = _get_file(path)
+    is_new_file = sha is None
     if content is None:
         content = _EMPTY_FILE
 
@@ -112,3 +180,6 @@ def push_rule(rule) -> None:
         timeout=15,
     )
     resp.raise_for_status()
+
+    if is_new_file:
+        _ensure_volume_mount(path)
