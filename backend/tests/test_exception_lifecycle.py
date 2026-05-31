@@ -145,12 +145,12 @@ def test_approve_already_applied_returns_400(admin_client, applied_rule):
 
 
 @pytest.mark.django_db
-def test_approve_push_failure_still_saves_status(admin_client, pending_rule):
+def test_approve_push_failure_returns_502_and_leaves_pending(admin_client, pending_rule):
     with patch("exceptions.views.push_rule", side_effect=RuntimeError("network")):
         response = admin_client.post(f"/api/exceptions/{pending_rule.pk}/approve/")
-    assert response.status_code == 200
+    assert response.status_code == 502
     pending_rule.refresh_from_db()
-    assert pending_rule.status == "applied"
+    assert pending_rule.status == "pending"
 
 
 @pytest.mark.django_db
@@ -197,12 +197,12 @@ def test_disable_pending_rule_returns_400(admin_client, pending_rule):
 
 
 @pytest.mark.django_db
-def test_disable_remove_failure_still_saves_status(admin_client, applied_rule, pool):
+def test_disable_remove_failure_returns_502_and_leaves_applied(admin_client, applied_rule, pool):
     with patch("exceptions.views.remove_rule", side_effect=RuntimeError("network")):
         response = admin_client.post(f"/api/exceptions/{applied_rule.pk}/disable/")
-    assert response.status_code == 200
+    assert response.status_code == 502
     applied_rule.refresh_from_db()
-    assert applied_rule.status == "disabled"
+    assert applied_rule.status == "applied"
 
 
 @pytest.mark.django_db

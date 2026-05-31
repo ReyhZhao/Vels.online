@@ -265,15 +265,15 @@ def test_create_calls_push_rule(admin_client, acme, pool):
 
 
 @pytest.mark.django_db
-def test_create_rule_saved_even_if_push_fails(admin_client, acme, pool):
+def test_create_rule_push_failure_returns_502_and_rolls_back(admin_client, acme, pool):
     with patch("exceptions.views.push_rule", side_effect=RuntimeError("network error")):
         response = admin_client.post(
             "/api/exceptions/",
             {"org": "acme", "description": "Test", "trigger_rule_id": 100204},
             content_type="application/json",
         )
-    assert response.status_code == 201
-    assert ExceptionRule.objects.filter(description="Test").exists()
+    assert response.status_code == 502
+    assert not ExceptionRule.objects.filter(description="Test").exists()
 
 
 @pytest.mark.django_db
