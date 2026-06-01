@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
 
-from automations.models import Automation
+from automations.models import Automation, WazuhActiveResponse
 from security.models import Organization
 
 
@@ -53,12 +53,20 @@ class TaskTemplateItem(models.Model):
     automation = models.ForeignKey(
         Automation, on_delete=models.SET_NULL, null=True, blank=True, related_name="template_items"
     )
+    wazuh_response = models.ForeignKey(
+        WazuhActiveResponse, on_delete=models.SET_NULL, null=True, blank=True, related_name="template_items"
+    )
 
     class Meta:
         ordering = ["display_order", "id"]
 
     def __str__(self):
         return f"{self.template}: {self.title}"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.automation_id and self.wazuh_response_id:
+            raise ValidationError("A template item cannot have both automation and wazuh_response set.")
 
 
 class Incident(models.Model):
@@ -198,9 +206,11 @@ class Task(models.Model):
 
     TYPE_MANUAL = "manual"
     TYPE_AUTOMATED = "automated"
+    TYPE_WAZUH_RESPONSE = "wazuh_response"
     TYPE_CHOICES = [
         (TYPE_MANUAL, "Manual"),
         (TYPE_AUTOMATED, "Automated"),
+        (TYPE_WAZUH_RESPONSE, "Wazuh Response"),
     ]
 
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="tasks")
@@ -213,6 +223,9 @@ class Task(models.Model):
     task_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_MANUAL)
     automation = models.ForeignKey(
         Automation, on_delete=models.SET_NULL, null=True, blank=True, related_name="tasks"
+    )
+    wazuh_response = models.ForeignKey(
+        WazuhActiveResponse, on_delete=models.SET_NULL, null=True, blank=True, related_name="tasks"
     )
     semaphore_task_id = models.IntegerField(null=True, blank=True)
     automation_error = models.TextField(null=True, blank=True)
@@ -437,3 +450,30 @@ class IOC(models.Model):
 
     def __str__(self):
         return f"{self.kind}: {self.value} ({self.incident})"
+
+
+class WazuhResponseExecution(models.Model):
+    wazuh_response = models.ForeignKey(
+        WazuhActiveResponse, on_delete=models.PROTECT, related_name="executions"
+    )
+    executed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="wazuh_executions"
+    )
+    agent_ids = models.JSONField(default=list)
+    resolved_args = models.TextField(blank=True, default="")
+    timeout_used = models.PositiveIntegerField(default=0)
+    incident = models.ForeignKey(
+        Incident, on_delete=models.SET_NULL, null=True, blank=True, related_name="wazuh_executions"
+    )
+    task = models.ForeignKey(
+        Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="wazuh_executions"
+    )
+    wazuh_status_code = models.IntegerField(null=True, blank=True)
+    wazuh_response_body = models.JSONField(default=dict)
+    executed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-executed_at"]
+
+    def __str__(self):
+        return f"WazuhExecution {self.pk} ({self.wazuh_response})"

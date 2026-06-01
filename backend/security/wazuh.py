@@ -96,6 +96,25 @@ class WazuhClient:
 
     # --------------------------------------------------------- public methods
 
+    def _put(self, path, body, params=None):
+        response = requests.put(
+            f"{self._base_url}{path}",
+            headers=self._headers(),
+            json=body,
+            params=params,
+            verify=False,
+            timeout=10,
+        )
+        status_code = response.status_code
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise WazuhAPIError(f"Wazuh API error on {path}: {exc}") from exc
+        data = response.json()
+        if data.get("error") != 0:
+            raise WazuhAPIError(f"Wazuh API error on {path}: {data.get('message', 'unknown')}")
+        return status_code, data
+
     def create_group(self, group_name):
         self._post("/groups", {"group_id": group_name})
 
@@ -109,4 +128,20 @@ class WazuhClient:
             },
         )
         return data["data"]["affected_items"]
+
+    def run_active_response(self, command, agent_ids, args="", timeout=0):
+        """Send PUT /active-response to dispatch a command against agent_ids.
+
+        Returns (status_code, response_body). Raises WazuhAPIError on non-2xx.
+        Wazuh expects agent IDs as strings in the agents_list array.
+        """
+        body = {
+            "command": command,
+            "arguments": args.split() if args else [],
+            "agents_list": [str(a) for a in agent_ids],
+        }
+        if timeout:
+            body["timeout"] = timeout
+        params = {"wait_for_complete": "false"}
+        return self._put("/active-response", body, params=params)
 

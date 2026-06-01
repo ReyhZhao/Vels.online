@@ -602,6 +602,120 @@ function VulnerabilitiesTab({ agentId, orgSlug }) {
   );
 }
 
+// ── Responses tab ─────────────────────────────────────────────────────────────
+
+function ResponsesTab({ agentId, orgSlug }) {
+  const [executions, setExecutions] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    api.get(`/api/security/agents/${agentId}/responses/`, { params: { org: orgSlug, offset: 0, limit: 50 } })
+      .then(res => {
+        setExecutions(res.data.executions);
+        setTotal(res.data.total);
+      })
+      .catch(() => setError('Failed to load response history.'))
+      .finally(() => setLoading(false));
+  }, [agentId, orgSlug]);
+
+  async function handleShowMore() {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await api.get(`/api/security/agents/${agentId}/responses/`, {
+        params: { org: orgSlug, offset: executions.length, limit: 50 },
+      });
+      setExecutions(prev => [...prev, ...res.data.executions]);
+      setTotal(res.data.total);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (error) return <p className="text-sm text-red-600">{error}</p>;
+
+  if (executions.length === 0) {
+    return <p className="text-sm text-muted-foreground">No active responses have been run against this agent.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-hidden rounded-lg border border-border">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-muted/30">
+              <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Timestamp</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Response</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Executed by</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Args</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Timeout</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Incident</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {executions.map(ex => (
+              <tr key={ex.id} className="border-b border-border last:border-0">
+                <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                  {new Date(ex.executed_at).toLocaleString()}
+                </td>
+                <td className="px-4 py-3 text-sm font-medium text-foreground">
+                  <div>{ex.response_name}</div>
+                  <div className="text-xs text-muted-foreground font-mono">{ex.command}</div>
+                </td>
+                <td className="px-4 py-3 text-sm text-muted-foreground">{ex.executed_by || '—'}</td>
+                <td className="px-4 py-3 text-xs font-mono text-muted-foreground max-w-xs truncate">
+                  {ex.resolved_args || '—'}
+                </td>
+                <td className="px-4 py-3 text-sm text-muted-foreground">
+                  {ex.timeout_used === 0 ? 'No timeout' : `${ex.timeout_used}s`}
+                </td>
+                <td className="px-4 py-3 text-sm">
+                  {ex.incident_display_id ? (
+                    <a
+                      href={`/incidents/${ex.incident_display_id}`}
+                      onClick={e => e.stopPropagation()}
+                      className="text-primary hover:underline"
+                    >
+                      {ex.incident_display_id}
+                    </a>
+                  ) : '—'}
+                </td>
+                <td className="px-4 py-3 text-xs">
+                  {ex.wazuh_status_code !== null ? (
+                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                      ex.wazuh_status_code >= 200 && ex.wazuh_status_code < 300
+                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                    }`}>
+                      {ex.wazuh_status_code}
+                    </span>
+                  ) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {executions.length < total && (
+        <button
+          onClick={handleShowMore}
+          disabled={loadingMore}
+          className="text-sm text-primary hover:underline disabled:opacity-50"
+        >
+          {loadingMore ? 'Loading…' : `Show more (${total - executions.length} remaining)`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function AgentDetail() {
   const { agentId } = useParams();
   const navigate = useNavigate();
@@ -651,7 +765,7 @@ export default function AgentDetail() {
 
       <div>
         <div className="flex gap-4 border-b border-border">
-          {['events', 'vulnerabilities'].map((tab) => (
+          {['events', 'vulnerabilities', 'responses'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -672,6 +786,9 @@ export default function AgentDetail() {
           )}
           {activeTab === 'vulnerabilities' && (
             <VulnerabilitiesTab key={`vulns-${refreshKey}`} agentId={agentId} orgSlug={selectedOrg.slug} />
+          )}
+          {activeTab === 'responses' && (
+            <ResponsesTab key={`responses-${refreshKey}`} agentId={agentId} orgSlug={selectedOrg.slug} />
           )}
         </div>
       </div>

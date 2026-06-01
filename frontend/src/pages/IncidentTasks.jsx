@@ -43,6 +43,152 @@ function automationStatus(task) {
   return null;
 }
 
+// ── Wazuh response run modal ──────────────────────────────────────────────────
+
+function WazuhRunModal({ task, onClose, onRunSuccess }) {
+  const [loading, setLoading] = useState(true);
+  const [preview, setPreview] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
+  const [args, setArgs] = useState('');
+  const [selectedAgents, setSelectedAgents] = useState([]);
+  const [timeout, setTimeout_] = useState('');
+  const [confirmText, setConfirmText] = useState('');
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState(null);
+
+  useEffect(() => {
+    api.get(`/api/tasks/${task.id}/preview/`)
+      .then(res => {
+        setPreview(res.data);
+        setArgs(res.data.resolved_args || '');
+        setTimeout_(String(res.data.timeout ?? 0));
+        setSelectedAgents((res.data.eligible_agents || []).map(a => a.agent_name));
+      })
+      .catch(err => setPreviewError(err.response?.data?.detail || 'Failed to load preview.'))
+      .finally(() => setLoading(false));
+  }, [task.id]);
+
+  function toggleAgent(agentName) {
+    setSelectedAgents(prev =>
+      prev.includes(agentName) ? prev.filter(a => a !== agentName) : [...prev, agentName]
+    );
+  }
+
+  const canDispatch = !loading && !previewError && !running &&
+    selectedAgents.length > 0 &&
+    (!task.wazuh_response_requires_confirmation || confirmText === task.wazuh_response_command);
+
+  async function handleDispatch() {
+    setRunning(true);
+    setRunError(null);
+    try {
+      const res = await api.post(`/api/tasks/${task.id}/run/`, {
+        args,
+        agent_ids: selectedAgents,
+        timeout: Number(timeout) || 0,
+      });
+      onRunSuccess(res.data);
+      onClose();
+    } catch (err) {
+      setRunError(err.response?.data?.detail || 'Failed to dispatch.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="flex w-full max-w-lg flex-col rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <h3 className="text-base font-semibold text-foreground">
+            Run: {task.wazuh_response_name}
+          </h3>
+          <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {loading && <p className="text-sm text-muted-foreground">Loading preview…</p>}
+          {previewError && <p className="text-sm text-red-600">{previewError}</p>}
+          {preview && (
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Command</label>
+                <code className="text-xs font-mono text-foreground">{task.wazuh_response_command}</code>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Arguments</label>
+                <input
+                  value={args}
+                  onChange={e => setArgs(e.target.value)}
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Timeout (s, 0 = none)</label>
+                <input
+                  type="number"
+                  value={timeout}
+                  onChange={e => setTimeout_(e.target.value)}
+                  min="0"
+                  className="w-24 rounded border border-border bg-background px-2 py-1 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Target agents</label>
+                {(preview.eligible_agents || []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No compatible agents linked to this incident.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {preview.eligible_agents.map(agent => (
+                      <label key={agent.agent_name} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedAgents.includes(agent.agent_name)}
+                          onChange={() => toggleAgent(agent.agent_name)}
+                          className="rounded border-border"
+                        />
+                        <span className="font-medium text-foreground">{agent.name}</span>
+                        <span className="text-muted-foreground text-xs">{agent.ip_address || agent.agent_name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {task.wazuh_response_requires_confirmation && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Type the command name to confirm: <code className="font-mono">{task.wazuh_response_command}</code>
+                  </label>
+                  <input
+                    value={confirmText}
+                    onChange={e => setConfirmText(e.target.value)}
+                    placeholder={task.wazuh_response_command}
+                    className="w-full rounded border border-border bg-background px-2 py-1 text-sm font-mono"
+                  />
+                </div>
+              )}
+            </>
+          )}
+          {runError && <p className="text-sm text-red-600">{runError}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+          <button onClick={onClose} className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent">
+            Cancel
+          </button>
+          <button
+            onClick={handleDispatch}
+            disabled={!canDispatch}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {running ? 'Dispatching…' : 'Dispatch'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Pre-run preview modal ─────────────────────────────────────────────────────
 
 function PreviewModal({ taskId, onClose, onRunSuccess }) {
@@ -158,6 +304,7 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
   const [currentTask, setCurrentTask] = useState(task);
   const [saving, setSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showWazuhRun, setShowWazuhRun] = useState(false);
   const [error, setError] = useState(null);
   const [staffUsers, setStaffUsers] = useState(null);
 
@@ -210,6 +357,7 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
   }
 
   const isAutomated = currentTask.task_type === 'automated';
+  const isWazuhResponse = currentTask.task_type === 'wazuh_response';
   const autoStatus = isAutomated ? automationStatus(currentTask) : null;
   const nextStates = ALL_STATES.filter(s => s !== currentTask.state);
 
@@ -227,6 +375,11 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
               {isAutomated && (
                 <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
                   Automated
+                </span>
+              )}
+              {isWazuhResponse && (
+                <span className="inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
+                  Wazuh Response
                 </span>
               )}
             </div>
@@ -275,6 +428,30 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
                     <p className="text-xs text-red-600">{currentTask.automation_error}</p>
                   )}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* Run Wazuh active response */}
+          {isWazuhResponse && isStaff && (
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">
+                Command: <code className="font-mono text-foreground">{currentTask.wazuh_response_command}</code>
+              </div>
+              <button
+                onClick={() => setShowWazuhRun(true)}
+                disabled={saving || currentTask.state === 'done'}
+                className="rounded-md bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50 transition-colors"
+              >
+                Run
+              </button>
+              {currentTask.state === 'done' && !currentTask.automation_error && (
+                <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                  Dispatched
+                </span>
+              )}
+              {currentTask.automation_error && (
+                <p className="text-xs text-red-600">{currentTask.automation_error}</p>
               )}
             </div>
           )}
@@ -343,6 +520,13 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
           onRunSuccess={handleRunSuccess}
         />
       )}
+      {showWazuhRun && (
+        <WazuhRunModal
+          task={currentTask}
+          onClose={() => setShowWazuhRun(false)}
+          onRunSuccess={handleRunSuccess}
+        />
+      )}
     </div>
   );
 }
@@ -353,6 +537,7 @@ function TaskRow({ task, onSelect }) {
   const isCancelled     = task.state === 'cancelled';
   const isTemplateDerived = task.template_name !== null;
   const isAutomated = task.task_type === 'automated';
+  const isWazuhResponse = task.task_type === 'wazuh_response';
 
   return (
     <tr
@@ -378,6 +563,11 @@ function TaskRow({ task, onSelect }) {
           {isAutomated && (
             <span className="shrink-0 inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-xs text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
               automated
+            </span>
+          )}
+          {isWazuhResponse && (
+            <span className="shrink-0 inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
+              wazuh
             </span>
           )}
         </div>
@@ -425,13 +615,16 @@ function AddAdHocForm({ incidentId, onAdded, isStaff }) {
   const [title, setTitle] = useState('');
   const [taskType, setTaskType] = useState('manual');
   const [automationId, setAutomationId] = useState('');
+  const [wazuhResponseId, setWazuhResponseId] = useState('');
   const [automations, setAutomations] = useState(null);
+  const [wazuhResponses, setWazuhResponses] = useState(null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!isStaff) return;
     api.get('/api/automations/').then(res => setAutomations(res.data)).catch(() => setAutomations([]));
+    api.get('/api/wazuh-responses/').then(res => setWazuhResponses(res.data)).catch(() => setWazuhResponses([]));
   }, [isStaff]);
 
   async function handleSubmit(e) {
@@ -441,6 +634,10 @@ function AddAdHocForm({ incidentId, onAdded, isStaff }) {
       setError('Please select an automation.');
       return;
     }
+    if (taskType === 'wazuh_response' && !wazuhResponseId) {
+      setError('Please select a Wazuh response.');
+      return;
+    }
     setAdding(true);
     setError(null);
     try {
@@ -448,19 +645,25 @@ function AddAdHocForm({ incidentId, onAdded, isStaff }) {
       if (isStaff) {
         payload.task_type = taskType;
         if (taskType === 'automated') payload.automation = Number(automationId);
+        if (taskType === 'wazuh_response') payload.wazuh_response = Number(wazuhResponseId);
       }
       const res = await api.post(`/api/incidents/${incidentId}/tasks/`, payload);
       onAdded(res.data);
       setTitle('');
       setTaskType('manual');
       setAutomationId('');
+      setWazuhResponseId('');
     } catch (err) {
       const detail = err.response?.data;
-      setError(detail?.automation?.[0] || detail?.title?.[0] || detail?.detail || 'Failed to add task.');
+      setError(detail?.automation?.[0] || detail?.wazuh_response?.[0] || detail?.title?.[0] || detail?.detail || 'Failed to add task.');
     } finally {
       setAdding(false);
     }
   }
+
+  const isSubmitDisabled = adding || !title.trim() ||
+    (isStaff && taskType === 'automated' && !automationId) ||
+    (isStaff && taskType === 'wazuh_response' && !wazuhResponseId);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
@@ -488,6 +691,13 @@ function AddAdHocForm({ incidentId, onAdded, isStaff }) {
             >
               Automated
             </button>
+            <button
+              type="button"
+              onClick={() => setTaskType('wazuh_response')}
+              className={`px-3 py-2 font-medium transition-colors ${taskType === 'wazuh_response' ? 'bg-orange-600 text-white' : 'text-foreground hover:bg-accent'}`}
+            >
+              Wazuh
+            </button>
           </div>
         )}
         {isStaff && taskType === 'automated' && (
@@ -501,9 +711,20 @@ function AddAdHocForm({ incidentId, onAdded, isStaff }) {
             {(automations ?? []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         )}
+        {isStaff && taskType === 'wazuh_response' && (
+          <select
+            value={wazuhResponseId}
+            onChange={e => setWazuhResponseId(e.target.value)}
+            disabled={adding}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          >
+            <option value="">Select Wazuh response…</option>
+            {(wazuhResponses ?? []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        )}
         <button
           type="submit"
-          disabled={adding || !title.trim() || (isStaff && taskType === 'automated' && !automationId)}
+          disabled={isSubmitDisabled}
           className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           Add task

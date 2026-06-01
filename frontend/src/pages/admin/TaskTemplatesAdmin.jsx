@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/axios';
 
-function ItemRow({ item, templateId, onUpdate, onDelete, automations }) {
+function ItemRow({ item, templateId, onUpdate, onDelete, automations, wazuhResponses }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description || '');
   const [order, setOrder] = useState(item.display_order);
+  const [itemKind, setItemKind] = useState(
+    item.wazuh_response ? 'wazuh' : item.automation ? 'automation' : 'manual'
+  );
   const [automationId, setAutomationId] = useState(item.automation ?? '');
+  const [wazuhResponseId, setWazuhResponseId] = useState(item.wazuh_response ?? '');
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -14,7 +18,8 @@ function ItemRow({ item, templateId, onUpdate, onDelete, automations }) {
     try {
       const res = await api.patch(`/api/task-templates/${templateId}/items/${item.id}/`, {
         title, description, display_order: Number(order),
-        automation: automationId === '' ? null : Number(automationId),
+        automation: itemKind === 'automation' && automationId !== '' ? Number(automationId) : null,
+        wazuh_response: itemKind === 'wazuh' && wazuhResponseId !== '' ? Number(wazuhResponseId) : null,
       });
       onUpdate(res.data);
       setEditing(false);
@@ -51,17 +56,40 @@ function ItemRow({ item, templateId, onUpdate, onDelete, automations }) {
             placeholder="Description"
             className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
           />
-          <select
-            value={automationId}
-            onChange={e => setAutomationId(e.target.value)}
-            disabled={saving}
-            className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
-          >
-            <option value="">No automation</option>
-            {(automations ?? []).map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
+          <div className="mt-1 flex gap-1">
+            {['manual', 'automation', 'wazuh'].map(k => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setItemKind(k)}
+                className={`rounded px-2 py-0.5 text-xs font-medium border transition-colors ${itemKind === k ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground border-border hover:bg-accent'}`}
+              >
+                {k === 'manual' ? 'Manual' : k === 'automation' ? 'Automation' : 'Wazuh Response'}
+              </button>
             ))}
-          </select>
+          </div>
+          {itemKind === 'automation' && (
+            <select
+              value={automationId}
+              onChange={e => setAutomationId(e.target.value)}
+              disabled={saving}
+              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+            >
+              <option value="">Select automation…</option>
+              {(automations ?? []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          )}
+          {itemKind === 'wazuh' && (
+            <select
+              value={wazuhResponseId}
+              onChange={e => setWazuhResponseId(e.target.value)}
+              disabled={saving}
+              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+            >
+              <option value="">Select Wazuh response…</option>
+              {(wazuhResponses ?? []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          )}
         </td>
         <td className="px-3 py-2">
           <div className="flex gap-2">
@@ -85,6 +113,8 @@ function ItemRow({ item, templateId, onUpdate, onDelete, automations }) {
       <td className="px-3 py-2 text-xs text-muted-foreground">
         {item.automation_name
           ? <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-xs text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">{item.automation_name}</span>
+          : item.wazuh_response_name
+          ? <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">{item.wazuh_response_name}</span>
           : '—'}
       </td>
       <td className="px-3 py-2">
@@ -100,14 +130,18 @@ function ItemRow({ item, templateId, onUpdate, onDelete, automations }) {
 function TemplateEditor({ template, onClose, onTemplateUpdate }) {
   const [items, setItems] = useState(template.items || []);
   const [automations, setAutomations] = useState([]);
+  const [wazuhResponses, setWazuhResponses] = useState([]);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
+  const [newItemKind, setNewItemKind] = useState('manual');
   const [newAutomation, setNewAutomation] = useState('');
+  const [newWazuhResponse, setNewWazuhResponse] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState(null);
 
   useEffect(() => {
     api.get('/api/automations/').then(res => setAutomations(res.data)).catch(() => {});
+    api.get('/api/wazuh-responses/').then(res => setWazuhResponses(res.data)).catch(() => {});
   }, []);
 
   async function handleAddItem(e) {
@@ -121,14 +155,17 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
         title: newTitle.trim(),
         description: newDesc.trim(),
         display_order: nextOrder,
-        automation: newAutomation === '' ? null : Number(newAutomation),
+        automation: newItemKind === 'automation' && newAutomation !== '' ? Number(newAutomation) : null,
+        wazuh_response: newItemKind === 'wazuh' && newWazuhResponse !== '' ? Number(newWazuhResponse) : null,
       });
       setItems(prev => [...prev, res.data].sort((a, b) => a.display_order - b.display_order));
       setNewTitle('');
       setNewDesc('');
+      setNewItemKind('manual');
       setNewAutomation('');
+      setNewWazuhResponse('');
     } catch (err) {
-      setAddError(err.response?.data?.title?.[0] || 'Failed to add item.');
+      setAddError(err.response?.data?.title?.[0] || err.response?.data?.detail || 'Failed to add item.');
     } finally {
       setAdding(false);
     }
@@ -160,7 +197,7 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
                 <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-12">#</th>
                 <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Title</th>
                 <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Description</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Automation</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Action</th>
                 <th className="px-3 py-2 w-20" />
               </tr>
             </thead>
@@ -176,6 +213,7 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
                     onUpdate={handleItemUpdate}
                     onDelete={handleItemDelete}
                     automations={automations}
+                    wazuhResponses={wazuhResponses}
                   />
                 ))
               )}
@@ -200,15 +238,42 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
               disabled={adding}
               className="flex-1 min-w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             />
-            <select
-              value={newAutomation}
-              onChange={e => setNewAutomation(e.target.value)}
-              disabled={adding}
-              className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-            >
-              <option value="">No automation</option>
-              {automations.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
+          </div>
+          <div className="flex gap-2 flex-wrap items-center">
+            <div className="flex items-center rounded-md border border-border bg-background text-sm overflow-hidden">
+              {['manual', 'automation', 'wazuh'].map(k => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setNewItemKind(k)}
+                  className={`px-3 py-1.5 font-medium transition-colors ${newItemKind === k ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'}`}
+                >
+                  {k === 'manual' ? 'Manual' : k === 'automation' ? 'Automation' : 'Wazuh Response'}
+                </button>
+              ))}
+            </div>
+            {newItemKind === 'automation' && (
+              <select
+                value={newAutomation}
+                onChange={e => setNewAutomation(e.target.value)}
+                disabled={adding}
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              >
+                <option value="">Select automation…</option>
+                {automations.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            )}
+            {newItemKind === 'wazuh' && (
+              <select
+                value={newWazuhResponse}
+                onChange={e => setNewWazuhResponse(e.target.value)}
+                disabled={adding}
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              >
+                <option value="">Select Wazuh response…</option>
+                {wazuhResponses.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            )}
             <button
               type="submit"
               disabled={adding || !newTitle.trim()}

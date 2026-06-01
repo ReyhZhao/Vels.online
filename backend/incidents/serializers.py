@@ -253,16 +253,27 @@ class IncidentUpdateSerializer(serializers.ModelSerializer):
 
 class TaskTemplateItemSerializer(serializers.ModelSerializer):
     automation_name = serializers.CharField(source="automation.name", read_only=True, default=None)
+    wazuh_response_name = serializers.CharField(source="wazuh_response.name", read_only=True, default=None)
 
     class Meta:
         model = TaskTemplateItem
-        fields = ["id", "title", "description", "display_order", "automation", "automation_name"]
+        fields = ["id", "title", "description", "display_order", "automation", "automation_name", "wazuh_response", "wazuh_response_name"]
+
+    def validate(self, attrs):
+        if attrs.get("automation") and attrs.get("wazuh_response"):
+            raise serializers.ValidationError("A template item cannot have both automation and wazuh_response set.")
+        return attrs
 
 
 class TaskTemplateItemWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskTemplateItem
-        fields = ["title", "description", "display_order", "automation"]
+        fields = ["title", "description", "display_order", "automation", "wazuh_response"]
+
+    def validate(self, attrs):
+        if attrs.get("automation") and attrs.get("wazuh_response"):
+            raise serializers.ValidationError("A template item cannot have both automation and wazuh_response set.")
+        return attrs
 
 
 class TaskTemplateSerializer(serializers.ModelSerializer):
@@ -303,6 +314,9 @@ class TaskSerializer(serializers.ModelSerializer):
     incident_display_id = serializers.SerializerMethodField()
     incident_title = serializers.SerializerMethodField()
     automation_name = serializers.CharField(source="automation.name", read_only=True, default=None)
+    wazuh_response_name = serializers.CharField(source="wazuh_response.name", read_only=True, default=None)
+    wazuh_response_command = serializers.CharField(source="wazuh_response.command", read_only=True, default=None)
+    wazuh_response_requires_confirmation = serializers.BooleanField(source="wazuh_response.requires_confirmation", read_only=True, default=False)
 
     class Meta:
         model = Task
@@ -310,6 +324,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "id", "incident", "template_item", "template_name",
             "title", "description", "state",
             "task_type", "automation", "automation_name",
+            "wazuh_response", "wazuh_response_name", "wazuh_response_command", "wazuh_response_requires_confirmation",
             "semaphore_task_id", "automation_error",
             "assignee", "assignee_username", "display_order",
             "created_at", "closed_at",
@@ -335,11 +350,13 @@ class TaskSerializer(serializers.ModelSerializer):
 class TaskCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
-        fields = ["title", "description", "display_order", "assignee", "task_type", "automation"]
+        fields = ["title", "description", "display_order", "assignee", "task_type", "automation", "wazuh_response"]
 
     def validate(self, attrs):
         if attrs.get("task_type") == "automated" and not attrs.get("automation"):
             raise serializers.ValidationError({"automation": "An automation must be selected when task type is automated."})
+        if attrs.get("task_type") == "wazuh_response" and not attrs.get("wazuh_response"):
+            raise serializers.ValidationError({"wazuh_response": "A Wazuh response must be selected when task type is wazuh_response."})
         return attrs
 
 

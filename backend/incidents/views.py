@@ -21,7 +21,7 @@ from security.models import Organization, OrganizationMembership
 from django.contrib.auth.models import User
 
 from .filters import AssetFilterSet, IncidentFilterSet, TaskFilterSet, TaskTemplateFilterSet
-from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem, WazuhResponseExecution
 from .serializers import (
     AssetSerializer,
     AttachmentSerializer,
@@ -1515,11 +1515,15 @@ class TaskRunView(APIView):
         if not request.user.is_staff:
             return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
         try:
-            task = Task.objects.select_related("incident", "automation").get(pk=pk)
+            task = Task.objects.select_related("incident", "automation", "wazuh_response").get(pk=pk)
         except Task.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_incident(request.user, task.incident):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if task.task_type == Task.TYPE_WAZUH_RESPONSE:
+            return _run_wazuh_response_task(request, task)
+
         if task.task_type != Task.TYPE_AUTOMATED:
             return Response({"detail": "Task is not of type automated."}, status=status.HTTP_400_BAD_REQUEST)
         if not task.automation_id:
@@ -1565,6 +1569,108 @@ class TaskRunView(APIView):
         return Response(TaskSerializer(task).data)
 
 
+def _run_wazuh_response_task(request, task):
+    from automations.interpolation import interpolate_args
+    from security.wazuh import WazuhAPIError, WazuhClient
+
+    if not task.wazuh_response_id:
+        return Response({"detail": "Task has no Wazuh response attached."}, status=status.HTTP_400_BAD_REQUEST)
+
+    wr = task.wazuh_response
+    incident = Incident.objects.prefetch_related("assets", "iocs").get(pk=task.incident_id)
+
+    # Resolve args
+    override_args = (request.data.get("args") or "").strip()
+    resolved_args = override_args if override_args else interpolate_args(wr.default_args, incident)
+
+    # Determine agent IDs to target
+    agent_ids_raw = request.data.get("agent_ids")
+    if agent_ids_raw and isinstance(agent_ids_raw, list):
+        agent_ids = [str(a) for a in agent_ids_raw]
+    else:
+        # Fall back to all assets with agent names linked to this incident
+        agent_ids = list(
+            incident.assets.filter(agent_name__isnull=False).values_list("agent_name", flat=True)
+        )
+
+    timeout_override = request.data.get("timeout")
+    timeout = int(timeout_override) if timeout_override is not None else wr.timeout
+
+    wazuh_status_code = None
+    wazuh_response_body = {}
+    error_msg = None
+
+    try:
+        client = WazuhClient()
+        wazuh_status_code, wazuh_response_body = client.run_active_response(
+            command=wr.command,
+            agent_ids=agent_ids,
+            args=resolved_args,
+            timeout=timeout,
+        )
+    except WazuhAPIError as exc:
+        logger.exception("WazuhAPIError running active response task=%s", task.pk)
+        error_msg = str(exc)
+
+    with transaction.atomic():
+        Task.objects.filter(pk=task.pk).update(
+            state=Task.STATE_DONE,
+            automation_error=error_msg,
+            assignee=task.assignee or request.user,
+        )
+        task.refresh_from_db()
+
+        execution = WazuhResponseExecution.objects.create(
+            wazuh_response=wr,
+            executed_by=request.user,
+            agent_ids=agent_ids,
+            resolved_args=resolved_args,
+            timeout_used=timeout,
+            incident=task.incident,
+            task=task,
+            wazuh_status_code=wazuh_status_code,
+            wazuh_response_body=wazuh_response_body,
+        )
+
+        agents_str = ", ".join(agent_ids) if agent_ids else "no agents"
+        if error_msg:
+            body = (
+                f"Wazuh active response **{wr.name}** (`{wr.command}`) dispatched to {agents_str} "
+                f"by {request.user.username}. **Error:** {error_msg}"
+            )
+        else:
+            body = (
+                f"Wazuh active response **{wr.name}** (`{wr.command}`) dispatched to {agents_str} "
+                f"by {request.user.username}. Status {wazuh_status_code} — dispatch confirmed "
+                f"(not execution confirmed)."
+            )
+        Comment.objects.create(
+            incident=task.incident,
+            author=request.user,
+            body=body,
+            kind=Comment.KIND_SYSTEM,
+        )
+        record_event(
+            task.incident,
+            "wazuh_response_dispatched",
+            actor=request.user,
+            payload={
+                "task_id": task.id,
+                "wazuh_response_id": wr.id,
+                "wazuh_response_name": wr.name,
+                "command": wr.command,
+                "agent_ids": agent_ids,
+                "resolved_args": resolved_args,
+                "timeout_used": timeout,
+                "execution_id": execution.id,
+                "status_code": wazuh_status_code,
+                "error": error_msg,
+            },
+        )
+
+    return Response(TaskSerializer(task).data)
+
+
 def _build_extra_vars(task):
     """Merge default_vars + resolved mappings + hardcoded incident fields.
 
@@ -1608,11 +1714,33 @@ class TaskPreviewView(APIView):
         if not request.user.is_staff:
             return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
         try:
-            task = Task.objects.select_related("incident", "automation").get(pk=pk)
+            task = Task.objects.select_related("incident", "automation", "wazuh_response").get(pk=pk)
         except Task.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_incident(request.user, task.incident):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if task.task_type == Task.TYPE_WAZUH_RESPONSE:
+            if not task.wazuh_response_id:
+                return Response({"detail": "Task has no Wazuh response attached."}, status=status.HTTP_400_BAD_REQUEST)
+            from automations.interpolation import interpolate_args
+            from security.models import OrganizationMembership
+            wr = task.wazuh_response
+            incident = Incident.objects.prefetch_related("assets", "iocs").get(pk=task.incident_id)
+            resolved_args = interpolate_args(wr.default_args, incident)
+            eligible_agents = list(
+                incident.assets.filter(
+                    agent_name__isnull=False
+                ).values("id", "name", "agent_name", "ip_address")
+            )
+            return Response({
+                "resolved_args": resolved_args,
+                "eligible_agents": eligible_agents,
+                "timeout": wr.timeout,
+                "requires_confirmation": wr.requires_confirmation,
+                "command": wr.command,
+            })
+
         if task.task_type != Task.TYPE_AUTOMATED:
             return Response({"detail": "Task is not of type automated."}, status=status.HTTP_400_BAD_REQUEST)
         if not task.automation_id:

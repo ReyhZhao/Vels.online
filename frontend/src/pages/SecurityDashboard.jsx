@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
+import { useAuth } from '../context/AuthContext';
 
 function StatCard({ label, value, colorClass }) {
   return (
@@ -29,15 +30,195 @@ function StatusBadge({ status }) {
   );
 }
 
+// ── Wazuh run modal (security overview context) ───────────────────────────────
+
+function WazuhOverviewRunModal({ agent, response, orgSlug, onClose, onSuccess }) {
+  const [args, setArgs] = useState(response.default_args || '');
+  const [timeout, setTimeout_] = useState(String(response.timeout ?? 0));
+  const [incidentId, setIncidentId] = useState('');
+  const [confirmText, setConfirmText] = useState('');
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const canDispatch = !running &&
+    (!response.requires_confirmation || confirmText === response.command);
+
+  async function handleDispatch() {
+    setRunning(true);
+    setError(null);
+    try {
+      const payload = {
+        org: orgSlug,
+        wazuh_response: response.id,
+        args: args.trim(),
+        timeout: Number(timeout) || 0,
+      };
+      if (incidentId.trim()) payload.incident = incidentId.trim();
+      const res = await api.post(`/api/security/agents/${agent.id}/respond/`, payload);
+      onSuccess(res.data);
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to dispatch.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="flex w-full max-w-md flex-col rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{response.name}</h3>
+            <p className="text-xs text-muted-foreground">{agent.name}</p>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent">✕</button>
+        </div>
+
+        <div className="space-y-4 px-6 py-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Command</label>
+            <code className="text-xs font-mono text-foreground">{response.command}</code>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Arguments</label>
+            <input
+              value={args}
+              onChange={e => setArgs(e.target.value)}
+              className="w-full rounded border border-border bg-background px-2 py-1 text-sm font-mono"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Timeout (s, 0 = none)</label>
+            <input
+              type="number"
+              value={timeout}
+              onChange={e => setTimeout_(e.target.value)}
+              min="0"
+              className="w-24 rounded border border-border bg-background px-2 py-1 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              Link to incident <span className="font-normal text-muted-foreground/70">(optional — display ID)</span>
+            </label>
+            <input
+              value={incidentId}
+              onChange={e => setIncidentId(e.target.value)}
+              placeholder="INC-2024-0001"
+              className="w-full rounded border border-border bg-background px-2 py-1 text-sm font-mono"
+            />
+          </div>
+          {response.requires_confirmation && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                Type the command to confirm: <code className="font-mono">{response.command}</code>
+              </label>
+              <input
+                value={confirmText}
+                onChange={e => setConfirmText(e.target.value)}
+                placeholder={response.command}
+                className="w-full rounded border border-border bg-background px-2 py-1 text-sm font-mono"
+              />
+            </div>
+          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+          <button onClick={onClose} className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent">
+            Cancel
+          </button>
+          <button
+            onClick={handleDispatch}
+            disabled={!canDispatch}
+            className="rounded-md bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
+          >
+            {running ? 'Dispatching…' : 'Dispatch'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Agent kebab menu ──────────────────────────────────────────────────────────
+
+function AgentKebab({ agent, responses, orgSlug, onResponseSuccess }) {
+  const [open, setOpen] = useState(false);
+  const [selectedResponse, setSelectedResponse] = useState(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  const agentPlatform = (agent.os_platform || '').toLowerCase();
+  const compatible = responses.filter(r =>
+    r.available_in_security_overview &&
+    (r.platforms.length === 0 || !agentPlatform || r.platforms.includes(agentPlatform))
+  );
+
+  if (compatible.length === 0) return null;
+
+  return (
+    <div className="relative" ref={menuRef} onClick={e => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+        aria-label="Actions"
+      >
+        ⋮
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-48 rounded-md border border-border bg-card shadow-lg">
+          {compatible.map(r => (
+            <button
+              key={r.id}
+              onClick={() => { setSelectedResponse(r); setOpen(false); }}
+              className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors first:rounded-t-md last:rounded-b-md"
+            >
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {selectedResponse && (
+        <WazuhOverviewRunModal
+          agent={agent}
+          response={selectedResponse}
+          orgSlug={orgSlug}
+          onClose={() => setSelectedResponse(null)}
+          onSuccess={(result) => {
+            setSelectedResponse(null);
+            onResponseSuccess(result);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── SecurityDashboard ─────────────────────────────────────────────────────────
+
 export default function SecurityDashboard() {
   const { selectedOrg, isLoading: orgLoading } = useOrganization();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [stats, setStats] = useState(null);
   const [agents, setAgents] = useState([]);
+  const [wazuhResponses, setWazuhResponses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [toast, setToast] = useState(null);
 
   const fetchData = useCallback(async (slug) => {
     setLoading(true);
@@ -61,6 +242,11 @@ export default function SecurityDashboard() {
     if (selectedOrg) fetchData(selectedOrg.slug);
   }, [selectedOrg, fetchData]);
 
+  useEffect(() => {
+    if (!user?.is_staff) return;
+    api.get('/api/wazuh-responses/').then(res => setWazuhResponses(res.data)).catch(() => {});
+  }, [user]);
+
   async function handleRefresh() {
     if (!selectedOrg || refreshing) return;
     setRefreshing(true);
@@ -72,6 +258,14 @@ export default function SecurityDashboard() {
     }
   }
 
+  function handleResponseSuccess(result) {
+    setToast(result.incident
+      ? `Dispatched ${result.wazuh_response_name} — linked to incident ${result.incident}`
+      : `Dispatched ${result.wazuh_response_name}`
+    );
+    setTimeout(() => setToast(null), 5000);
+  }
+
   if (orgLoading) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
@@ -79,6 +273,9 @@ export default function SecurityDashboard() {
   if (!selectedOrg) {
     return <p className="text-sm text-muted-foreground">No organisation assigned.</p>;
   }
+
+  const isStaff = user?.is_staff ?? false;
+  const hasWazuhResponses = wazuhResponses.length > 0;
 
   return (
     <div className="space-y-6 p-6">
@@ -94,6 +291,12 @@ export default function SecurityDashboard() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {toast && (
+        <div className="rounded-md bg-green-100 px-4 py-3 text-sm text-green-800 dark:bg-green-900/30 dark:text-green-400">
+          {toast}
+        </div>
+      )}
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
@@ -129,12 +332,13 @@ export default function SecurityDashboard() {
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">IP</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Last Seen</th>
+                  {isStaff && hasWazuhResponses && <th className="px-4 py-3 w-12" />}
                 </tr>
               </thead>
               <tbody>
                 {agents.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                    <td colSpan={isStaff && hasWazuhResponses ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
                       No agents enrolled.
                     </td>
                   </tr>
@@ -154,6 +358,18 @@ export default function SecurityDashboard() {
                       <td className="px-4 py-3 text-muted-foreground">
                         {agent.last_seen ? new Date(agent.last_seen).toLocaleString() : '—'}
                       </td>
+                      {isStaff && hasWazuhResponses && (
+                        <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                          {agent.status === 'active' && (
+                            <AgentKebab
+                              agent={agent}
+                              responses={wazuhResponses}
+                              orgSlug={selectedOrg.slug}
+                              onResponseSuccess={handleResponseSuccess}
+                            />
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}

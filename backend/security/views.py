@@ -1270,6 +1270,209 @@ class WorkPackageDetailView(APIView):
         return Response({"package": WorkPackageSerializer(package).data})
 
 
+class AgentRespondView(APIView):
+    """POST /api/security/agents/<agent_id>/respond/ — fire a Wazuh active response against a host."""
+
+    def post(self, request, agent_id):
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+
+        if not request.user.is_staff:
+            return Response(status=403)
+
+        slug = request.data.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        from automations.models import WazuhActiveResponse
+        from automations.interpolation import interpolate_args
+        from incidents.models import Comment, Incident, IncidentEvent, WazuhResponseExecution
+        from incidents.services.events import record_event
+
+        response_id = request.data.get("wazuh_response")
+        if not response_id:
+            return Response({"detail": "wazuh_response is required."}, status=400)
+
+        try:
+            wr = WazuhActiveResponse.objects.get(pk=response_id, archived=False)
+        except WazuhActiveResponse.DoesNotExist:
+            return Response({"detail": "Wazuh response not found."}, status=404)
+
+        if not wr.available_in_security_overview:
+            return Response({"detail": "This response is not available in the security overview."}, status=400)
+
+        # Fetch agent to validate OS compatibility
+        try:
+            raw_agents = WazuhClient().get_agents(org.wazuh_group)
+        except (WazuhAuthError, WazuhAPIError):
+            return Response({"detail": "Security service unavailable."}, status=502)
+
+        agent_raw = next((a for a in raw_agents if str(a.get("id")) == str(agent_id)), None)
+        if agent_raw is None:
+            return Response(status=404)
+
+        os_info = agent_raw.get("os", {})
+        agent_platform = os_info.get("platform", "").lower() if isinstance(os_info, dict) else ""
+
+        if wr.platforms and agent_platform and agent_platform not in wr.platforms:
+            return Response(
+                {"detail": f"Agent OS '{agent_platform}' is not in this response's platforms: {wr.platforms}."},
+                status=400,
+            )
+
+        # Resolve args
+        override_args = (request.data.get("args") or "").strip()
+        incident_id = request.data.get("incident")
+        incident = None
+
+        if incident_id:
+            try:
+                incident = Incident.objects.prefetch_related("assets", "iocs").get(display_id=incident_id)
+            except Incident.DoesNotExist:
+                return Response({"detail": "Incident not found."}, status=404)
+            resolved_args = override_args if override_args else interpolate_args(wr.default_args, incident)
+        else:
+            resolved_args = override_args if override_args else wr.default_args
+
+        timeout_val = request.data.get("timeout")
+        timeout = int(timeout_val) if timeout_val is not None else wr.timeout
+
+        wazuh_status_code = None
+        wazuh_response_body = {}
+        error_msg = None
+
+        try:
+            client = WazuhClient()
+            wazuh_status_code, wazuh_response_body = client.run_active_response(
+                command=wr.command,
+                agent_ids=[str(agent_id)],
+                args=resolved_args,
+                timeout=timeout,
+            )
+        except (WazuhAuthError, WazuhAPIError) as exc:
+            _log.exception("WazuhAPIError in AgentRespondView for agent_id=%s", agent_id)
+            error_msg = str(exc)
+
+        from django.db import transaction
+        with transaction.atomic():
+            task = None
+            if incident:
+                from incidents.models import Task
+                task = Task.objects.create(
+                    incident=incident,
+                    title=f"Wazuh response: {wr.name}",
+                    task_type=Task.TYPE_WAZUH_RESPONSE,
+                    wazuh_response=wr,
+                    state=Task.STATE_DONE,
+                    assignee=request.user,
+                    automation_error=error_msg,
+                )
+
+            execution = WazuhResponseExecution.objects.create(
+                wazuh_response=wr,
+                executed_by=request.user,
+                agent_ids=[str(agent_id)],
+                resolved_args=resolved_args,
+                timeout_used=timeout,
+                incident=incident,
+                task=task,
+                wazuh_status_code=wazuh_status_code,
+                wazuh_response_body=wazuh_response_body,
+            )
+
+            if incident:
+                if error_msg:
+                    body = (
+                        f"Wazuh active response **{wr.name}** (`{wr.command}`) dispatched to agent `{agent_id}` "
+                        f"from security overview by {request.user.username}. **Error:** {error_msg}"
+                    )
+                else:
+                    body = (
+                        f"Wazuh active response **{wr.name}** (`{wr.command}`) dispatched to agent `{agent_id}` "
+                        f"from security overview by {request.user.username}. Status {wazuh_status_code}."
+                    )
+                Comment.objects.create(
+                    incident=incident,
+                    author=request.user,
+                    body=body,
+                    kind=Comment.KIND_SYSTEM,
+                )
+                record_event(
+                    incident,
+                    "wazuh_response_dispatched",
+                    actor=request.user,
+                    payload={
+                        "agent_id": str(agent_id),
+                        "wazuh_response_id": wr.id,
+                        "wazuh_response_name": wr.name,
+                        "execution_id": execution.id,
+                        "status_code": wazuh_status_code,
+                        "error": error_msg,
+                    },
+                )
+
+        return Response({
+            "id": execution.id,
+            "wazuh_response": wr.id,
+            "wazuh_response_name": wr.name,
+            "agent_id": str(agent_id),
+            "resolved_args": resolved_args,
+            "timeout_used": timeout,
+            "wazuh_status_code": wazuh_status_code,
+            "error": error_msg,
+            "incident": incident.display_id if incident else None,
+            "task_id": task.id if task else None,
+        }, status=201)
+
+
+class AgentResponseHistoryView(APIView):
+    """GET /api/security/agents/<agent_id>/responses/ — list WazuhResponseExecution records."""
+
+    def get(self, request, agent_id):
+        slug = request.query_params.get("org", "").strip()
+        org, err = _resolve_org(request, slug)
+        if err:
+            return err
+
+        err = _resolve_agent(request, org, agent_id)
+        if err:
+            return err
+
+        from incidents.models import WazuhResponseExecution
+        try:
+            offset = int(request.query_params.get("offset", 0))
+            limit = int(request.query_params.get("limit", 50))
+        except ValueError:
+            return Response({"detail": "offset and limit must be integers."}, status=400)
+
+        qs = (
+            WazuhResponseExecution.objects
+            .filter(agent_ids__icontains=f'"{agent_id}"')
+            .select_related("wazuh_response", "executed_by", "incident", "task")
+            .order_by("-executed_at")
+        )
+        total = qs.count()
+        executions = qs[offset:offset + limit]
+
+        data = []
+        for ex in executions:
+            data.append({
+                "id": ex.id,
+                "executed_at": ex.executed_at.isoformat(),
+                "response_name": ex.wazuh_response.name,
+                "command": ex.wazuh_response.command,
+                "executed_by": ex.executed_by.username if ex.executed_by else None,
+                "resolved_args": ex.resolved_args,
+                "timeout_used": ex.timeout_used,
+                "incident_display_id": ex.incident.display_id if ex.incident else None,
+                "incident_title": ex.incident.title if ex.incident else None,
+                "wazuh_status_code": ex.wazuh_status_code,
+            })
+
+        return Response({"executions": data, "total": total})
+
+
 class RiskAcceptanceListView(APIView):
     def get(self, request):
         slug = request.query_params.get("org", "").strip()
