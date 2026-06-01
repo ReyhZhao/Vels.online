@@ -20,13 +20,18 @@ const STATS = {
 };
 
 const ROUTES = [{ fqdn: 'app.example.com' }, { fqdn: 'api.example.com' }];
+const INCIDENTS = { count: 3 };
 
-function mockApiBothEndpoints({ statsData = STATS, routesData = ROUTES } = {}) {
+function mockAllEndpoints({ statsData = STATS, routesData = ROUTES, incidentsData = INCIDENTS } = {}) {
   api.get.mockImplementation((url) => {
     if (url.includes('/api/ingress/routes/')) return Promise.resolve({ data: routesData });
+    if (url.includes('/api/incidents/')) return Promise.resolve({ data: incidentsData });
     return Promise.resolve({ data: statsData });
   });
 }
+
+// Backwards-compat alias used by existing tests
+const mockApiBothEndpoints = mockAllEndpoints;
 
 function renderPage(selectedOrg = SELECTED_ORG) {
   return render(
@@ -47,7 +52,8 @@ describe('DashboardPage', () => {
     mockApiBothEndpoints();
     renderPage();
 
-    const securityCard = screen.getByRole('link', { name: /security/i });
+    // The Incidents card description also contains "Security", so match by card title only
+    const securityCard = screen.getByRole('link', { name: /^security\b/i });
     expect(securityCard).toBeInTheDocument();
     expect(securityCard).toHaveAttribute('href', '/security');
     await waitFor(() => expect(screen.getByText('24')).toBeInTheDocument());
