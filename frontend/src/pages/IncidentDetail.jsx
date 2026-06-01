@@ -1102,13 +1102,14 @@ export default function IncidentDetail() {
     }
   }, [displayId]);
 
-  async function handleTransition(targetState, closureReason = undefined, duplicateOfId = null) {
+  async function handleTransition(targetState, closureReason = undefined, duplicateOfId = null, assigneeId = undefined) {
     setTransitioning(true);
     setTransitionError(null);
     try {
       const payload = { state: targetState };
       if (closureReason) payload.closure_reason = closureReason;
       if (duplicateOfId) payload.duplicate_of = duplicateOfId;
+      if (assigneeId !== undefined) payload.assignee_id = assigneeId;
       const res = await api.post(`/api/incidents/${displayId}/transition/`, payload);
       setIncident(res.data);
     } catch (err) {
@@ -1132,11 +1133,16 @@ export default function IncidentDetail() {
     }
   }
 
+  const START_WORK_STATES = new Set(['new', 'triaged']);
+
   function handleActionClick(targetState) {
     if (targetState === 'closed') {
       setPendingClose(true);
     } else {
-      handleTransition(targetState);
+      const assigneeId = targetState === 'in_progress' && START_WORK_STATES.has(incident.state)
+        ? user?.id
+        : undefined;
+      handleTransition(targetState, undefined, null, assigneeId);
     }
   }
 

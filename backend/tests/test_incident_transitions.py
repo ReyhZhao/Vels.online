@@ -474,3 +474,45 @@ def test_endpoint_canonical_shows_duplicates_list(admin_client, acme):
     dup_ids = {d["display_id"] for d in response.json()["duplicates"]}
     assert dup1.display_id in dup_ids
     assert dup2.display_id in dup_ids
+
+
+# ── auto-assign on start work (#336) ─────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_transition_with_assignee_id_sets_assignee(acme, actor):
+    incident = make_incident(acme, state="new")
+    result = transition_incident(incident, "in_progress", actor=actor, assignee_id=actor.pk)
+    assert result.assignee_id == actor.pk
+
+
+@pytest.mark.django_db
+def test_transition_with_assignee_id_records_change_event(acme, actor):
+    incident = make_incident(acme, state="new")
+    transition_incident(incident, "in_progress", actor=actor, assignee_id=actor.pk)
+    event = IncidentEvent.objects.get(incident=incident, kind="incident_updated")
+    assert "assignee_id" in event.payload["changes"]
+    assert event.payload["changes"]["assignee_id"]["new"] == actor.pk
+
+
+@pytest.mark.django_db
+def test_transition_without_assignee_id_leaves_assignee_unchanged(acme, actor):
+    incident = make_incident(acme, state="new")
+    result = transition_incident(incident, "in_progress", actor=actor)
+    assert result.assignee_id is None
+
+
+@pytest.mark.django_db
+def test_transition_endpoint_start_work_assigns_to_requesting_user(admin_client, acme):
+    from django.contrib.auth.models import User
+    staff = User.objects.get(is_superuser=True)
+    incident = make_incident(acme, state="new")
+    response = admin_client.post(
+        f"/api/incidents/{incident.display_id}/transition/",
+        {"state": "in_progress", "assignee_id": staff.pk},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["state"] == "in_progress"
+    assert data["assignee_username"] == staff.username

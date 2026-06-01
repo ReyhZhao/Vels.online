@@ -17,7 +17,7 @@ ALLOWED_TRANSITIONS = {
 REOPEN_STATES = {"closed", "resolved", "needs_tuning"}
 
 
-def transition_incident(incident, target_state, actor, closure_reason=None, duplicate_of_id=None):
+def transition_incident(incident, target_state, actor, closure_reason=None, duplicate_of_id=None, assignee_id=None):
     from incidents.models import Incident
 
     allowed = ALLOWED_TRANSITIONS.get(incident.state, set())
@@ -67,6 +67,12 @@ def transition_incident(incident, target_state, actor, closure_reason=None, dupl
             if old_duplicate_of_id is not None:
                 changes["duplicate_of"] = {"old": old_duplicate_of_id, "new": None}
                 incident.duplicate_of = None
+
+        if assignee_id is not None:
+            old_assignee_id = incident.assignee_id
+            if old_assignee_id != assignee_id:
+                changes["assignee_id"] = {"old": old_assignee_id, "new": assignee_id}
+                incident.assignee_id = assignee_id
 
         incident.save()
         record_event(incident, "incident_updated", actor=actor, payload={"changes": changes})
