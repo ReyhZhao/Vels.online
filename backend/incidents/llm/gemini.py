@@ -23,6 +23,8 @@ Return a JSON object with exactly these fields:
 close_as_false_positive, monitor, close_as_informational
   secondary_action         (string, optional) — same choices as primary_action, or omit
   false_positive_confidence (float, required) — probability 0.0-1.0 that this is a false positive
+  subject_recommendation   (string, optional) — best-matching incident subject slug, or omit if unclear. \
+Choose from: phishing, malware, account_compromise, data_exfiltration, policy_violation
 
 Return only valid JSON. No markdown, no code fences, no explanation.
 """
@@ -203,6 +205,9 @@ def _parse_correlation_result(data: dict) -> CorrelationResult:
     )
 
 
+VALID_SUBJECT_SLUGS = {"phishing", "malware", "account_compromise", "data_exfiltration", "policy_violation"}
+
+
 def _parse_result(data: dict, provider: str) -> TriageResult:
     severity = data.get("severity_recommendation", "medium")
     if severity not in ("critical", "high", "medium", "low", "info"):
@@ -219,6 +224,10 @@ def _parse_result(data: dict, provider: str) -> TriageResult:
     confidence = float(data.get("false_positive_confidence", 0.0))
     confidence = max(0.0, min(1.0, confidence))
 
+    subject_recommendation = data.get("subject_recommendation")
+    if subject_recommendation and subject_recommendation not in VALID_SUBJECT_SLUGS:
+        subject_recommendation = None
+
     return TriageResult(
         severity_recommendation=severity,
         summary=data.get("summary", ""),
@@ -226,4 +235,5 @@ def _parse_result(data: dict, provider: str) -> TriageResult:
         secondary_action=secondary,
         false_positive_confidence=confidence,
         provider=provider,
+        subject_recommendation=subject_recommendation,
     )

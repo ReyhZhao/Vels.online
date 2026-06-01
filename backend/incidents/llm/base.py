@@ -33,6 +33,7 @@ class TriageResult:
     secondary_action: Optional[str] = None
     false_positive_confidence: float = 0.0
     provider: str = ""
+    subject_recommendation: Optional[str] = None
 
 
 @dataclass

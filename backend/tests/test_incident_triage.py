@@ -659,3 +659,97 @@ def test_get_triage_lock_started_at_returns_none_when_no_lock(acme):
     incident = make_incident(acme, state="triaged")
     from incidents.tasks import get_triage_lock_started_at
     assert get_triage_lock_started_at(incident.id) is None
+
+
+# ── subject_recommendation (#335) ────────────────────────────────────────────
+
+
+def test_parse_result_subject_recommendation_valid():
+    from incidents.llm.gemini import _parse_result
+    data = {
+        "severity_recommendation": "high",
+        "summary": "Phishing attempt detected.",
+        "primary_action": "assign_to_analyst",
+        "false_positive_confidence": 0.05,
+        "subject_recommendation": "phishing",
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.subject_recommendation == "phishing"
+
+
+def test_parse_result_subject_recommendation_invalid_cleared():
+    from incidents.llm.gemini import _parse_result
+    data = {
+        "severity_recommendation": "medium",
+        "summary": ".",
+        "primary_action": "monitor",
+        "false_positive_confidence": 0.0,
+        "subject_recommendation": "ransomware",
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.subject_recommendation is None
+
+
+def test_parse_result_subject_recommendation_missing_is_none():
+    from incidents.llm.gemini import _parse_result
+    data = {
+        "severity_recommendation": "low",
+        "summary": ".",
+        "primary_action": "monitor",
+        "false_positive_confidence": 0.0,
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.subject_recommendation is None
+
+
+@pytest.mark.django_db
+def test_triage_task_sets_subject_when_recommended(acme):
+    from incidents.models import Subject
+    incident = make_incident(acme)
+    result = _make_triage_result(subject_recommendation="phishing")
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.subject is not None
+    assert incident.subject.slug == "phishing"
+
+
+@pytest.mark.django_db
+def test_triage_task_does_not_overwrite_existing_subject(acme):
+    from incidents.models import Subject
+    malware = Subject.objects.get(slug="malware")
+    incident = make_incident(acme)
+    incident.subject = malware
+    incident.save(update_fields=["subject"])
+
+    result = _make_triage_result(subject_recommendation="phishing")
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.subject.slug == "malware"
+
+
+@pytest.mark.django_db
+def test_triage_task_does_not_set_subject_on_auto_close(acme):
+    acme.triage_fp_threshold = 0.95
+    acme.save()
+    incident = make_incident(acme)
+    result = _make_triage_result(
+        primary_action="close_as_false_positive",
+        false_positive_confidence=0.97,
+        subject_recommendation="phishing",
+    )
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.subject is None
+
+
+@pytest.mark.django_db
+def test_triage_task_no_subject_when_recommendation_is_none(acme):
+    incident = make_incident(acme)
+    result = _make_triage_result(subject_recommendation=None)
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.subject is None

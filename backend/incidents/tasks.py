@@ -157,6 +157,15 @@ def run_incident_triage(self, incident_id: int):
         incident.severity = new_severity
         incident.save(update_fields=["severity"])
 
+    if not auto_closed and result.subject_recommendation and incident.subject_id is None:
+        from incidents.models import Subject
+        try:
+            subject = Subject.objects.get(slug=result.subject_recommendation)
+            incident.subject = subject
+            incident.save(update_fields=["subject"])
+        except Subject.DoesNotExist:
+            logger.warning("run_incident_triage: subject slug %r not found for %s", result.subject_recommendation, incident_id)
+
     Comment.objects.create(
         incident=incident,
         kind=Comment.KIND_AI_TRIAGE,
