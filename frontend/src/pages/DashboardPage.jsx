@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Globe } from 'lucide-react';
+import { Shield, Globe, Siren } from 'lucide-react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 
@@ -48,6 +48,9 @@ export default function DashboardPage() {
   const [routeCount, setRouteCount] = useState(null);
   const [routesLoading, setRoutesLoading] = useState(false);
 
+  const [incidentCount, setIncidentCount] = useState(null);
+  const [incidentsLoading, setIncidentsLoading] = useState(false);
+
   useEffect(() => {
     if (!selectedOrg) return;
     setLoading(true);
@@ -67,6 +70,16 @@ export default function DashboardPage() {
       .then((res) => setRouteCount(res.data.length))
       .catch(() => setRouteCount(null))
       .finally(() => setRoutesLoading(false));
+  }, [selectedOrg]);
+
+  useEffect(() => {
+    if (!selectedOrg) return;
+    setIncidentsLoading(true);
+    api
+      .get('/api/incidents/', { params: { org: selectedOrg.slug, page_size: 1, state: 'new,triaged,in_progress,on_hold,needs_tuning' } })
+      .then((res) => setIncidentCount(res.data.count))
+      .catch(() => setIncidentCount(null))
+      .finally(() => setIncidentsLoading(false));
   }, [selectedOrg]);
 
   const vulnCount =
@@ -98,6 +111,12 @@ export default function DashboardPage() {
             description="Reverse proxy and WAF routes"
             to="/routes"
           />
+          <ServiceCard
+            icon={Siren}
+            title="Incidents"
+            description="Security incident management"
+            to="/incidents"
+          />
         </div>
       </section>
 
@@ -105,7 +124,7 @@ export default function DashboardPage() {
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
           Summary
         </h2>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <SummaryWidget
             label="Vulnerabilities"
             value={error ? '—' : vulnCount}
@@ -120,6 +139,11 @@ export default function DashboardPage() {
             label="Routes"
             value={routeCount}
             isLoading={routesLoading}
+          />
+          <SummaryWidget
+            label="Open Incidents"
+            value={incidentCount}
+            isLoading={incidentsLoading}
           />
         </div>
       </section>
