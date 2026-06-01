@@ -126,10 +126,32 @@ class RouteListView(ListAPIView):
 
 
 class RouteDetailView(APIView):
+    _PATCH_FIELDS = {"name", "backend_host", "backend_port", "backend_protocol"}
+
     def get(self, request, fqdn):
         route, err = _get_route(request, fqdn)
         if err:
             return err
+        return Response(RouteSerializer(route).data)
+
+    def patch(self, request, fqdn):
+        route, err = _get_route(request, fqdn)
+        if err:
+            return err
+
+        data = {k: v for k, v in request.data.items() if k in self._PATCH_FIELDS}
+        ser = RouteSerializer(route, data=data, partial=True)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        route = ser.save()
+        push_route_settings.delay(
+            fqdn,
+            {
+                "REVERSE_PROXY_HOST": f"{route.backend_host}:{route.backend_port}",
+                "REVERSE_PROXY_SCHEME": route.backend_protocol,
+            },
+        )
         return Response(RouteSerializer(route).data)
 
     def delete(self, request, fqdn):
@@ -156,6 +178,7 @@ _MANAGED_SETTINGS = {
     "USE_MODSECURITY",
     "USE_MODSECURITY_CRS",
     "MODSECURITY_CRS_PARANOIA_LEVEL",
+    "USE_REDIRECT_HTTP_TO_HTTPS",
     # IP whitelist
     "USE_WHITELIST",
     "WHITELIST_IP",
@@ -166,10 +189,52 @@ _MANAGED_SETTINGS = {
     # Country access
     "BLACKLIST_COUNTRY",
     "WHITELIST_COUNTRY",
+    # Bot protection
+    "USE_ANTIBOT",
+    "ANTIBOT_TYPE",
+    "ANTIBOT_RECAPTCHA_SCORE",
+    "ANTIBOT_RECAPTCHA_SITEKEY",
+    "ANTIBOT_RECAPTCHA_SECRET",
+    "ANTIBOT_HCAPTCHA_SITEKEY",
+    "ANTIBOT_HCAPTCHA_SECRET",
+    "ANTIBOT_TURNSTILE_SITEKEY",
+    "ANTIBOT_TURNSTILE_SECRET",
+    # Advanced — proxy
+    "REVERSE_PROXY_CONNECT_TIMEOUT",
+    "REVERSE_PROXY_READ_TIMEOUT",
+    "REVERSE_PROXY_SEND_TIMEOUT",
+    "USE_REVERSE_PROXY_WS",
+    "USE_REVERSE_PROXY_BUFFERING",
+    "REVERSE_PROXY_BUFFER_SIZE",
+    "REVERSE_PROXY_BUFFERS",
+    "REVERSE_PROXY_MAX_TEMP_FILE_SIZE",
+    # Advanced — request
+    "ALLOWED_METHODS",
+    "MAX_CLIENT_SIZE",
+    # Advanced — real IP
+    "USE_REAL_IP",
+    "REAL_IP_RECURSIVE",
+    "REAL_IP_HEADER",
+    # Advanced — CORS
+    "USE_CORS",
+    "CORS_ALLOW_ORIGIN",
+    "CORS_ALLOW_HEADERS",
+    "CORS_ALLOW_METHODS",
+    "CORS_EXPOSE_HEADERS",
+    "CORS_MAX_AGE",
+    "CORS_ALLOW_CREDENTIALS",
 }
 
 _RATE_RE = re.compile(r"^\d+r/[smh]$")
 _COUNTRY_CODE_RE = re.compile(r"^[A-Z]{2}$")
+_MAX_CLIENT_SIZE_RE = re.compile(r"^\d+[kmgKMG]$")
+_HTTP_VERBS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE"}
+_ANTIBOT_TYPES = {"cookie", "javascript", "recaptcha", "hcaptcha", "turnstile"}
+_PROXY_TIMEOUT_KEYS = (
+    "REVERSE_PROXY_CONNECT_TIMEOUT",
+    "REVERSE_PROXY_READ_TIMEOUT",
+    "REVERSE_PROXY_SEND_TIMEOUT",
+)
 
 
 def _validate_settings(data):
@@ -213,6 +278,53 @@ def _validate_settings(data):
                         f"Invalid country code in {key}: {token!r}. "
                         "Must be 2-letter uppercase ISO 3166-1 alpha-2."
                     )
+
+    if "USE_REDIRECT_HTTP_TO_HTTPS" in data and data["USE_REDIRECT_HTTP_TO_HTTPS"] not in ("", None):
+        if data["USE_REDIRECT_HTTP_TO_HTTPS"] not in ("yes", "no"):
+            return None, "USE_REDIRECT_HTTP_TO_HTTPS must be 'yes' or 'no'."
+
+    for key in _PROXY_TIMEOUT_KEYS:
+        if key in data and data[key] not in ("", None):
+            try:
+                val = int(data[key])
+            except (TypeError, ValueError):
+                return None, f"{key} must be a positive integer."
+            if val <= 0:
+                return None, f"{key} must be a positive integer."
+
+    if "ALLOWED_METHODS" in data and data["ALLOWED_METHODS"] not in ("", None):
+        for verb in str(data["ALLOWED_METHODS"]).split("|"):
+            verb = verb.strip()
+            if verb not in _HTTP_VERBS:
+                return None, f"ALLOWED_METHODS contains unknown verb: {verb!r}."
+
+    if "MAX_CLIENT_SIZE" in data and data["MAX_CLIENT_SIZE"] not in ("", None):
+        val = str(data["MAX_CLIENT_SIZE"]).strip()
+        if val != "0" and not _MAX_CLIENT_SIZE_RE.match(val):
+            return None, (
+                "MAX_CLIENT_SIZE must be a non-negative integer followed by k, m, or g, "
+                "or 0 for unlimited."
+            )
+
+    if "ANTIBOT_TYPE" in data and data["ANTIBOT_TYPE"] not in ("", None):
+        if data["ANTIBOT_TYPE"] not in _ANTIBOT_TYPES:
+            return None, f"ANTIBOT_TYPE must be one of: {', '.join(sorted(_ANTIBOT_TYPES))}."
+
+    if "ANTIBOT_RECAPTCHA_SCORE" in data and data["ANTIBOT_RECAPTCHA_SCORE"] not in ("", None):
+        try:
+            score = float(data["ANTIBOT_RECAPTCHA_SCORE"])
+        except (TypeError, ValueError):
+            return None, "ANTIBOT_RECAPTCHA_SCORE must be a float between 0.0 and 1.0."
+        if score < 0.0 or score > 1.0:
+            return None, "ANTIBOT_RECAPTCHA_SCORE must be between 0.0 and 1.0."
+
+    if "CORS_MAX_AGE" in data and data["CORS_MAX_AGE"] not in ("", None):
+        try:
+            age = int(data["CORS_MAX_AGE"])
+        except (TypeError, ValueError):
+            return None, "CORS_MAX_AGE must be a non-negative integer."
+        if age < 0:
+            return None, "CORS_MAX_AGE must be a non-negative integer."
 
     return dict(data), None
 

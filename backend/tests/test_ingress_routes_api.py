@@ -307,6 +307,115 @@ def test_create_bare_backend_host_unchanged(MockClient, client, acme_member, acm
     assert res.json()["backend_host"] == "10.0.0.7"
 
 
+# ── PATCH /api/ingress/routes/<fqdn>/ ───────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_patch_route_requires_auth(client, acme):
+    make_route(acme)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/",
+        {"name": "New Name"},
+        content_type="application/json",
+    )
+    assert res.status_code == 401
+
+
+@pytest.mark.django_db
+def test_patch_route_non_member_forbidden(client, alice, acme):
+    make_route(acme)
+    client.force_login(alice)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/",
+        {"name": "New Name"},
+        content_type="application/json",
+    )
+    assert res.status_code == 403
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_route_saves_fields(mock_task, client, acme_member, acme):
+    make_route(acme)
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/",
+        {"name": "My App", "backend_host": "10.0.0.9", "backend_port": 9000, "backend_protocol": "https"},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["name"] == "My App"
+    assert data["backend_host"] == "10.0.0.9"
+    assert data["backend_port"] == 9000
+    assert data["backend_protocol"] == "https"
+    from ingress.models import Route
+    route = Route.objects.get(fqdn="app.example.com")
+    assert route.name == "My App"
+    assert route.backend_host == "10.0.0.9"
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_route_enqueues_task_with_bunkerweb_keys(mock_task, client, acme_member, acme):
+    make_route(acme)
+    client.force_login(acme_member)
+    client.patch(
+        "/api/ingress/routes/app.example.com/",
+        {"backend_host": "app-backend", "backend_port": 3000, "backend_protocol": "http"},
+        content_type="application/json",
+    )
+    mock_task.delay.assert_called_once_with(
+        "app.example.com",
+        {"REVERSE_PROXY_HOST": "app-backend:3000", "REVERSE_PROXY_SCHEME": "http"},
+    )
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_route_fqdn_in_body_is_ignored(mock_task, client, acme_member, acme):
+    make_route(acme)
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/",
+        {"fqdn": "evil.example.com", "name": "Renamed"},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+    assert res.json()["fqdn"] == "app.example.com"
+    from ingress.models import Route
+    assert not Route.objects.filter(fqdn="evil.example.com").exists()
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_route_backend_type_in_body_is_ignored(mock_task, client, acme_member, acme):
+    make_route(acme, backend_type="direct")
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/",
+        {"backend_type": "netbird"},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+    from ingress.models import Route
+    assert Route.objects.get(fqdn="app.example.com").backend_type == "direct"
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_route_strips_scheme_from_backend_host(mock_task, client, acme_member, acme):
+    make_route(acme)
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/",
+        {"backend_host": "http://10.0.0.5"},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+    assert res.json()["backend_host"] == "10.0.0.5"
+
+
 # ── GET /api/ingress/settings/ ───────────────────────────────────────────────
 
 

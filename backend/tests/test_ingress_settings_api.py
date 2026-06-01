@@ -295,3 +295,210 @@ def test_patch_settings_rejects_invalid_country_code(client, acme_member, route)
     )
     assert res.status_code == 400
     assert "country code" in res.json()["detail"].lower()
+
+
+# ── WAF — HTTPS redirect ──────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_use_redirect_http_to_https(mock_task, client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"USE_REDIRECT_HTTP_TO_HTTPS": "yes"},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_invalid_use_redirect_http_to_https(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"USE_REDIRECT_HTTP_TO_HTTPS": "maybe"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+
+
+# ── Advanced — proxy timeouts ─────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_valid_timeouts(mock_task, client, acme_member, route):
+    payload = {
+        "REVERSE_PROXY_CONNECT_TIMEOUT": "30",
+        "REVERSE_PROXY_READ_TIMEOUT": "60",
+        "REVERSE_PROXY_SEND_TIMEOUT": "60",
+    }
+    client.force_login(acme_member)
+    assert client.patch(
+        "/api/ingress/routes/app.example.com/settings/", payload, content_type="application/json"
+    ).status_code == 200
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_non_integer_timeout(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"REVERSE_PROXY_CONNECT_TIMEOUT": "fast"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_negative_timeout(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"REVERSE_PROXY_READ_TIMEOUT": "-5"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+
+
+# ── Advanced — ALLOWED_METHODS ────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_valid_allowed_methods(mock_task, client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"ALLOWED_METHODS": "GET|POST|DELETE"},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_unknown_http_verb(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"ALLOWED_METHODS": "GET|INVALID"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+
+
+# ── Advanced — MAX_CLIENT_SIZE ────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_max_client_size_with_suffix(mock_task, client, acme_member, route):
+    for val in ("10m", "512k", "2g"):
+        client.force_login(acme_member)
+        res = client.patch(
+            "/api/ingress/routes/app.example.com/settings/",
+            {"MAX_CLIENT_SIZE": val},
+            content_type="application/json",
+        )
+        assert res.status_code == 200, f"Expected 200 for MAX_CLIENT_SIZE={val!r}"
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_max_client_size_zero(mock_task, client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"MAX_CLIENT_SIZE": "0"},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_max_client_size_unknown_suffix(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"MAX_CLIENT_SIZE": "10x"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+
+
+# ── Bot protection ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_valid_antibot_type(mock_task, client, acme_member, route):
+    for atype in ("cookie", "javascript", "recaptcha", "hcaptcha", "turnstile"):
+        client.force_login(acme_member)
+        res = client.patch(
+            "/api/ingress/routes/app.example.com/settings/",
+            {"ANTIBOT_TYPE": atype},
+            content_type="application/json",
+        )
+        assert res.status_code == 200, f"Expected 200 for ANTIBOT_TYPE={atype!r}"
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_unknown_antibot_type(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"ANTIBOT_TYPE": "captcha_v9"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_valid_recaptcha_score(mock_task, client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"ANTIBOT_RECAPTCHA_SCORE": "0.5"},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_recaptcha_score_out_of_range(client, acme_member, route):
+    for val in ("1.5", "-0.1"):
+        client.force_login(acme_member)
+        res = client.patch(
+            "/api/ingress/routes/app.example.com/settings/",
+            {"ANTIBOT_RECAPTCHA_SCORE": val},
+            content_type="application/json",
+        )
+        assert res.status_code == 400, f"Expected 400 for ANTIBOT_RECAPTCHA_SCORE={val!r}"
+
+
+# ── Advanced — CORS_MAX_AGE ───────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_settings_accepts_cors_max_age(mock_task, client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"CORS_MAX_AGE": "3600"},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+
+
+@pytest.mark.django_db
+def test_patch_settings_rejects_non_integer_cors_max_age(client, acme_member, route):
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/app.example.com/settings/",
+        {"CORS_MAX_AGE": "forever"},
+        content_type="application/json",
+    )
+    assert res.status_code == 400
