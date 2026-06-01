@@ -241,6 +241,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     <SidebarLink to="/admin/incidents/automations" icon={Zap} collapsed={collapsed}>
                       Automations
                     </SidebarLink>
+                    <SidebarLink to="/admin/wazuh-responses" icon={ShieldCheck} collapsed={collapsed}>
+                      Wazuh Responses
+                    </SidebarLink>
                   </>
                 )}
               </>
