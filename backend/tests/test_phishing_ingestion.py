@@ -156,3 +156,49 @@ def test_router_does_not_route_plus_token_to_phishing(acme, forwarder, monkeypat
     )
     route_inbound_message(msg)
     assert Alert.objects.filter(source_kind="inbound_email").count() == 0
+
+
+# ── Extend allow list to contacts (#334) ─────────────────────────────────────
+
+@pytest.mark.django_db
+def test_contact_sender_resolves_org(acme):
+    from contacts.models import Contact
+    Contact.objects.create(organisation=acme, name="Bob", email="bob@client.com")
+    msg = _forwarded_msg(forwarder_email="bob@client.com")
+
+    with patch("security.storage.StorageClient"), \
+         patch("inbound_mail.handlers.get_system_user"):
+        result = PhishingIngestionHandler().handle(msg)
+
+    assert result in ("phishing:created", "phishing:dedup")
+    assert Alert.objects.filter(source_kind="inbound_email").count() == 1
+
+
+@pytest.mark.django_db
+def test_contact_sender_with_ambiguous_org_dropped():
+    from contacts.models import Contact
+    from security.models import Organization
+    org1 = Organization.objects.create(name="Org1", slug="org1", wazuh_group="org1")
+    org2 = Organization.objects.create(name="Org2", slug="org2", wazuh_group="org2")
+    Contact.objects.create(organisation=org1, name="Alice", email="alice@shared.com")
+    Contact.objects.create(organisation=org2, name="Alice", email="alice@shared.com")
+
+    msg = _forwarded_msg(forwarder_email="alice@shared.com")
+    result = PhishingIngestionHandler().handle(msg)
+    assert result == "phishing:dropped:unknown_sender"
+
+
+@pytest.mark.django_db
+def test_user_lookup_takes_precedence_over_contact(acme, forwarder):
+    from contacts.models import Contact
+    from security.models import Organization
+    other_org = Organization.objects.create(name="Other", slug="other", wazuh_group="other")
+    Contact.objects.create(organisation=other_org, name="Carol", email="carol@acme.com")
+
+    msg = _forwarded_msg(forwarder_email="carol@acme.com")
+    with patch("security.storage.StorageClient"), \
+         patch("inbound_mail.handlers.get_system_user", return_value=forwarder):
+        PhishingIngestionHandler().handle(msg)
+
+    alert = Alert.objects.get(source_kind="inbound_email")
+    assert alert.organization == acme

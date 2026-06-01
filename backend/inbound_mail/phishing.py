@@ -114,27 +114,34 @@ def detect_forward(msg) -> bool:
 
 
 def resolve_org(from_address: str):
-    """Return the Organisation for the sending user, or None."""
+    """Return the Organisation for the sending user or contact, or None."""
     from django.contrib.auth.models import User
     from api.models import UserProfile
+    from contacts.models import Contact
     from security.models import OrganizationMembership
 
     bare = _bare_address(from_address)
+
     try:
         user = User.objects.get(email__iexact=bare)
+        try:
+            profile = user.profile
+            if profile.default_org_id:
+                return profile.default_org
+        except UserProfile.DoesNotExist:
+            pass
+        memberships = list(OrganizationMembership.objects.filter(user=user).select_related("organization"))
+        if len(memberships) == 1:
+            return memberships[0].organization
+        if memberships:
+            return None
     except User.DoesNotExist:
-        return None
-
-    try:
-        profile = user.profile
-        if profile.default_org_id:
-            return profile.default_org
-    except UserProfile.DoesNotExist:
         pass
 
-    memberships = list(OrganizationMembership.objects.filter(user=user).select_related("organization"))
-    if len(memberships) == 1:
-        return memberships[0].organization
+    contacts = list(Contact.objects.filter(email__iexact=bare).select_related("organisation"))
+    org_ids = {c.organisation_id for c in contacts}
+    if len(org_ids) == 1:
+        return contacts[0].organisation
     return None
 
 
