@@ -109,3 +109,27 @@ def test_source_kind_must_match(acme):
     alert = _make_alert(acme, source_kind="wazuh_event", source_ref={"rule_id": "100002"})
     match = find_matching_incident(alert)
     assert match is None
+
+
+@pytest.mark.parametrize("state", ["resolved", "needs_tuning"])
+def test_does_not_match_terminal_incident(state, acme):
+    ref = {"rule_id": "100002"}
+    _make_incident(acme, source_ref=ref, state=state)
+    alert = _make_alert(acme, source_ref={"rule_id": "100002"})
+    assert find_matching_incident(alert) is None
+
+
+@pytest.mark.parametrize("state", ["resolved", "needs_tuning"])
+def test_inbound_email_does_not_match_terminal_incident(state, acme):
+    ref = {"sender_address": "evil@bad.com", "subject_normalised": "win a prize"}
+    _make_incident(acme, source_kind="inbound_email", source_ref=ref, state=state)
+    alert = _make_alert(acme, source_kind="inbound_email", source_ref=ref)
+    assert find_matching_incident(alert) is None
+
+
+@pytest.mark.parametrize("state", ["new", "triaged", "in_progress", "on_hold"])
+def test_matches_non_terminal_states(state, acme):
+    ref = {"rule_id": "100002"}
+    _make_incident(acme, source_ref=ref, state=state)
+    alert = _make_alert(acme, source_ref={"rule_id": "100002"})
+    assert find_matching_incident(alert) is not None

@@ -27,7 +27,7 @@ def find_matching_incident(alert):
         organization=org,
         source_kind=alert.source_kind,
         created_at__gte=lookback,
-    ).exclude(state='closed')
+    ).exclude(state__in=["closed", "resolved", "needs_tuning"])
 
     q = Q()
     if rule_id:
@@ -54,7 +54,7 @@ def _find_matching_inbound_email_incident(alert, org, lookback):
             source_ref__sender_address=sender_address,
             source_ref__subject_normalised=subject_normalised,
         )
-        .exclude(state="closed")
+        .exclude(state__in=["closed", "resolved", "needs_tuning"])
         .order_by("-created_at")
         .first()
     )
