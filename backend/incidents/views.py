@@ -505,6 +505,7 @@ class AssetListView(ListAPIView):
                 name=name,
                 agent_name=agent_name,
                 ip_address=request.data.get("ip_address") or None,
+                is_permanent=bool(request.data.get("is_permanent", False)),
             )
 
         elif kind == Asset.KIND_ROUTE:
@@ -562,6 +563,10 @@ class AssetDetailView(APIView):
             allowed["name"] = request.data["name"]
         if "ip_address" in request.data:
             allowed["ip_address"] = request.data["ip_address"] or None
+        if "is_permanent" in request.data:
+            allowed["is_permanent"] = bool(request.data["is_permanent"])
+        if not allowed:
+            return Response(AssetSerializer(asset).data)
         for field, value in allowed.items():
             setattr(asset, field, value)
         asset.save(update_fields=list(allowed.keys()))

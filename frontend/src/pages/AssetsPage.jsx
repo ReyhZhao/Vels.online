@@ -4,13 +4,13 @@ import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 
 function CreateAssetModal({ open, onClose, orgSlug, onCreated }) {
-  const [form, setForm] = useState({ name: '', agent_name: '', ip_address: '' });
+  const [form, setForm] = useState({ name: '', agent_name: '', ip_address: '', is_permanent: false });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setForm({ name: '', agent_name: '', ip_address: '' });
+      setForm({ name: '', agent_name: '', ip_address: '', is_permanent: false });
       setError(null);
     }
   }, [open]);
@@ -32,6 +32,7 @@ function CreateAssetModal({ open, onClose, orgSlug, onCreated }) {
         name: form.name,
         agent_name: form.agent_name,
         ip_address: form.ip_address || undefined,
+        is_permanent: form.is_permanent,
       });
       onCreated(res.data);
       onClose();
@@ -68,6 +69,21 @@ function CreateAssetModal({ open, onClose, orgSlug, onCreated }) {
               />
             </div>
           ))}
+          <div className="flex items-center gap-3">
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                type="checkbox"
+                className="peer sr-only"
+                checked={form.is_permanent}
+                onChange={e => set('is_permanent', e.target.checked)}
+              />
+              <div className="h-5 w-9 rounded-full bg-border peer-checked:bg-primary transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
+            </label>
+            <div>
+              <p className="text-sm font-medium text-foreground">Permanent</p>
+              <p className="text-xs text-muted-foreground">Permanent assets are never removed by automated cleanup.</p>
+            </div>
+          </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} disabled={saving}
