@@ -1313,7 +1313,18 @@ class AgentRespondView(APIView):
             return Response(status=404)
 
         os_info = agent_raw.get("os", {})
-        agent_platform = os_info.get("platform", "").lower() if isinstance(os_info, dict) else ""
+        _raw_platform = os_info.get("platform", "").lower() if isinstance(os_info, dict) else ""
+        _LINUX_DISTROS = {
+            "ubuntu", "debian", "raspbian", "centos", "rhel", "fedora",
+            "arch", "alpine", "amzn", "sles", "opensuse", "manjaro", "mint",
+            "kali", "parrot", "oracle",
+        }
+        if _raw_platform in _LINUX_DISTROS:
+            agent_platform = "linux"
+        elif _raw_platform == "darwin":
+            agent_platform = "macos"
+        else:
+            agent_platform = _raw_platform
 
         if wr.platforms and agent_platform and agent_platform not in wr.platforms:
             return Response(

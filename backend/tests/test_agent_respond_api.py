@@ -49,14 +49,15 @@ def wr_not_in_overview(db, staff):
 
 
 _MOCK_AGENTS = [{"id": "001", "name": "server1", "ip": "10.0.0.1", "status": "active", "os": {"platform": "linux"}}]
+_MOCK_UBUNTU_AGENTS = [{"id": "001", "name": "server1", "ip": "10.0.0.1", "status": "active", "os": {"platform": "ubuntu"}}]
 
 
 def _mock_run(return_value=(200, {})):
     return patch("security.wazuh.WazuhClient.run_active_response", return_value=return_value)
 
 
-def _mock_agents():
-    return patch("security.wazuh.WazuhClient.get_agents", return_value=_MOCK_AGENTS)
+def _mock_agents(agents=None):
+    return patch("security.wazuh.WazuhClient.get_agents", return_value=agents or _MOCK_AGENTS)
 
 
 # ── AgentRespondView ──────────────────────────────────────────────────────────
@@ -103,6 +104,19 @@ def test_respond_rejects_wrong_platform(client, staff, org, db, django_user_mode
         )
     assert resp.status_code == 400
     assert "platform" in resp.json()["detail"].lower()
+
+
+@pytest.mark.django_db
+def test_respond_allows_ubuntu_agent_on_linux_response(client, staff, wr, org):
+    """Ubuntu agents report 'ubuntu' as platform; must match 'linux' responses."""
+    client.force_login(staff)
+    with _mock_agents(_MOCK_UBUNTU_AGENTS), _mock_run():
+        resp = client.post(
+            "/api/security/agents/001/respond/",
+            {"org": org.slug, "wazuh_response": wr.id},
+            content_type="application/json",
+        )
+    assert resp.status_code == 201
 
 
 @pytest.mark.django_db
