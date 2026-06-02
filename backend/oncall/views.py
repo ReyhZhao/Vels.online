@@ -442,6 +442,8 @@ class ShiftOverrideActionView(APIView):
             else:
                 return Response({"detail": "Unknown action."}, status=400)
         except ValueError as exc:
-            return Response({"detail": str(exc)}, status=400)
+            import logging as _log
+            _log.getLogger(__name__).warning("Override action '%s' rejected: %s", action, exc)
+            return Response({"detail": "Action not permitted in the current state."}, status=400)
 
         return Response(ShiftOverrideSerializer(override).data)

@@ -1363,7 +1363,7 @@ class AgentRespondView(APIView):
             )
         except (WazuhAuthError, WazuhAPIError) as exc:
             _log.exception("WazuhAPIError in AgentRespondView for agent_id=%s", agent_id)
-            error_msg = str(exc)
+            error_msg = "Wazuh service error."
 
         from django.db import transaction
         with transaction.atomic():
