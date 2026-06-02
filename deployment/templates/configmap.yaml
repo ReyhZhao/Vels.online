@@ -10,3 +10,4 @@ data:
   TRIAGE_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
   OLLAMA_MODEL: gemma4:31b-cloud
   INBOUND_IMAP_HOST: mail.vels.online
+  ONCALL_ROUTING: llm_guided

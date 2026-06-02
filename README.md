@@ -18,6 +18,14 @@ The platform is built around a Wazuh-integrated SOC workflow: detections flow in
 |---------------|------------------------|----------------|
 | ![Routes placeholder](docs/screenshots/routes.png) | ![Vulns placeholder](docs/screenshots/vulnerabilities.png) | ![Fleet placeholder](docs/screenshots/fleet.png) |
 
+| Alert Inbox | Wazuh Active Response | Exception Rules |
+|-------------|----------------------|-----------------|
+| ![Alerts placeholder](docs/screenshots/alerts.png) | ![Responses placeholder](docs/screenshots/wazuh-responses.png) | ![Exceptions placeholder](docs/screenshots/exceptions.png) |
+
+| On-Call Calendar | On-Call Widget | |
+|-----------------|----------------|--|
+| ![On-Call Calendar placeholder](docs/screenshots/oncall-calendar.png) | ![On-Call Widget placeholder](docs/screenshots/oncall-widget.png) | |
+
 ---
 
 ## Features
@@ -30,9 +38,10 @@ A pre-incident layer that records every detection before it becomes an incident.
 - **Smart auto-routing** — high and critical severity alerts with no matching open incident auto-promote to new incidents immediately; low and medium alerts sit in the inbox for analyst review.
 - **Duplicate suppression** — incoming alerts are matched against open incidents by Wazuh rule ID or rule description within a configurable lookback window; matches auto-link to the existing incident instead of creating a duplicate.
 - **Asset threshold promotion** — sustained low-severity alerts against the same asset within a configurable time window auto-promote to a new incident even when individual severities are low.
-- **Bulk promote** — select multiple alerts from the inbox and promote them to a single incident in one action.
+- **Bulk promote** — select multiple alerts from the inbox and promote them to a single incident in one action; a preview modal shows the auto-derived incident fields before writing.
 - **Linked Alerts panel** — every incident shows a collapsible panel listing all `AL-NNN` records behind it, with state badges and timestamps.
 - **Alert enrichment passthrough** — third-party tools (N8N, webhooks) can pass `title`, `description`, `severity`, `pap`, and `tlp` at ingestion time; promoted incidents inherit these values instead of auto-derived placeholders.
+- **Source kinds** — alerts can be tagged as `wazuh`, `inbound_email`, `workflow`, or `external_source` so the origin of every detection is visible and filterable.
 - **Per-org thresholds** — configure the auto-promote count, time window, and match lookback window per organisation in settings.
 
 ### Incident Management
@@ -42,6 +51,7 @@ A full lifecycle for security incidents, from detection to closure.
 - **Multi-source ingestion** — incidents are created from Wazuh alerts, phishing emails, vulnerability scans, agent findings, or manually by analysts.
 - **Severity tiers** — Critical · High · Medium · Low · Info, with SLA tracking displayed in the incident list. Severity auto-escalates when a new linked alert has a higher severity than the current incident.
 - **Structured playbooks** — subject-based task templates automatically apply the right checklist (phishing, malware, vulnerability, etc.) when an incident is created.
+- **Auto-assignment** — claiming an incident via "Start Work" automatically assigns it to you; the incident subject is also auto-populated from the LLM triage recommendation when one arrives.
 - **Immutable audit trail** — every state change, comment, delegation, attachment, and alert link is timestamped in a timeline for complete accountability.
 - **Extended close flow** — close incidents as resolved or as a duplicate linked to a canonical incident; a searchable combobox makes finding the canonical incident fast even across large lists.
 - **Auto-closure** — incidents older than 7 days in `new`, `triaged`, or `resolved` state are automatically closed, keeping the active queue clean.
@@ -52,14 +62,30 @@ A full lifecycle for security incidents, from detection to closure.
 - **Smart page refresh** — the incident detail page detects when new data is available (triage result, new alert link, comment) and prompts for a reload without forcing a full refresh.
 - **Multi-organisation support** — each organisation has its own incident queue, team, and settings; admins can manage all orgs from one account.
 
+### On-Call Scheduling
+
+Manage 24/7 analyst coverage and automatically route post-triage incidents to the analyst on duty.
+
+- **Shift blocks** — admins define named time blocks (e.g. Day / Evening / Night) that must collectively tile 00:00–24:00 without gaps or overlaps; the system validates full coverage before the template can be saved.
+- **Repeating weekly rotation template** — assign a staff analyst to each day-of-week × shift-block slot; the template repeats indefinitely until explicitly changed, requiring no weekly manual input.
+- **Shift overrides** — any analyst can initiate a shift swap (hand off their own upcoming shift) or offer to cover a colleague's shift; the receiving analyst accepts or declines via notification. A pending override does not affect the resolver until accepted, so there is never a coverage gap during the handoff process.
+- **Hand-off now** — the active on-call analyst can transfer responsibility immediately from the calendar page without pre-planning a swap.
+- **Pending requests panel** — outstanding swap and cover-offer requests are surfaced in a dedicated panel so recipients can action them without hunting through the calendar.
+- **Post-triage incident routing** — after AI triage promotes an incident to `triaged`, the routing service automatically assigns it to the current on-call analyst. The routing mode is controlled via the `ONCALL_ROUTING` env var: `always` routes every triaged incident; `llm_guided` routes only when the triage recommendation is `escalate` or `assign_to_analyst`. If no on-call analyst is found, a system alert is sent to all staff.
+- **Coverage gap detection** — the month calendar view renders days with no assigned analyst in red with a GAP badge so admins can fix gaps before they go live.
+- **Timezone-aware display** — each staff analyst sets their local timezone in their profile (default: Europe/Amsterdam); all shift times in the UI are converted to the viewer's local timezone.
+- **Compact on-call widget** — the incident list header shows who is currently on-call and when their shift ends, so analysts always know who owns incoming work without leaving their main workspace.
+- **shift_swap notifications** — swap requests and cover offers trigger notifications via email, in-app, or push. At least one channel must remain enabled per analyst so coverage-critical requests are never missed.
+
 ### Inbound Phishing Ingestion
 
 Turn phishing reports into incidents with zero analyst effort.
 
 - Forward any suspected phishing email to `soc@vels.online`; the platform creates an incident automatically.
 - Parses forwarded and attached `.eml` files; extracts raw email body as the incident description.
-- Extracts URLs, domains, and sender addresses as IOCs and enriches them immediately (see IOC Enrichment below).
+- Extracts URLs, domains, sender addresses, and email addresses as IOCs and enriches them immediately (see IOC Enrichment below).
 - LLM triage annotates phishing incidents with email-specific context (sender reputation, URL risk, attachment analysis).
+- **Contacts allow list** — known-safe senders (internal staff and registered contacts) are excluded from phishing incident creation to prevent analyst noise.
 
 ### IOC Enrichment
 
@@ -67,6 +93,8 @@ Automatically assess every indicator of compromise at incident creation time.
 
 - **IP addresses** — queried against AbuseIPDB; results include abuse confidence score, total reports, country, and usage type.
 - **Domains and URLs** — queried against VirusTotal; malicious/suspicious vote counts surfaced inline.
+- **Email addresses** — extracted from phishing emails and displayed as a dedicated IOC kind in the IOC tab.
+- **Owned-asset deduplication** — IPs that belong to assets already registered in the organisation's estate are skipped at ingestion time so the IOC tab stays focused on external indicators.
 - Enrichment data is available to the AI triage pipeline immediately, improving the quality of automated assessments.
 - Enriched IOCs display threat intelligence details in the IOC tab without requiring analysts to leave the platform.
 
@@ -108,6 +136,8 @@ Suppress known-good alerts so analysts focus on real threats.
 - Rules are assembled into valid Wazuh XML and pushed directly to a GitHub repository via the API; the Wazuh deployment picks them up on its next sync.
 - IDs are allocated from a managed pool to avoid collisions; freed IDs are recycled automatically.
 - Approval workflow: exceptions require review before the GitHub push is made.
+- **Auto-update deployment config** — when a new exception file is pushed, the platform automatically updates the `apps-values.yaml` deployment manifest so the rule is included in the next Wazuh sync without manual config editing.
+- **Automatic Wazuh restart** — ten minutes after a rule is pushed the platform triggers a rolling Wazuh manager restart so the new exception takes effect without requiring manual intervention.
 
 ### App Ingress (Reverse Proxy & WAF)
 
@@ -115,9 +145,14 @@ Let customers safely publish their own services to the internet without manual i
 
 - **Self-service route management** — create ingress routes mapping a public FQDN to any backend host:port, scoped to the organisation.
 - **Automatic SSL termination** — BunkerWeb provisions and renews Let's Encrypt certificates automatically; the creation form shows the DNS A-record target and a background check warns if DNS is not yet aligned.
-- **Web Application Firewall** — ModSecurity with the OWASP Core Rule Set protects every route. Configurable paranoia level (1–4) per route.
-- **Rate limiting** — per-route request rate and burst limits to guard against traffic spikes and credential-stuffing.
-- **Country access controls** — blacklist or whitelist countries per route for geography-based access policies.
+- **Structured 7-tab settings UI** — the route settings panel is organised into dedicated tabs: General, WAF, IP Whitelist, Rate Limiting, Country, Bot Protection, and Advanced. Each tab has its own Save button with an unsaved-changes indicator dot and per-tab toast feedback.
+- **General tab** — edit backend host, port, and protocol after creation; FQDN is displayed read-only.
+- **Web Application Firewall** — ModSecurity with the OWASP Core Rule Set protects every route. Paranoia level (1–4) is shown as a segmented control with a description per level; HTTPS redirect can be toggled per route.
+- **IP Whitelist** — add allowed IPs and CIDRs as a chip list with inline validation; capped at 10 entries with a clear limit message.
+- **Rate limiting** — structured number + unit input (`r/s`, `r/m`, `r/h`) guards against traffic spikes and credential-stuffing.
+- **Country access controls** — searchable multi-select popover lets operators block or allow countries by name rather than memorising ISO codes.
+- **Bot protection** — toggle antibot challenge per route; choose the challenge type (cookie, JavaScript, reCAPTCHA, hCaptcha, Turnstile) with conditional credential fields per provider.
+- **Advanced tab** — configure upstream proxy timeouts (connect, read, send), WebSocket proxying, proxy buffering, maximum request body size, allowed HTTP methods, real-IP extraction headers, and full CORS settings.
 - **Blocked activity reports** — live feed of blocked requests (source IP, rule triggered, action taken) fetched on demand from BunkerWeb.
 - Routes support both direct (public IP) and NetBird (overlay network) backend types.
 
@@ -127,10 +162,24 @@ Trigger runbook-style workflows without leaving the platform.
 
 - Automations map to Semaphore CI/CD templates; analysts can launch them from incident tasks with optional variable overrides.
 - **Incident var mappings** — each automation can declare a YAML mapping from Semaphore playbook variable names to incident data sources (linked assets, IOCs, core incident fields). Variables are resolved automatically at run time — no manual copy-paste.
-- **Pre-run preview modal** — before launching an automation, analysts see a preview of all resolved variables so they can verify the correct data will be passed.
+- **Pre-run preview modal** — before launching an automation, analysts see a preview of all resolved variables and can edit any value before confirming, so they can verify and adjust data without leaving the platform.
+- **Auto-assign on start** — starting an automation task automatically assigns it to the analyst who clicked Start, creating a clear chain of responsibility.
 - Task templates can be pre-wired to an automation so the right runbook fires automatically when a checklist item is started.
 - In-progress automation status is tracked and surfaced on incident tasks in real time.
-- Automation output and feedback are collected and displayed on the task after the run completes.
+- **LLM-summarised output** — when an automation run completes, the platform feeds the raw output through the LLM and posts a concise summary as a task comment alongside the full output, reducing the need to parse verbose CI logs.
+- **Wazuh response task type** — in addition to Semaphore automations, tasks can be of type `wazuh_response` to dispatch a Wazuh active response command directly from an incident checklist item (see Wazuh Active Response below).
+
+### Wazuh Active Response
+
+Take direct remediation actions on endpoints from within the platform — no context-switching to the Wazuh management interface.
+
+- **Response catalog** — admins manage a global catalog of Wazuh active response commands (e.g. `firewall-drop`, `host-deny`). Each entry specifies supported OS platforms (`linux`, `windows`, `macos`), a default argument template with `{{incident.field}}` interpolation placeholders, a configurable timeout, and flags for security-overview visibility and destructive-action confirmation.
+- **`wazuh_response` incident tasks** — task templates and ad-hoc checklist items can be wired to a catalog entry. The run modal shows an agent multi-picker (filtered to the response's supported platforms), pre-resolved argument values, a timeout field, and — for destructive commands — a required typed confirmation phrase (the agent hostname).
+- **Variable interpolation** — `{{incident.id}}`, `{{asset.ip}}`, `{{ioc.ip}}`, `{{ioc.domain}}` and similar placeholders are resolved server-side before the modal opens; unresolvable placeholders remain editable so analysts can fill them in manually.
+- **Auto-complete on dispatch** — once the Wazuh API accepts the command, the task is automatically marked done and a system comment is added to the incident timeline recording the command, target agents, arguments, timeout, and the analyst who dispatched it.
+- **Security overview fast path** — active agent rows in the `/security` dashboard have a kebab menu showing catalog entries filtered to the agent's OS and flagged for security-overview use. Analysts can optionally link the execution to an existing incident; if linked, a task is created and the incident timeline is updated.
+- **Agent response history** — the agent detail page has a dedicated Responses tab listing every `WazuhResponseExecution` for that host: timestamp, response name, executed by, args, timeout, linked incident, and Wazuh API status code.
+- All active response executions are fire-and-forget (the Wazuh API queues the command on the agent); the timeline entry reflects dispatch, not confirmed execution.
 
 ### Incident Contacts
 
@@ -225,6 +274,7 @@ Copy `backend/.env.example` to `backend/.env` and fill in the values:
 | `GITHUB_TOKEN` | GitHub PAT for pushing Wazuh exception rules |
 | `ABUSEIPDB_API_KEY` | AbuseIPDB API key (for IOC enrichment) |
 | `VIRUSTOTAL_API_KEY` | VirusTotal API key (for IOC enrichment) |
+| `ONCALL_ROUTING` | Post-triage incident routing mode: `always` (default) routes every triaged incident; `llm_guided` routes only on escalation recommendations |
 | `IMAP_HOST` | IMAP server host (for inbound contact replies and phishing ingestion) |
 | `IMAP_USER` | IMAP account username |
 | `IMAP_PASSWORD` | IMAP account password |
@@ -245,7 +295,8 @@ A Helm chart is provided under `deployment/`. See `deployment/values.yaml` for t
 │   ├── security/         # Organisations, assets, vulnerabilities, CVE advisories
 │   ├── exceptions/       # Wazuh exception rule management
 │   ├── ingress/          # BunkerWeb-backed reverse proxy routes
-│   ├── automations/      # Semaphore automation wrappers
+│   ├── automations/      # Semaphore automations + Wazuh active response catalog and executions
+│   ├── oncall/           # On-call scheduling, shift blocks, rotation templates, swap service, routing
 │   ├── notifications/    # In-app, push, and email notifications
 │   ├── inbound_mail/     # IMAP polling, phishing ingestion, contact reply handling
 │   └── api/              # Cross-app API utilities

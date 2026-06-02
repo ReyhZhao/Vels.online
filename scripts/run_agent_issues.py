@@ -14,7 +14,7 @@ LABEL = "ready-for-agent"
 PROMPT_TEMPLATE = (
     "Work on GitHub issue #{number}. "
     "Read the issue with `gh issue view {number} --comments`, understand the "
-    "requirements, implement the changes, then close the loop by commiting the changes than commenting on "
+    "requirements, implement the changes, test test changes you made,then close the loop by commiting the changes than commenting on "
     "the issue and updating its labels as appropriate."
 )
 
