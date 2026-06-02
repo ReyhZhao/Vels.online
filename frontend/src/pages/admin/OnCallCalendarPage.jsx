@@ -375,10 +375,9 @@ function ShiftBlocksPanel({ onBlocksChanged }) {
     try {
       const res = await api.get('/api/oncall/blocks/');
       setBlocks(res.data);
-      onBlocksChanged?.();
     } catch { setError('Failed to load shift blocks.'); }
     finally { setLoading(false); }
-  }, [onBlocksChanged]);
+  }, []);
 
   useEffect(() => { fetchBlocks(); }, [fetchBlocks]);
 
@@ -400,7 +399,9 @@ function ShiftBlocksPanel({ onBlocksChanged }) {
     try {
       if (editingId) await api.patch(`/api/oncall/blocks/${editingId}/`, payload);
       else await api.post('/api/oncall/blocks/', payload);
-      cancelEdit(); fetchBlocks();
+      cancelEdit();
+      await fetchBlocks();
+      onBlocksChanged?.();
     } catch (err) {
       const d = err.response?.data?.detail || err.response?.data || 'Failed to save block.';
       setTilingError(typeof d === 'string' ? d : JSON.stringify(d));
@@ -412,7 +413,8 @@ function ShiftBlocksPanel({ onBlocksChanged }) {
     setTilingError(null);
     try {
       await api.delete(`/api/oncall/blocks/${blockId}/`);
-      fetchBlocks();
+      await fetchBlocks();
+      onBlocksChanged?.();
     } catch (err) {
       const d = err.response?.data?.detail || 'Failed to delete block.';
       setTilingError(typeof d === 'string' ? d : JSON.stringify(d));
