@@ -4,6 +4,7 @@ import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import SLAPill from '../components/SLAPill';
 import CreateIncidentModal from '../components/CreateIncidentModal';
+import { OnCallWidgetCompact } from '../components/OnCallWidget';
 
 // Keys that are persisted as user preferences (excludes transient keys like page, q)
 const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'created_within', 'sort', 'order'];
@@ -560,6 +561,12 @@ export default function IncidentList() {
           </button>
         ))}
       </div>
+
+      {user?.is_staff && (
+        <div className="flex items-center gap-2">
+          <OnCallWidgetCompact />
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 items-center">
         <input
