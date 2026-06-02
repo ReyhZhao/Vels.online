@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   CalendarClock, Plus, Pencil, Trash2, X, Check,
   ChevronLeft, ChevronRight, AlertTriangle
@@ -472,6 +472,205 @@ function ShiftBlocksPanel({ onBlocksChanged }) {
   );
 }
 
+// ─── Rotation Template Panel ─────────────────────────────────────────────────
+
+const DAY_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+function RotationTemplatePanel({ blocks, onSaved }) {
+  const { user } = useAuth();
+  const isAdmin = user?.is_superuser;
+
+  const [staffUsers, setStaffUsers] = useState([]);
+  const [slots, setSlots] = useState([]); // raw from API
+  const [draft, setDraft] = useState({}); // { "dow-blockId": analyst_id | null }
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [savedOk, setSavedOk] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/incidents/staff-users/')
+      .then(res => setStaffUsers(res.data))
+      .catch(() => {});
+  }, []);
+
+  const fetchTemplate = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/api/oncall/template/');
+      setSlots(res.data);
+      setDraft({});
+    } catch {
+      setSlots([]);
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchTemplate(); }, [fetchTemplate]);
+
+  // Build a lookup: key = "dow-blockId" → analyst_id (null = gap)
+  const committed = useMemo(() => {
+    const m = {};
+    // Initialize all cells to null (unassigned)
+    for (let dow = 0; dow < 7; dow++) {
+      blocks.forEach(b => { m[`${dow}-${b.id}`] = null; });
+    }
+    slots.forEach(s => { m[`${s.day_of_week}-${s.shift_block}`] = s.analyst_id ?? null; });
+    return m;
+  }, [slots, blocks]);
+
+  function effectiveValue(key) {
+    return key in draft ? draft[key] : committed[key];
+  }
+
+  function handleCellChange(dow, blockId, analystId) {
+    const key = `${dow}-${blockId}`;
+    setDraft(prev => ({ ...prev, [key]: analystId }));
+    setSavedOk(false);
+  }
+
+  const hasPending = Object.keys(draft).length > 0;
+
+  async function handleSave() {
+    setSaving(true); setError(null); setSavedOk(false);
+    // Build full payload from effective values
+    const payload = [];
+    for (let dow = 0; dow < 7; dow++) {
+      blocks.forEach(b => {
+        const key = `${dow}-${b.id}`;
+        const analystId = effectiveValue(key);
+        payload.push({ day_of_week: dow, shift_block_id: b.id, analyst_id: analystId ?? null });
+      });
+    }
+    try {
+      await api.put('/api/oncall/template/', payload);
+      setSavedOk(true);
+      setDraft({});
+      fetchTemplate();
+      onSaved?.();
+    } catch (err) {
+      const d = err.response?.data;
+      setError(typeof d === 'string' ? d : d?.detail || JSON.stringify(d) || 'Failed to save template.');
+    } finally { setSaving(false); }
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-border p-4">
+        <h2 className="text-base font-semibold text-foreground mb-3">Rotation Template</h2>
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
+
+  if (blocks.length === 0) {
+    return (
+      <div className="rounded-lg border border-border p-4">
+        <h2 className="text-base font-semibold text-foreground mb-3">Rotation Template</h2>
+        <p className="text-sm text-muted-foreground">Configure shift blocks first before assigning the rotation template.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Rotation Template</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Weekly repeating schedule — assign an analyst to each day × block slot.</p>
+        </div>
+        {isAdmin && (
+          <button
+            onClick={handleSave}
+            disabled={saving || !hasPending}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Saving…' : 'Save template'}
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>
+      )}
+      {savedOk && (
+        <div className="rounded-md border border-green-500/50 bg-green-500/10 px-4 py-3 text-sm text-green-700 dark:text-green-400">
+          Template saved.
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr>
+              <th className="border border-border bg-muted/50 px-3 py-2 text-left text-xs font-medium text-muted-foreground w-28">Block</th>
+              {DAY_FULL.map(day => (
+                <th key={day} className="border border-border bg-muted/50 px-3 py-2 text-center text-xs font-medium text-muted-foreground min-w-[140px]">
+                  {day}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {blocks.map(block => (
+              <tr key={block.id}>
+                <td className="border border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground whitespace-nowrap">
+                  <div>{block.label}</div>
+                  <div className="font-normal text-muted-foreground/70">{block.start_time}–{block.end_time}</div>
+                </td>
+                {[0, 1, 2, 3, 4, 5, 6].map(dow => {
+                  const key = `${dow}-${block.id}`;
+                  const analystId = effectiveValue(key);
+                  const isDirty = key in draft;
+
+                  return (
+                    <td key={dow} className={`border border-border px-2 py-2 ${isDirty ? 'bg-primary/5' : ''}`}>
+                      {isAdmin ? (
+                        <select
+                          value={analystId ?? ''}
+                          onChange={e => handleCellChange(dow, block.id, e.target.value ? parseInt(e.target.value, 10) : null)}
+                          className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                        >
+                          <option value="">— Unassigned</option>
+                          {staffUsers.map(u => (
+                            <option key={u.id} value={u.id}>
+                              {u.first_name && u.last_name ? `${u.first_name} ${u.last_name}` : u.username}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="flex items-center gap-1.5 justify-center">
+                          {analystId ? (
+                            <>
+                              <Avatar name={staffUsers.find(u => u.id === analystId)?.first_name
+                                ? `${staffUsers.find(u => u.id === analystId)?.first_name} ${staffUsers.find(u => u.id === analystId)?.last_name}`
+                                : staffUsers.find(u => u.id === analystId)?.username || '?'} />
+                              <span className="text-xs text-foreground">
+                                {staffUsers.find(u => u.id === analystId)?.first_name || staffUsers.find(u => u.id === analystId)?.username || '—'}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">Unassigned</span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {isAdmin && hasPending && (
+        <p className="text-xs text-muted-foreground">
+          You have unsaved changes. Click "Save template" to apply.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Week View ────────────────────────────────────────────────────────────────
 
 function WeekView({ blocks, weekParam, onWeekChange, onOverrideRequest, scheduleKey }) {
@@ -806,6 +1005,13 @@ export default function OnCallCalendarPage() {
           monthParam={monthParam}
           onMonthChange={handleMonthChange}
           scheduleKey={scheduleKey}
+        />
+      )}
+
+      {isStaff && (
+        <RotationTemplatePanel
+          blocks={blocks}
+          onSaved={() => setScheduleKey(k => k + 1)}
         />
       )}
 
