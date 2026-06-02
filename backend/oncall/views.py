@@ -54,8 +54,6 @@ class ShiftBlockListView(APIView):
             return Response(status=401)
         if not request.user.is_staff:
             return Response(status=403)
-        if not request.user.is_superuser:
-            return Response(status=403)
         serializer = ShiftBlockSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -79,8 +77,6 @@ class ShiftBlockDetailView(APIView):
             return Response(status=401)
         if not request.user.is_staff:
             return Response(status=403)
-        if not request.user.is_superuser:
-            return Response(status=403)
         block, err = self._get_block(pk)
         if err:
             return err
@@ -98,8 +94,6 @@ class ShiftBlockDetailView(APIView):
         if not request.user.is_authenticated:
             return Response(status=401)
         if not request.user.is_staff:
-            return Response(status=403)
-        if not request.user.is_superuser:
             return Response(status=403)
         block, err = self._get_block(pk)
         if err:
@@ -126,8 +120,6 @@ class RotationTemplateView(APIView):
         if not request.user.is_authenticated:
             return Response(status=401)
         if not request.user.is_staff:
-            return Response(status=403)
-        if not request.user.is_superuser:
             return Response(status=403)
         if not isinstance(request.data, list):
             return Response({"detail": "Expected a list of slot objects."}, status=400)

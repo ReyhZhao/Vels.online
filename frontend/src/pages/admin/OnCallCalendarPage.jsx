@@ -360,7 +360,7 @@ function BlockForm({ form, setForm, onSave, onCancel, saving }) {
 
 function ShiftBlocksPanel({ onBlocksChanged }) {
   const { user } = useAuth();
-  const isAdmin = user?.is_superuser;
+  const isAdmin = user?.is_staff;
   const [blocks, setBlocks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -480,7 +480,7 @@ const DAY_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satur
 
 function RotationTemplatePanel({ blocks, onSaved }) {
   const { user } = useAuth();
-  const isAdmin = user?.is_superuser;
+  const isAdmin = user?.is_staff;
 
   const [staffUsers, setStaffUsers] = useState([]);
   const [slots, setSlots] = useState([]); // raw from API
