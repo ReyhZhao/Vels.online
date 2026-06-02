@@ -149,6 +149,8 @@ def run_incident_triage(self, incident_id: int):
     if not auto_closed and "triaged" in ALLOWED_TRANSITIONS.get(incident.state, set()):
         try:
             transition_incident(incident, "triaged", actor=None)
+            from oncall.services.routing import route_triaged_incident
+            route_triaged_incident(incident, result)
         except Exception as exc:
             logger.warning("run_incident_triage: state transition to triaged failed for %s: %s", incident_id, exc)
 
