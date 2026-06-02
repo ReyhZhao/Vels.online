@@ -40,6 +40,9 @@ class NotificationPreferences(models.Model):
     inapp_system_alert = models.BooleanField(default=True)
     email_task_complete = models.BooleanField(default=False)
     inapp_task_complete = models.BooleanField(default=True)
+    email_shift_swap = models.BooleanField(default=True)
+    inapp_shift_swap = models.BooleanField(default=True)
+    push_shift_swap = models.BooleanField(default=False)
     push_assignment = models.BooleanField(default=False)
     push_delegation = models.BooleanField(default=False)
     push_comment = models.BooleanField(default=False)
@@ -71,6 +74,7 @@ class Notification(models.Model):
     KIND_INCIDENT_ALERT = "incident_alert"
     KIND_SYSTEM_ALERT = "system_alert"
     KIND_TASK_COMPLETE = "task_complete"
+    KIND_SHIFT_SWAP = "shift_swap"
     KIND_CHOICES = [
         (KIND_ASSIGNMENT, "Assignment"),
         (KIND_DELEGATION, "Delegation"),
@@ -79,6 +83,7 @@ class Notification(models.Model):
         (KIND_INCIDENT_ALERT, "Incident Alert"),
         (KIND_SYSTEM_ALERT, "System Alert"),
         (KIND_TASK_COMPLETE, "Task Complete"),
+        (KIND_SHIFT_SWAP, "Shift Swap"),
     ]
 
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")

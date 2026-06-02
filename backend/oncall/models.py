@@ -50,6 +50,44 @@ class RotationTemplateSlot(models.Model):
         return f"RotationTemplateSlot(dow={self.day_of_week}, block={self.shift_block}, analyst={self.analyst})"
 
 
+class ShiftOverride(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_DECLINED = "declined"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_DECLINED, "Declined"),
+    ]
+
+    KIND_SWAP = "swap"
+    KIND_COVER_OFFER = "cover_offer"
+    KIND_CHOICES = [
+        (KIND_SWAP, "Swap"),
+        (KIND_COVER_OFFER, "Cover Offer"),
+    ]
+
+    date = models.DateField()
+    shift_block = models.ForeignKey(ShiftBlock, on_delete=models.CASCADE, related_name="overrides")
+    original_analyst = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="original_overrides"
+    )
+    override_analyst = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="override_overrides"
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=KIND_SWAP)
+    initiated_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="initiated_overrides"
+    )
+    note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"ShiftOverride({self.date}, {self.shift_block}, {self.status})"
+
+
 def validate_tiling(exclude_pk=None):
     """Check that all ShiftBlocks together cover exactly 24h with no gaps or overlaps.
 

@@ -2,16 +2,19 @@ import datetime
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import models as django_models
 from django.db import transaction
 from django.utils import timezone as tz
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import RotationTemplateSlot, ShiftBlock, StaffProfile, validate_tiling
+from .models import RotationTemplateSlot, ShiftBlock, ShiftOverride, StaffProfile, validate_tiling
 from .serializers import (
     RotationTemplateSlotSerializer,
     RotationTemplateSlotWriteSerializer,
     ShiftBlockSerializer,
+    ShiftOverrideCreateSerializer,
+    ShiftOverrideSerializer,
     StaffProfileSerializer,
 )
 
@@ -365,3 +368,88 @@ def _initials(user):
         parts = full.split()
         return "".join(p[0].upper() for p in parts[:2])
     return user.username[:2].upper()
+
+
+class ShiftOverrideListView(APIView):
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return Response(status=401)
+        if not request.user.is_staff:
+            return Response(status=403)
+        # List pending received + sent for the authenticated user
+        overrides = ShiftOverride.objects.filter(
+            status=ShiftOverride.STATUS_PENDING,
+        ).filter(
+            # Either the user is the override analyst or the initiator
+            django_models.Q(override_analyst=request.user) |
+            django_models.Q(initiated_by=request.user)
+        ).select_related(
+            "shift_block", "original_analyst", "override_analyst", "initiated_by"
+        ).order_by("-created_at")
+        return Response(ShiftOverrideSerializer(overrides, many=True).data)
+
+    def post(self, request):
+        if not request.user.is_authenticated:
+            return Response(status=401)
+        if not request.user.is_staff:
+            return Response(status=403)
+        serializer = ShiftOverrideCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        from django.contrib.auth.models import User
+        override_analyst = User.objects.get(pk=data["override_analyst_id"])
+        shift_block = ShiftBlock.objects.get(pk=data["shift_block_id"])
+
+        # Determine original_analyst
+        if data.get("original_analyst_id"):
+            original_analyst = User.objects.get(pk=data["original_analyst_id"])
+        else:
+            original_analyst = request.user
+
+        from oncall.services.swap import request_swap
+        override = request_swap(
+            date=data["date"],
+            shift_block=shift_block,
+            original_analyst=original_analyst,
+            override_analyst=override_analyst,
+            initiated_by=request.user,
+            note=data.get("note", ""),
+            kind=data["kind"],
+        )
+        return Response(
+            ShiftOverrideSerializer(override).data, status=201
+        )
+
+
+class ShiftOverrideActionView(APIView):
+    def _get_override(self, pk):
+        try:
+            return ShiftOverride.objects.select_related(
+                "shift_block", "original_analyst", "override_analyst", "initiated_by"
+            ).get(pk=pk), None
+        except ShiftOverride.DoesNotExist:
+            return None, Response(status=404)
+
+    def post(self, request, pk, action):
+        if not request.user.is_authenticated:
+            return Response(status=401)
+        if not request.user.is_staff:
+            return Response(status=403)
+
+        override, err = self._get_override(pk)
+        if err:
+            return err
+
+        from oncall.services.swap import accept_override, decline_override
+        try:
+            if action == "accept":
+                override = accept_override(override, request.user)
+            elif action == "decline":
+                override = decline_override(override, request.user)
+            else:
+                return Response({"detail": "Unknown action."}, status=400)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+
+        return Response(ShiftOverrideSerializer(override).data)

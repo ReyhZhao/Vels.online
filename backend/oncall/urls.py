@@ -7,6 +7,8 @@ from .views import (
     RotationTemplateView,
     ShiftBlockDetailView,
     ShiftBlockListView,
+    ShiftOverrideActionView,
+    ShiftOverrideListView,
     StaffProfileView,
 )
 
@@ -18,4 +20,6 @@ urlpatterns = [
     path("current/", CurrentOnCallView.as_view()),
     path("schedule/", OnCallScheduleWeekView.as_view()),
     path("schedule/month/", OnCallScheduleMonthView.as_view()),
+    path("overrides/", ShiftOverrideListView.as_view()),
+    path("overrides/<int:pk>/<str:action>/", ShiftOverrideActionView.as_view()),
 ]

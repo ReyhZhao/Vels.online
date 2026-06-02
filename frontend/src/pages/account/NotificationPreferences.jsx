@@ -11,9 +11,10 @@ const CATEGORIES = [
   { key: 'state_change', label: 'State changes', description: "When an incident's state changes" },
   { key: 'incident_alert', label: 'Incident alerts', description: 'High/critical severity incidents affecting your organisation' },
   { key: 'task_complete', label: 'Task completed', description: 'When an automated task assigned to your incident finishes' },
+  { key: 'shift_swap', label: 'Shift swaps', description: 'When a shift swap or cover offer is sent to you' },
 ];
 
-const GUARDRAIL_CATEGORIES = new Set(['assignment', 'delegation']);
+const GUARDRAIL_CATEGORIES = new Set(['assignment', 'delegation', 'shift_swap']);
 
 function Toggle({ checked, onChange, disabled, label }) {
   return (
@@ -160,13 +161,28 @@ export default function NotificationPreferences() {
   function handleToggle(key) {
     setGuardrailError(null);
     setSuccess(false);
-    const category = key.replace(/^(email|inapp)_/, '');
-    const otherChannel = key.startsWith('email_') ? `inapp_${category}` : `email_${category}`;
+    const category = key.replace(/^(email|inapp|push)_/, '');
     const newValue = !effectiveValue(key);
 
-    if (GUARDRAIL_CATEGORIES.has(category) && !newValue && !effectiveValue(otherChannel)) {
-      setGuardrailError(`At least one channel must remain enabled for ${category} notifications.`);
-      return;
+    if (GUARDRAIL_CATEGORIES.has(category) && !newValue) {
+      if (category === 'shift_swap') {
+        // shift_swap has 3 channels: email, inapp, push
+        const channels = ['email', 'inapp', 'push'];
+        const otherChannelsEnabled = channels
+          .filter(ch => `${ch}_${category}` !== key)
+          .some(ch => effectiveValue(`${ch}_${category}`));
+        if (!otherChannelsEnabled) {
+          setGuardrailError('At least one channel must remain enabled for shift swap notifications.');
+          return;
+        }
+      } else {
+        // Standard 2-channel guardrail
+        const otherChannel = key.startsWith('email_') ? `inapp_${category}` : `email_${category}`;
+        if (!effectiveValue(otherChannel)) {
+          setGuardrailError(`At least one channel must remain enabled for ${category} notifications.`);
+          return;
+        }
+      }
     }
 
     setPending(prev => ({ ...prev, [key]: newValue }));

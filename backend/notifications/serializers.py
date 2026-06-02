@@ -14,6 +14,7 @@ class NotificationPreferencesSerializer(serializers.ModelSerializer):
             "email_incident_alert", "inapp_incident_alert",
             "email_system_alert", "inapp_system_alert",
             "email_task_complete", "inapp_task_complete",
+            "email_shift_swap", "inapp_shift_swap", "push_shift_swap",
             "push_assignment", "push_delegation", "push_comment",
             "push_state_change", "push_incident_alert", "push_task_complete",
             "updated_at",
@@ -35,6 +36,10 @@ class NotificationPreferencesSerializer(serializers.ModelSerializer):
         if not (effective("email_delegation") or effective("inapp_delegation")):
             raise serializers.ValidationError(
                 "At least one channel must be enabled for delegation notifications."
+            )
+        if not (effective("email_shift_swap") or effective("inapp_shift_swap") or effective("push_shift_swap")):
+            raise serializers.ValidationError(
+                "At least one channel must be enabled for shift swap notifications."
             )
         return data
 
