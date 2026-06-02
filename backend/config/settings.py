@@ -7,6 +7,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "12345")
 
+ONCALL_ROUTING = os.environ.get("ONCALL_ROUTING", "always")
+
 DEBUG = os.environ.get("DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",")
@@ -58,6 +60,7 @@ INSTALLED_APPS = [
     "django_celery_results",
     "django_celery_beat",
     "celery_tasks",
+    "oncall",
 ]
 
 SITE_ID = 1
