@@ -19,6 +19,7 @@ class StaffProfile(models.Model):
 
 
 class ShiftBlock(models.Model):
+    """A named time block within a 24-hour day, e.g. Morning (06:00–14:00)."""
     label = models.CharField(max_length=64)
     start_time = models.TimeField()
     end_time = models.TimeField()
@@ -29,6 +30,24 @@ class ShiftBlock(models.Model):
 
     def __str__(self):
         return f"{self.label} ({self.start_time}–{self.end_time})"
+
+
+class RotationTemplateSlot(models.Model):
+    """Default analyst assignment for a (day_of_week, shift_block) pair."""
+
+    day_of_week = models.IntegerField()  # 0=Mon, 6=Sun
+    shift_block = models.ForeignKey(ShiftBlock, on_delete=models.CASCADE, related_name="template_slots")
+    analyst = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="template_slots"
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["day_of_week", "shift_block"], name="unique_dow_block")
+        ]
+
+    def __str__(self):
+        return f"RotationTemplateSlot(dow={self.day_of_week}, block={self.shift_block}, analyst={self.analyst})"
 
 
 def validate_tiling(exclude_pk=None):
