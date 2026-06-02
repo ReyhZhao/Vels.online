@@ -41,6 +41,7 @@ import ContactsPage from './pages/ContactsPage';
 import ContactDetail from './pages/ContactDetail';
 import AssetsPage from './pages/AssetsPage';
 import AssetDetail from './pages/AssetDetail';
+import OnCallCalendarPage from './pages/admin/OnCallCalendarPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -71,6 +72,7 @@ function App() {
           <Route path="/admin/incidents/task-templates" element={<TaskTemplatesAdmin />} />
           <Route path="/admin/incidents/automations" element={<AutomationsAdmin />} />
           <Route path="/admin/wazuh-responses" element={<WazuhResponsesAdmin />} />
+          <Route path="/admin/incidents/oncall" element={<OnCallCalendarPage />} />
           <Route path="/admin/tasks/history" element={<TaskHistory />} />
           <Route path="/admin/tasks/scheduled" element={<ScheduledTasks />} />
           <Route path="/admin/email-templates" element={<EmailTemplates />} />

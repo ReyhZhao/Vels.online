@@ -2,7 +2,7 @@ import zoneinfo
 
 from rest_framework import serializers
 
-from .models import StaffProfile
+from .models import ShiftBlock, StaffProfile
 
 
 class StaffProfileSerializer(serializers.ModelSerializer):
@@ -14,3 +14,9 @@ class StaffProfileSerializer(serializers.ModelSerializer):
         if value not in zoneinfo.available_timezones():
             raise serializers.ValidationError(f"'{value}' is not a valid IANA timezone.")
         return value
+
+
+class ShiftBlockSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShiftBlock
+        fields = ["id", "label", "start_time", "end_time", "order"]
