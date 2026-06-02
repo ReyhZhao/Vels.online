@@ -128,6 +128,24 @@ class TestEmailView(APIView):
         return Response({"detail": f"Test email sent to {recipient}."})
 
 
+class TestPushView(APIView):
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        if not PushSubscription.objects.filter(user=request.user).exists():
+            return Response(
+                {"detail": "No push subscriptions found. Enable push notifications first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from .tasks import send_push_notifications
+        send_push_notifications.delay(request.user.id, {
+            "title": "Test Push Notification",
+            "body": "Push notifications are working correctly.",
+            "url": "/account/notifications",
+        })
+        return Response({"detail": "Test push notification sent."})
+
+
 class PushVapidKeyView(APIView):
     def get(self, request):
         return Response({"public_key": settings.VAPID_PUBLIC_KEY})

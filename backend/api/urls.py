@@ -5,7 +5,7 @@ from blog.urls import router as blog_router
 from notifications.views import TestEmailView
 
 from . import views
-from incidents.views import AssetDetailView, AssetListView, AssetOwnerDetailView, AssetOwnerListView
+from incidents.views import AssetBulkUpdateView, AssetDetailView, AssetListView, AssetOwnerDetailView, AssetOwnerListView
 
 urlpatterns = [
     path("health/", views.HealthView.as_view()),
@@ -15,6 +15,7 @@ urlpatterns = [
     path("status/", include("status.urls")),
     path("security/", include("security.urls")),
     path("assets/", AssetListView.as_view()),
+    path("assets/bulk/", AssetBulkUpdateView.as_view()),
     path("assets/<int:pk>/", AssetDetailView.as_view()),
     path("assets/<int:pk>/owners/", AssetOwnerListView.as_view()),
     path("assets/<int:pk>/owners/<int:contact_pk>/", AssetOwnerDetailView.as_view()),

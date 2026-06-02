@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Mail } from 'lucide-react';
+import { Bell, Mail } from 'lucide-react';
 import api from '../../lib/axios';
 import { useAuth } from '../../context/AuthContext';
 import usePushSubscription from '../../hooks/usePushSubscription';
@@ -68,6 +68,52 @@ function EmailDiagnosticsSection() {
         >
           {sending ? 'Sending…' : 'Send test email'}
         </button>
+        {result && (
+          <p className={`text-sm ${result.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+            {result.message}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PushDiagnosticsSection({ isSubscribed }) {
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function handleSend() {
+    setSending(true);
+    setResult(null);
+    try {
+      const res = await api.post('/api/me/push/test/');
+      setResult({ ok: true, message: res.data.detail });
+    } catch (err) {
+      setResult({ ok: false, message: err.response?.data?.detail || 'Failed to send test push notification.' });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="mt-6">
+      <h2 className="text-base font-semibold text-foreground mb-4 flex items-center gap-2">
+        <Bell className="h-4 w-4 text-muted-foreground" />
+        Push diagnostics
+      </h2>
+      <div className="rounded-lg border border-border p-4 space-y-3">
+        <p className="text-sm text-muted-foreground">Send a test push notification to verify your push configuration is working correctly.</p>
+        <button
+          onClick={handleSend}
+          disabled={sending || !isSubscribed}
+          title={!isSubscribed ? 'Enable push notifications first' : undefined}
+          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        >
+          {sending ? 'Sending…' : 'Send test push'}
+        </button>
+        {!isSubscribed && (
+          <p className="text-xs text-muted-foreground">Enable push notifications above before sending a test.</p>
+        )}
         {result && (
           <p className={`text-sm ${result.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
             {result.message}
@@ -284,7 +330,12 @@ export default function NotificationPreferences() {
         </button>
       </div>
 
-      {user?.is_staff && <EmailDiagnosticsSection />}
+      {user?.is_staff && (
+        <>
+          <EmailDiagnosticsSection />
+          <PushDiagnosticsSection isSubscribed={isSubscribed} />
+        </>
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ from .views import (
     NotificationReadView,
     PushSubscribeView,
     PushVapidKeyView,
+    TestPushView,
     UnreadCountView,
 )
 
@@ -24,4 +25,5 @@ urlpatterns = [
     path("email-templates/<str:name>/", EmailTemplateDetailView.as_view()),
     path("push/vapid-public-key/", PushVapidKeyView.as_view()),
     path("push/subscribe/", PushSubscribeView.as_view()),
+    path("push/test/", TestPushView.as_view()),
 ]

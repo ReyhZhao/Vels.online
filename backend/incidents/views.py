@@ -532,6 +532,53 @@ class AssetListView(ListAPIView):
         return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
 
 
+class AssetBulkUpdateView(APIView):
+    """Bulk-update is_permanent and/or owners across multiple assets."""
+
+    def post(self, request):
+        if not request.user.is_authenticated:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        ids = request.data.get("ids")
+        if not isinstance(ids, list) or not ids:
+            return Response({"detail": "ids must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_permanent = request.data.get("is_permanent")
+        owner_ids = request.data.get("owner_ids")
+
+        if is_permanent is None and owner_ids is None:
+            return Response({"detail": "Provide at least one of: is_permanent, owner_ids."}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = Asset.objects.filter(pk__in=ids)
+        if not request.user.is_staff:
+            member_org_ids = OrganizationMembership.objects.filter(
+                user=request.user
+            ).values_list("organization_id", flat=True)
+            qs = qs.filter(organization__in=member_org_ids)
+
+        assets = list(qs)
+        if not assets:
+            return Response({"detail": "No accessible assets found for the given ids."}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            if is_permanent is not None:
+                Asset.objects.filter(pk__in=[a.pk for a in assets]).update(is_permanent=bool(is_permanent))
+
+            if owner_ids is not None:
+                from contacts.models import AssetOwner, Contact
+                valid_owners = list(Contact.objects.filter(pk__in=owner_ids))
+                for asset in assets:
+                    AssetOwner.objects.filter(asset=asset).delete()
+                    AssetOwner.objects.bulk_create(
+                        [AssetOwner(asset=asset, contact=c) for c in valid_owners
+                         if c.organisation_id == asset.organization_id],
+                        ignore_conflicts=True,
+                    )
+
+        updated = Asset.objects.filter(pk__in=[a.pk for a in assets]).select_related("route", "organization")
+        return Response(AssetSerializer(updated, many=True).data)
+
+
 def _get_asset_for_user(user, pk):
     try:
         asset = Asset.objects.select_related("organization", "route").get(pk=pk)

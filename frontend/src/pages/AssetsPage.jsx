@@ -101,7 +101,90 @@ function CreateAssetModal({ open, onClose, orgSlug, onCreated }) {
   );
 }
 
-function AssetRow({ asset, onDeleted }) {
+function BulkUpdateModal({ open, onClose, selectedIds, orgSlug, onUpdated }) {
+  const [isPermanent, setIsPermanent] = useState(null); // null = no change
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (open) {
+      setIsPermanent(null);
+      setError(null);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  async function submit(e) {
+    e.preventDefault();
+    if (isPermanent === null) {
+      setError('Select at least one setting to update.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await api.post('/api/assets/bulk/', {
+        ids: selectedIds,
+        is_permanent: isPermanent,
+      });
+      onUpdated(res.data);
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to update assets.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">
+          Bulk update {selectedIds.length} asset{selectedIds.length !== 1 ? 's' : ''}
+        </h2>
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <p className="text-sm font-medium text-foreground mb-2">Permanent status</p>
+            <div className="flex gap-2">
+              {[
+                { label: 'No change', value: null },
+                { label: 'Set permanent', value: true },
+                { label: 'Unset permanent', value: false },
+              ].map(opt => (
+                <button
+                  key={String(opt.value)}
+                  type="button"
+                  onClick={() => setIsPermanent(opt.value)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium border transition-colors ${
+                    isPermanent === opt.value
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-background text-foreground border-border hover:bg-accent'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} disabled={saving}
+              className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+              {saving ? 'Updating…' : 'Apply'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AssetRow({ asset, selected, onToggle, onDeleted }) {
   const [deleting, setDeleting] = useState(false);
 
   async function handleDelete() {
@@ -119,6 +202,15 @@ function AssetRow({ asset, onDeleted }) {
 
   return (
     <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+      <td className="px-4 py-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggle(asset.id)}
+          className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+          aria-label={`Select ${asset.name}`}
+        />
+      </td>
       <td className="px-4 py-3 font-medium text-foreground">
         <Link to={`/assets/${asset.id}`} className="hover:underline">{asset.name}</Link>
       </td>
@@ -164,10 +256,13 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(new Set());
 
   useEffect(() => {
     setLoading(true);
+    setSelected(new Set());
     const params = selectedOrg ? { org: selectedOrg.slug } : {};
     api.get('/api/assets/', { params })
       .then(res => setAssets(res.data.results || res.data))
@@ -181,6 +276,41 @@ export default function AssetsPage() {
     (a.ip_address || '').toLowerCase().includes(search.toLowerCase())
   );
 
+  const allFilteredSelected = filtered.length > 0 && filtered.every(a => selected.has(a.id));
+
+  function toggleAll() {
+    if (allFilteredSelected) {
+      setSelected(prev => {
+        const next = new Set(prev);
+        filtered.forEach(a => next.delete(a.id));
+        return next;
+      });
+    } else {
+      setSelected(prev => {
+        const next = new Set(prev);
+        filtered.forEach(a => next.add(a.id));
+        return next;
+      });
+    }
+  }
+
+  function toggleOne(id) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function handleBulkUpdated(updatedAssets) {
+    const byId = Object.fromEntries(updatedAssets.map(a => [a.id, a]));
+    setAssets(prev => prev.map(a => byId[a.id] ?? a));
+    setSelected(new Set());
+  }
+
+  const selectedIds = [...selected];
+
   return (
     <div className="space-y-4 p-6">
       <CreateAssetModal
@@ -188,6 +318,13 @@ export default function AssetsPage() {
         onClose={() => setCreateOpen(false)}
         orgSlug={selectedOrg?.slug}
         onCreated={asset => setAssets(prev => [...prev, asset].sort((a, b) => a.name.localeCompare(b.name)))}
+      />
+      <BulkUpdateModal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        selectedIds={selectedIds}
+        orgSlug={selectedOrg?.slug}
+        onUpdated={handleBulkUpdated}
       />
 
       <div className="flex items-center justify-between">
@@ -200,7 +337,7 @@ export default function AssetsPage() {
         </button>
       </div>
 
-      <div>
+      <div className="flex items-center gap-3">
         <input
           type="search"
           placeholder="Search assets…"
@@ -208,6 +345,23 @@ export default function AssetsPage() {
           onChange={e => setSearch(e.target.value)}
           className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-64"
         />
+        {selected.size > 0 && (
+          <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5">
+            <span className="text-sm text-foreground font-medium">{selected.size} selected</span>
+            <button
+              onClick={() => setBulkOpen(true)}
+              className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Bulk update
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        )}
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -217,6 +371,15 @@ export default function AssetsPage() {
         <table className="w-full text-sm min-w-max">
           <thead>
             <tr className="border-b border-border">
+              <th className="px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={allFilteredSelected}
+                  onChange={toggleAll}
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  aria-label="Select all"
+                />
+              </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Kind</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Agent Name</th>
@@ -229,16 +392,25 @@ export default function AssetsPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
                   {search ? 'No assets match your search.' : 'No assets yet.'}
                 </td>
               </tr>
             ) : filtered.map(asset => (
-              <AssetRow key={asset.id} asset={asset} onDeleted={id => setAssets(prev => prev.filter(a => a.id !== id))} />
+              <AssetRow
+                key={asset.id}
+                asset={asset}
+                selected={selected.has(asset.id)}
+                onToggle={toggleOne}
+                onDeleted={id => {
+                  setAssets(prev => prev.filter(a => a.id !== id));
+                  setSelected(prev => { const next = new Set(prev); next.delete(id); return next; });
+                }}
+              />
             ))}
           </tbody>
         </table>

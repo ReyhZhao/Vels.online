@@ -112,3 +112,78 @@ def test_patch_omitting_is_permanent_leaves_it_unchanged(client, staff, host_ass
     assert resp.status_code == 200
     host_asset.refresh_from_db()
     assert host_asset.is_permanent is True
+
+
+# ── POST /api/assets/bulk/ ───────────────────────────────────────────────────
+
+
+@pytest.fixture
+def host_asset2(acme):
+    return Asset.objects.create(
+        organization=acme,
+        kind=Asset.KIND_HOST,
+        name="srv-02",
+        agent_name="srv-02",
+        is_permanent=False,
+    )
+
+
+@pytest.mark.django_db
+def test_bulk_update_is_permanent(client, staff, host_asset, host_asset2):
+    client.force_login(staff)
+    resp = client.post(
+        "/api/assets/bulk/",
+        {"ids": [host_asset.pk, host_asset2.pk], "is_permanent": True},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    host_asset.refresh_from_db()
+    host_asset2.refresh_from_db()
+    assert host_asset.is_permanent is True
+    assert host_asset2.is_permanent is True
+
+
+@pytest.mark.django_db
+def test_bulk_update_requires_auth(client, host_asset):
+    resp = client.post(
+        "/api/assets/bulk/",
+        {"ids": [host_asset.pk], "is_permanent": True},
+        content_type="application/json",
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+def test_bulk_update_empty_ids_rejected(client, staff):
+    client.force_login(staff)
+    resp = client.post(
+        "/api/assets/bulk/",
+        {"ids": [], "is_permanent": True},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_bulk_update_no_fields_rejected(client, staff, host_asset):
+    client.force_login(staff)
+    resp = client.post(
+        "/api/assets/bulk/",
+        {"ids": [host_asset.pk]},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_bulk_update_non_member_cannot_update_asset(client, django_user_model, host_asset):
+    outsider = django_user_model.objects.create_user(username="outsider", password="pass")
+    client.force_login(outsider)
+    resp = client.post(
+        "/api/assets/bulk/",
+        {"ids": [host_asset.pk], "is_permanent": True},
+        content_type="application/json",
+    )
+    assert resp.status_code == 404
+    host_asset.refresh_from_db()
+    assert host_asset.is_permanent is False
