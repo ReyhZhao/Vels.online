@@ -18,6 +18,7 @@ from .models import ExceptionRule
 from .serializers import ExceptionRuleSerializer
 from .services import allocate_rule_id, free_rule_id
 from .services_github import push_rule, remove_rule
+from .tasks import restart_wazuh_manager, _ARGOCD_SYNC_WAIT
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,7 @@ class ExceptionRuleListView(ListAPIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        restart_wazuh_manager.apply_async(countdown=_ARGOCD_SYNC_WAIT)
         return Response(ExceptionRuleSerializer(rule).data, status=status.HTTP_201_CREATED)
 
 
@@ -223,6 +225,7 @@ class ExceptionApproveView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        restart_wazuh_manager.apply_async(countdown=_ARGOCD_SYNC_WAIT)
         rule.status = "applied"
         rule.save(update_fields=["status"])
 

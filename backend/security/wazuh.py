@@ -129,6 +129,10 @@ class WazuhClient:
         )
         return data["data"]["affected_items"]
 
+    def restart_manager(self):
+        """Send PUT /manager/restart to reload Wazuh rules without rebooting."""
+        self._put("/manager/restart", {})
+
     def run_active_response(self, command, agent_ids, args="", timeout=0):
         """Send PUT /active-response to dispatch a command against agent_ids.
 

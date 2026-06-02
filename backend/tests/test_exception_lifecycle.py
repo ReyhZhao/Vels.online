@@ -159,6 +159,31 @@ def test_approve_nonexistent_returns_404(admin_client):
     assert response.status_code == 404
 
 
+@pytest.mark.django_db
+def test_approve_schedules_manager_restart(admin_client, pending_rule):
+    with patch("exceptions.views.push_rule"), \
+         patch("exceptions.views.restart_wazuh_manager") as mock_task:
+        admin_client.post(f"/api/exceptions/{pending_rule.pk}/approve/")
+    mock_task.apply_async.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_create_schedules_manager_restart(admin_client, pool, acme):
+    with patch("exceptions.views.push_rule"), \
+         patch("exceptions.views.restart_wazuh_manager") as mock_task:
+        admin_client.post(
+            "/api/exceptions/",
+            {
+                "org": acme.slug,
+                "description": "Block noisy rule",
+                "trigger_rule_id": 100001,
+                "scope": "org",
+            },
+            content_type="application/json",
+        )
+    mock_task.apply_async.assert_called_once()
+
+
 # ── POST /api/exceptions/<id>/disable/ ───────────────────────────────────────
 
 
