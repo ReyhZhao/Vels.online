@@ -50,6 +50,10 @@ function Avatar({ name, size = 'sm' }) {
   );
 }
 
+function toLocalDateStr(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 function mondayOfIsoWeek(year, week) {
   const jan4 = new Date(year, 0, 4);
   const day = jan4.getDay() || 7;
@@ -697,7 +701,7 @@ function WeekView({ blocks, weekParam, onWeekChange, onOverrideRequest, schedule
   const monday = mondayOfIsoWeek(year, weekNum);
 
   const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
+  const todayStr = toLocalDateStr(now);
 
   const scheduleByDateBlock = {};
   schedule.forEach(cell => {
@@ -732,7 +736,7 @@ function WeekView({ blocks, weekParam, onWeekChange, onOverrideRequest, schedule
                 {DAY_NAMES.map((day, i) => {
                   const d = new Date(monday);
                   d.setDate(d.getDate() + i);
-                  const dateStr = d.toISOString().split('T')[0];
+                  const dateStr = toLocalDateStr(d);
                   const isToday = dateStr === todayStr;
                   return (
                     <th key={day} className={`border border-border px-2 py-2 text-center text-xs font-medium min-w-[110px] ${isToday ? 'bg-primary/10 text-primary' : 'bg-muted/50 text-muted-foreground'}`}>
@@ -750,7 +754,7 @@ function WeekView({ blocks, weekParam, onWeekChange, onOverrideRequest, schedule
                   {DAY_NAMES.map((_, i) => {
                     const d = new Date(monday);
                     d.setDate(d.getDate() + i);
-                    const dateStr = d.toISOString().split('T')[0];
+                    const dateStr = toLocalDateStr(d);
                     const isPast = dateStr < todayStr;
                     const isToday = dateStr === todayStr;
                     const isFuture = dateStr > todayStr;
@@ -836,7 +840,7 @@ function MonthView({ monthParam, onMonthChange, scheduleKey }) {
   const year = parseInt(yearStr, 10);
   const month = parseInt(monthStr, 10) - 1;
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = toLocalDateStr(new Date());
 
   const firstDay = new Date(year, month, 1);
   const startDow = (firstDay.getDay() + 6) % 7;
@@ -955,7 +959,7 @@ export default function OnCallCalendarPage() {
 
   function handleHandOffNow() {
     // Pre-fill with today + current active block
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = toLocalDateStr(new Date());
     const currentBlock = blocks.find(b => isCurrentShiftBlock(b, new Date()));
     setOverrideModal({
       date: todayStr,

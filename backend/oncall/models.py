@@ -88,64 +88,34 @@ class ShiftOverride(models.Model):
         return f"ShiftOverride({self.date}, {self.shift_block}, {self.status})"
 
 
-def validate_tiling(exclude_pk=None):
-    """Check that all ShiftBlocks together cover exactly 24h with no gaps or overlaps.
+def _block_minute_intervals(block):
+    """Return (start, end) minute pairs for a block, splitting midnight-crossing blocks."""
+    start = block.start_time.hour * 60 + block.start_time.minute
+    end_h = block.end_time.hour * 60 + block.end_time.minute
+    end = end_h if end_h != 0 else 1440
+    if end <= start:
+        return [(start, 1440), (0, end)]
+    return [(start, end)]
 
-    Blocks can start at any time; the check is circular (wraps around midnight).
+
+def validate_tiling(exclude_pk=None):
+    """Check that no ShiftBlocks overlap in time.
+
+    Blocks may cover any duration and are not required to tile a full 24 hours.
+    Gaps in coverage are allowed; overlapping blocks are not.
     """
     qs = ShiftBlock.objects.all()
     if exclude_pk is not None:
         qs = qs.exclude(pk=exclude_pk)
-    blocks = list(qs.order_by("order"))
+    blocks = list(qs)
 
-    if not blocks:
-        raise ValidationError("At least one shift block is required for 24/7 coverage.")
-
-    # Build intervals in minutes. Expand midnight-crossing blocks.
-    # Each interval is (start_minutes, end_minutes) with end > start.
-    # end_time==00:00 means midnight = 1440 minutes.
-    intervals = []
-    for b in blocks:
-        start = b.start_time.hour * 60 + b.start_time.minute
-        end_h = b.end_time.hour * 60 + b.end_time.minute
-        end = end_h if end_h != 0 else 1440
-        if end <= start:
-            end += 1440  # midnight crossing
-        intervals.append((start, end))
-
-    total = sum(e - s for s, e in intervals)
-    if total != 1440:
-        raise ValidationError(
-            f"Shift blocks must cover exactly 24 hours. Currently covering {total} minutes."
-        )
-
-    # Sort by start time and check for gaps/overlaps in a circular sense.
-    # We normalise all intervals relative to the first block's start.
-    intervals.sort(key=lambda x: x[0])
-    first_start = intervals[0][0]
-
-    # Re-express all intervals relative to first_start, modulo 1440
-    normalised = []
-    for start, end in intervals:
-        s = (start - first_start) % 1440
-        e = s + (end - start)
-        normalised.append((s, e))
-
-    normalised.sort(key=lambda x: x[0])
-
-    current = 0
-    for start, end in normalised:
-        if start > current:
-            raise ValidationError(
-                f"Gap detected in shift coverage (at +{start} minutes from first block start)."
-            )
-        if start < current:
-            raise ValidationError(
-                f"Overlap detected in shift coverage (at +{start} minutes from first block start)."
-            )
-        current = end
-
-    if current != 1440:
-        raise ValidationError(
-            f"Shift blocks do not cover the full 24 hours (ends at +{current} minutes)."
-        )
+    for i, a in enumerate(blocks):
+        a_ivs = _block_minute_intervals(a)
+        for b in blocks[i + 1:]:
+            b_ivs = _block_minute_intervals(b)
+            for a_start, a_end in a_ivs:
+                for b_start, b_end in b_ivs:
+                    if a_start < b_end and b_start < a_end:
+                        raise ValidationError(
+                            f"Shift blocks '{a.label}' and '{b.label}' overlap."
+                        )
