@@ -56,8 +56,6 @@ spec:
                   name: cluster-velsonline-app
                   key: fqdn-uri
 
-            - name: ALLOWED_HOSTS
-              value: "vels.online"
             - name: CSRF_TRUSTED_ORIGINS
               value: "https://vels.online"
             - name: DEBUG
