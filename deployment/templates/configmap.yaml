@@ -11,4 +11,4 @@ data:
   OLLAMA_MODEL: gemma4:31b-cloud
   INBOUND_IMAP_HOST: mail.vels.online
   ONCALL_ROUTING: llm_guided
-  ALLOWED_HOSTS: "vels.online,backend.velsonline.svc.cluster.local:8000"
+  ALLOWED_HOSTS: "vels.online,backend.velsonline.svc.cluster.local"
