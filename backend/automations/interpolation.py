@@ -1,6 +1,6 @@
 import re
 
-_PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
+_PLACEHOLDER_RE = re.compile(r"\{\{([^{}]{1,64})\}\}")
 
 _SUPPORTED = {
     "incident.id",

@@ -149,7 +149,7 @@ class ExceptionRuleListView(ListAPIView):
             free_rule_id(rule.wazuh_rule_id)
             rule.delete()
             return Response(
-                {"detail": f"Exception rule saved but could not be pushed to GitHub: {exc}"},
+                {"detail": "Exception rule could not be pushed to GitHub."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
@@ -221,7 +221,7 @@ class ExceptionApproveView(APIView):
         except Exception as exc:
             logger.error("GitHub push failed for rule %s: %s", rule.id, exc)
             return Response(
-                {"detail": f"Could not push exception rule to GitHub: {exc}"},
+                {"detail": "Could not push exception rule to GitHub."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
@@ -249,7 +249,7 @@ class ExceptionDisableView(APIView):
         except Exception as exc:
             logger.error("GitHub remove failed for rule %s: %s", rule.id, exc)
             return Response(
-                {"detail": f"Could not remove exception rule from GitHub: {exc}"},
+                {"detail": "Could not remove exception rule from GitHub."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
