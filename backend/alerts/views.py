@@ -19,10 +19,11 @@ from incidents.services.promote import build_promote_payload
 
 from .filters import AlertFilterSet
 from .models import (
-    Alert, SEVERITY_ORDER, STATE_NEW, STATE_ACKNOWLEDGED, STATE_IMPORTED, STATE_IGNORED,
+    Alert, AlertEntity, SEVERITY_ORDER, STATE_NEW, STATE_ACKNOWLEDGED, STATE_IMPORTED, STATE_IGNORED,
     SEVERITY_CHOICES, PAP_CHOICES, TLP_CHOICES,
 )
 from .serializers import AlertSerializer
+from .services.entities import entities_for
 from .services.identifiers import next_alert_display_id
 from .services.routing import route_alert, _create_incident_from_alert, derive_incident_fields
 from .services.side_effects import apply_link_side_effects
@@ -166,6 +167,15 @@ class AlertListIngestView(APIView):
                     allow_null=True,
                     help_text="TLP classification override.",
                 ),
+                "entities": _s.DictField(
+                    required=False,
+                    allow_null=True,
+                    help_text=(
+                        "Optional ECS entity envelope. Keys must be ECS field names "
+                        "(host.name, source.ip, user.name, file.hash.sha256, process.name). "
+                        "Values are canonicalised on ingest. Unknown keys are ignored."
+                    ),
+                ),
             },
         ),
         responses={
@@ -185,6 +195,7 @@ class AlertListIngestView(APIView):
         source_kind = request.data.get("source_kind")
         source_ref = request.data.get("source_ref") or {}
         org_slug = request.data.get("org")
+        entities_envelope = request.data.get("entities") or None
 
         if not source_kind:
             return Response({"detail": "source_kind is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -253,6 +264,7 @@ class AlertListIngestView(APIView):
                 tlp=explicit_tlp,
                 state=STATE_NEW,
             )
+            _save_alert_entities(alert, org, entities_envelope)
 
         try:
             route_alert(alert)
@@ -635,3 +647,16 @@ class AlertBulkPromotePreviewView(APIView):
             "pap": fields.get("pap", "amber"),
             "tlp": fields.get("tlp", "amber"),
         })
+
+
+def _save_alert_entities(alert, org, envelope):
+    """Persist AlertEntity rows for the given envelope dict. No-op when envelope is falsy."""
+    if not envelope:
+        return
+    for entity_type, value in entities_for({"entities": envelope}):
+        AlertEntity.objects.create(
+            alert=alert,
+            organization=org,
+            entity_type=entity_type,
+            value=value,
+        )

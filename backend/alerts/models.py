@@ -102,3 +102,24 @@ class Alert(models.Model):
 
     def __str__(self):
         return f"{self.display_id}: {self.title}"
+
+
+class AlertEntity(models.Model):
+    alert = models.ForeignKey(Alert, on_delete=models.CASCADE, related_name="entities")
+    organization = models.ForeignKey(
+        "security.Organization", on_delete=models.CASCADE, related_name="alert_entities"
+    )
+    entity_type = models.CharField(max_length=50)
+    value = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["organization", "entity_type", "value", "created_at"],
+                name="alertentity_org_type_value_ts",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.entity_type}={self.value} ({self.alert_id})"
