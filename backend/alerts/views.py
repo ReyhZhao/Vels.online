@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 
 SEVERITY_RANK = ["info", "low", "medium", "high", "critical"]
 
+
+def _enqueue_correlation_eval(alert_id):
+    from correlations.tasks import evaluate_correlation_rules
+    evaluate_correlation_rules.delay(alert_id)
+
 # Valid manual state transitions
 VALID_TRANSITIONS = {
     STATE_NEW: {STATE_ACKNOWLEDGED, STATE_IGNORED},
@@ -265,6 +270,8 @@ class AlertListIngestView(APIView):
                 state=STATE_NEW,
             )
             _save_alert_entities(alert, org, entities_envelope)
+            _aid = alert.id
+            transaction.on_commit(lambda: _enqueue_correlation_eval(_aid))
 
         try:
             route_alert(alert)

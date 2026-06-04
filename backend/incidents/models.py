@@ -78,6 +78,7 @@ class Incident(models.Model):
     SOURCE_INBOUND_EMAIL = "inbound_email"
     SOURCE_WORKFLOW = "workflow"
     SOURCE_EXTERNAL = "external"
+    SOURCE_CORRELATION = "correlation"
     SOURCE_CHOICES = [
         (SOURCE_MANUAL, "Manual"),
         (SOURCE_API, "API"),
@@ -87,6 +88,7 @@ class Incident(models.Model):
         (SOURCE_INBOUND_EMAIL, "Inbound Email"),
         (SOURCE_WORKFLOW, "Workflow"),
         (SOURCE_EXTERNAL, "External"),
+        (SOURCE_CORRELATION, "Correlation Rule"),
     ]
 
     SEVERITY_CRITICAL = "critical"
