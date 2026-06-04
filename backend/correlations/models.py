@@ -126,6 +126,46 @@ class CorrelationFiring(models.Model):
         return f"{self.rule} fired at {self.fired_at}"
 
 
+class DetectionSuggestion(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_DISMISSED = "dismissed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_DISMISSED, "Dismissed"),
+    ]
+
+    organization = models.ForeignKey(
+        "security.Organization",
+        on_delete=models.CASCADE,
+        related_name="detection_suggestions",
+    )
+    proposed_alerts = models.ManyToManyField(
+        "alerts.Alert",
+        related_name="detection_suggestions",
+        blank=True,
+    )
+    rationale = models.TextField()
+    confidence = models.FloatField()
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    incident = models.ForeignKey(
+        "incidents.Incident",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="detection_suggestion",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"DetectionSuggestion {self.id} ({self.status}) for {self.organization}"
+
+
 class SystemRuleMute(models.Model):
     organization = models.ForeignKey(
         "security.Organization", on_delete=models.CASCADE, related_name="system_rule_mutes"

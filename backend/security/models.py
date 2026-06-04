@@ -47,6 +47,7 @@ class Organization(models.Model):
     alert_match_lookback_days = models.PositiveIntegerField(default=30)
     alert_auto_promote_threshold = models.PositiveIntegerField(default=5)
     alert_auto_promote_window_minutes = models.PositiveIntegerField(default=60)
+    llm_residual_autocreate_threshold = models.FloatField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
         if not self.wazuh_group:

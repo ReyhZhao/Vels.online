@@ -2,7 +2,7 @@ import json
 
 from django.conf import settings
 
-from .base import BaseTriageProvider, CorrelationResult, TaskSummaryResult, TriageConfigError, TriageError, TriageResult, VALID_ACTIONS
+from .base import BaseTriageProvider, CorrelationResult, ResidualGroup, ResidualGroupingResult, TaskSummaryResult, TriageConfigError, TriageError, TriageResult, VALID_ACTIONS
 
 SYSTEM_PROMPT = """\
 You are a senior security analyst. Given an incident context as JSON, triage the incident and \
@@ -95,6 +95,25 @@ or empty string if none found
 
 Return only valid JSON. No markdown, no code fences, no explanation.
 If no correlations are found return: {"related_incidents": [], "correlation_summary": ""}
+"""
+
+
+RESIDUAL_GROUPING_SYSTEM_PROMPT = """\
+You are a senior security analyst performing threat detection over a batch of unprocessed security alerts. \
+Each alert has not been linked to an incident by any automated rule. \
+Identify groups of alerts that together indicate suspicious or malicious activity — \
+look for shared infrastructure, attack patterns, affected assets, or temporal clustering.
+
+Input is a JSON array of alert objects, each with: id, title, severity, source_kind, entities (list of {type, value}).
+
+Return a JSON object with exactly this field:
+  groups  (array, required) — list of suspicious groupings, each with:
+    alert_ids   (array of integers, required) — IDs of alerts in the group (minimum 2)
+    rationale   (string, required) — 1-2 sentences explaining why these alerts are suspicious together
+    confidence  (float, required) — probability 0.0-1.0 that this grouping represents real malicious activity
+
+Return only valid JSON. No markdown, no code fences, no explanation.
+If no suspicious groupings are found return: {"groups": []}
 """
 
 
@@ -218,6 +237,33 @@ class GeminiTriageProvider(BaseTriageProvider):
 
         return _parse_correlation_result(data)
 
+    def group_residual_alerts(self, alerts: list) -> ResidualGroupingResult:
+        if not alerts:
+            return ResidualGroupingResult(provider="gemini")
+        prompt = json.dumps(alerts, indent=2)
+        try:
+            response = self._client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=RESIDUAL_GROUPING_SYSTEM_PROMPT,
+                ),
+            )
+            text = response.text.strip()
+        except Exception as exc:
+            raise TriageError(f"Gemini residual grouping error: {exc}") from exc
+
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise TriageError(f"Gemini returned non-JSON for residual grouping: {text[:200]}") from exc
+
+        return _parse_residual_grouping_result(data)
+
     def summarize_task_output(self, task_title: str, task_output: str) -> TaskSummaryResult:
         prompt = json.dumps({"task_title": task_title, "output": task_output[:8000]}, indent=2)
         try:
@@ -242,6 +288,26 @@ class GeminiTriageProvider(BaseTriageProvider):
             raise TriageError(f"Gemini returned non-JSON for task summary: {text[:200]}") from exc
 
         return _parse_task_summary_result(data, provider="gemini")
+
+
+def _parse_residual_grouping_result(data: dict) -> ResidualGroupingResult:
+    groups = []
+    for item in data.get("groups", []):
+        if not isinstance(item, dict):
+            continue
+        alert_ids = []
+        for aid in item.get("alert_ids", []):
+            try:
+                alert_ids.append(int(aid))
+            except (ValueError, TypeError):
+                pass
+        if len(alert_ids) < 2:
+            continue
+        confidence = float(item.get("confidence", 0.0))
+        confidence = max(0.0, min(1.0, confidence))
+        rationale = item.get("rationale", "") or ""
+        groups.append(ResidualGroup(alert_ids=alert_ids, rationale=str(rationale), confidence=confidence))
+    return ResidualGroupingResult(groups=groups, provider="gemini")
 
 
 def _parse_task_summary_result(data: dict, provider: str) -> TaskSummaryResult:

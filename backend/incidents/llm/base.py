@@ -51,6 +51,19 @@ class TaskSummaryResult:
     provider: str = ""
 
 
+@dataclass
+class ResidualGroup:
+    alert_ids: List[int] = field(default_factory=list)
+    rationale: str = ""
+    confidence: float = 0.0
+
+
+@dataclass
+class ResidualGroupingResult:
+    groups: List[ResidualGroup] = field(default_factory=list)
+    provider: str = ""
+
+
 class BaseTriageProvider(ABC):
     @abstractmethod
     def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
@@ -63,3 +76,7 @@ class BaseTriageProvider(ABC):
     def summarize_task_output(self, task_title: str, task_output: str) -> TaskSummaryResult:
         """Parse and summarise automated task output. Override in providers that support it."""
         return TaskSummaryResult()
+
+    def group_residual_alerts(self, alerts: list) -> ResidualGroupingResult:
+        """Group residual (unlinked, settled) alerts into suspicious clusters. Override in providers that support it."""
+        return ResidualGroupingResult()
