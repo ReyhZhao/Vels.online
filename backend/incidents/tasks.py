@@ -230,6 +230,7 @@ def _build_triage_payload(incident) -> dict:
         annotation = _ioc_enrichment_annotation(ioc)
         iocs.append({"kind": ioc.kind, "value": annotation or ioc.value})
     return {
+        "source_kind": incident.source_kind,
         "source_ref": incident.source_ref,
         "assets": assets,
         "iocs": iocs,
@@ -237,6 +238,16 @@ def _build_triage_payload(incident) -> dict:
         "description": incident.description,
         "severity": incident.severity,
     }
+
+
+def build_triage_prompts(incident) -> tuple:
+    """Return (system_prompt, user_payload_json) for the given incident. Used by the debug view."""
+    import json as _json
+    from incidents.llm.gemini import _build_system_prompt
+    payload = _build_triage_payload(incident)
+    extra_context = incident.organization.triage_prompt_context or ""
+    system_prompt = _build_system_prompt(payload.get("source_kind", ""), extra_context)
+    return system_prompt, _json.dumps(payload, indent=2)
 
 def _build_correlation_candidates(incident) -> list:
     """Return summary dicts for recent non-current incidents in the same org."""

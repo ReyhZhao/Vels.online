@@ -23,12 +23,13 @@ class OllamaTriageProvider(BaseTriageProvider):
         self._model = getattr(settings, "OLLAMA_MODEL", "mistral")
 
     def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
+        source_kind = payload.get("source_kind", "")
         prompt = json.dumps(payload, indent=2)
         try:
             response = self._client.chat(
                 model=self._model,
                 messages=[
-                    {"role": "system", "content": _build_system_prompt(extra_context)},
+                    {"role": "system", "content": _build_system_prompt(source_kind, extra_context)},
                     {"role": "user", "content": prompt},
                 ],
             )
@@ -46,6 +47,41 @@ class OllamaTriageProvider(BaseTriageProvider):
             raise TriageError(f"Ollama returned non-JSON: {text[:200]}") from exc
 
         return _parse_result(data, provider="ollama")
+
+    def debug_triage_incident(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Run the LLM with provided prompts and return (raw_text, parsed_result_dict)."""
+        from .gemini import _parse_result as _gr
+        try:
+            response = self._client.chat(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            text = response.message.content.strip()
+        except Exception as exc:
+            raise TriageError(f"Ollama API error: {exc}") from exc
+
+        clean = text
+        if clean.startswith("```"):
+            lines = clean.splitlines()
+            clean = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(clean)
+        except json.JSONDecodeError:
+            data = {}
+
+        result = _gr(data, provider="ollama")
+        return text, {
+            "severity_recommendation": result.severity_recommendation,
+            "summary": result.summary,
+            "primary_action": result.primary_action,
+            "secondary_action": result.secondary_action,
+            "false_positive_confidence": result.false_positive_confidence,
+            "subject_recommendation": result.subject_recommendation,
+        }
 
     def find_related_incidents(self, payload: dict, candidates: list) -> CorrelationResult:
         if not candidates:

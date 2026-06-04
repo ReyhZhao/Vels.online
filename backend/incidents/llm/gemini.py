@@ -9,6 +9,7 @@ You are a senior security analyst. Given an incident context as JSON, triage the
 return a structured assessment.
 
 The input contains:
+  source_kind   — the type of signal that generated this incident
   source_ref    — raw event data (Wazuh alert, vulnerability scan, etc.)
   assets        — list of affected assets with name, kind, agent_name, ip_address
   iocs          — extracted indicators of compromise (IPs, domains, URLs)
@@ -28,6 +29,42 @@ Choose from: phishing, malware, account_compromise, data_exfiltration, policy_vi
 
 Return only valid JSON. No markdown, no code fences, no explanation.
 """
+
+# Per-source preambles injected after the base prompt to guide source-specific reasoning.
+_SOURCE_KIND_PREAMBLES = {
+    "inbound_email": (
+        "This incident was created from an email forwarded to the security team mailbox. "
+        "The source_ref contains the raw email metadata: sender, subject, and body text. "
+        "The email was sent TO the security mailbox as a report — it is not a direct attack payload. "
+        "Treat the content as evidence of a potential phishing campaign, BEC attempt, or social "
+        "engineering attempt unless it clearly indicates otherwise. "
+        "Focus on the sender domain/IP reputation, the nature of any links or attachments, "
+        "and whether the email matches known phishing patterns. "
+        "The subject_recommendation for confirmed phishing is 'phishing'."
+    ),
+    "wazuh_event": (
+        "This incident was triggered by a Wazuh SIEM alert from an endpoint agent. "
+        "The source_ref contains the raw Wazuh rule data including rule_id, rule_description, "
+        "and severity level. "
+        "Focus on the rule category, the affected agent's behaviour, lateral movement indicators, "
+        "and whether the alert pattern matches known false positive conditions for the rule."
+    ),
+    "vulnerability": (
+        "This incident was created from a vulnerability scan finding. "
+        "The source_ref contains CVE/vulnerability details including the affected component and "
+        "CVSS score. "
+        "Focus on exploitability in the context of the affected assets, patch or mitigation "
+        "availability, asset exposure (internet-facing vs. internal), and the realistic risk "
+        "to the organisation rather than the raw CVSS score alone."
+    ),
+    "agent_finding": (
+        "This incident was raised by an automated security agent (e.g. a compliance or "
+        "configuration check). "
+        "The source_ref contains the agent's finding details. "
+        "Focus on the policy or configuration gap identified, its exploitability, and the "
+        "risk it poses relative to the asset's role and exposure."
+    ),
+}
 
 TASK_SUMMARY_SYSTEM_PROMPT = """\
 You are a security analyst reviewing the output of an automated security task. \
@@ -61,10 +98,14 @@ If no correlations are found return: {"related_incidents": [], "correlation_summ
 """
 
 
-def _build_system_prompt(extra_context: str = "") -> str:
+def _build_system_prompt(source_kind: str = "", extra_context: str = "") -> str:
+    parts = [SYSTEM_PROMPT]
+    preamble = _SOURCE_KIND_PREAMBLES.get(source_kind, "")
+    if preamble:
+        parts.append("\n--- Source context ---\n" + preamble)
     if extra_context:
-        return SYSTEM_PROMPT + "\n--- Organisation context ---\n" + extra_context
-    return SYSTEM_PROMPT
+        parts.append("\n--- Organisation context ---\n" + extra_context)
+    return "".join(parts)
 
 
 class GeminiTriageProvider(BaseTriageProvider):
@@ -80,13 +121,14 @@ class GeminiTriageProvider(BaseTriageProvider):
         self._types = types
 
     def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
+        source_kind = payload.get("source_kind", "")
         prompt = json.dumps(payload, indent=2)
         try:
             response = self._client.models.generate_content(
                 model=settings.GEMINI_MODEL,
                 contents=prompt,
                 config=self._types.GenerateContentConfig(
-                    system_instruction=_build_system_prompt(extra_context),
+                    system_instruction=_build_system_prompt(source_kind, extra_context),
                 ),
             )
             text = response.text.strip()
@@ -103,6 +145,40 @@ class GeminiTriageProvider(BaseTriageProvider):
             raise TriageError(f"Gemini returned non-JSON: {text[:200]}") from exc
 
         return _parse_result(data, provider="gemini")
+
+    def debug_triage_incident(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Run the LLM with provided prompts and return (raw_text, parsed_result_dict)."""
+        try:
+            response = self._client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=user_prompt,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                ),
+            )
+            text = response.text.strip()
+        except Exception as exc:
+            raise TriageError(f"Gemini API error: {exc}") from exc
+
+        clean = text
+        if clean.startswith("```"):
+            lines = clean.splitlines()
+            clean = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(clean)
+        except json.JSONDecodeError:
+            data = {}
+
+        result = _parse_result(data, provider="gemini")
+        return text, {
+            "severity_recommendation": result.severity_recommendation,
+            "summary": result.summary,
+            "primary_action": result.primary_action,
+            "secondary_action": result.secondary_action,
+            "false_positive_confidence": result.false_positive_confidence,
+            "subject_recommendation": result.subject_recommendation,
+        }
 
     def find_related_incidents(self, payload: dict, candidates: list) -> CorrelationResult:
         if not candidates:

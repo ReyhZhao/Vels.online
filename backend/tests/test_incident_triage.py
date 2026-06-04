@@ -41,14 +41,14 @@ def member(member_user, acme):
     return member_user
 
 
-def make_incident(acme, state="new", severity="medium", n=None):
+def make_incident(acme, state="new", severity="medium", n=None, source_kind="wazuh_event"):
     count = Incident.objects.count() if n is None else n
     return Incident.objects.create(
         organization=acme,
         title="Suspicious login from unknown IP",
         description="Multiple failed SSH attempts",
         display_id=f"INC-2026-{count + 1:04d}",
-        source_kind="wazuh_event",
+        source_kind=source_kind,
         source_ref={"rule_id": 5712, "level": 8, "agent_name": "web-01"},
         state=state,
         severity=severity,
@@ -339,12 +339,43 @@ def test_build_system_prompt_no_context():
     assert _build_system_prompt() == SYSTEM_PROMPT
 
 
-def test_build_system_prompt_appends_context():
+def test_build_system_prompt_appends_org_context():
     from incidents.llm.gemini import SYSTEM_PROMPT, _build_system_prompt
-    result = _build_system_prompt("treat SSH from 10.0.0.1 as low priority")
+    result = _build_system_prompt("", "treat SSH from 10.0.0.1 as low priority")
     assert result.startswith(SYSTEM_PROMPT)
     assert "--- Organisation context ---" in result
     assert "treat SSH from 10.0.0.1 as low priority" in result
+
+
+def test_build_system_prompt_source_kind_inbound_email():
+    from incidents.llm.gemini import SYSTEM_PROMPT, _build_system_prompt
+    result = _build_system_prompt("inbound_email", "")
+    assert result.startswith(SYSTEM_PROMPT)
+    assert "--- Source context ---" in result
+    assert "security team mailbox" in result
+    assert "--- Organisation context ---" not in result
+
+
+def test_build_system_prompt_source_kind_wazuh_event():
+    from incidents.llm.gemini import _build_system_prompt
+    result = _build_system_prompt("wazuh_event")
+    assert "Wazuh SIEM" in result
+    assert "--- Source context ---" in result
+
+
+def test_build_system_prompt_unknown_source_kind_has_no_preamble():
+    from incidents.llm.gemini import SYSTEM_PROMPT, _build_system_prompt
+    result = _build_system_prompt("api")
+    assert result == SYSTEM_PROMPT
+
+
+def test_build_system_prompt_all_sections():
+    from incidents.llm.gemini import SYSTEM_PROMPT, _build_system_prompt
+    result = _build_system_prompt("wazuh_event", "Escalate all high-severity alerts.")
+    assert result.startswith(SYSTEM_PROMPT)
+    assert "--- Source context ---" in result
+    assert "--- Organisation context ---" in result
+    assert "Escalate all high-severity alerts." in result
 
 
 @pytest.mark.django_db
@@ -753,3 +784,110 @@ def test_triage_task_no_subject_when_recommendation_is_none(acme):
 
     incident.refresh_from_db()
     assert incident.subject is None
+
+
+# ── source_kind in triage payload ────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_triage_payload_includes_source_kind(acme):
+    from incidents.tasks import _build_triage_payload
+    incident = make_incident(acme)
+    payload = _build_triage_payload(incident)
+    assert payload["source_kind"] == "wazuh_event"
+
+
+@pytest.mark.django_db
+def test_triage_payload_source_kind_inbound_email(acme):
+    from incidents.tasks import _build_triage_payload
+    incident = Incident.objects.create(
+        organization=acme,
+        title="Phishing email",
+        display_id="INC-2026-9991",
+        source_kind="inbound_email",
+        source_ref={},
+        state="new",
+        severity="medium",
+    )
+    payload = _build_triage_payload(incident)
+    assert payload["source_kind"] == "inbound_email"
+
+
+# ── IncidentTriageDebugView ───────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_debug_endpoint_requires_auth(client, acme):
+    incident = make_incident(acme)
+    assert client.get(f"/api/incidents/{incident.display_id}/triage/debug/").status_code == 401
+    assert client.post(f"/api/incidents/{incident.display_id}/triage/debug/").status_code == 401
+
+
+@pytest.mark.django_db
+def test_debug_endpoint_requires_staff(client, member, acme):
+    incident = make_incident(acme)
+    client.force_login(member)
+    assert client.get(f"/api/incidents/{incident.display_id}/triage/debug/").status_code == 403
+    assert client.post(f"/api/incidents/{incident.display_id}/triage/debug/").status_code == 403
+
+
+@pytest.mark.django_db
+def test_debug_get_returns_prompts(client, staff_user, acme):
+    incident = make_incident(acme)
+    client.force_login(staff_user)
+    response = client.get(f"/api/incidents/{incident.display_id}/triage/debug/")
+    assert response.status_code == 200
+    data = response.json()
+    assert "system_prompt" in data
+    assert "user_payload" in data
+    assert "wazuh_event" in data["user_payload"]
+
+
+@pytest.mark.django_db
+def test_debug_get_uses_source_specific_prompt(client, staff_user, acme):
+    incident = Incident.objects.create(
+        organization=acme,
+        title="Phishing",
+        display_id="INC-2026-9992",
+        source_kind="inbound_email",
+        source_ref={},
+        state="new",
+        severity="medium",
+    )
+    client.force_login(staff_user)
+    response = client.get(f"/api/incidents/{incident.display_id}/triage/debug/")
+    assert response.status_code == 200
+    assert "security team mailbox" in response.json()["system_prompt"]
+
+
+@pytest.mark.django_db
+def test_debug_post_runs_llm(client, staff_user, acme):
+    incident = make_incident(acme)
+    client.force_login(staff_user)
+
+    mock_provider = MagicMock()
+    mock_provider.debug_triage_incident.return_value = (
+        '{"severity_recommendation":"high","summary":"Test.","primary_action":"escalate","false_positive_confidence":0.1}',
+        {
+            "severity_recommendation": "high",
+            "summary": "Test.",
+            "primary_action": "escalate",
+            "secondary_action": None,
+            "false_positive_confidence": 0.1,
+            "subject_recommendation": None,
+        },
+    )
+
+    with patch("incidents.llm.factory.get_triage_provider", return_value=mock_provider):
+        response = client.post(
+            f"/api/incidents/{incident.display_id}/triage/debug/",
+            data={"system_prompt": "Test prompt", "user_payload": "{}"},
+            content_type="application/json",
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "raw_response" in data
+    assert "result" in data
+    assert data["result"]["severity_recommendation"] == "high"
+    mock_provider.debug_triage_incident.assert_called_once_with("Test prompt", "{}")
