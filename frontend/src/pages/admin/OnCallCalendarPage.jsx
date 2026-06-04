@@ -26,11 +26,37 @@ function formatMonth(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function formatShiftEnd(utcString, timezone) {
+const USER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function tzAbbr() {
+  return new Intl.DateTimeFormat('en-US', { timeZoneName: 'short', timeZone: USER_TZ })
+    .formatToParts(new Date())
+    .find(p => p.type === 'timeZoneName')?.value ?? 'local';
+}
+
+// Convert a stored UTC "HH:MM" string to the user's local "HH:MM" for display.
+function utcHHMMtoLocal(utcHHMM) {
+  if (!utcHHMM) return '';
+  const [h, m] = utcHHMM.split(':').map(Number);
+  const d = new Date();
+  d.setUTCHours(h, m, 0, 0);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// Convert a local "HH:MM" string (from a time input in the user's browser tz) back to UTC "HH:MM".
+function localHHMMtoUtc(localHHMM) {
+  if (!localHHMM) return '';
+  const [h, m] = localHHMM.split(':').map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+function formatShiftEnd(utcString) {
   if (!utcString) return '';
   try {
     return new Date(utcString).toLocaleTimeString('en-US', {
-      timeZone: timezone || 'Europe/Amsterdam',
+      timeZone: USER_TZ,
       hour: '2-digit', minute: '2-digit', hour12: false,
     });
   } catch { return utcString; }
@@ -169,7 +195,7 @@ function OverrideModal({ prefill, blocks, onClose, onSubmitted }) {
               className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
               <option value="">Select block…</option>
               {blocks.map(b => (
-                <option key={b.id} value={b.id}>{b.label} ({b.start_time}–{b.end_time})</option>
+                <option key={b.id} value={b.id}>{b.label} ({utcHHMMtoLocal(b.start_time)}–{utcHHMMtoLocal(b.end_time)} {tzAbbr()})</option>
               ))}
             </select>
           </div>
@@ -321,6 +347,7 @@ function PendingRequestsPanel({ onUpdate }) {
 // ─── Shift Blocks Panel ───────────────────────────────────────────────────────
 
 function BlockForm({ form, setForm, onSave, onCancel, saving }) {
+  const tz = tzAbbr();
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="col-span-2">
@@ -331,13 +358,13 @@ function BlockForm({ form, setForm, onSave, onCancel, saving }) {
           placeholder="e.g. Morning" />
       </div>
       <div>
-        <label className="block text-xs font-medium text-muted-foreground mb-1">Start time (UTC)</label>
+        <label className="block text-xs font-medium text-muted-foreground mb-1">Start time ({tz})</label>
         <input type="time" value={form.start_time}
           onChange={(e) => setForm(f => ({ ...f, start_time: e.target.value }))}
           className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
       </div>
       <div>
-        <label className="block text-xs font-medium text-muted-foreground mb-1">End time (UTC, 00:00=midnight)</label>
+        <label className="block text-xs font-medium text-muted-foreground mb-1">End time ({tz}, 00:00=midnight)</label>
         <input type="time" value={form.end_time}
           onChange={(e) => setForm(f => ({ ...f, end_time: e.target.value }))}
           className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
@@ -387,7 +414,12 @@ function ShiftBlocksPanel({ onBlocksChanged }) {
 
   function startEdit(block) {
     setEditingId(block.id);
-    setForm({ label: block.label, start_time: block.start_time, end_time: block.end_time, order: String(block.order) });
+    setForm({
+      label: block.label,
+      start_time: utcHHMMtoLocal(block.start_time),
+      end_time: utcHHMMtoLocal(block.end_time),
+      order: String(block.order),
+    });
     setTilingError(null);
   }
 
@@ -399,7 +431,12 @@ function ShiftBlocksPanel({ onBlocksChanged }) {
 
   async function handleSave() {
     setSaving(true); setTilingError(null);
-    const payload = { ...form, order: parseInt(form.order, 10) };
+    const payload = {
+      ...form,
+      start_time: localHHMMtoUtc(form.start_time),
+      end_time: localHHMMtoUtc(form.end_time),
+      order: parseInt(form.order, 10),
+    };
     try {
       if (editingId) await api.patch(`/api/oncall/blocks/${editingId}/`, payload);
       else await api.post('/api/oncall/blocks/', payload);
@@ -451,7 +488,7 @@ function ShiftBlocksPanel({ onBlocksChanged }) {
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-sm font-medium text-foreground">{block.label}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">{block.start_time} – {block.end_time} (order: {block.order})</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{utcHHMMtoLocal(block.start_time)} – {utcHHMMtoLocal(block.end_time)} {tzAbbr()} (order: {block.order})</span>
                 </div>
                 {isAdmin && (
                   <div className="flex items-center gap-2">
@@ -621,7 +658,7 @@ function RotationTemplatePanel({ blocks, onSaved }) {
               <tr key={block.id}>
                 <td className="border border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground whitespace-nowrap">
                   <div>{block.label}</div>
-                  <div className="font-normal text-muted-foreground/70">{block.start_time}–{block.end_time}</div>
+                  <div className="font-normal text-muted-foreground/70">{utcHHMMtoLocal(block.start_time)}–{utcHHMMtoLocal(block.end_time)} {tzAbbr()}</div>
                 </td>
                 {[0, 1, 2, 3, 4, 5, 6].map(dow => {
                   const key = `${dow}-${block.id}`;
@@ -680,8 +717,7 @@ function RotationTemplatePanel({ blocks, onSaved }) {
 // ─── Week View ────────────────────────────────────────────────────────────────
 
 function WeekView({ blocks, weekParam, onWeekChange, onOverrideRequest, scheduleKey }) {
-  const { user, staffProfile } = useAuth();
-  const tz = staffProfile?.timezone || 'Europe/Amsterdam';
+  const { user } = useAuth();
   const [schedule, setSchedule] = useState([]);
   const [loading, setLoading] = useState(true);
 
