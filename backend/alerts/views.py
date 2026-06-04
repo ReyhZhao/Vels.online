@@ -660,3 +660,107 @@ def _save_alert_entities(alert, org, envelope):
             entity_type=entity_type,
             value=value,
         )
+
+
+_ENTITY_ENVELOPE_DETAIL = (
+    "entities must be an object containing at least one recognised ECS field "
+    "(host.name, source.ip, user.name, file.hash.sha256, process.name) "
+    "with a non-empty string value."
+)
+
+
+class AlertListIngestV2View(AlertListIngestView):
+    """
+    POST /api/v2/alerts/ — entity-envelope-required ingest endpoint.
+
+    Identical to v1 but rejects requests whose ``entities`` field is absent,
+    not an object, or contains no recognised ECS field with a non-empty value.
+    Existing callers of /api/alerts/ continue to work; new integrators should
+    target this endpoint.
+    """
+
+    @extend_schema(
+        summary="Ingest alert — v2 (entity envelope required)",
+        description=(
+            "Create a new alert. Identical to `POST /api/alerts/` (v1) except the "
+            "`entities` ECS envelope is **required**. Requests without a valid envelope "
+            "are rejected with HTTP 422.\n\n"
+            "**Required envelope fields** (at least one must be present with a non-empty value):\n"
+            "- `host.name` — fully-qualified hostname\n"
+            "- `source.ip` — IPv4/IPv6 address of the traffic source\n"
+            "- `user.name` — account name (DOMAIN\\user, user@domain, and bare forms are all normalised)\n"
+            "- `file.hash.sha256` — 64-character hex SHA-256 digest\n"
+            "- `process.name` — process image name\n\n"
+            "Values are canonicalised (lowercased, domain prefix stripped) on ingest."
+        ),
+        request=inline_serializer(
+            name="AlertIngestV2Request",
+            fields={
+                "org": _s.CharField(help_text="Organisation slug"),
+                "source_kind": _s.ChoiceField(
+                    choices=["wazuh_event", "vulnerability", "agent_finding", "api", "workflow", "external"],
+                    help_text="Alert source type",
+                ),
+                "source_ref": _s.DictField(
+                    required=False,
+                    allow_null=True,
+                    help_text="Source-specific metadata (e.g. agent_name, rule_id)",
+                ),
+                "title": _s.CharField(
+                    required=False,
+                    allow_null=True,
+                    help_text="Human-readable title. Required for workflow/external.",
+                ),
+                "description": _s.CharField(
+                    required=False,
+                    allow_null=True,
+                    help_text="Free-text description.",
+                ),
+                "severity": _s.ChoiceField(
+                    choices=["critical", "high", "medium", "low", "info"],
+                    required=False,
+                    allow_null=True,
+                    help_text="Severity override.",
+                ),
+                "pap": _s.ChoiceField(
+                    choices=["white", "green", "amber", "red"],
+                    required=False,
+                    allow_null=True,
+                    help_text="PAP classification override.",
+                ),
+                "tlp": _s.ChoiceField(
+                    choices=["white", "green", "amber", "red"],
+                    required=False,
+                    allow_null=True,
+                    help_text="TLP classification override.",
+                ),
+                "entities": _s.DictField(
+                    help_text=(
+                        "**Required.** ECS entity envelope. Keys must be ECS field names "
+                        "(host.name, source.ip, user.name, file.hash.sha256, process.name). "
+                        "At least one key must have a non-empty string value."
+                    ),
+                ),
+            },
+        ),
+        responses={
+            201: AlertSerializer,
+            400: inline_serializer(name="AlertIngestV2Error", fields={"detail": _s.CharField()}),
+            403: inline_serializer(name="AlertIngestV2Forbidden", fields={"detail": _s.CharField()}),
+            404: inline_serializer(name="AlertIngestV2NotFound", fields={"detail": _s.CharField()}),
+            422: inline_serializer(name="AlertIngestV2EnvelopeError", fields={"detail": _s.CharField()}),
+        },
+    )
+    def post(self, request):
+        envelope = request.data.get("entities")
+        if not envelope or not isinstance(envelope, dict):
+            return Response(
+                {"detail": "entities is required. " + _ENTITY_ENVELOPE_DETAIL},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        if not entities_for({"entities": envelope}):
+            return Response(
+                {"detail": _ENTITY_ENVELOPE_DETAIL},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        return super().post(request)
