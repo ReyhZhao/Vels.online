@@ -679,6 +679,156 @@ function IncidentAssetsPanel({ displayId, isStaff, orgSlug }) {
   );
 }
 
+function TriageDebugModal({ displayId, onClose }) {
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [userPayload, setUserPayload] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [rawResponse, setRawResponse] = useState(null);
+  const [parsedResult, setParsedResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    api.get(`/api/incidents/${displayId}/triage/debug/`)
+      .then(res => {
+        setSystemPrompt(res.data.system_prompt);
+        setUserPayload(res.data.user_payload);
+      })
+      .catch(() => setError('Failed to load triage prompt.'))
+      .finally(() => setLoading(false));
+  }, [displayId]);
+
+  async function handleSend() {
+    setSending(true);
+    setError(null);
+    setRawResponse(null);
+    setParsedResult(null);
+    try {
+      const res = await api.post(`/api/incidents/${displayId}/triage/debug/`, {
+        system_prompt: systemPrompt,
+        user_payload: userPayload,
+      });
+      setRawResponse(res.data.raw_response);
+      setParsedResult(res.data.result);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'LLM request failed.');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <h2 className="text-base font-semibold text-foreground">Debug Triage</h2>
+          <button onClick={onClose} className="rounded-md p-1.5 text-muted-foreground hover:bg-accent">
+            ✕
+          </button>
+        </div>
+        {loading ? (
+          <p className="px-6 py-8 text-sm text-muted-foreground">Loading prompt…</p>
+        ) : (
+          <div className="space-y-4 px-6 py-4">
+            {error && (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>
+            )}
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">System Prompt</label>
+              <textarea
+                value={systemPrompt}
+                onChange={e => setSystemPrompt(e.target.value)}
+                rows={10}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">User Payload (JSON)</label>
+              <textarea
+                value={userPayload}
+                onChange={e => setUserPayload(e.target.value)}
+                rows={8}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+              />
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={handleSend}
+                disabled={sending}
+                className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+              >
+                {sending ? 'Sending…' : 'Send to LLM'}
+              </button>
+            </div>
+            {rawResponse !== null && (
+              <>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Raw LLM Response</label>
+                  <pre className="w-full rounded-md border border-border bg-muted px-3 py-2 font-mono text-xs text-foreground overflow-x-auto whitespace-pre-wrap">{rawResponse}</pre>
+                </div>
+                {parsedResult && (
+                  <div className="rounded-md border border-border bg-muted/50 px-4 py-3 space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Parsed result</p>
+                    <p className="text-sm text-foreground"><span className="font-medium">Severity:</span> {parsedResult.severity_recommendation}</p>
+                    <p className="text-sm text-foreground"><span className="font-medium">Action:</span> {parsedResult.primary_action}{parsedResult.secondary_action ? ` / ${parsedResult.secondary_action}` : ''}</p>
+                    <p className="text-sm text-foreground"><span className="font-medium">FP confidence:</span> {(parsedResult.false_positive_confidence * 100).toFixed(0)}%</p>
+                    <p className="text-sm text-foreground"><span className="font-medium">Summary:</span> {parsedResult.summary}</p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TriageDropdown({ onRunTriage, onDebugTriage, disabled, label }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <div className="flex rounded-md overflow-hidden">
+        <button
+          onClick={() => { setOpen(false); onRunTriage(); }}
+          disabled={disabled}
+          className="rounded-none border border-violet-400 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:border-violet-600 dark:bg-violet-900/20 dark:text-violet-400 dark:hover:bg-violet-900/40"
+        >
+          {label}
+        </button>
+        <button
+          onClick={() => setOpen(o => !o)}
+          disabled={disabled}
+          aria-label="Triage options"
+          className="border border-l-0 border-violet-400 bg-violet-50 px-2 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:border-violet-600 dark:bg-violet-900/20 dark:text-violet-400 dark:hover:bg-violet-900/40"
+        >
+          ▾
+        </button>
+      </div>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-10 w-36 rounded-md border border-border bg-card shadow-lg">
+          <button
+            onClick={() => { setOpen(false); onDebugTriage(); }}
+            className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-accent rounded-md"
+          >
+            Debug Triage
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ResolveDropdown({ onResolve, onNeedsTuning, disabled }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -992,6 +1142,7 @@ export default function IncidentDetail() {
   const [triaging, setTriaging]           = useState(false);
   const [triageQueued, setTriageQueued]   = useState(false);
   const [triageError, setTriageError]     = useState(null);
+  const [showDebugModal, setShowDebugModal] = useState(false);
   const pollRef = useRef(null);
   const incidentRef = useRef(null);
 
@@ -1179,6 +1330,13 @@ export default function IncidentDetail() {
         incident={incident}
       />
 
+      {showDebugModal && (
+        <TriageDebugModal
+          displayId={displayId}
+          onClose={() => setShowDebugModal(false)}
+        />
+      )}
+
       <div className="flex items-center gap-3">
         <Link to="/incidents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
           ← Incidents
@@ -1228,13 +1386,12 @@ export default function IncidentDetail() {
               </button>
             )}
             {user?.is_staff && incident.state !== 'closed' && (
-              <button
-                onClick={handleTriage}
+              <TriageDropdown
+                onRunTriage={handleTriage}
+                onDebugTriage={() => setShowDebugModal(true)}
                 disabled={triaging || triageQueued || incident.triage_running || transitioning}
-                className="rounded-md border border-violet-400 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:border-violet-600 dark:bg-violet-900/20 dark:text-violet-400 dark:hover:bg-violet-900/40"
-              >
-                {triaging ? 'Triaging…' : (triageQueued || incident.triage_running) ? 'Triage running…' : 'Run Triage'}
-              </button>
+                label={triaging ? 'Triaging…' : (triageQueued || incident.triage_running) ? 'Triage running…' : 'Run Triage'}
+              />
             )}
           </div>
         </div>

@@ -566,4 +566,38 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByRole('button', { name: /triage running/i }));
     expect(screen.getByRole('button', { name: /triage running/i })).toBeDisabled();
   });
+
+  // ── debug triage dropdown ─────────────────────────────────────────────────
+
+  it('shows Debug Triage option in dropdown', async () => {
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /run triage/i }));
+    const arrowBtn = screen.getByRole('button', { name: /triage options/i });
+    await userEvent.click(arrowBtn);
+    expect(screen.getByRole('button', { name: /debug triage/i })).toBeInTheDocument();
+  });
+
+  it('opens debug modal when Debug Triage is clicked', async () => {
+    api.get.mockImplementation((url) => {
+      if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
+      if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
+      if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contact-messages/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contacts/')) return Promise.resolve({ data: [] });
+      if (url === '/api/exceptions/') return Promise.resolve({ data: [] });
+      if (url.includes('/triage/debug/')) {
+        return Promise.resolve({ data: { system_prompt: 'You are a security analyst.', user_payload: '{"source_kind":"manual"}' } });
+      }
+      return Promise.resolve({ data: INCIDENT });
+    });
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /run triage/i }));
+    await userEvent.click(screen.getByRole('button', { name: /triage options/i }));
+    await userEvent.click(screen.getByRole('button', { name: /debug triage/i }));
+    await waitFor(() => screen.getByText('Debug Triage'));
+    expect(screen.getByDisplayValue('You are a security analyst.')).toBeInTheDocument();
+  });
 });

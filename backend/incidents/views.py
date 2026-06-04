@@ -2134,3 +2134,68 @@ class IncidentTriageView(APIView):
 
         run_incident_triage.delay(incident.id)
         return Response(status=status.HTTP_202_ACCEPTED)
+
+
+class IncidentTriageDebugView(APIView):
+    """
+    GET  /api/incidents/<display_id>/triage/debug/  — return the prompts without running the LLM
+    POST /api/incidents/<display_id>/triage/debug/  — run LLM with optional prompt overrides
+    """
+
+    def _get_incident(self, request, display_id):
+        if not request.user.is_authenticated:
+            return None, Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not request.user.is_staff:
+            return None, Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            incident = Incident.objects.select_related("organization").prefetch_related(
+                "incident_assets__asset", "iocs"
+            ).get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, incident):
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return incident, None
+
+    def get(self, request, display_id):
+        incident, err = self._get_incident(request, display_id)
+        if err:
+            return err
+        from incidents.tasks import build_triage_prompts
+        system_prompt, user_payload = build_triage_prompts(incident)
+        return Response({"system_prompt": system_prompt, "user_payload": user_payload})
+
+    def post(self, request, display_id):
+        incident, err = self._get_incident(request, display_id)
+        if err:
+            return err
+        from incidents.tasks import build_triage_prompts
+        from incidents.llm.factory import get_triage_provider
+        from incidents.llm.base import TriageConfigError, TriageError
+
+        default_system, default_payload = build_triage_prompts(incident)
+        system_prompt = request.data.get("system_prompt") or default_system
+        user_payload = request.data.get("user_payload") or default_payload
+
+        try:
+            provider = get_triage_provider()
+        except TriageConfigError as exc:
+            return Response({"detail": f"LLM provider misconfigured: {exc}"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        if not hasattr(provider, "debug_triage_incident"):
+            return Response({"detail": "This provider does not support debug mode."}, status=status.HTTP_501_NOT_IMPLEMENTED)
+
+        try:
+            raw_response, parsed = provider.debug_triage_incident(system_prompt, user_payload)
+        except TriageError as exc:
+            return Response({"detail": f"LLM error: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+        except Exception as exc:
+            logger.exception("IncidentTriageDebugView: unexpected error for %s", display_id)
+            return Response({"detail": f"Unexpected error: {exc}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            "system_prompt": system_prompt,
+            "user_payload": user_payload,
+            "raw_response": raw_response,
+            "result": parsed,
+        })
