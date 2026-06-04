@@ -343,6 +343,39 @@ def test_system_rule_fires_for_any_org(org):
     assert alert.incident.severity == "high"
 
 
+def test_muted_system_rule_does_not_fire_for_muting_org_but_fires_for_others(org, db):
+    from correlations.models import SystemRuleMute
+
+    other_org = Organization.objects.create(
+        name="OtherMuteTest",
+        slug="othermutetest",
+        wazuh_group="othermutetest",
+        alert_match_lookback_days=30,
+        alert_auto_promote_threshold=5,
+        alert_auto_promote_window_minutes=60,
+    )
+
+    rule = _make_rule(org=None, severity="high")  # system rule
+    leg = _make_leg(rule)
+    _make_condition(leg, FIELD_KIND_ALERT, "severity", OPERATOR_EQUALS, "critical")
+
+    # Mute the system rule for `org` only
+    SystemRuleMute.objects.create(organization=org, rule=rule)
+
+    # Alert from muting org — rule must NOT fire
+    alert_muted = _make_alert(org, severity="critical")
+    evaluate(alert_muted)
+    alert_muted.refresh_from_db()
+    assert alert_muted.incident is None
+
+    # Alert from other org — rule must still fire
+    alert_other = _make_alert(other_org, severity="critical")
+    evaluate(alert_other)
+    alert_other.refresh_from_db()
+    assert alert_other.incident is not None
+    assert alert_other.incident.severity == "high"
+
+
 # ── evaluate: multi-leg windowed correlation ─────────────────────────────────
 
 
