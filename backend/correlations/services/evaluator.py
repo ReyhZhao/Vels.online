@@ -26,7 +26,7 @@ def _get_window_alerts(org, correlation_key, key_value, window_start):
     qs = Alert.objects.filter(
         organization=org,
         created_at__gte=window_start,
-    ).prefetch_related("entities")
+    ).select_related("incident").prefetch_related("entities")
 
     if correlation_key != "none":
         qs = qs.filter(entities__entity_type=correlation_key, entities__value=key_value).distinct()
@@ -57,12 +57,22 @@ def _link_alert_to_incident(alert, incident, rule):
 
 def _fire(rule, org, key_value, matching_alerts):
     """Create an incident and CorrelationFiring for a satisfied rule."""
+    from incidents.models import Incident
     from incidents.serializers import IncidentCreateSerializer
     from incidents.services.events import record_event
     from incidents.services.identifiers import next_display_id
     from correlations.models import CorrelationFiring
+    from correlations.services.supersede import supersede_simpler_incidents
 
     title = f"{rule.name}: {key_value}"
+
+    # Collect any simpler (non-correlation) incidents that currently own contributing alerts,
+    # before relinking mutates alert.incident.
+    prior_simpler = {
+        a.incident
+        for a in matching_alerts
+        if a.incident_id is not None and a.incident.source_kind != Incident.SOURCE_CORRELATION
+    }
 
     with transaction.atomic():
         ser = IncidentCreateSerializer(
@@ -95,6 +105,9 @@ def _fire(rule, org, key_value, matching_alerts):
             entity_value=key_value,
             incident=incident,
         )
+
+        if prior_simpler:
+            supersede_simpler_incidents(incident, prior_simpler, rule)
 
     return incident
 

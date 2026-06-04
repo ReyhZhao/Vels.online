@@ -612,3 +612,150 @@ def test_refire_allowed_after_incident_closes(org):
 
     assert Incident.objects.count() == 2
     assert CorrelationFiring.objects.count() == 2
+
+
+# ── supersede: absorb simpler incidents on rule fire ─────────────────────────
+
+
+def _make_simple_incident(org, alert, state="new", assignee=None):
+    """Create a fast-path (non-correlation) incident and link the alert to it."""
+    from incidents.services.identifiers import next_display_id
+
+    inc = Incident.objects.create(
+        organization=org,
+        display_id=next_display_id(),
+        title="Simple incident",
+        severity="high",
+        source_kind="wazuh_event",
+        state=state,
+        assignee=assignee,
+    )
+    alert.incident = inc
+    alert.state = "imported"
+    alert.save(update_fields=["incident", "state", "updated_at"])
+    return inc
+
+
+def test_supersede_relinks_and_closes_simpler_incident(org):
+    """Happy path: simpler incident is relinked, marked duplicate_of, and closed."""
+    from incidents.models import IncidentEvent
+
+    alert1 = _make_alert(org, title="port scan detected")
+    alert2 = _make_alert(org, title="exploit attempt")
+
+    # alert1 already belongs to a fast-path incident
+    simple_inc = _make_simple_incident(org, alert1)
+
+    rule = _make_rule(org, correlation_key="none", severity="critical")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert2)
+
+    alert1.refresh_from_db()
+    alert2.refresh_from_db()
+    chain_inc = alert2.incident
+    assert chain_inc is not None
+    assert chain_inc.source_kind == "correlation"
+
+    # alert1 must now point to the chain incident
+    assert alert1.incident == chain_inc
+
+    # Simple incident must be closed as duplicate of the chain incident
+    simple_inc.refresh_from_db()
+    assert simple_inc.state == Incident.STATE_CLOSED
+    assert simple_inc.closure_reason == Incident.CLOSURE_DUPLICATE
+    assert simple_inc.duplicate_of == chain_inc
+
+    # History events recorded
+    assert IncidentEvent.objects.filter(incident=simple_inc, kind="superseded").exists()
+    assert IncidentEvent.objects.filter(incident=chain_inc, kind="absorbed_incident").exists()
+
+
+def test_supersede_guard_rail_in_progress(org):
+    """An in_progress simpler incident is NOT auto-superseded; supersede_blocked event emitted."""
+    from incidents.models import IncidentEvent
+
+    alert1 = _make_alert(org, title="port scan detected")
+    alert2 = _make_alert(org, title="exploit attempt")
+
+    simple_inc = _make_simple_incident(org, alert1, state="in_progress")
+
+    rule = _make_rule(org, correlation_key="none", severity="critical")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert2)
+
+    simple_inc.refresh_from_db()
+    # Guard rail: simple incident must NOT be closed
+    assert simple_inc.state == "in_progress"
+    assert simple_inc.closure_reason is None
+    assert simple_inc.duplicate_of is None
+
+    # alert1 was relinked as part of normal _link_alert_to_incident (which runs before supersede),
+    # but the simpler incident itself is preserved open
+    chain_inc = Incident.objects.get(source_kind="correlation")
+    assert IncidentEvent.objects.filter(incident=chain_inc, kind="supersede_blocked").exists()
+    event = IncidentEvent.objects.get(incident=chain_inc, kind="supersede_blocked")
+    assert event.payload["blocked_incident_id"] == simple_inc.id
+    assert event.payload["state"] == "in_progress"
+
+
+def test_supersede_guard_rail_on_hold(org):
+    """An on_hold simpler incident is NOT auto-superseded."""
+    from incidents.models import IncidentEvent
+
+    alert1 = _make_alert(org, title="port scan detected")
+    alert2 = _make_alert(org, title="exploit attempt")
+
+    simple_inc = _make_simple_incident(org, alert1, state="on_hold")
+
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert2)
+
+    simple_inc.refresh_from_db()
+    assert simple_inc.state == "on_hold"
+    assert simple_inc.duplicate_of is None
+
+    chain_inc = Incident.objects.get(source_kind="correlation")
+    assert IncidentEvent.objects.filter(incident=chain_inc, kind="supersede_blocked").exists()
+
+
+def test_supersede_guard_rail_assigned(org):
+    """An assigned simpler incident (even if state=new) is NOT auto-superseded."""
+    from django.contrib.auth.models import User
+    from incidents.models import IncidentEvent
+
+    analyst = User.objects.create_user("analyst", password="x")
+
+    alert1 = _make_alert(org, title="port scan detected")
+    alert2 = _make_alert(org, title="exploit attempt")
+
+    simple_inc = _make_simple_incident(org, alert1, state="triaged", assignee=analyst)
+
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert2)
+
+    simple_inc.refresh_from_db()
+    assert simple_inc.duplicate_of is None
+    assert simple_inc.state == "triaged"
+
+    chain_inc = Incident.objects.get(source_kind="correlation")
+    assert IncidentEvent.objects.filter(incident=chain_inc, kind="supersede_blocked").exists()
+    event = IncidentEvent.objects.get(incident=chain_inc, kind="supersede_blocked")
+    assert event.payload["assigned"] is True
