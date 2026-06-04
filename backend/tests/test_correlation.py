@@ -2,6 +2,7 @@
 import pytest
 from security.models import Organization
 from alerts.models import Alert, AlertEntity
+from datetime import timedelta
 from correlations.models import (
     CorrelationRule,
     CorrelationRuleLeg,
@@ -342,15 +343,239 @@ def test_system_rule_fires_for_any_org(org):
     assert alert.incident.severity == "high"
 
 
-def test_multi_leg_rule_skipped_in_this_slice(org):
-    alert = _make_alert(org, severity="critical")
-    rule = _make_rule(org, severity="high")
-    leg1 = _make_leg(rule)
+# ── evaluate: multi-leg windowed correlation ─────────────────────────────────
+
+
+def test_two_leg_rule_fires_when_both_legs_satisfied(org):
+    alert1 = _make_alert(org, title="port scan detected")
+    alert2 = _make_alert(org, title="exploit attempt")
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    leg1 = _make_leg(rule, count=1)
     leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
-    _make_condition(leg1, FIELD_KIND_ALERT, "severity", OPERATOR_EQUALS, "critical")
-    _make_condition(leg2, FIELD_KIND_ALERT, "severity", OPERATOR_EQUALS, "critical")
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert2)
+
+    alert1.refresh_from_db()
+    alert2.refresh_from_db()
+    assert alert1.incident is not None
+    assert alert2.incident is not None
+    assert alert1.incident == alert2.incident
+    assert alert1.incident.source_kind == "correlation"
+
+
+def test_missing_leg_prevents_fire(org):
+    alert = _make_alert(org, title="port scan detected")
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
 
     evaluate(alert)
 
     alert.refresh_from_db()
     assert alert.incident is None
+
+
+def test_per_leg_count_requires_enough_alerts(org):
+    alert1 = _make_alert(org, title="brute force login")
+    alert2 = _make_alert(org, title="brute force login")
+    alert3 = _make_alert(org, title="account locked")
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    leg1 = _make_leg(rule, count=2)  # needs 2 brute force alerts
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "brute force")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "account locked")
+
+    evaluate(alert3)
+
+    alert1.refresh_from_db()
+    alert2.refresh_from_db()
+    alert3.refresh_from_db()
+    assert alert1.incident is not None
+    assert alert2.incident is not None
+    assert alert3.incident is not None
+    assert alert1.incident == alert2.incident == alert3.incident
+
+
+def test_per_leg_count_insufficient_prevents_fire(org):
+    alert1 = _make_alert(org, title="brute force login")
+    alert2 = _make_alert(org, title="account locked")
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    leg1 = _make_leg(rule, count=2)  # needs 2 brute force alerts but only 1 exists
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "brute force")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "account locked")
+
+    evaluate(alert2)
+
+    alert2.refresh_from_db()
+    assert alert2.incident is None
+
+
+def test_correlation_key_isolates_different_entity_values(org):
+    alert_host_a1 = _make_alert(org, title="port scan")
+    _add_entity(alert_host_a1, "host.name", "host-a")
+    alert_host_b = _make_alert(org, title="exploit attempt")
+    _add_entity(alert_host_b, "host.name", "host-b")
+
+    rule = _make_rule(org, correlation_key="host.name", severity="high")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert_host_b)
+
+    alert_host_a1.refresh_from_db()
+    alert_host_b.refresh_from_db()
+    assert alert_host_b.incident is None  # host-b has no port scan alert
+
+
+def test_correlation_key_fires_for_matching_entity(org):
+    alert1 = _make_alert(org, title="port scan")
+    _add_entity(alert1, "host.name", "host-a")
+    alert2 = _make_alert(org, title="exploit attempt")
+    _add_entity(alert2, "host.name", "host-a")
+
+    rule = _make_rule(org, correlation_key="host.name", severity="high")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert2)
+
+    alert1.refresh_from_db()
+    alert2.refresh_from_db()
+    assert alert1.incident is not None
+    assert alert2.incident is not None
+    assert alert1.incident == alert2.incident
+    assert "host-a" in alert1.incident.title
+
+
+def test_alert_without_required_entity_skips_rule(org):
+    alert_no_entity = _make_alert(org, title="port scan")
+    # No host.name entity added
+    alert_with_entity = _make_alert(org, title="exploit attempt")
+    _add_entity(alert_with_entity, "host.name", "host-a")
+
+    rule = _make_rule(org, correlation_key="host.name", severity="high")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    # Triggering with an alert that lacks host.name — rule is skipped entirely
+    evaluate(alert_no_entity)
+
+    alert_no_entity.refresh_from_db()
+    assert alert_no_entity.incident is None
+
+
+def test_window_boundary_excludes_old_alerts(org):
+    from django.utils import timezone as tz
+
+    old_alert = _make_alert(org, title="port scan")
+    # Backdating: set created_at to outside the window
+    Alert.objects.filter(pk=old_alert.pk).update(created_at=tz.now() - timedelta(minutes=120))
+
+    alert2 = _make_alert(org, title="exploit attempt")
+
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    rule.window_minutes = 60
+    rule.save()
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert2)
+
+    alert2.refresh_from_db()
+    assert alert2.incident is None  # Port scan is outside the window
+
+
+# ── evaluate: CorrelationFiring dedup ────────────────────────────────────────
+
+
+def test_dedup_links_new_alert_to_live_incident(org):
+    from correlations.models import CorrelationFiring
+
+    alert1 = _make_alert(org, title="port scan")
+    alert2 = _make_alert(org, title="exploit attempt")
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    # First evaluation: rule fires, incident created
+    evaluate(alert2)
+
+    alert1.refresh_from_db()
+    alert2.refresh_from_db()
+    assert alert1.incident is not None
+    incident = alert1.incident
+
+    assert CorrelationFiring.objects.filter(rule=rule, incident=incident).count() == 1
+
+    # New alert matching leg1 arrives while firing is still live
+    alert3 = _make_alert(org, title="port scan again")
+    evaluate(alert3)
+
+    alert3.refresh_from_db()
+    assert alert3.incident == incident  # Linked to the same live incident
+    assert CorrelationFiring.objects.filter(rule=rule).count() == 1  # No new firing
+
+
+def test_dedup_no_new_incident_while_live(org):
+    from correlations.models import CorrelationFiring
+    from incidents.models import Incident
+
+    alert1 = _make_alert(org, title="port scan")
+    alert2 = _make_alert(org, title="exploit attempt")
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert2)
+    assert Incident.objects.count() == 1
+
+    # Another alert that would satisfy both legs again
+    alert3 = _make_alert(org, title="port scan again")
+    alert4 = _make_alert(org, title="exploit attempt 2")
+    evaluate(alert4)
+
+    assert Incident.objects.count() == 1  # Still only one incident
+
+
+def test_refire_allowed_after_incident_closes(org):
+    from correlations.models import CorrelationFiring
+    from incidents.models import Incident
+
+    alert1 = _make_alert(org, title="port scan")
+    alert2 = _make_alert(org, title="exploit attempt")
+    rule = _make_rule(org, correlation_key="none", severity="high")
+    leg1 = _make_leg(rule, count=1)
+    leg2 = CorrelationRuleLeg.objects.create(rule=rule, count=1, display_order=1)
+    _make_condition(leg1, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "port scan")
+    _make_condition(leg2, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "exploit")
+
+    evaluate(alert2)
+    assert Incident.objects.count() == 1
+
+    # Close the incident
+    Incident.objects.update(state="closed")
+
+    # New alerts arrive — rule should fire a new incident
+    alert3 = _make_alert(org, title="port scan again")
+    alert4 = _make_alert(org, title="exploit attempt 2")
+    evaluate(alert4)
+
+    assert Incident.objects.count() == 2
+    assert CorrelationFiring.objects.count() == 2
