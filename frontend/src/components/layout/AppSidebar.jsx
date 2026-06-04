@@ -31,6 +31,7 @@ import {
   CalendarClock,
   Mail,
   Users,
+  GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -246,6 +247,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     </SidebarLink>
                     <SidebarLink to="/admin/wazuh-responses" icon={ShieldCheck} collapsed={collapsed}>
                       Wazuh Responses
+                    </SidebarLink>
+                    <SidebarLink to="/admin/correlations/rules" icon={GitBranch} collapsed={collapsed}>
+                      Correlation Rules
                     </SidebarLink>
                   </>
                 )}
