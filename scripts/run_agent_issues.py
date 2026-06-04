@@ -8,7 +8,8 @@ import json
 import subprocess
 import sys
 
-LABEL = "ready-for-agent"
+#LABEL = "ready-for-agent"
+LABEL = "Sandcastle"
 
 # Static prompt template — {number} is replaced with the issue number.
 PROMPT_TEMPLATE = (
@@ -31,7 +32,8 @@ def fetch_issues() -> list[dict]:
         text=True,
         check=True,
     )
-    return json.loads(result.stdout)
+    issues = json.loads(result.stdout)
+    return sorted(issues, key=lambda i: i["number"])
 
 
 def run_claude(issue_number: int, issue_title: str) -> None:
