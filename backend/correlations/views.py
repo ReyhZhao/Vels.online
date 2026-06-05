@@ -22,6 +22,7 @@ from .models import (
     CorrelationRuleLeg,
     DetectionSuggestion,
     LegCondition,
+    SystemRuleMute,
 )
 from .tasks import _create_incident_from_suggestion
 
@@ -361,3 +362,74 @@ class CorrelationRuleDetailView(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         rule.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Per-org system rule mute views ────────────────────────────────────────────
+
+def _get_org_for_staff(request):
+    org_slug = request.query_params.get("org") or request.data.get("org")
+    if not org_slug:
+        return None, Response({"detail": "org is required."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        return Organization.objects.get(slug=org_slug), None
+    except Organization.DoesNotExist:
+        return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+
+class OrgSystemRulesView(APIView):
+    """List system rules with per-org mute status. Staff only."""
+
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        org, err = _get_org_for_staff(request)
+        if err:
+            return err
+
+        system_rules = (
+            CorrelationRule.objects
+            .filter(organization=None)
+            .prefetch_related("legs__conditions")
+            .order_by("name")
+        )
+        muted_ids = set(
+            SystemRuleMute.objects.filter(organization=org).values_list("rule_id", flat=True)
+        )
+        data = []
+        for rule in system_rules:
+            row = _CorrelationRuleSerializer(rule).data
+            row["muted"] = rule.id in muted_ids
+            data.append(row)
+        return Response(data)
+
+
+class OrgSystemRuleMuteView(APIView):
+    """Create or remove a mute record for a system rule + org pair. Staff only."""
+
+    def _resolve(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return None, None, err
+        org, err = _get_org_for_staff(request)
+        if err:
+            return None, None, err
+        try:
+            rule = CorrelationRule.objects.get(pk=pk, organization=None)
+        except CorrelationRule.DoesNotExist:
+            return None, None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return rule, org, None
+
+    def post(self, request, pk):
+        rule, org, err = self._resolve(request, pk)
+        if err:
+            return err
+        SystemRuleMute.objects.get_or_create(organization=org, rule=rule)
+        return Response({"rule_id": rule.id, "muted": True})
+
+    def delete(self, request, pk):
+        rule, org, err = self._resolve(request, pk)
+        if err:
+            return err
+        SystemRuleMute.objects.filter(organization=org, rule=rule).delete()
+        return Response({"rule_id": rule.id, "muted": False})

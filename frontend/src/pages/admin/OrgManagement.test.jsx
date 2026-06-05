@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('@/lib/axios', () => ({
-  default: { get: vi.fn(), post: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
 }));
 
 import api from '@/lib/axios';
@@ -227,7 +227,8 @@ describe('OrgManagement', () => {
     it('loads invitations when row is expanded', async () => {
       api.get
         .mockResolvedValueOnce({ data: [ACME] })
-        .mockResolvedValueOnce({ data: [PENDING_INV] });
+        .mockResolvedValueOnce({ data: [PENDING_INV] })
+        .mockResolvedValueOnce({ data: [] });
       const user = userEvent.setup();
       renderPage();
       await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
@@ -242,7 +243,8 @@ describe('OrgManagement', () => {
     it('shows invitation details in sub-table', async () => {
       api.get
         .mockResolvedValueOnce({ data: [ACME] })
-        .mockResolvedValueOnce({ data: [PENDING_INV] });
+        .mockResolvedValueOnce({ data: [PENDING_INV] })
+        .mockResolvedValueOnce({ data: [] });
       const user = userEvent.setup();
       renderPage();
       await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
@@ -260,6 +262,7 @@ describe('OrgManagement', () => {
     it('shows empty state when org has no invitations', async () => {
       api.get
         .mockResolvedValueOnce({ data: [ACME] })
+        .mockResolvedValueOnce({ data: [] })
         .mockResolvedValueOnce({ data: [] });
       const user = userEvent.setup();
       renderPage();
@@ -275,7 +278,8 @@ describe('OrgManagement', () => {
     it('collapses row when chevron is clicked again', async () => {
       api.get
         .mockResolvedValueOnce({ data: [ACME] })
-        .mockResolvedValueOnce({ data: [PENDING_INV] });
+        .mockResolvedValueOnce({ data: [PENDING_INV] })
+        .mockResolvedValueOnce({ data: [] });
       const user = userEvent.setup();
       renderPage();
       await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
@@ -291,6 +295,7 @@ describe('OrgManagement', () => {
       const NEW_INV = { id: 11, email: 'bob@example.com', full_name: 'Bob', role: 'member', status: 'pending' };
       api.get
         .mockResolvedValueOnce({ data: [ACME] })
+        .mockResolvedValueOnce({ data: [] })
         .mockResolvedValueOnce({ data: [] });
       api.post.mockResolvedValue({ data: NEW_INV });
 
@@ -307,6 +312,146 @@ describe('OrgManagement', () => {
       await user.click(screen.getByRole('button', { name: /send invitation/i }));
 
       await waitFor(() => expect(screen.getByText('bob@example.com')).toBeInTheDocument());
+    });
+  });
+
+  describe('OrgRow system rules mute', () => {
+    const SYSTEM_RULE_ACTIVE = { id: 1, name: 'Port Scan', severity: 'high', muted: false, organization: null, legs: [] };
+    const SYSTEM_RULE_MUTED = { id: 2, name: 'Brute Force', severity: 'critical', muted: true, organization: null, legs: [] };
+
+    function setupWithSystemRules(rules) {
+      api.get
+        .mockResolvedValueOnce({ data: [ACME] })
+        .mockResolvedValueOnce({ data: [] })
+        .mockResolvedValueOnce({ data: rules });
+    }
+
+    it('loads system rules when row is expanded', async () => {
+      setupWithSystemRules([SYSTEM_RULE_ACTIVE]);
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
+
+      await user.click(screen.getByLabelText('Expand Acme invitations'));
+
+      await waitFor(() =>
+        expect(api.get).toHaveBeenCalledWith('/api/correlations/org-system-rules/?org=acme')
+      );
+    });
+
+    it('shows system rules in section', async () => {
+      setupWithSystemRules([SYSTEM_RULE_ACTIVE, SYSTEM_RULE_MUTED]);
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
+
+      await user.click(screen.getByLabelText('Expand Acme invitations'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Port Scan')).toBeInTheDocument();
+        expect(screen.getByText('Brute Force')).toBeInTheDocument();
+      });
+    });
+
+    it('shows Mute button for unmuted rules', async () => {
+      setupWithSystemRules([SYSTEM_RULE_ACTIVE]);
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
+
+      await user.click(screen.getByLabelText('Expand Acme invitations'));
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /^mute port scan for acme$/i })).toBeInTheDocument()
+      );
+    });
+
+    it('shows Unmute button for muted rules', async () => {
+      setupWithSystemRules([SYSTEM_RULE_MUTED]);
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
+
+      await user.click(screen.getByLabelText('Expand Acme invitations'));
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /^unmute brute force for acme$/i })).toBeInTheDocument()
+      );
+    });
+
+    it('calls POST to mute an unmuted system rule', async () => {
+      setupWithSystemRules([SYSTEM_RULE_ACTIVE]);
+      api.post.mockResolvedValue({ data: { rule_id: 1, muted: true } });
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
+
+      await user.click(screen.getByLabelText('Expand Acme invitations'));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /^mute port scan for acme$/i })).toBeInTheDocument()
+      );
+
+      await user.click(screen.getByRole('button', { name: /^mute port scan for acme$/i }));
+
+      await waitFor(() =>
+        expect(api.post).toHaveBeenCalledWith(
+          '/api/correlations/org-system-rules/1/mute/',
+          { org: 'acme' }
+        )
+      );
+    });
+
+    it('calls DELETE to unmute a muted system rule', async () => {
+      setupWithSystemRules([SYSTEM_RULE_MUTED]);
+      api.delete.mockResolvedValue({ data: { rule_id: 2, muted: false } });
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
+
+      await user.click(screen.getByLabelText('Expand Acme invitations'));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /^unmute brute force for acme$/i })).toBeInTheDocument()
+      );
+
+      await user.click(screen.getByRole('button', { name: /^unmute brute force for acme$/i }));
+
+      await waitFor(() =>
+        expect(api.delete).toHaveBeenCalledWith(
+          '/api/correlations/org-system-rules/2/mute/?org=acme'
+        )
+      );
+    });
+
+    it('toggles button label from Mute to Unmute after muting', async () => {
+      setupWithSystemRules([SYSTEM_RULE_ACTIVE]);
+      api.post.mockResolvedValue({ data: { rule_id: 1, muted: true } });
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
+
+      await user.click(screen.getByLabelText('Expand Acme invitations'));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /^mute port scan for acme$/i })).toBeInTheDocument()
+      );
+
+      await user.click(screen.getByRole('button', { name: /^mute port scan for acme$/i }));
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /^unmute port scan for acme$/i })).toBeInTheDocument()
+      );
+    });
+
+    it('shows empty state when no system rules exist', async () => {
+      setupWithSystemRules([]);
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument());
+
+      await user.click(screen.getByLabelText('Expand Acme invitations'));
+
+      await waitFor(() =>
+        expect(screen.getByText('No system rules defined.')).toBeInTheDocument()
+      );
     });
   });
 });

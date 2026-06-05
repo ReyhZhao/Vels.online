@@ -7,6 +7,8 @@ from .views import (
     DetectionSuggestionAcceptView,
     DetectionSuggestionDismissView,
     DetectionSuggestionListView,
+    OrgSystemRuleMuteView,
+    OrgSystemRulesView,
 )
 
 urlpatterns = [
@@ -16,4 +18,6 @@ urlpatterns = [
     path("rules/", CorrelationRuleListView.as_view()),
     path("rules/<int:pk>/", CorrelationRuleDetailView.as_view()),
     path("catalog/", CorrelationCatalogView.as_view()),
+    path("org-system-rules/", OrgSystemRulesView.as_view()),
+    path("org-system-rules/<int:pk>/mute/", OrgSystemRuleMuteView.as_view()),
 ]

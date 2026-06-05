@@ -340,3 +340,175 @@ def test_get_rule_detail(client, staff, rule):
     r = client.get(f"/api/correlations/rules/{rule.pk}/")
     assert r.status_code == 200
     assert r.json()["name"] == "Port Scan Rule"
+
+
+# ── GET /api/correlations/org-system-rules/ ──────────────────────────────────
+
+@pytest.fixture
+def org(db):
+    return Organization.objects.create(name="Acme Corp", slug="acme", wazuh_group="acme")
+
+
+@pytest.fixture
+def system_rule(db):
+    return CorrelationRule.objects.create(
+        name="Port Scan",
+        organization=None,
+        correlation_key="source.ip",
+        window_minutes=30,
+        severity="high",
+        enabled=True,
+    )
+
+
+@pytest.mark.django_db
+def test_list_org_system_rules_requires_staff(client, non_staff, org):
+    client.force_login(non_staff)
+    r = client.get(f"/api/correlations/org-system-rules/?org={org.slug}")
+    assert r.status_code == 403
+
+
+@pytest.mark.django_db
+def test_list_org_system_rules_requires_org_param(client, staff):
+    client.force_login(staff)
+    r = client.get("/api/correlations/org-system-rules/")
+    assert r.status_code == 400
+
+
+@pytest.mark.django_db
+def test_list_org_system_rules_returns_system_rules_only(client, staff, org, system_rule):
+    org_rule = CorrelationRule.objects.create(
+        name="Org-owned Rule",
+        organization=org,
+        correlation_key="none",
+        window_minutes=60,
+        severity="medium",
+        enabled=True,
+    )
+    client.force_login(staff)
+    r = client.get(f"/api/correlations/org-system-rules/?org={org.slug}")
+    assert r.status_code == 200
+    data = r.json()
+    names = [d["name"] for d in data]
+    assert "Port Scan" in names
+    assert "Org-owned Rule" not in names
+
+
+@pytest.mark.django_db
+def test_list_org_system_rules_muted_flag_false_when_not_muted(client, staff, org, system_rule):
+    client.force_login(staff)
+    r = client.get(f"/api/correlations/org-system-rules/?org={org.slug}")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    assert data[0]["muted"] is False
+
+
+@pytest.mark.django_db
+def test_list_org_system_rules_muted_flag_true_when_muted(client, staff, org, system_rule):
+    from correlations.models import SystemRuleMute
+    SystemRuleMute.objects.create(organization=org, rule=system_rule)
+    client.force_login(staff)
+    r = client.get(f"/api/correlations/org-system-rules/?org={org.slug}")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    assert data[0]["muted"] is True
+
+
+# ── POST /api/correlations/org-system-rules/<pk>/mute/ ───────────────────────
+
+@pytest.mark.django_db
+def test_mute_system_rule_requires_staff(client, non_staff, org, system_rule):
+    client.force_login(non_staff)
+    r = client.post(
+        f"/api/correlations/org-system-rules/{system_rule.pk}/mute/",
+        data={"org": org.slug},
+        content_type="application/json",
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.django_db
+def test_mute_system_rule_creates_mute_record(client, staff, org, system_rule):
+    from correlations.models import SystemRuleMute
+    client.force_login(staff)
+    r = client.post(
+        f"/api/correlations/org-system-rules/{system_rule.pk}/mute/",
+        data={"org": org.slug},
+        content_type="application/json",
+    )
+    assert r.status_code == 200
+    assert r.json()["muted"] is True
+    assert SystemRuleMute.objects.filter(organization=org, rule=system_rule).exists()
+
+
+@pytest.mark.django_db
+def test_mute_system_rule_idempotent(client, staff, org, system_rule):
+    from correlations.models import SystemRuleMute
+    client.force_login(staff)
+    client.post(
+        f"/api/correlations/org-system-rules/{system_rule.pk}/mute/",
+        data={"org": org.slug},
+        content_type="application/json",
+    )
+    r = client.post(
+        f"/api/correlations/org-system-rules/{system_rule.pk}/mute/",
+        data={"org": org.slug},
+        content_type="application/json",
+    )
+    assert r.status_code == 200
+    assert SystemRuleMute.objects.filter(organization=org, rule=system_rule).count() == 1
+
+
+@pytest.mark.django_db
+def test_mute_org_owned_rule_returns_404(client, staff, org):
+    org_rule = CorrelationRule.objects.create(
+        name="Org Rule",
+        organization=org,
+        correlation_key="none",
+        window_minutes=60,
+        severity="medium",
+        enabled=True,
+    )
+    client.force_login(staff)
+    r = client.post(
+        f"/api/correlations/org-system-rules/{org_rule.pk}/mute/",
+        data={"org": org.slug},
+        content_type="application/json",
+    )
+    assert r.status_code == 404
+
+
+# ── DELETE /api/correlations/org-system-rules/<pk>/mute/ ─────────────────────
+
+@pytest.mark.django_db
+def test_unmute_system_rule_removes_mute_record(client, staff, org, system_rule):
+    from correlations.models import SystemRuleMute
+    SystemRuleMute.objects.create(organization=org, rule=system_rule)
+    client.force_login(staff)
+    r = client.delete(
+        f"/api/correlations/org-system-rules/{system_rule.pk}/mute/?org={org.slug}"
+    )
+    assert r.status_code == 200
+    assert r.json()["muted"] is False
+    assert not SystemRuleMute.objects.filter(organization=org, rule=system_rule).exists()
+
+
+@pytest.mark.django_db
+def test_unmute_system_rule_no_op_when_not_muted(client, staff, org, system_rule):
+    client.force_login(staff)
+    r = client.delete(
+        f"/api/correlations/org-system-rules/{system_rule.pk}/mute/?org={org.slug}"
+    )
+    assert r.status_code == 200
+    assert r.json()["muted"] is False
+
+
+@pytest.mark.django_db
+def test_unmute_system_rule_requires_staff(client, non_staff, org, system_rule):
+    client.force_login(non_staff)
+    r = client.delete(
+        f"/api/correlations/org-system-rules/{system_rule.pk}/mute/?org={org.slug}"
+    )
+    assert r.status_code == 403

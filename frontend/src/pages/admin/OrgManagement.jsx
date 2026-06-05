@@ -123,6 +123,10 @@ function OrgRow({ org }) {
   const [alertSaveError, setAlertSaveError] = useState(null);
   const [alertSaved, setAlertSaved] = useState(false);
 
+  const [systemRules, setSystemRules] = useState(null);
+  const [loadingSystemRules, setLoadingSystemRules] = useState(false);
+  const [muteTogglingId, setMuteTogglingId] = useState(null);
+
   async function loadInvitations() {
     if (invitations !== null) return;
     setLoadingInvites(true);
@@ -136,8 +140,42 @@ function OrgRow({ org }) {
     }
   }
 
+  async function loadSystemRules() {
+    if (systemRules !== null) return;
+    setLoadingSystemRules(true);
+    try {
+      const res = await api.get(`/api/correlations/org-system-rules/?org=${org.slug}`);
+      setSystemRules(res.data);
+    } catch {
+      setSystemRules([]);
+    } finally {
+      setLoadingSystemRules(false);
+    }
+  }
+
+  async function handleToggleMute(rule) {
+    setMuteTogglingId(rule.id);
+    try {
+      if (rule.muted) {
+        await api.delete(`/api/correlations/org-system-rules/${rule.id}/mute/?org=${org.slug}`);
+      } else {
+        await api.post(`/api/correlations/org-system-rules/${rule.id}/mute/`, { org: org.slug });
+      }
+      setSystemRules(prev =>
+        prev.map(r => (r.id === rule.id ? { ...r, muted: !r.muted } : r))
+      );
+    } catch {
+      // leave state unchanged on error
+    } finally {
+      setMuteTogglingId(null);
+    }
+  }
+
   function handleToggle() {
-    if (!expanded) loadInvitations();
+    if (!expanded) {
+      loadInvitations();
+      loadSystemRules();
+    }
     setExpanded(v => !v);
   }
 
@@ -330,6 +368,44 @@ function OrgRow({ org }) {
                 </Button>
               </div>
             </form>
+
+            <div className="space-y-2 border-t border-border/50 pt-3 mt-3">
+              <p className="text-xs font-semibold text-foreground uppercase tracking-wider">System Rules</p>
+              {loadingSystemRules && <p className="text-sm text-muted-foreground">Loading system rules…</p>}
+              {!loadingSystemRules && systemRules !== null && systemRules.length === 0 && (
+                <p className="text-sm text-muted-foreground">No system rules defined.</p>
+              )}
+              {!loadingSystemRules && systemRules && systemRules.length > 0 && (
+                <table className="w-full text-xs" aria-label={`System rules for ${org.name}`}>
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th className="pb-1 font-medium">Rule</th>
+                      <th className="pb-1 font-medium">Severity</th>
+                      <th className="pb-1 font-medium text-right">Mute for this org</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {systemRules.map(rule => (
+                      <tr key={rule.id} className="border-t border-border/50">
+                        <td className="py-1.5 text-foreground">{rule.name}</td>
+                        <td className="py-1.5 text-muted-foreground capitalize">{rule.severity}</td>
+                        <td className="py-1.5 text-right">
+                          <Button
+                            size="sm"
+                            variant={rule.muted ? 'default' : 'outline'}
+                            disabled={muteTogglingId === rule.id}
+                            onClick={() => handleToggleMute(rule)}
+                            aria-label={rule.muted ? `Unmute ${rule.name} for ${org.name}` : `Mute ${rule.name} for ${org.name}`}
+                          >
+                            {muteTogglingId === rule.id ? '…' : rule.muted ? 'Unmute' : 'Mute'}
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </td>
         </tr>
       )}
