@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrgContext';
 import SlideOver from '../components/SlideOver';
 import BulkPromoteModal from '../components/BulkPromoteModal';
+import CorrelationFromAlertsDrawer from '../components/CorrelationFromAlertsDrawer';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -34,12 +35,13 @@ function formatDatetime(iso) {
   return d.toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function AlertDetailPanel({ alert, onClose, onStateChange, orgSlug }) {
+function AlertDetailPanel({ alert, onClose, onStateChange, onDelete, orgSlug }) {
   const [relinkOpen, setRelinkOpen] = useState(false);
   const [incidents, setIncidents] = useState([]);
   const [incidentQuery, setIncidentQuery] = useState('');
   const [relinking, setRelinking] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleTransition = async (newState) => {
     setTransitioning(true);
@@ -50,6 +52,20 @@ function AlertDetailPanel({ alert, onClose, onStateChange, orgSlug }) {
       // ignore
     } finally {
       setTransitioning(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Permanently delete alert ${alert.display_id}? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/api/alerts/${alert.display_id}/`);
+      onDelete(alert.display_id);
+      onClose();
+    } catch {
+      // ignore
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -165,6 +181,17 @@ function AlertDetailPanel({ alert, onClose, onStateChange, orgSlug }) {
             Re-link to incident…
           </button>
         )}
+      </div>
+
+      {/* Destructive actions */}
+      <div className="pt-2 border-t border-border">
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          className="w-full rounded-md border border-red-200 dark:border-red-900/50 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
+        >
+          {deleting ? 'Deleting…' : 'Delete alert'}
+        </button>
       </div>
 
       {/* Re-link incident picker */}
@@ -291,6 +318,8 @@ function AlertsPage() {
   const [promoteModalOpen, setPromoteModalOpen] = useState(false);
   const [promoteOrgSlug, setPromoteOrgSlug] = useState(null);
 
+  const [correlationDrawerOpen, setCorrelationDrawerOpen] = useState(false);
+
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
     try {
@@ -392,6 +421,32 @@ function AlertsPage() {
     if (!orgSlug) return;
     setPromoteOrgSlug(orgSlug);
     setPromoteModalOpen(true);
+  };
+
+  const handleAlertDeleted = (displayId) => {
+    setData(prev => ({
+      ...prev,
+      count: prev.count - 1,
+      results: prev.results.filter(a => a.display_id !== displayId),
+    }));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.delete(displayId);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = [...selectedIds];
+    if (!window.confirm(`Permanently delete ${ids.length} alert${ids.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    for (const id of ids) {
+      try {
+        await api.delete(`/api/alerts/${id}/`);
+        handleAlertDeleted(id);
+      } catch {
+        // continue deleting remaining
+      }
+    }
   };
 
   const handleQuickAction = async (e, alert, newState) => {
@@ -636,7 +691,21 @@ function AlertsPage() {
             onClick={handleBulkPromote}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
           >
-            {`Create incident from selected (${selectedIds.size})`}
+            {`Create incident (${selectedIds.size})`}
+          </button>
+          {user?.is_staff && (
+            <button
+              onClick={() => setCorrelationDrawerOpen(true)}
+              className="rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+            >
+              Create correlation rule
+            </button>
+          )}
+          <button
+            onClick={handleBulkDelete}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            Delete selected
           </button>
           <button
             onClick={() => setSelectedIds(new Set())}
@@ -662,6 +731,18 @@ function AlertsPage() {
         }}
       />
 
+      {/* Correlation rule creation from selected alerts */}
+      {correlationDrawerOpen && (
+        <CorrelationFromAlertsDrawer
+          alerts={data.results.filter(a => selectedIds.has(a.display_id))}
+          onClose={() => setCorrelationDrawerOpen(false)}
+          onCreated={() => {
+            setCorrelationDrawerOpen(false);
+            setSelectedIds(new Set());
+          }}
+        />
+      )}
+
       {/* Detail slide-over */}
       <SlideOver
         open={panelOpen}
@@ -673,6 +754,7 @@ function AlertsPage() {
             alert={selectedAlert}
             onClose={() => setPanelOpen(false)}
             onStateChange={handleStateChange}
+            onDelete={handleAlertDeleted}
             orgSlug={selectedAlert.org_slug}
           />
         )}

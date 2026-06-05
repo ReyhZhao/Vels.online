@@ -318,6 +318,24 @@ class AlertDetailView(APIView):
         return Response(AlertSerializer(alert).data)
 
     @extend_schema(
+        summary="Delete alert",
+        description="Permanently deletes an alert. Available to authenticated org members.",
+        responses={
+            204: None,
+            404: inline_serializer(name="AlertDeleteNotFound", fields={"detail": _s.CharField()}),
+        },
+    )
+    def delete(self, request, display_id):
+        err = _require_auth(request)
+        if err:
+            return err
+        alert, err = self._get_alert(request, display_id)
+        if err:
+            return err
+        alert.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(
         summary="Update alert state or incident link",
         description=(
             "Performs one of two mutually exclusive operations:\n\n"
