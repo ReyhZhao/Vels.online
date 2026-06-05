@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import api from '@/lib/axios';
+import RuleAuthorDrawer from '@/components/RuleAuthorDrawer';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -141,109 +142,6 @@ function LegEditor({ leg, legIndex, catalog, onChange, onRemove }) {
       >
         + Add condition
       </button>
-    </div>
-  );
-}
-
-// ── DraftModal ─────────────────────────────────────────────────────────────
-
-function DraftModal({ onClose, onDrafted }) {
-  const [prompt, setPrompt] = useState('');
-  const [scope, setScope] = useState('all');
-  const [orgs, setOrgs] = useState([]);
-  const [drafting, setDrafting] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    api.get('/api/security/organizations/').then(res => setOrgs(res.data)).catch(() => {});
-  }, []);
-
-  async function handleDraft() {
-    if (!prompt.trim()) return;
-    setError(null);
-    setDrafting(true);
-    try {
-      const res = await api.post('/api/correlations/draft/', {
-        messages: [{ role: 'user', content: prompt.trim() }],
-        scope,
-      });
-      onDrafted(res.data);
-    } catch (err) {
-      const d = err.response?.data;
-      setError(d?.detail || d?.reason || 'Failed to generate draft.');
-    } finally {
-      setDrafting(false);
-    }
-  }
-
-  function handleKeyDown(e) {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleDraft();
-  }
-
-  const scopeLabel = scope === 'all'
-    ? 'System Rule (all organizations)'
-    : (orgs.find(o => o.slug === scope)?.name ?? scope) + ' (Org Rule)';
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-card rounded-lg border border-border shadow-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground">Draft with AI</h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">✕</button>
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-foreground">Scope</label>
-          <select
-            value={scope}
-            onChange={e => setScope(e.target.value)}
-            aria-label="Grounding scope"
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            <option value="all">All organizations — System Rule</option>
-            {orgs.map(o => (
-              <option key={o.slug} value={o.slug}>{o.name} — Org Rule</option>
-            ))}
-          </select>
-          <p className="text-xs text-muted-foreground">
-            Grounding uses {scope === 'all' ? 'alerts across all tenants' : `${orgs.find(o => o.slug === scope)?.name ?? scope}'s alerts`}.
-            Draft will default to a <strong>{scope === 'all' ? 'System Rule' : 'Org Rule'}</strong>.
-          </p>
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-foreground">Describe what to detect</label>
-          <textarea
-            value={prompt}
-            onChange={e => setPrompt(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="e.g. Detect when the same user triggers more than 5 failed logins within 10 minutes"
-            rows={4}
-            autoFocus
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring resize-none"
-          />
-        </div>
-
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleDraft}
-            disabled={!prompt.trim() || drafting}
-            className="flex-1 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-          >
-            {drafting ? 'Drafting…' : 'Generate draft'}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -564,8 +462,7 @@ export default function CorrelationRulesAdmin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [drawerRule, setDrawerRule] = useState(undefined);
-  const [draftModalOpen, setDraftModalOpen] = useState(false);
-  const [draftWarnings, setDraftWarnings] = useState([]);
+  const [ruleAuthorOpen, setRuleAuthorOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -609,18 +506,17 @@ export default function CorrelationRulesAdmin() {
     }
   }
 
-  function handleDrafted({ updated_draft, warnings }) {
-    setDraftModalOpen(false);
-    setDraftWarnings(warnings ?? []);
-    setDrawerRule(updated_draft);
+  function handleRuleAuthorSaved(rule) {
+    setRules(prev => [...prev, rule]);
+    setRuleAuthorOpen(false);
   }
 
   return (
     <div className="space-y-6 p-6">
-      {draftModalOpen && (
-        <DraftModal
-          onClose={() => setDraftModalOpen(false)}
-          onDrafted={handleDrafted}
+      {ruleAuthorOpen && (
+        <RuleAuthorDrawer
+          onClose={() => setRuleAuthorOpen(false)}
+          onSaved={handleRuleAuthorSaved}
         />
       )}
 
@@ -637,7 +533,7 @@ export default function CorrelationRulesAdmin() {
         <h1 className="text-2xl font-semibold text-foreground">Correlation Rules</h1>
         <div className="flex gap-2">
           <button
-            onClick={() => setDraftModalOpen(true)}
+            onClick={() => setRuleAuthorOpen(true)}
             className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
           >
             Draft with AI
@@ -652,24 +548,6 @@ export default function CorrelationRulesAdmin() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
-      {draftWarnings.length > 0 && (
-        <div className="rounded-md border border-yellow-300 bg-yellow-50 dark:border-yellow-700 dark:bg-yellow-900/20 px-4 py-3 space-y-1">
-          <p className="text-xs font-semibold text-yellow-800 dark:text-yellow-300">
-            AI draft warnings — some conditions were removed:
-          </p>
-          <ul className="list-disc list-inside space-y-0.5">
-            {draftWarnings.map((w, i) => (
-              <li key={i} className="text-xs text-yellow-700 dark:text-yellow-400">{w}</li>
-            ))}
-          </ul>
-          <button
-            onClick={() => setDraftWarnings([])}
-            className="text-xs text-yellow-600 dark:text-yellow-400 hover:underline"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
 
       <div className="overflow-hidden rounded-lg border border-border bg-card">
         <div className="overflow-x-auto">
