@@ -149,8 +149,14 @@ function LegEditor({ leg, legIndex, catalog, onChange, onRemove }) {
 
 function DraftModal({ onClose, onDrafted }) {
   const [prompt, setPrompt] = useState('');
+  const [scope, setScope] = useState('all');
+  const [orgs, setOrgs] = useState([]);
   const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    api.get('/api/security/organizations/').then(res => setOrgs(res.data)).catch(() => {});
+  }, []);
 
   async function handleDraft() {
     if (!prompt.trim()) return;
@@ -159,6 +165,7 @@ function DraftModal({ onClose, onDrafted }) {
     try {
       const res = await api.post('/api/correlations/draft/', {
         messages: [{ role: 'user', content: prompt.trim() }],
+        scope,
       });
       onDrafted(res.data);
     } catch (err) {
@@ -173,6 +180,10 @@ function DraftModal({ onClose, onDrafted }) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleDraft();
   }
 
+  const scopeLabel = scope === 'all'
+    ? 'System Rule (all organizations)'
+    : (orgs.find(o => o.slug === scope)?.name ?? scope) + ' (Org Rule)';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -181,18 +192,39 @@ function DraftModal({ onClose, onDrafted }) {
           <h2 className="text-lg font-semibold text-foreground">Draft with AI</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">✕</button>
         </div>
-        <p className="text-sm text-muted-foreground">
-          Describe what you want to detect in plain language. The assistant will draft a correlation rule for you to review and save.
-        </p>
-        <textarea
-          value={prompt}
-          onChange={e => setPrompt(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="e.g. Detect when the same user triggers more than 5 failed logins within 10 minutes"
-          rows={4}
-          autoFocus
-          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring resize-none"
-        />
+
+        <div className="space-y-1.5">
+          <label className="block text-xs font-medium text-foreground">Scope</label>
+          <select
+            value={scope}
+            onChange={e => setScope(e.target.value)}
+            aria-label="Grounding scope"
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            <option value="all">All organizations — System Rule</option>
+            {orgs.map(o => (
+              <option key={o.slug} value={o.slug}>{o.name} — Org Rule</option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Grounding uses {scope === 'all' ? 'alerts across all tenants' : `${orgs.find(o => o.slug === scope)?.name ?? scope}'s alerts`}.
+            Draft will default to a <strong>{scope === 'all' ? 'System Rule' : 'Org Rule'}</strong>.
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="block text-xs font-medium text-foreground">Describe what to detect</label>
+          <textarea
+            value={prompt}
+            onChange={e => setPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="e.g. Detect when the same user triggers more than 5 failed logins within 10 minutes"
+            rows={4}
+            autoFocus
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+          />
+        </div>
+
         {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="flex gap-3">
           <button
@@ -227,6 +259,10 @@ function RuleDrawer({ rule, catalog, onClose, onSaved }) {
   const [windowMinutes, setWindowMinutes] = useState(rule?.window_minutes ?? 60);
   const [severity, setSeverity] = useState(rule?.severity ?? 'medium');
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
+  // organization: PK for Org Rule, null for System Rule; undefined means not set by draft
+  const [organization, setOrganization] = useState(
+    'organization' in (rule ?? {}) ? rule.organization : undefined
+  );
   const [legs, setLegs] = useState(
     rule?.legs?.length
       ? rule.legs.map(l => ({
@@ -270,6 +306,7 @@ function RuleDrawer({ rule, catalog, onClose, onSaved }) {
       severity,
       enabled,
       legs: legs.map((l, i) => ({ ...l, display_order: i })),
+      ...(organization !== undefined ? { organization } : {}),
     };
     try {
       let res;
@@ -317,6 +354,13 @@ function RuleDrawer({ rule, catalog, onClose, onSaved }) {
 
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Rule details</p>
+
+            {organization !== undefined && (
+              <div className={`rounded-md px-3 py-2 text-xs font-medium ${organization ? 'bg-blue-50 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300' : 'bg-purple-50 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300'}`}>
+                {organization ? `Org Rule (organization #${organization})` : 'System Rule — applies to all organizations'}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="block text-xs font-medium text-foreground mb-1">Name *</label>

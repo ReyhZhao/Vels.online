@@ -456,6 +456,14 @@ class CorrelationDraftView(APIView):
         current_draft = request.data.get("current_draft") or None
         scope = request.data.get("scope")
 
+        # Validate scope and derive ownership server-side — never trust org from client
+        org_for_draft = None
+        if scope and scope != "all":
+            try:
+                org_for_draft = Organization.objects.get(slug=scope)
+            except Organization.DoesNotExist:
+                return Response({"detail": "Unknown scope."}, status=status.HTTP_400_BAD_REQUEST)
+
         grounding = build_grounding(scope=scope)
 
         try:
@@ -481,6 +489,9 @@ class CorrelationDraftView(APIView):
             )
 
         sanitized, sanitizer_warnings = sanitize_draft(result.updated_draft)
+
+        # Inject ownership default derived from scope
+        sanitized["organization"] = org_for_draft.pk if org_for_draft else None
 
         return Response({
             "updated_draft": sanitized,

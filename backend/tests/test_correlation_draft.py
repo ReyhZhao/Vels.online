@@ -593,3 +593,99 @@ def test_draft_sanitizer_runs_on_provider_output(client, staff_user):
     data = resp.json()
     assert data["updated_draft"]["legs"][0]["conditions"] == []
     assert len(data["warnings"]) >= 1
+
+
+# ── Scope selection & ownership defaults ───────────────────────────────────────
+
+def _mock_provider_with_draft(draft=None):
+    mock_result = RuleDraftResult(updated_draft=draft or _STUB_DRAFT, assistant_reply="ok", warnings=[])
+    mock_provider = MagicMock()
+    mock_provider.draft_rule.return_value = mock_result
+    return mock_provider
+
+
+@pytest.mark.django_db
+def test_draft_all_scope_sets_organization_null(client, staff_user):
+    """scope='all' → updated_draft.organization is null (System Rule)."""
+    client.force_login(staff_user)
+    with patch("correlations.views.get_draft_provider", return_value=_mock_provider_with_draft()):
+        resp = client.post(
+            "/api/correlations/draft/",
+            data=json.dumps({"messages": _MESSAGES, "scope": "all"}),
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    assert resp.json()["updated_draft"]["organization"] is None
+
+
+@pytest.mark.django_db
+def test_draft_no_scope_sets_organization_null(client, staff_user):
+    """Omitting scope → updated_draft.organization is null (System Rule default)."""
+    client.force_login(staff_user)
+    with patch("correlations.views.get_draft_provider", return_value=_mock_provider_with_draft()):
+        resp = client.post(
+            "/api/correlations/draft/",
+            data=json.dumps({"messages": _MESSAGES}),
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    assert resp.json()["updated_draft"]["organization"] is None
+
+
+@pytest.mark.django_db
+def test_draft_org_scope_sets_organization_pk(client, staff_user, db):
+    """scope=<org slug> → updated_draft.organization equals that org's PK (Org Rule)."""
+    org = Organization.objects.create(name="Acme", slug="acme", wazuh_group="acme")
+    client.force_login(staff_user)
+    with patch("correlations.views.get_draft_provider", return_value=_mock_provider_with_draft()):
+        resp = client.post(
+            "/api/correlations/draft/",
+            data=json.dumps({"messages": _MESSAGES, "scope": "acme"}),
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    assert resp.json()["updated_draft"]["organization"] == org.pk
+
+
+@pytest.mark.django_db
+def test_draft_unknown_scope_returns_400(client, staff_user):
+    """Unknown org slug → 400."""
+    client.force_login(staff_user)
+    resp = client.post(
+        "/api/correlations/draft/",
+        data=json.dumps({"messages": _MESSAGES, "scope": "nonexistent-org"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_grounding_org_scope_does_not_leak_other_org_alerts(db):
+    """Org-scoped grounding must not include alerts from another tenant."""
+    now = timezone.now()
+    org_a = Organization.objects.create(name="A", slug="scope-a", wazuh_group="a")
+    org_b = Organization.objects.create(name="B", slug="scope-b", wazuh_group="b")
+    _make_alert(org_a, source_kind="wazuh_event")
+    _make_alert(org_b, source_kind="vulnerability")
+
+    g_a = build_grounding(scope="scope-a", now=now)
+    assert "wazuh_event" in g_a["source_kinds"]
+    assert "vulnerability" not in g_a["source_kinds"]
+
+    g_b = build_grounding(scope="scope-b", now=now)
+    assert "vulnerability" in g_b["source_kinds"]
+    assert "wazuh_event" not in g_b["source_kinds"]
+
+
+@pytest.mark.django_db
+def test_grounding_all_scope_spans_all_tenants(db):
+    """scope='all' grounding includes alerts from every tenant."""
+    now = timezone.now()
+    org_a = Organization.objects.create(name="C", slug="scope-c", wazuh_group="c")
+    org_b = Organization.objects.create(name="D", slug="scope-d", wazuh_group="d")
+    _make_alert(org_a, source_kind="wazuh_event")
+    _make_alert(org_b, source_kind="vulnerability")
+
+    g = build_grounding(scope="all", now=now)
+    assert "wazuh_event" in g["source_kinds"]
+    assert "vulnerability" in g["source_kinds"]
