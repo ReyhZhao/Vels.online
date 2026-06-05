@@ -150,7 +150,7 @@ class PhishingIngestionHandler:
             )
             if message.raw_bytes:
                 self._attach_raw_email(incident, message.raw_bytes, sender_address)
-            self._link_forwarder_contact(incident, forwarder_address, org)
+            self._link_forwarder(incident, forwarder_address, org)
             return outcome
 
         # route_alert didn't create/link an incident (medium-severity path, shouldn't happen here)
@@ -188,7 +188,24 @@ class PhishingIngestionHandler:
                 "inbound_mail: phishing: failed to send drop notification to contact %s", contact.pk
             )
 
-    def _link_forwarder_contact(self, incident, forwarder_address, org):
+    def _link_forwarder(self, incident, forwarder_address, org):
+        from django.contrib.auth.models import User as _User
+
+        # User path: forwarder is a system user — assign them as incident creator.
+        try:
+            user = _User.objects.get(email__iexact=forwarder_address)
+            if incident.created_by_id is None:
+                incident.created_by = user
+                incident.save(update_fields=["created_by", "updated_at"])
+            logger.info(
+                "inbound_mail: phishing: set forwarder user %s as created_by on incident %s",
+                user.pk, incident.display_id,
+            )
+            return
+        except (_User.DoesNotExist, _User.MultipleObjectsReturned):
+            pass
+
+        # Contact path: forwarder is a known contact — link to incident.
         from contacts.models import Contact, IncidentContact
         try:
             contact = Contact.objects.get(email__iexact=forwarder_address, organisation=org)

@@ -204,12 +204,19 @@ def test_user_lookup_takes_precedence_over_contact(acme, forwarder):
     assert alert.organization == acme
 
 
-# ── Auto-link forwarder contact (#387) ───────────────────────────────────────
+# ── Auto-link forwarder (#387) ────────────────────────────────────────────────
+
+@pytest.fixture
+def contact_forwarder(acme):
+    """A forwarder who is a Contact only (no User record)."""
+    from contacts.models import Contact
+    return Contact.objects.create(organisation=acme, name="Bob", email="bob@client.com")
+
+
+# User path
 
 @pytest.mark.django_db
-def test_forwarder_contact_linked_on_created(acme, forwarder):
-    from contacts.models import Contact, IncidentContact
-    contact = Contact.objects.create(organisation=acme, name="Carol", email="carol@acme.com")
+def test_forwarder_user_sets_created_by(acme, forwarder):
     msg = _forwarded_msg()
 
     with patch("security.storage.StorageClient"), \
@@ -218,13 +225,23 @@ def test_forwarder_contact_linked_on_created(acme, forwarder):
 
     assert outcome == "phishing:created"
     incident = Alert.objects.get(source_kind="inbound_email").incident
-    assert IncidentContact.objects.filter(incident=incident, contact=contact).exists()
+    assert incident.created_by == forwarder
 
 
 @pytest.mark.django_db
-def test_forwarder_contact_linked_idempotent_on_dedup(acme, forwarder):
-    from contacts.models import Contact, IncidentContact
-    Contact.objects.create(organisation=acme, name="Carol", email="carol@acme.com")
+def test_forwarder_user_no_incident_contact_created(acme, forwarder):
+    from contacts.models import IncidentContact
+    msg = _forwarded_msg()
+
+    with patch("security.storage.StorageClient"), \
+         patch("inbound_mail.handlers.get_system_user", return_value=forwarder):
+        PhishingIngestionHandler().handle(msg)
+
+    assert IncidentContact.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_forwarder_user_dedup_preserves_created_by(acme, forwarder):
     msg = _forwarded_msg()
 
     with patch("security.storage.StorageClient"), \
@@ -234,12 +251,13 @@ def test_forwarder_contact_linked_idempotent_on_dedup(acme, forwarder):
 
     assert outcome == "phishing:dedup"
     incident = Alert.objects.filter(source_kind="inbound_email").first().incident
-    assert IncidentContact.objects.filter(incident=incident).count() == 1
+    assert incident.created_by == forwarder
 
 
 @pytest.mark.django_db
-def test_no_contact_record_no_error(acme, forwarder):
-    from contacts.models import IncidentContact
+def test_forwarder_user_takes_precedence_over_contact(acme, forwarder):
+    from contacts.models import Contact, IncidentContact
+    Contact.objects.create(organisation=acme, name="Carol", email="carol@acme.com")
     msg = _forwarded_msg()
 
     with patch("security.storage.StorageClient"), \
@@ -247,6 +265,56 @@ def test_no_contact_record_no_error(acme, forwarder):
         outcome = PhishingIngestionHandler().handle(msg)
 
     assert outcome == "phishing:created"
+    incident = Alert.objects.get(source_kind="inbound_email").incident
+    assert incident.created_by == forwarder
+    assert IncidentContact.objects.count() == 0
+
+
+# Contact path
+
+@pytest.mark.django_db
+def test_forwarder_contact_linked_on_created(acme, contact_forwarder):
+    from contacts.models import IncidentContact
+    msg = _forwarded_msg(forwarder_email="bob@client.com")
+
+    with patch("security.storage.StorageClient"), \
+         patch("inbound_mail.handlers.get_system_user"):
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:created"
+    incident = Alert.objects.get(source_kind="inbound_email").incident
+    assert IncidentContact.objects.filter(incident=incident, contact=contact_forwarder).exists()
+
+
+@pytest.mark.django_db
+def test_forwarder_contact_linked_idempotent_on_dedup(acme, contact_forwarder):
+    from contacts.models import IncidentContact
+    msg = _forwarded_msg(forwarder_email="bob@client.com")
+
+    with patch("security.storage.StorageClient"), \
+         patch("inbound_mail.handlers.get_system_user"):
+        PhishingIngestionHandler().handle(msg)
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:dedup"
+    incident = Alert.objects.filter(source_kind="inbound_email").first().incident
+    assert IncidentContact.objects.filter(incident=incident).count() == 1
+
+
+@pytest.mark.django_db
+def test_no_forwarder_match_no_error(acme, forwarder):
+    from contacts.models import IncidentContact
+    # forwarder User exists (used for org resolution) but has no Contact record
+    msg = _forwarded_msg()
+
+    with patch("security.storage.StorageClient"), \
+         patch("inbound_mail.handlers.get_system_user", return_value=forwarder):
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:created"
+    # User path was taken — created_by is set, no IncidentContact
+    incident = Alert.objects.get(source_kind="inbound_email").incident
+    assert incident.created_by == forwarder
     assert IncidentContact.objects.count() == 0
 
 
