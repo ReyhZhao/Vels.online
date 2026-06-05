@@ -146,12 +146,15 @@ function LegEditor({ leg, legIndex, catalog, onChange, onRemove }) {
  * Conversational rule-drafting drawer.
  * Replays messages[] + current_draft to the draft endpoint each turn.
  * Server stays stateless; conversation lives in client state and disappears on close.
+ *
+ * initialScope  — pre-select scope dropdown (org slug or 'all')
+ * initialMessage — if set, auto-sends this as the first turn once data loads
  */
-export default function RuleAuthorDrawer({ initialDraft, onClose, onSaved }) {
+export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMessage, onClose, onSaved }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState(() => ({ ...EMPTY_DRAFT, ...(initialDraft || {}) }));
   const [warnings, setWarnings] = useState([]);
-  const [scope, setScope] = useState('all');
+  const [scope, setScope] = useState(initialScope || 'all');
   const [orgs, setOrgs] = useState([]);
   const [catalog, setCatalog] = useState(null);
   const [input, setInput] = useState('');
@@ -159,6 +162,7 @@ export default function RuleAuthorDrawer({ initialDraft, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const threadRef = useRef(null);
+  const hasAutoSent = useRef(false);
 
   useEffect(() => {
     Promise.all([
@@ -187,12 +191,20 @@ export default function RuleAuthorDrawer({ initialDraft, onClose, onSaved }) {
     }
   }, [messages, loading]);
 
-  async function handleSend() {
-    if (!input.trim() || loading) return;
-    const userMsg = { role: 'user', content: input.trim() };
+  // Auto-send initialMessage once catalog is available (signals data load complete).
+  useEffect(() => {
+    if (!initialMessage || hasAutoSent.current || catalog === null) return;
+    hasAutoSent.current = true;
+    handleSend(initialMessage); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [catalog, initialMessage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleSend(messageOverride) {
+    const content = messageOverride !== undefined ? messageOverride : input.trim();
+    if (!content || loading) return;
+    const userMsg = { role: 'user', content };
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
-    setInput('');
+    if (messageOverride === undefined) setInput('');
     setLoading(true);
     setError(null);
 
@@ -364,7 +376,7 @@ export default function RuleAuthorDrawer({ initialDraft, onClose, onSaved }) {
                 />
                 <button
                   type="button"
-                  onClick={handleSend}
+                  onClick={() => handleSend()}
                   disabled={!input.trim() || loading}
                   aria-label="Send message"
                   className="self-end rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"

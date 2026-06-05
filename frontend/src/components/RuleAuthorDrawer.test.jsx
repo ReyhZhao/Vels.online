@@ -305,4 +305,44 @@ describe('RuleAuthorDrawer', () => {
     expect(secondCall[1].messages).toHaveLength(3); // user, assistant, user
     expect(secondCall[1].current_draft).toMatchObject({ name: 'Brute force rule' });
   });
+
+  it('initialScope pre-selects the scope dropdown', async () => {
+    api.get.mockImplementation(url => {
+      if (url.includes('catalog')) return Promise.resolve({ data: STUB_CATALOG });
+      if (url.includes('organizations')) return Promise.resolve({ data: [{ id: 1, slug: 'acme', name: 'Acme Corp' }] });
+      return Promise.reject(new Error(`Unmocked GET: ${url}`));
+    });
+
+    renderDrawer({ initialScope: 'acme' });
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /grounding scope/i })).toHaveValue('acme');
+    });
+  });
+
+  it('initialMessage auto-sends as first turn once catalog loads', async () => {
+    api.get.mockImplementation(url => {
+      if (url.includes('catalog')) return Promise.resolve({ data: STUB_CATALOG });
+      if (url.includes('organizations')) return Promise.resolve({ data: [{ id: 1, slug: 'acme', name: 'Acme Corp' }] });
+      return Promise.reject(new Error(`Unmocked GET: ${url}`));
+    });
+    api.post.mockResolvedValue({
+      data: { updated_draft: STUB_DRAFT, assistant_reply: 'Auto-drafted from suggestion.', warnings: [] },
+    });
+
+    renderDrawer({ initialScope: 'acme', initialMessage: 'Codify this suggestion into a rule.' });
+
+    await waitFor(() => {
+      expect(screen.getByText('Codify this suggestion into a rule.')).toBeInTheDocument();
+      expect(screen.getByText('Auto-drafted from suggestion.')).toBeInTheDocument();
+    });
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/api/correlations/draft/',
+      expect.objectContaining({
+        messages: [{ role: 'user', content: 'Codify this suggestion into a rule.' }],
+        scope: 'acme',
+      }),
+    );
+  });
 });

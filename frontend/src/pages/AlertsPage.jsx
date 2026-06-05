@@ -6,6 +6,7 @@ import { useOrganization } from '../context/OrgContext';
 import SlideOver from '../components/SlideOver';
 import BulkPromoteModal from '../components/BulkPromoteModal';
 import CorrelationFromAlertsDrawer from '../components/CorrelationFromAlertsDrawer';
+import RuleAuthorDrawer from '../components/RuleAuthorDrawer';
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -239,7 +240,7 @@ function confidenceBadgeClass(confidence) {
   return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
 }
 
-function SuggestionCard({ suggestion, acting, onAccept, onDismiss }) {
+function SuggestionCard({ suggestion, acting, onAccept, onDismiss, onCodify, isStaff }) {
   return (
     <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-background p-4 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -249,7 +250,7 @@ function SuggestionCard({ suggestion, acting, onAccept, onDismiss }) {
             {Math.round(suggestion.confidence * 100)}%
           </span>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2 shrink-0 flex-wrap">
           <button
             onClick={() => onAccept(suggestion.id)}
             disabled={acting}
@@ -264,6 +265,15 @@ function SuggestionCard({ suggestion, acting, onAccept, onDismiss }) {
           >
             Dismiss
           </button>
+          {isStaff && (
+            <button
+              onClick={() => onCodify(suggestion)}
+              disabled={acting}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              Codify as rule
+            </button>
+          )}
         </div>
       </div>
       <p className="text-sm text-foreground">{suggestion.rationale}</p>
@@ -282,6 +292,13 @@ function SuggestionCard({ suggestion, acting, onAccept, onDismiss }) {
       )}
     </div>
   );
+}
+
+function buildSuggestionSeed(suggestion) {
+  const alertLines = suggestion.proposed_alerts
+    .map(a => `- ${a.display_id}: ${a.title} (${a.severity})`)
+    .join('\n');
+  return `Codify the following correlated alerts into a detection rule.\n\nRationale: ${suggestion.rationale}\n\nAlerts:\n${alertLines}`;
 }
 
 const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low', 'info'];
@@ -319,6 +336,7 @@ function AlertsPage() {
   const [promoteOrgSlug, setPromoteOrgSlug] = useState(null);
 
   const [correlationDrawerOpen, setCorrelationDrawerOpen] = useState(false);
+  const [codifySource, setCodifySource] = useState(null);
 
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
@@ -495,6 +513,8 @@ function AlertsPage() {
               acting={acting}
               onAccept={handleAccept}
               onDismiss={handleDismiss}
+              onCodify={setCodifySource}
+              isStaff={user?.is_staff}
             />
           ))}
         </div>
@@ -740,6 +760,16 @@ function AlertsPage() {
             setCorrelationDrawerOpen(false);
             setSelectedIds(new Set());
           }}
+        />
+      )}
+
+      {/* Codify suggestion as a correlation rule */}
+      {codifySource && (
+        <RuleAuthorDrawer
+          initialScope={selectedOrg?.slug}
+          initialMessage={buildSuggestionSeed(codifySource)}
+          onClose={() => setCodifySource(null)}
+          onSaved={() => setCodifySource(null)}
         />
       )}
 

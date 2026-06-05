@@ -14,6 +14,18 @@ vi.mock('../components/BulkPromoteModal', () => ({
   default: () => null,
 }));
 
+vi.mock('../components/CorrelationFromAlertsDrawer', () => ({
+  default: () => null,
+}));
+
+vi.mock('../components/RuleAuthorDrawer', () => ({
+  default: ({ initialScope, initialMessage, onClose }) => (
+    <div data-testid="rule-author-drawer" data-scope={initialScope} data-message={initialMessage}>
+      <button onClick={onClose}>close-drawer</button>
+    </div>
+  ),
+}));
+
 vi.mock('../context/AuthContext', () => ({
   useAuth: vi.fn(() => ({ user: { id: 1 } })),
 }));
@@ -30,6 +42,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 import api from '../lib/axios';
+import { useAuth } from '../context/AuthContext';
 import AlertsPage from './AlertsPage';
 
 const EMPTY_ALERTS = { count: 0, page: 1, per_page: 25, total_pages: 1, results: [] };
@@ -149,5 +162,61 @@ describe('AlertsPage — Detection Suggestions', () => {
     renderPage();
     await waitFor(() => screen.getByText('Detection Suggestions'));
     expect(screen.getByText('(1)')).toBeInTheDocument();
+  });
+});
+
+describe('AlertsPage — Codify as rule', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockNavigate.mockReset();
+    api.get.mockImplementation(url => {
+      if (url === '/api/correlations/suggestions/') return Promise.resolve({ data: [SUGGESTION] });
+      return Promise.resolve({ data: EMPTY_ALERTS });
+    });
+  });
+
+  it('"Codify as rule" button is not visible for non-staff users', async () => {
+    useAuth.mockReturnValue({ user: { id: 1, is_staff: false } });
+    renderPage();
+    await waitFor(() => screen.getByText(SUGGESTION.rationale));
+    expect(screen.queryByRole('button', { name: /codify as rule/i })).not.toBeInTheDocument();
+  });
+
+  it('"Codify as rule" button is not visible when is_staff is absent', async () => {
+    useAuth.mockReturnValue({ user: { id: 1 } });
+    renderPage();
+    await waitFor(() => screen.getByText(SUGGESTION.rationale));
+    expect(screen.queryByRole('button', { name: /codify as rule/i })).not.toBeInTheDocument();
+  });
+
+  it('"Codify as rule" button is visible for staff users', async () => {
+    useAuth.mockReturnValue({ user: { id: 1, is_staff: true } });
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /codify as rule/i }));
+  });
+
+  it('clicking "Codify as rule" opens the drafting drawer scoped to the current org', async () => {
+    useAuth.mockReturnValue({ user: { id: 1, is_staff: true } });
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /codify as rule/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /codify as rule/i }));
+
+    await waitFor(() => screen.getByTestId('rule-author-drawer'));
+    expect(screen.getByTestId('rule-author-drawer')).toHaveAttribute('data-scope', 'acme');
+  });
+
+  it('the drawer initialMessage is seeded from suggestion rationale and alert IDs', async () => {
+    useAuth.mockReturnValue({ user: { id: 1, is_staff: true } });
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: /codify as rule/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /codify as rule/i }));
+
+    await waitFor(() => screen.getByTestId('rule-author-drawer'));
+    const msg = screen.getByTestId('rule-author-drawer').getAttribute('data-message');
+    expect(msg).toContain(SUGGESTION.rationale);
+    expect(msg).toContain('AL-0001');
+    expect(msg).toContain('AL-0002');
   });
 });
