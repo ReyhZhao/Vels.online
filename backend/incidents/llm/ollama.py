@@ -5,6 +5,7 @@ from django.conf import settings
 
 from .base import BaseTriageProvider, CorrelationResult, TaskSummaryResult, TriageError, TriageResult
 from .gemini import (
+    CLOSURE_MESSAGE_SYSTEM_PROMPT,
     CORRELATION_SYSTEM_PROMPT,
     TASK_SUMMARY_SYSTEM_PROMPT,
     _build_system_prompt,
@@ -145,3 +146,17 @@ class OllamaTriageProvider(BaseTriageProvider):
             raise TriageError(f"Ollama returned non-JSON for task summary: {text[:200]}") from exc
 
         return _parse_task_summary_result(data, provider="ollama")
+
+    def generate_closure_message(self, incident_context: dict) -> str:
+        prompt = json.dumps(incident_context, indent=2)
+        try:
+            response = self._client.chat(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": CLOSURE_MESSAGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return response.message.content.strip()
+        except Exception as exc:
+            raise TriageError(f"Ollama closure message error: {exc}") from exc

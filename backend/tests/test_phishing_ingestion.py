@@ -248,3 +248,80 @@ def test_no_contact_record_no_error(acme, forwarder):
 
     assert outcome == "phishing:created"
     assert IncidentContact.objects.count() == 0
+
+
+# ── Phishing drop notification (#388) ─────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_drop_notification_sent_to_known_contact_on_no_original_sender(acme):
+    from contacts.models import Contact
+    Contact.objects.create(organisation=acme, name="Carol", email="carol@acme.com")
+
+    msg = NormalisedMessage(
+        from_address="carol@acme.com",
+        to_address="soc@vels.online",
+        reply_to=None,
+        subject="Fwd: Important",
+        body_text="FYI\n---------- Forwarded message ---------\n",
+        body_html="",
+    )
+
+    with patch("notifications.email.send_html_email") as mock_email:
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:dropped:no_original_sender"
+    mock_email.assert_called_once()
+    call_args = mock_email.call_args
+    assert call_args[0][0] == "phishing_drop_notification"
+    assert "carol@acme.com" in call_args[0][2]
+
+
+@pytest.mark.django_db
+def test_drop_notification_not_sent_when_contact_unknown(acme, forwarder):
+    msg = NormalisedMessage(
+        from_address="carol@acme.com",
+        to_address="soc@vels.online",
+        reply_to=None,
+        subject="Fwd: Important",
+        body_text="FYI\n---------- Forwarded message ---------\n",
+        body_html="",
+    )
+
+    with patch("notifications.email.send_html_email") as mock_email:
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:dropped:no_original_sender"
+    mock_email.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_drop_notification_not_sent_for_unknown_sender(acme):
+    msg = _forwarded_msg(forwarder_email="stranger@unknown.com")
+
+    with patch("notifications.email.send_html_email") as mock_email:
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:dropped:unknown_sender"
+    mock_email.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_drop_notification_not_sent_for_not_forward(acme, forwarder):
+    from contacts.models import Contact
+    Contact.objects.create(organisation=acme, name="Carol", email="carol@acme.com")
+
+    msg = NormalisedMessage(
+        from_address="carol@acme.com",
+        to_address="soc@vels.online",
+        reply_to=None,
+        subject="Hello",
+        body_text="Just a regular email.",
+        body_html="",
+    )
+
+    with patch("notifications.email.send_html_email") as mock_email:
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:dropped:not_forward"
+    mock_email.assert_not_called()

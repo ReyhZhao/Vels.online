@@ -114,6 +114,7 @@ class PhishingIngestionHandler:
                 *ctx_args,
                 (message.body_text or "")[:200],
             )
+            self._notify_drop(forwarder_address, org)
             return "phishing:dropped:no_original_sender"
 
         subject_normalised = normalise_subject(message.subject)
@@ -159,6 +160,33 @@ class PhishingIngestionHandler:
             alert.display_id, org.slug, sender_address,
         )
         return "phishing:created"
+
+    def _notify_drop(self, forwarder_address, org):
+        if org is None:
+            return
+        from contacts.models import Contact
+        from django.conf import settings as _settings
+        from notifications.email import send_html_email
+        try:
+            contact = Contact.objects.get(email__iexact=forwarder_address, organisation=org)
+        except Contact.DoesNotExist:
+            return
+        try:
+            send_html_email(
+                "phishing_drop_notification",
+                {
+                    "contact_name": contact.name,
+                    "frontend_url": getattr(_settings, "FRONTEND_URL", "").rstrip("/"),
+                },
+                [contact.email],
+            )
+            logger.info(
+                "inbound_mail: phishing: sent drop notification to contact %s", contact.pk
+            )
+        except Exception:
+            logger.exception(
+                "inbound_mail: phishing: failed to send drop notification to contact %s", contact.pk
+            )
 
     def _link_forwarder_contact(self, incident, forwarder_address, org):
         from contacts.models import Contact, IncidentContact

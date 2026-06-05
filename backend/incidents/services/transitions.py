@@ -78,6 +78,11 @@ def transition_incident(incident, target_state, actor, closure_reason=None, dupl
         record_event(incident, "incident_updated", actor=actor, payload={"changes": changes})
 
     _notify_state_change(incident, old_state, target_state)
+
+    if target_state == "closed":
+        from incidents.tasks import notify_contacts_on_close
+        notify_contacts_on_close.delay(incident.id)
+
     return incident
 
 

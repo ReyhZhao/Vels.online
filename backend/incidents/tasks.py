@@ -8,7 +8,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from incidents.llm.base import RANK_TO_SEV, SEVERITY_RANK, TriageConfigError, TriageError
-from incidents.llm.factory import get_triage_provider
+from incidents.llm.factory import get_closure_provider, get_triage_provider
 from notifications.email import send_html_email
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,59 @@ def release_triage_lock(incident_id: int) -> None:
 def get_triage_lock_started_at(incident_id: int) -> str | None:
     """Return the ISO-format start timestamp if triage is running, else None."""
     return cache.get(_TRIAGE_LOCK_KEY.format(incident_id))
+
+
+@shared_task
+def notify_contacts_on_close(incident_id: int):
+    """Send an LLM-generated closure notification to all IncidentContacts for a closed incident."""
+    from incidents.models import Comment, Incident
+    from contacts.services import send_contact_message
+
+    try:
+        incident = Incident.objects.select_related("organization").get(id=incident_id)
+    except Incident.DoesNotExist:
+        return
+
+    incident_contacts = list(incident.incident_contacts.select_related("contact").all())
+    if not incident_contacts:
+        return
+
+    ai_summaries = list(
+        Comment.objects.filter(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+        .order_by("created_at")
+        .values_list("body", flat=True)
+    )
+    incident_context = {
+        "title": incident.title,
+        "severity": incident.severity,
+        "description": incident.description or "",
+        "closure_reason": incident.closure_reason or "",
+        "ai_triage_summaries": ai_summaries,
+    }
+
+    try:
+        provider = get_closure_provider()
+        message_body = provider.generate_closure_message(incident_context)
+    except Exception as exc:
+        logger.warning(
+            "notify_contacts_on_close: LLM call failed for incident %s: %s", incident_id, exc
+        )
+        return
+
+    if not message_body:
+        logger.warning(
+            "notify_contacts_on_close: LLM returned empty message for incident %s", incident_id
+        )
+        return
+
+    for ic in incident_contacts:
+        try:
+            send_contact_message(incident, ic.contact, role="notified", body=message_body)
+        except Exception as exc:
+            logger.warning(
+                "notify_contacts_on_close: failed to notify contact %s for incident %s: %s",
+                ic.contact.id, incident_id, exc,
+            )
 
 
 def _clamp_severity(current: str, recommended: str) -> str:

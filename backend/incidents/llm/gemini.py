@@ -98,6 +98,23 @@ If no correlations are found return: {"related_incidents": [], "correlation_summ
 """
 
 
+CLOSURE_MESSAGE_SYSTEM_PROMPT = """\
+You are a security analyst writing a brief closure notification for a non-technical reporter who \
+raised a security concern.
+
+Given an incident context as JSON (title, severity, description, closure_reason, ai_triage_summaries), \
+write a short plain-language message (2-4 sentences) suitable for sending by email.
+
+The message should:
+- Confirm the report was received and investigated
+- Summarise what was found in plain language (no technical jargon)
+- State whether it was resolved, found to be benign, or another outcome based on the closure_reason
+- Be professional but accessible to a non-technical audience
+
+Do NOT include a salutation or sign-off — just the body text.
+Return only the message text. No JSON, no markdown, no code fences.
+"""
+
 RESIDUAL_GROUPING_SYSTEM_PROMPT = """\
 You are a senior security analyst performing threat detection over a batch of unprocessed security alerts. \
 Each alert has not been linked to an incident by any automated rule. \
@@ -288,6 +305,20 @@ class GeminiTriageProvider(BaseTriageProvider):
             raise TriageError(f"Gemini returned non-JSON for task summary: {text[:200]}") from exc
 
         return _parse_task_summary_result(data, provider="gemini")
+
+    def generate_closure_message(self, incident_context: dict) -> str:
+        prompt = json.dumps(incident_context, indent=2)
+        try:
+            response = self._client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=CLOSURE_MESSAGE_SYSTEM_PROMPT,
+                ),
+            )
+            return response.text.strip()
+        except Exception as exc:
+            raise TriageError(f"Gemini closure message error: {exc}") from exc
 
 
 def _parse_residual_grouping_result(data: dict) -> ResidualGroupingResult:

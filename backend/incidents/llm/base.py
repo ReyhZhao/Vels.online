@@ -80,3 +80,7 @@ class BaseTriageProvider(ABC):
     def group_residual_alerts(self, alerts: list) -> ResidualGroupingResult:
         """Group residual (unlinked, settled) alerts into suspicious clusters. Override in providers that support it."""
         return ResidualGroupingResult()
+
+    def generate_closure_message(self, incident_context: dict) -> str:
+        """Generate a plain-language closure notification for a non-technical reporter. Returns empty string by default."""
+        return ""

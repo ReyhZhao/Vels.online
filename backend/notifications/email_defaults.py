@@ -228,6 +228,21 @@ _SIGNUP_REQUEST_BODY = (
 )
 
 # ---------------------------------------------------------------------------
+# phishing_drop_notification
+# Context: contact_name, frontend_url
+# ---------------------------------------------------------------------------
+_PHISHING_DROP_BODY = (
+    "<h1>Security report — unable to process</h1>"
+    "<p>Hi {{ contact_name }},</p>"
+    "<p>We received an email forwarded to our security inbox from your address, but were unable "
+    "to process it as a phishing report.</p>"
+    "<p>If you intended to report a suspicious email, please forward it again and ensure the "
+    "original email is attached.</p>"
+    "<p style=\"font-size:13px;color:#64748b;\">If you did not send this email or have questions, "
+    "please contact your security team.</p>"
+)
+
+# ---------------------------------------------------------------------------
 # test
 # Context: recipient_name, frontend_url
 # ---------------------------------------------------------------------------
@@ -278,6 +293,11 @@ DEFAULT_TEMPLATES = {
         "description": "Sent to a contact when they are linked to an incident with role=questioned",
         "subject": "[vels.online] Security incident — your input requested: {{ display_id }}",
         "html_body": _base("Security incident — your input requested", _CONTACT_QUESTIONED_BODY),
+    },
+    "phishing_drop_notification": {
+        "description": "Sent to a known contact when their forwarded phishing report could not be processed",
+        "subject": "[vels.online] Security report — unable to process",
+        "html_body": _base("Security report — unable to process", _PHISHING_DROP_BODY),
     },
     "test": {
         "description": "Test email sent from the admin dashboard",
