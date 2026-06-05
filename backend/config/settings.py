@@ -253,6 +253,10 @@ TRIAGE_LLM_PROVIDER = os.environ.get(
     "TRIAGE_LLM_PROVIDER",
     "incidents.llm.gemini.GeminiTriageProvider",
 )
+CORRELATION_LLM_PROVIDER = os.environ.get(
+    "CORRELATION_LLM_PROVIDER",
+    "correlations.llm.gemini.GeminiDraftProvider",
+)
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "mistral")

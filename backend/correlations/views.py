@@ -7,6 +7,10 @@ from rest_framework.views import APIView
 
 from security.models import Organization, OrganizationMembership
 
+from .llm.base import DraftConfigError, DraftError
+from .llm.factory import get_draft_provider
+from .llm.grounding import build_grounding
+from .llm.sanitizer import sanitize_draft
 from .models import (
     ALERT_FIELD_CATALOG,
     ENTITY_CATALOG,
@@ -433,3 +437,53 @@ class OrgSystemRuleMuteView(APIView):
             return err
         SystemRuleMute.objects.filter(organization=org, rule=rule).delete()
         return Response({"rule_id": rule.id, "muted": False})
+
+
+# ── Rule-author assistant ─────────────────────────────────────────────────────
+
+class CorrelationDraftView(APIView):
+    """Staff-only: given a conversation and optional current draft, return an LLM-drafted rule."""
+
+    def post(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+
+        messages = request.data.get("messages") or []
+        if not messages:
+            return Response({"detail": "messages is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        current_draft = request.data.get("current_draft") or None
+        scope = request.data.get("scope")
+
+        grounding = build_grounding(scope=scope)
+
+        try:
+            provider = get_draft_provider()
+        except DraftConfigError as exc:
+            return Response(
+                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            result = provider.draft_rule(messages, grounding, current_draft)
+        except DraftConfigError as exc:
+            return Response(
+                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except DraftError as exc:
+            logger.warning("CorrelationDraftView: provider error: %s", exc)
+            return Response(
+                {"detail": "Assistant failed to produce a valid draft.", "reason": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        sanitized, sanitizer_warnings = sanitize_draft(result.updated_draft)
+
+        return Response({
+            "updated_draft": sanitized,
+            "assistant_reply": result.assistant_reply,
+            "warnings": result.warnings + sanitizer_warnings,
+        })
