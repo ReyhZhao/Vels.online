@@ -53,6 +53,10 @@ Alerts that no static rule promoted or linked — still `new`/unlinked, aged pas
 A proposed grouping of Residual alerts the LLM flags as suspicious, carrying a rationale and confidence, surfaced in the inbox for an analyst to accept (→ Incident) or dismiss. In v1 the LLM never auto-creates incidents. See [ADR-0004](docs/adr/0004-llm-residual-safety-net-suggestion-only.md).
 _Avoid_: Alert (a Suggestion is about a *group* of alerts and is analyst-facing, not a source signal).
 
+**Rule Draft**:
+An unsaved, proposed **Correlation Rule** the LLM assembles from a natural-language detection description (e.g. "alert when a new user is created then logs in within 24h"). Presented pre-filled in the rule builder for a human to review, edit, and save; it is never persisted until saved as a real Correlation Rule, and the LLM never activates a rule itself. Produced by a stateless, multi-turn drafting conversation grounded in the scope's recent alerts. See [ADR-0005](docs/adr/0005-rule-author-assistant-ephemeral-stateless.md).
+_Avoid_: Detection Suggestion (that is the LLM acting on a *group of past alerts* to propose an Incident; a Rule Draft is the LLM acting on *a human's words* to propose a future-matching Rule). Avoid Suggestion (overloaded with Detection Suggestion).
+
 ## Relationships
 
 - A **Correlation Rule** is either a **System Rule** (org = null) or an **Org Rule**; it has one or more **Legs** and exactly one **Correlation Key**.

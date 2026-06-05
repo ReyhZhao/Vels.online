@@ -1,20 +1,30 @@
+import itertools
 import json
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.test import override_settings
+from django.utils import timezone
 
+from alerts.models import Alert, AlertEntity
+from alerts.services.identifiers import next_alert_display_id
 from correlations.llm.base import RuleDraftResult
+from correlations.llm.gemini import _build_system_prompt
 from correlations.llm.grounding import build_grounding
 from correlations.llm.sanitizer import sanitize_draft
+from security.models import Organization
 
 
 # ── Grounding builder ──────────────────────────────────────────────────────────
 
+@pytest.mark.django_db
 def test_grounding_has_all_field_kinds():
     g = build_grounding()
     assert set(g["field_catalog"].keys()) == {"alert_field", "entity", "source_ref"}
 
 
+@pytest.mark.django_db
 def test_grounding_alert_field_vocabulary():
     g = build_grounding()
     fields = g["field_catalog"]["alert_field"]
@@ -23,6 +33,7 @@ def test_grounding_alert_field_vocabulary():
     assert "title" in fields
 
 
+@pytest.mark.django_db
 def test_grounding_entity_vocabulary():
     g = build_grounding()
     fields = g["field_catalog"]["entity"]
@@ -30,12 +41,14 @@ def test_grounding_entity_vocabulary():
     assert "user.name" in fields
 
 
+@pytest.mark.django_db
 def test_grounding_source_ref_vocabulary():
     g = build_grounding()
     fields = g["field_catalog"]["source_ref"]
     assert "rule_id" in fields
 
 
+@pytest.mark.django_db
 def test_grounding_operators_alert_field():
     g = build_grounding()
     ops = g["allowed_operators"]["alert_field"]
@@ -44,11 +57,13 @@ def test_grounding_operators_alert_field():
     assert "cidr" not in ops
 
 
+@pytest.mark.django_db
 def test_grounding_operators_entity_includes_cidr():
     g = build_grounding()
     assert "cidr" in g["allowed_operators"]["entity"]
 
 
+@pytest.mark.django_db
 def test_grounding_operators_source_ref_excludes_gte():
     g = build_grounding()
     ops = g["allowed_operators"]["source_ref"]
@@ -56,15 +71,234 @@ def test_grounding_operators_source_ref_excludes_gte():
     assert "equals" in ops
 
 
+@pytest.mark.django_db
 def test_grounding_correlation_keys():
     g = build_grounding()
     assert "none" in g["correlation_keys"]
     assert "host.name" in g["correlation_keys"]
 
 
+@pytest.mark.django_db
 def test_grounding_severities():
     g = build_grounding()
     assert set(g["severities"]) == {"critical", "high", "medium", "low", "info"}
+
+
+# ── Grounding builder: corpus (DB) ─────────────────────────────────────────────
+
+@pytest.fixture
+def org(db):
+    return Organization.objects.create(name="Test Org", slug="test-org", wazuh_group="test")
+
+
+def _make_alert(org, source_kind="wazuh_event", severity="high", title="Test Alert",
+                source_ref=None):
+    return Alert.objects.create(
+        display_id=next_alert_display_id(),
+        organization=org,
+        source_kind=source_kind,
+        severity=severity,
+        title=title,
+        source_ref=source_ref or {},
+    )
+
+
+def _make_entity(alert, org, entity_type="host.name", value="server-01"):
+    return AlertEntity.objects.create(
+        alert=alert,
+        organization=org,
+        entity_type=entity_type,
+        value=value,
+    )
+
+
+@pytest.mark.django_db
+def test_grounding_source_kinds_with_counts(org):
+    now = timezone.now()
+    for _ in range(3):
+        _make_alert(org, source_kind="wazuh_event")
+    for _ in range(2):
+        _make_alert(org, source_kind="vulnerability")
+
+    g = build_grounding(scope="test-org", now=now)
+    assert g["source_kinds"]["wazuh_event"] == 3
+    assert g["source_kinds"]["vulnerability"] == 2
+
+
+@pytest.mark.django_db
+def test_grounding_severity_distribution(org):
+    now = timezone.now()
+    _make_alert(org, severity="high")
+    _make_alert(org, severity="high")
+    _make_alert(org, severity="critical")
+
+    g = build_grounding(scope="test-org", now=now)
+    assert g["severity_distribution"]["high"] == 2
+    assert g["severity_distribution"]["critical"] == 1
+
+
+@pytest.mark.django_db
+def test_grounding_entity_types_populated(org):
+    now = timezone.now()
+    a = _make_alert(org)
+    _make_entity(a, org, entity_type="host.name", value="web-01")
+    _make_entity(a, org, entity_type="user.name", value="alice")
+
+    g = build_grounding(scope="test-org", now=now)
+    assert "host.name" in g["entity_types"]
+    assert "user.name" in g["entity_types"]
+
+
+@pytest.mark.django_db
+def test_grounding_source_ref_keys(org):
+    now = timezone.now()
+    _make_alert(org, source_ref={"rule_id": "100001", "level": "9"})
+
+    g = build_grounding(scope="test-org", now=now)
+    assert "rule_id" in g["source_ref_keys"]
+    assert "level" in g["source_ref_keys"]
+
+
+@pytest.mark.django_db
+def test_grounding_top_alert_field_values(org):
+    now = timezone.now()
+    _make_alert(org, source_kind="wazuh_event", title="Brute force detected")
+    _make_alert(org, source_kind="wazuh_event", title="Lateral movement")
+
+    g = build_grounding(scope="test-org", now=now)
+    top = g["top_values"]["alert_field"]
+    assert "wazuh_event" in top.get("source_kind", [])
+    titles = top.get("title", [])
+    assert "Brute force detected" in titles or "Lateral movement" in titles
+
+
+@pytest.mark.django_db
+def test_grounding_sample_cap_enforced(org):
+    now = timezone.now()
+    cap = 3
+    for i in range(cap + 2):
+        _make_alert(org, title=f"Alert {i}")
+
+    with override_settings(GROUNDING_SAMPLE_CAP=cap):
+        g = build_grounding(scope="test-org", now=now)
+
+    assert len(g["sample_alerts"]) == cap
+
+
+@pytest.mark.django_db
+def test_grounding_value_cap_enforced(org):
+    now = timezone.now()
+    cap = 3
+    for i in range(cap + 2):
+        _make_alert(org, title=f"Unique Title {i:04d}")
+
+    with override_settings(GROUNDING_VALUE_CAP=cap):
+        g = build_grounding(scope="test-org", now=now)
+
+    top_titles = g["top_values"]["alert_field"].get("title", [])
+    assert len(top_titles) <= cap
+
+
+@pytest.mark.django_db
+def test_grounding_source_ref_value_cap_enforced(org):
+    now = timezone.now()
+    cap = 2
+    for i in range(cap + 2):
+        _make_alert(org, source_ref={"rule_id": f"RULE-{i:04d}"})
+
+    with override_settings(GROUNDING_VALUE_CAP=cap):
+        g = build_grounding(scope="test-org", now=now)
+
+    sr_top = g["top_values"]["source_ref"]
+    if "rule_id" in sr_top:
+        assert len(sr_top["rule_id"]) <= cap
+
+
+@pytest.mark.django_db
+def test_grounding_window_excludes_old_alerts(org):
+    now = timezone.now()
+    a = _make_alert(org, source_kind="vulnerability")
+    Alert.objects.filter(pk=a.pk).update(created_at=now - timedelta(days=35))
+
+    with override_settings(GROUNDING_WINDOW_DAYS=30):
+        g = build_grounding(scope="test-org", now=now)
+
+    assert "vulnerability" not in g["source_kinds"]
+    assert g["sample_alerts"] == []
+
+
+@pytest.mark.django_db
+def test_grounding_scope_filters_by_org(db):
+    now = timezone.now()
+    org_a = Organization.objects.create(name="Org A", slug="org-a", wazuh_group="a")
+    org_b = Organization.objects.create(name="Org B", slug="org-b", wazuh_group="b")
+    _make_alert(org_a, source_kind="wazuh_event")
+    _make_alert(org_b, source_kind="vulnerability")
+
+    g = build_grounding(scope="org-a", now=now)
+    assert "wazuh_event" in g["source_kinds"]
+    assert "vulnerability" not in g["source_kinds"]
+
+
+@pytest.mark.django_db
+def test_grounding_all_scope_includes_all_orgs(db):
+    now = timezone.now()
+    org_a = Organization.objects.create(name="Org A", slug="org-a", wazuh_group="a")
+    org_b = Organization.objects.create(name="Org B", slug="org-b", wazuh_group="b")
+    _make_alert(org_a, source_kind="wazuh_event")
+    _make_alert(org_b, source_kind="vulnerability")
+
+    g = build_grounding(scope="all", now=now)
+    assert "wazuh_event" in g["source_kinds"]
+    assert "vulnerability" in g["source_kinds"]
+
+
+def test_build_system_prompt_includes_corpus_data():
+    """_build_system_prompt renders corpus fields (source_kinds, samples, top values) into the prompt."""
+    from correlations.models import (
+        ALERT_FIELD_CATALOG, CORRELATION_KEY_CHOICES, ENTITY_CATALOG,
+        FIELD_KIND_ALERT, FIELD_KIND_ENTITY, FIELD_KIND_SOURCE_REF, SOURCE_REF_CATALOG,
+    )
+    grounding = {
+        "field_catalog": {
+            FIELD_KIND_ALERT: sorted(ALERT_FIELD_CATALOG),
+            FIELD_KIND_ENTITY: sorted(ENTITY_CATALOG),
+            FIELD_KIND_SOURCE_REF: sorted(SOURCE_REF_CATALOG),
+        },
+        "allowed_operators": {
+            FIELD_KIND_ALERT: ["equals", "in"],
+            FIELD_KIND_ENTITY: ["equals", "cidr"],
+            FIELD_KIND_SOURCE_REF: ["equals"],
+        },
+        "severities": ["critical", "high", "medium", "low", "info"],
+        "correlation_keys": [k for k, _ in CORRELATION_KEY_CHOICES],
+        "source_kinds": {"wazuh_event": 42},
+        "severity_distribution": {"high": 10, "critical": 5},
+        "entity_types": ["host.name", "user.name"],
+        "source_ref_keys": ["rule_id"],
+        "top_values": {
+            "alert_field": {"title": ["Brute force", "Lateral movement"]},
+            "entity": {"host.name": ["web-01"]},
+            "source_ref": {"rule_id": ["100001"]},
+        },
+        "sample_alerts": [
+            {
+                "source_kind": "wazuh_event",
+                "severity": "high",
+                "title": "Real Alert",
+                "source_ref": {"rule_id": "100001"},
+                "entities": {"host.name": ["web-01"]},
+            }
+        ],
+    }
+
+    prompt = _build_system_prompt(grounding)
+
+    assert "wazuh_event" in prompt
+    assert "rule_id" in prompt
+    assert "host.name" in prompt
+    assert "Real Alert" in prompt
+    assert "Brute force" in prompt
 
 
 # ── Draft sanitizer ────────────────────────────────────────────────────────────

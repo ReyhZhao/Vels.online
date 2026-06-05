@@ -40,8 +40,13 @@ draft_rule schema:
 Vocabulary (only use these exact values):
 {vocabulary}
 
+Alert corpus (real data from this scope — prefer these values when proposing conditions):
+{corpus}
+
 Rules:
 - Only use field names and operators listed in the vocabulary above
+- Prefer condition values that appear in the alert corpus above (e.g. real source_kinds, rule_ids, \
+titles, entity values) rather than invented examples
 - A rule must have at least one leg with at least one condition
 - If a current draft is provided, update it based on the latest instruction
 - Return only valid JSON. No markdown, no code fences, no explanation outside the JSON.
@@ -56,10 +61,43 @@ def _build_system_prompt(grounding: dict) -> str:
         ops = allowed_ops.get(kind, [])
         vocab_parts.append(f"  {kind}: fields={fields}, operators={ops}")
 
+    corpus_parts = []
+
+    source_kinds = grounding.get("source_kinds", {})
+    if source_kinds:
+        corpus_parts.append(f"  source_kinds present: {source_kinds}")
+
+    sev_dist = grounding.get("severity_distribution", {})
+    if sev_dist:
+        corpus_parts.append(f"  severity distribution: {sev_dist}")
+
+    entity_types = grounding.get("entity_types", [])
+    if entity_types:
+        corpus_parts.append(f"  entity types populated: {entity_types}")
+
+    sr_keys = grounding.get("source_ref_keys", [])
+    if sr_keys:
+        corpus_parts.append(f"  source_ref keys present: {sr_keys}")
+
+    top_values = grounding.get("top_values", {})
+    if top_values.get("alert_field"):
+        corpus_parts.append(f"  top alert field values: {top_values['alert_field']}")
+    if top_values.get("entity"):
+        corpus_parts.append(f"  top entity values: {top_values['entity']}")
+    if top_values.get("source_ref"):
+        corpus_parts.append(f"  top source_ref values: {top_values['source_ref']}")
+
+    sample_alerts = grounding.get("sample_alerts", [])
+    if sample_alerts:
+        corpus_parts.append(f"  sample alerts (most recent first):\n{json.dumps(sample_alerts, indent=2)}")
+
+    corpus_section = "\n".join(corpus_parts) if corpus_parts else "  (no alert data in scope)"
+
     return _SYSTEM_PROMPT_TEMPLATE.format(
         corr_keys=", ".join(grounding.get("correlation_keys", [])),
         severities=", ".join(grounding.get("severities", [])),
         vocabulary="\n".join(vocab_parts),
+        corpus=corpus_section,
     )
 
 

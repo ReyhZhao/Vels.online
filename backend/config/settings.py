@@ -257,6 +257,9 @@ CORRELATION_LLM_PROVIDER = os.environ.get(
     "CORRELATION_LLM_PROVIDER",
     "correlations.llm.gemini.GeminiDraftProvider",
 )
+GROUNDING_WINDOW_DAYS = int(os.environ.get("GROUNDING_WINDOW_DAYS", "30"))
+GROUNDING_VALUE_CAP   = int(os.environ.get("GROUNDING_VALUE_CAP", "50"))
+GROUNDING_SAMPLE_CAP  = int(os.environ.get("GROUNDING_SAMPLE_CAP", "15"))
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "mistral")
