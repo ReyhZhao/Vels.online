@@ -4,27 +4,25 @@ Fetch all open GitHub issues labelled ready-for-agent and run Claude Code
 against each one with a static prompt that injects the issue number.
 """
 
+import argparse
 import json
 import subprocess
 import sys
-
-#LABEL = "ready-for-agent"
-LABEL = "Sandcastle"
 
 # Static prompt template — {number} is replaced with the issue number.
 PROMPT_TEMPLATE = (
     "Work on GitHub issue #{number}. "
     "Read the issue with `gh issue view {number} --comments`, understand the "
-    "requirements, implement the changes, test test changes you made,then close the loop by commiting the changes than commenting on "
+    "requirements, implement the changes, test test changes you made, then close the loop by commiting the changes than commenting on "
     "the issue and updating its labels as appropriate."
 )
 
 
-def fetch_issues() -> list[dict]:
+def fetch_issues(label: str) -> list[dict]:
     result = subprocess.run(
         [
             "gh", "issue", "list",
-            "--label", LABEL,
+            "--label", label,
             "--state", "open",
             "--json", "number,title",
         ],
@@ -36,32 +34,46 @@ def fetch_issues() -> list[dict]:
     return sorted(issues, key=lambda i: i["number"])
 
 
-def run_claude(issue_number: int, issue_title: str) -> None:
+def run_claude(issue_number: int, issue_title: str, abort_on_failure: bool = False) -> None:
     prompt = PROMPT_TEMPLATE.format(number=issue_number)
     print(f"\n{'='*60}")
     print(f"Issue #{issue_number}: {issue_title}")
     print(f"{'='*60}")
     subprocess.run(
         ["claude", "-p", prompt],
-        check=False,  # don't abort the loop if one issue fails
+        check=abort_on_failure,
     )
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--label",
+        default="ready-for-agent",
+        help="GitHub issue label to filter on (default: ready-for-agent).",
+    )
+    parser.add_argument(
+        "--abort-on-failure",
+        action="store_true",
+        default=False,
+        help="Stop processing further issues if one fails (default: continue).",
+    )
+    args = parser.parse_args()
+
     try:
-        issues = fetch_issues()
+        issues = fetch_issues(args.label)
     except subprocess.CalledProcessError as exc:
         print(f"Failed to fetch issues: {exc.stderr}", file=sys.stderr)
         sys.exit(1)
 
     if not issues:
-        print(f"No open issues with label '{LABEL}' found.")
+        print(f"No open issues with label '{args.label}' found.")
         return
 
-    print(f"Found {len(issues)} issue(s) with label '{LABEL}'.")
+    print(f"Found {len(issues)} issue(s) with label '{args.label}'.")
 
     for issue in issues:
-        run_claude(issue["number"], issue["title"])
+        run_claude(issue["number"], issue["title"], abort_on_failure=args.abort_on_failure)
 
     print("\nAll issues processed.")
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrgContext';
 import SlideOver from '../components/SlideOver';
 import BulkPromoteModal from '../components/BulkPromoteModal';
 
@@ -205,6 +206,57 @@ function AlertDetailPanel({ alert, onClose, onStateChange, orgSlug }) {
   );
 }
 
+function confidenceBadgeClass(confidence) {
+  if (confidence >= 0.8) return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
+  if (confidence >= 0.6) return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
+  return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
+}
+
+function SuggestionCard({ suggestion, acting, onAccept, onDismiss }) {
+  return (
+    <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-background p-4 flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Confidence</span>
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(suggestion.confidence)}`}>
+            {Math.round(suggestion.confidence * 100)}%
+          </span>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button
+            onClick={() => onAccept(suggestion.id)}
+            disabled={acting}
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+          >
+            Accept — Create Incident
+          </button>
+          <button
+            onClick={() => onDismiss(suggestion.id)}
+            disabled={acting}
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50"
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+      <p className="text-sm text-foreground">{suggestion.rationale}</p>
+      {suggestion.proposed_alerts.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {suggestion.proposed_alerts.map(a => (
+            <span
+              key={a.id}
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[a.severity] ?? 'bg-gray-100 text-gray-800'}`}
+            >
+              <span className="font-mono">{a.display_id}</span>
+              <span className="opacity-70">{a.title}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low', 'info'];
 const STATE_OPTIONS = ['new', 'acknowledged', 'imported', 'ignored'];
 const SOURCE_KIND_OPTIONS = ['wazuh_event', 'vulnerability', 'agent_finding', 'api'];
@@ -214,10 +266,14 @@ const EMPTY_DATA = { count: 0, page: 1, per_page: 25, total_pages: 1, results: [
 function AlertsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { selectedOrg } = useOrganization();
 
   const [data, setData] = useState(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+
+  const [suggestions, setSuggestions] = useState([]);
+  const [acting, setActing] = useState(false);
 
   // Filters
   const [filterState, setFilterState] = useState('');
@@ -256,6 +312,47 @@ function AlertsPage() {
   useEffect(() => {
     fetchAlerts();
   }, [fetchAlerts]);
+
+  const fetchSuggestions = useCallback(async () => {
+    if (!selectedOrg) return;
+    try {
+      const resp = await api.get('/api/correlations/suggestions/', { params: { org: selectedOrg.slug } });
+      setSuggestions(resp.data);
+    } catch {
+      // ignore — suggestions are optional
+    }
+  }, [selectedOrg]);
+
+  useEffect(() => {
+    fetchSuggestions();
+  }, [fetchSuggestions]);
+
+  const handleAccept = async (id) => {
+    setActing(true);
+    try {
+      const resp = await api.post(`/api/correlations/suggestions/${id}/accept/`);
+      setSuggestions(prev => prev.filter(s => s.id !== id));
+      if (resp.data.incident_display_id) {
+        navigate(`/incidents/${resp.data.incident_display_id}`);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const handleDismiss = async (id) => {
+    setActing(true);
+    try {
+      await api.post(`/api/correlations/suggestions/${id}/dismiss/`);
+      setSuggestions(prev => prev.filter(s => s.id !== id));
+    } catch {
+      // ignore
+    } finally {
+      setActing(false);
+    }
+  };
 
   const openDetail = (alert) => {
     setSelectedAlert(alert);
@@ -325,6 +422,28 @@ function AlertsPage() {
           )}
         </div>
       </div>
+
+      {/* Detection Suggestions */}
+      {suggestions.length > 0 && (
+        <div className="border-b border-border bg-blue-50/40 dark:bg-blue-950/20 px-6 py-4 flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 text-xs font-medium text-blue-800 dark:text-blue-400">
+              AI
+            </span>
+            Detection Suggestions
+            <span className="text-xs text-muted-foreground font-normal">({suggestions.length})</span>
+          </h2>
+          {suggestions.map(s => (
+            <SuggestionCard
+              key={s.id}
+              suggestion={s}
+              acting={acting}
+              onAccept={handleAccept}
+              onDismiss={handleDismiss}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-muted/20">
