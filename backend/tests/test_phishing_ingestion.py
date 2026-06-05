@@ -202,3 +202,49 @@ def test_user_lookup_takes_precedence_over_contact(acme, forwarder):
 
     alert = Alert.objects.get(source_kind="inbound_email")
     assert alert.organization == acme
+
+
+# ── Auto-link forwarder contact (#387) ───────────────────────────────────────
+
+@pytest.mark.django_db
+def test_forwarder_contact_linked_on_created(acme, forwarder):
+    from contacts.models import Contact, IncidentContact
+    contact = Contact.objects.create(organisation=acme, name="Carol", email="carol@acme.com")
+    msg = _forwarded_msg()
+
+    with patch("security.storage.StorageClient"), \
+         patch("inbound_mail.handlers.get_system_user", return_value=forwarder):
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:created"
+    incident = Alert.objects.get(source_kind="inbound_email").incident
+    assert IncidentContact.objects.filter(incident=incident, contact=contact).exists()
+
+
+@pytest.mark.django_db
+def test_forwarder_contact_linked_idempotent_on_dedup(acme, forwarder):
+    from contacts.models import Contact, IncidentContact
+    Contact.objects.create(organisation=acme, name="Carol", email="carol@acme.com")
+    msg = _forwarded_msg()
+
+    with patch("security.storage.StorageClient"), \
+         patch("inbound_mail.handlers.get_system_user", return_value=forwarder):
+        PhishingIngestionHandler().handle(msg)
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:dedup"
+    incident = Alert.objects.filter(source_kind="inbound_email").first().incident
+    assert IncidentContact.objects.filter(incident=incident).count() == 1
+
+
+@pytest.mark.django_db
+def test_no_contact_record_no_error(acme, forwarder):
+    from contacts.models import IncidentContact
+    msg = _forwarded_msg()
+
+    with patch("security.storage.StorageClient"), \
+         patch("inbound_mail.handlers.get_system_user", return_value=forwarder):
+        outcome = PhishingIngestionHandler().handle(msg)
+
+    assert outcome == "phishing:created"
+    assert IncidentContact.objects.count() == 0

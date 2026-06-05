@@ -149,6 +149,7 @@ class PhishingIngestionHandler:
             )
             if message.raw_bytes:
                 self._attach_raw_email(incident, message.raw_bytes, sender_address)
+            self._link_forwarder_contact(incident, forwarder_address, org)
             return outcome
 
         # route_alert didn't create/link an incident (medium-severity path, shouldn't happen here)
@@ -158,6 +159,18 @@ class PhishingIngestionHandler:
             alert.display_id, org.slug, sender_address,
         )
         return "phishing:created"
+
+    def _link_forwarder_contact(self, incident, forwarder_address, org):
+        from contacts.models import Contact, IncidentContact
+        try:
+            contact = Contact.objects.get(email__iexact=forwarder_address, organisation=org)
+        except Contact.DoesNotExist:
+            return
+        IncidentContact.objects.get_or_create(incident=incident, contact=contact)
+        logger.info(
+            "inbound_mail: phishing: linked forwarder contact %s to incident %s",
+            contact.pk, incident.display_id,
+        )
 
     def _attach_raw_email(self, incident, raw_bytes, sender_address):
         try:
