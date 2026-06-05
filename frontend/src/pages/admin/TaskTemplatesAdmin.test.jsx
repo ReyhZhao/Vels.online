@@ -147,6 +147,72 @@ describe('TaskTemplatesAdmin', () => {
     expect(screen.getByText('Step 2')).toBeInTheDocument();
   });
 
+  it('opens meta editor modal when Edit button clicked', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Phishing Playbook'));
+    const editBtns = screen.getAllByRole('button', { name: 'Edit' });
+    await user.click(editBtns[0]);
+    expect(screen.getByRole('heading', { name: 'Edit Template' })).toBeInTheDocument();
+  });
+
+  it('pre-fills meta editor with existing template values', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Phishing Playbook'));
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    expect(screen.getByDisplayValue('Phishing Playbook')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Phishing response steps.')).toBeInTheDocument();
+    const modal = screen.getByRole('heading', { name: 'Edit Template' }).closest('div[class*="fixed"]');
+    expect(modal.querySelector('input[type="checkbox"]')).toBeChecked();
+  });
+
+  it('saves template metadata via PATCH and updates the row', async () => {
+    mockGet();
+    api.patch.mockResolvedValue({
+      data: { ...TEMPLATES[0], name: 'Updated Name', description: 'New desc', is_auto_apply: false },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Phishing Playbook'));
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    const nameInput = screen.getByDisplayValue('Phishing Playbook');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Updated Name');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
+      '/api/task-templates/1/',
+      expect.objectContaining({ name: 'Updated Name', description: 'Phishing response steps.', is_auto_apply: true })
+    ));
+    await waitFor(() => screen.getByText('Updated Name'));
+  });
+
+  it('shows backend error in meta editor on PATCH failure', async () => {
+    mockGet();
+    api.patch.mockRejectedValue({
+      response: { data: { name: ['A template with this name already exists.'] } },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Phishing Playbook'));
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => screen.getByText('A template with this name already exists.'));
+  });
+
+  it('closes meta editor on Cancel', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Phishing Playbook'));
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    expect(screen.getByRole('heading', { name: 'Edit Template' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('heading', { name: 'Edit Template' })).not.toBeInTheDocument();
+  });
+
   it('adds an item in the template editor', async () => {
     mockGet();
     api.post.mockResolvedValue({

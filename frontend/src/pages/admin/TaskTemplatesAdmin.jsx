@@ -289,7 +289,90 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
   );
 }
 
-function TemplateRow({ template, onArchive, onEdit }) {
+function TemplateMetaEditor({ template, onClose, onSave }) {
+  const [name, setName] = useState(template.name);
+  const [description, setDescription] = useState(template.description || '');
+  const [isAutoApply, setIsAutoApply] = useState(template.is_auto_apply);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await api.patch(`/api/task-templates/${template.id}/`, {
+        name: name.trim(),
+        description: description.trim(),
+        is_auto_apply: isAutoApply,
+      });
+      onSave(res.data);
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.name?.[0] || err.response?.data?.detail || 'Failed to save template.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg space-y-4 mx-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-foreground">Edit Template</h2>
+          <button onClick={onClose} className="text-sm text-muted-foreground hover:text-foreground">✕</button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              disabled={saving}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
+            <input
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Description (optional)"
+              disabled={saving}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={isAutoApply}
+              onChange={e => setIsAutoApply(e.target.checked)}
+              disabled={saving}
+              className="rounded"
+            />
+            Auto-apply
+          </label>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !name.trim()}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function TemplateRow({ template, onArchive, onEdit, onEditMeta }) {
   const [archiving, setArchiving] = useState(false);
 
   async function handleArchive() {
@@ -321,6 +404,9 @@ function TemplateRow({ template, onArchive, onEdit }) {
       <td className="px-4 py-3 text-center text-xs text-muted-foreground">{template.items?.length ?? 0}</td>
       <td className="px-4 py-3">
         <div className="flex gap-2">
+          <button onClick={() => onEditMeta(template)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">
+            Edit
+          </button>
           <button onClick={() => onEdit(template)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">
             Edit items
           </button>
@@ -343,6 +429,7 @@ export default function TaskTemplatesAdmin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [editingMeta, setEditingMeta] = useState(null);
 
   const [name, setName] = useState('');
   const [subjectId, setSubjectId] = useState('');
@@ -406,6 +493,13 @@ export default function TaskTemplatesAdmin() {
           template={editing}
           onClose={() => setEditing(null)}
           onTemplateUpdate={updated => setTemplates(prev => prev.map(t => t.id === updated.id ? updated : t))}
+        />
+      )}
+      {editingMeta && (
+        <TemplateMetaEditor
+          template={editingMeta}
+          onClose={() => setEditingMeta(null)}
+          onSave={updated => setTemplates(prev => prev.map(t => t.id === updated.id ? updated : t))}
         />
       )}
 
@@ -486,7 +580,7 @@ export default function TaskTemplatesAdmin() {
               <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No templates.</td></tr>
             ) : (
               templates.map(t => (
-                <TemplateRow key={t.id} template={t} onArchive={handleArchive} onEdit={setEditing} />
+                <TemplateRow key={t.id} template={t} onArchive={handleArchive} onEdit={setEditing} onEditMeta={setEditingMeta} />
               ))
             )}
           </tbody>
