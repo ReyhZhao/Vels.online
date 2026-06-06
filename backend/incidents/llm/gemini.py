@@ -170,6 +170,66 @@ def _strip_code_fence_if_present(text: str) -> str:
     return stripped
 
 
+def _parse_assistant_result(data: dict, grounding: dict) -> AssistantResult:
+    """Validate a parsed assistant JSON payload against the grounding and build an AssistantResult.
+
+    Shared by all providers so action validation stays consistent regardless of the LLM backend.
+    """
+    reply = str(data.get("assistant_reply", ""))
+    raw_actions = data.get("proposed_actions") or []
+    proposed_actions = []
+    warnings = []
+
+    for item in raw_actions:
+        if not isinstance(item, dict):
+            continue
+        action_type = item.get("type", "")
+        if action_type == "update_field":
+            field_name = item.get("field", "")
+            if field_name not in ASSISTANT_FIELD_ALLOWLIST:
+                warnings.append(f"Proposed field '{field_name}' is not in the allowlist; skipped.")
+                continue
+            proposed_actions.append(ProposedAction(
+                type="update_field",
+                label=item.get("label", f"Update {field_name}"),
+                payload={"field": field_name, "value": item.get("value")},
+            ))
+        elif action_type == "transition_state":
+            state = item.get("state", "")
+            allowed = grounding.get("allowed_transitions", [])
+            if state not in allowed:
+                warnings.append(f"Proposed transition to '{state}' is not allowed from current state; skipped.")
+                continue
+            proposed_actions.append(ProposedAction(
+                type="transition_state",
+                label=item.get("label", f"Transition to {state}"),
+                payload={"state": state},
+            ))
+        elif action_type == "apply_task_template":
+            template_id = item.get("template_id")
+            available_ids = {t["id"] for t in grounding.get("available_templates", [])}
+            if template_id not in available_ids:
+                warnings.append(f"Proposed template id {template_id} is not available for this incident; skipped.")
+                continue
+            template_name = next(
+                (t["name"] for t in grounding.get("available_templates", []) if t["id"] == template_id),
+                str(template_id),
+            )
+            proposed_actions.append(ProposedAction(
+                type="apply_task_template",
+                label=item.get("label", f"Apply template '{template_name}'"),
+                payload={"template_id": template_id, "template_name": template_name},
+            ))
+        else:
+            warnings.append(f"Unknown proposed action type '{action_type}'; skipped.")
+
+    return AssistantResult(
+        assistant_reply=reply,
+        proposed_actions=proposed_actions,
+        warnings=warnings,
+    )
+
+
 def _build_assistant_system_prompt(grounding: dict) -> str:
     incident = grounding.get("incident", {})
     available_templates = grounding.get("available_templates", [])
@@ -421,59 +481,7 @@ class GeminiTriageProvider(BaseTriageProvider):
         except json.JSONDecodeError as exc:
             raise AssistantError(f"Gemini returned non-JSON: {raw[:200]}") from exc
 
-        reply = str(data.get("assistant_reply", ""))
-        raw_actions = data.get("proposed_actions") or []
-        proposed_actions = []
-        warnings = []
-
-        for item in raw_actions:
-            if not isinstance(item, dict):
-                continue
-            action_type = item.get("type", "")
-            if action_type == "update_field":
-                field_name = item.get("field", "")
-                if field_name not in ASSISTANT_FIELD_ALLOWLIST:
-                    warnings.append(f"Proposed field '{field_name}' is not in the allowlist; skipped.")
-                    continue
-                proposed_actions.append(ProposedAction(
-                    type="update_field",
-                    label=item.get("label", f"Update {field_name}"),
-                    payload={"field": field_name, "value": item.get("value")},
-                ))
-            elif action_type == "transition_state":
-                state = item.get("state", "")
-                allowed = grounding.get("allowed_transitions", [])
-                if state not in allowed:
-                    warnings.append(f"Proposed transition to '{state}' is not allowed from current state; skipped.")
-                    continue
-                proposed_actions.append(ProposedAction(
-                    type="transition_state",
-                    label=item.get("label", f"Transition to {state}"),
-                    payload={"state": state},
-                ))
-            elif action_type == "apply_task_template":
-                template_id = item.get("template_id")
-                available_ids = {t["id"] for t in grounding.get("available_templates", [])}
-                if template_id not in available_ids:
-                    warnings.append(f"Proposed template id {template_id} is not available for this incident; skipped.")
-                    continue
-                template_name = next(
-                    (t["name"] for t in grounding.get("available_templates", []) if t["id"] == template_id),
-                    str(template_id),
-                )
-                proposed_actions.append(ProposedAction(
-                    type="apply_task_template",
-                    label=item.get("label", f"Apply template '{template_name}'"),
-                    payload={"template_id": template_id, "template_name": template_name},
-                ))
-            else:
-                warnings.append(f"Unknown proposed action type '{action_type}'; skipped.")
-
-        return AssistantResult(
-            assistant_reply=reply,
-            proposed_actions=proposed_actions,
-            warnings=warnings,
-        )
+        return _parse_assistant_result(data, grounding)
 
     def generate_closure_message(self, incident_context: dict) -> str:
         prompt = json.dumps(incident_context, indent=2)
