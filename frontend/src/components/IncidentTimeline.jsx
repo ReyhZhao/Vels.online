@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  AlertCircle, FilePen, MessageSquare, Pencil, Trash2,
+  AlertCircle, Bot, FilePen, MessageSquare, Pencil, Trash2,
   UserCheck, CornerDownLeft, ArrowLeftRight, LayoutTemplate,
   SquareCheck, RefreshCw, CircleX, ShieldCheck, Mail, MailOpen,
 } from 'lucide-react';
@@ -104,6 +104,7 @@ const KIND_RENDERERS = {
   exception_created: renderExceptionCreated,
   contact_message_sent: renderContactMessageSent,
   contact_message_received: renderContactMessageReceived,
+  assistant_action: payload => `Assistant action confirmed: ${payload?.action_type ?? 'unknown'}.`,
 };
 
 export function renderEvent(kind, payload) {
@@ -131,6 +132,7 @@ const KIND_CONFIG = {
   exception_created:            { Icon: ShieldCheck,    badge: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',       label: 'EXCEPTION' },
   contact_message_sent:         { Icon: Mail,           badge: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400',                label: 'MESSAGE'   },
   contact_message_received:     { Icon: MailOpen,       badge: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',               label: 'REPLY'     },
+  assistant_action:             { Icon: Bot,            badge: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',   label: 'ASSISTANT' },
 };
 
 const DEFAULT_CONFIG = { Icon: AlertCircle, badge: 'bg-muted text-muted-foreground', label: 'EVENT' };

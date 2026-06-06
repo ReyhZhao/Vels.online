@@ -13,6 +13,7 @@ import SLAPill from '../components/SLAPill';
 import CreateExceptionSlideOver from '../components/CreateExceptionSlideOver';
 import ContactMessagesCard from '../components/ContactMessagesCard';
 import ContactComposeModal from '../components/ContactComposeModal';
+import IncidentAssistantDrawer from '../components/IncidentAssistantDrawer';
 
 const TRIAGE_STATES = new Set(['new', 'triaged']);
 
@@ -1143,6 +1144,7 @@ export default function IncidentDetail() {
   const [triageQueued, setTriageQueued]   = useState(false);
   const [triageError, setTriageError]     = useState(null);
   const [showDebugModal, setShowDebugModal] = useState(false);
+  const [showAssistant, setShowAssistant] = useState(false);
   const pollRef = useRef(null);
   const incidentRef = useRef(null);
 
@@ -1337,6 +1339,18 @@ export default function IncidentDetail() {
         />
       )}
 
+      {showAssistant && (
+        <IncidentAssistantDrawer
+          displayId={displayId}
+          onClose={() => setShowAssistant(false)}
+          onActionConfirmed={() => {
+            api.get(`/api/incidents/${displayId}/`).then(r => setIncident(r.data)).catch(() => {});
+            setTasksRefreshKey(k => k + 1);
+            setTimelineRefreshKey(k => k + 1);
+          }}
+        />
+      )}
+
       <div className="flex items-center gap-3">
         <Link to="/incidents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
           ← Incidents
@@ -1392,6 +1406,14 @@ export default function IncidentDetail() {
                 disabled={triaging || triageQueued || incident.triage_running || transitioning}
                 label={triaging ? 'Triaging…' : (triageQueued || incident.triage_running) ? 'Triage running…' : 'Run Triage'}
               />
+            )}
+            {user?.is_staff && (
+              <button
+                onClick={() => setShowAssistant(true)}
+                className="rounded-md border border-indigo-400 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition-colors dark:border-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 dark:hover:bg-indigo-900/40"
+              >
+                Ask AI
+              </button>
             )}
           </div>
         </div>

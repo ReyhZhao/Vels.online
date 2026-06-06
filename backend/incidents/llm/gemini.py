@@ -2,7 +2,21 @@ import json
 
 from django.conf import settings
 
-from .base import BaseTriageProvider, CorrelationResult, ResidualGroup, ResidualGroupingResult, TaskSummaryResult, TriageConfigError, TriageError, TriageResult, VALID_ACTIONS
+from .base import (
+    ASSISTANT_FIELD_ALLOWLIST,
+    AssistantError,
+    AssistantResult,
+    BaseTriageProvider,
+    CorrelationResult,
+    ProposedAction,
+    ResidualGroup,
+    ResidualGroupingResult,
+    TaskSummaryResult,
+    TriageConfigError,
+    TriageError,
+    TriageResult,
+    VALID_ACTIONS,
+)
 
 SYSTEM_PROMPT = """\
 You are a senior security analyst. Given an incident context as JSON, triage the incident and \
@@ -142,6 +156,70 @@ def _build_system_prompt(source_kind: str = "", extra_context: str = "") -> str:
     if extra_context:
         parts.append("\n--- Organisation context ---\n" + extra_context)
     return "".join(parts)
+
+
+def _strip_code_fence_if_present(text: str) -> str:
+    """Remove a single leading/trailing markdown code fence if present."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1:]
+        if stripped.endswith("```"):
+            stripped = stripped[:-3].strip()
+    return stripped
+
+
+def _build_assistant_system_prompt(grounding: dict) -> str:
+    incident = grounding.get("incident", {})
+    available_templates = grounding.get("available_templates", [])
+    allowed_transitions = grounding.get("allowed_transitions", [])
+    field_allowlist = grounding.get("field_allowlist", [])
+
+    template_lines = "\n".join(
+        f'  - id={t["id"]}: "{t["name"]}" ({t["item_count"]} tasks)'
+        for t in available_templates
+    ) or "  (none)"
+
+    return f"""\
+You are a senior security analyst assistant helping a staff member investigate an incident.
+You have full context about the incident below. Answer questions accurately using only the grounded data.
+You may also propose specific actions the user can confirm with one click.
+
+=== INCIDENT CONTEXT ===
+{json.dumps(grounding, indent=2)}
+
+=== RESPONSE FORMAT ===
+Return a JSON object with exactly these fields:
+  assistant_reply   (string, required) — your conversational response; markdown is supported
+  proposed_actions  (array, optional)  — zero or more actions the user can confirm
+
+Each proposed action must be one of these shapes:
+
+  Update an allowlisted field:
+    {{"type": "update_field", "field": "<field>", "value": "<value>", "label": "<short human label>"}}
+    Allowlisted fields: {', '.join(sorted(field_allowlist))}
+    Valid severity values: critical, high, medium, low, info
+    Valid tlp/pap values: white, green, amber, red
+    For "subject": use the subject slug; for "assignee": use the username.
+
+  Transition the incident state:
+    {{"type": "transition_state", "state": "<target_state>", "label": "<short human label>"}}
+    Currently allowed target states: {', '.join(allowed_transitions) or '(none — incident is closed)'}
+
+  Apply a task template:
+    {{"type": "apply_task_template", "template_id": <integer id>, "label": "<short human label>"}}
+    Available templates for this incident's subject:
+{template_lines}
+
+Rules:
+- Only propose actions from the shapes above. Never invent action types.
+- Only propose transitions to states in the allowed list above.
+- Only propose templates from the available list above.
+- Only propose field updates for fields in the allowlist above.
+- If no actions are warranted, return proposed_actions as [].
+- Return only valid JSON. No markdown fences, no extra text.
+"""
 
 
 class GeminiTriageProvider(BaseTriageProvider):
@@ -305,6 +383,97 @@ class GeminiTriageProvider(BaseTriageProvider):
             raise TriageError(f"Gemini returned non-JSON for task summary: {text[:200]}") from exc
 
         return _parse_task_summary_result(data, provider="gemini")
+
+    def assist_incident(self, messages: list, grounding: dict) -> AssistantResult:
+        if not messages:
+            raise AssistantError("No messages provided.")
+
+        system_prompt = _build_assistant_system_prompt(grounding)
+
+        contents = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            if role == "assistant":
+                role = "model"
+            contents.append(
+                self._types.Content(
+                    role=role,
+                    parts=[self._types.Part.from_text(text=str(msg.get("content", "")))],
+                )
+            )
+
+        try:
+            response = self._client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=contents,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                ),
+            )
+            raw = response.text.strip()
+        except Exception as exc:
+            raise AssistantError(f"Gemini API error: {exc}") from exc
+
+        raw = _strip_code_fence_if_present(raw)
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise AssistantError(f"Gemini returned non-JSON: {raw[:200]}") from exc
+
+        reply = str(data.get("assistant_reply", ""))
+        raw_actions = data.get("proposed_actions") or []
+        proposed_actions = []
+        warnings = []
+
+        for item in raw_actions:
+            if not isinstance(item, dict):
+                continue
+            action_type = item.get("type", "")
+            if action_type == "update_field":
+                field_name = item.get("field", "")
+                if field_name not in ASSISTANT_FIELD_ALLOWLIST:
+                    warnings.append(f"Proposed field '{field_name}' is not in the allowlist; skipped.")
+                    continue
+                proposed_actions.append(ProposedAction(
+                    type="update_field",
+                    label=item.get("label", f"Update {field_name}"),
+                    payload={"field": field_name, "value": item.get("value")},
+                ))
+            elif action_type == "transition_state":
+                state = item.get("state", "")
+                allowed = grounding.get("allowed_transitions", [])
+                if state not in allowed:
+                    warnings.append(f"Proposed transition to '{state}' is not allowed from current state; skipped.")
+                    continue
+                proposed_actions.append(ProposedAction(
+                    type="transition_state",
+                    label=item.get("label", f"Transition to {state}"),
+                    payload={"state": state},
+                ))
+            elif action_type == "apply_task_template":
+                template_id = item.get("template_id")
+                available_ids = {t["id"] for t in grounding.get("available_templates", [])}
+                if template_id not in available_ids:
+                    warnings.append(f"Proposed template id {template_id} is not available for this incident; skipped.")
+                    continue
+                template_name = next(
+                    (t["name"] for t in grounding.get("available_templates", []) if t["id"] == template_id),
+                    str(template_id),
+                )
+                proposed_actions.append(ProposedAction(
+                    type="apply_task_template",
+                    label=item.get("label", f"Apply template '{template_name}'"),
+                    payload={"template_id": template_id, "template_name": template_name},
+                ))
+            else:
+                warnings.append(f"Unknown proposed action type '{action_type}'; skipped.")
+
+        return AssistantResult(
+            assistant_reply=reply,
+            proposed_actions=proposed_actions,
+            warnings=warnings,
+        )
 
     def generate_closure_message(self, incident_context: dict) -> str:
         prompt = json.dumps(incident_context, indent=2)
