@@ -35,10 +35,16 @@ def _compose_description(rule, alerts, key_value=None) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _materialise_and_fire(rule, org, hits, key_value="none"):
-    """Persist alerts for *hits* and create one Incident for the given key_value.
+def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0):
+    """Persist alerts for *hits* and create/update an Incident for the given key_value.
 
-    Returns the Incident, or None if all hits were already seen (idempotent).
+    - Idempotent: docs already in SearchFinding are skipped.
+    - Live-firing dedup: if an open (non-closed) incident already exists for
+      (rule, key_value), new findings link into it rather than spawning a sibling.
+    - Overflow: when OpenSearch returned fewer hits than its total (truncated by
+      max_findings_per_run), an event records "+N more matched (truncated)".
+
+    Returns the Incident, or None if all hits were already seen.
     """
     from alerts.models import Alert
     from alerts.services.identifiers import next_alert_display_id
@@ -50,6 +56,15 @@ def _materialise_and_fire(rule, org, hits, key_value="none"):
     from incidents.tasks import acquire_triage_lock, enrich_iocs_then_triage
 
     with transaction.atomic():
+        # Live-firing dedup: find an existing open incident for this (rule, key_value).
+        live_firing = (
+            SearchFiring.objects
+            .filter(rule=rule, organization=org, key_value=key_value, incident__isnull=False)
+            .exclude(incident__state="closed")
+            .select_related("incident")
+            .first()
+        )
+
         new_alerts = []
         for hit in hits:
             doc_id = hit.get("_id", "")
@@ -90,7 +105,52 @@ def _materialise_and_fire(rule, org, hits, key_value="none"):
         if not new_alerts:
             return None
 
+        if live_firing:
+            # Absorb new findings into the existing open incident.
+            incident = live_firing.incident
+
+            for alert in new_alerts:
+                alert.state = "imported"
+                alert.incident = incident
+                alert.save(update_fields=["state", "incident", "updated_at"])
+                record_event(
+                    incident,
+                    "alert_linked",
+                    payload={
+                        "alert_display_id": alert.display_id,
+                        "source": "scheduled_search",
+                        "rule_name": rule.name,
+                    },
+                )
+
+            if overflow > 0:
+                record_event(
+                    incident,
+                    "search_rule_overflow",
+                    payload={
+                        "rule_id": rule.id,
+                        "rule_name": rule.name,
+                        "key_value": key_value,
+                        "overflow": overflow,
+                        "note": f"+{overflow} more matched (truncated)",
+                    },
+                )
+
+            SearchFiring.objects.create(
+                rule=rule,
+                organization=org,
+                incident=incident,
+                key_value=key_value,
+                finding_count=len(new_alerts),
+            )
+
+            return incident
+
+        # No live incident — create a fresh one.
         description = _compose_description(rule, new_alerts, key_value)
+        if overflow > 0:
+            description += f"\n+{overflow} more matched (truncated)\n"
+
         key_label = f" [{key_value}]" if key_value and key_value != "none" else ""
 
         ser = IncidentCreateSerializer(
@@ -133,6 +193,19 @@ def _materialise_and_fire(rule, org, hits, key_value="none"):
                 },
             )
 
+        if overflow > 0:
+            record_event(
+                incident,
+                "search_rule_overflow",
+                payload={
+                    "rule_id": rule.id,
+                    "rule_name": rule.name,
+                    "key_value": key_value,
+                    "overflow": overflow,
+                    "note": f"+{overflow} more matched (truncated)",
+                },
+            )
+
         SearchFiring.objects.create(
             rule=rule,
             organization=org,
@@ -167,11 +240,15 @@ def _run_single_leg(rule, org, agent_ids, leg, now, window_start):
         logger.exception("search_evaluator: OpenSearch query failed for rule %s", rule.id)
         return None
 
-    hits = result.get("hits", {}).get("hits", [])
+    hits_block = result.get("hits", {})
+    hits = hits_block.get("hits", [])
     if not hits:
         return None
 
-    return _materialise_and_fire(rule, org, hits, key_value="none")
+    total_count = hits_block.get("total", {}).get("value", 0)
+    overflow = max(0, total_count - len(hits))
+
+    return _materialise_and_fire(rule, org, hits, key_value="none", overflow=overflow)
 
 
 def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
@@ -220,6 +297,7 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
     last_incident = None
     for key_value in sorted(satisfied_keys):
         all_hits = []
+        total_overflow = 0
         for leg in legs:
             body = compile_query(
                 list(leg.conditions.all()),
@@ -232,7 +310,11 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
             )
             try:
                 result = OpenSearchClient()._search(_ALERTS_INDEX, body)
-                all_hits.extend(result.get("hits", {}).get("hits", []))
+                hits_block = result.get("hits", {})
+                leg_hits = hits_block.get("hits", [])
+                leg_total = hits_block.get("total", {}).get("value", 0)
+                all_hits.extend(leg_hits)
+                total_overflow += max(0, leg_total - len(leg_hits))
             except OpenSearchError:
                 logger.exception(
                     "search_evaluator: hit fetch failed for rule %s key %r", rule.id, key_value
@@ -240,7 +322,7 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
                 continue
 
         if all_hits:
-            incident = _materialise_and_fire(rule, org, all_hits, key_value=key_value)
+            incident = _materialise_and_fire(rule, org, all_hits, key_value=key_value, overflow=total_overflow)
             if incident:
                 last_incident = incident
 

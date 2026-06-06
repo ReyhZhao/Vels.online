@@ -681,3 +681,218 @@ class TestMultiLegEvaluator:
         firing = SearchFiring.objects.filter(rule=multi_leg_rule, organization=org).first()
         assert firing is not None
         assert firing.key_value == "db-server"
+
+
+# ── Slice 3: dedup, overlapping-window idempotency, flood cap ─────────────────
+
+_FAKE_HIT_2 = {
+    "_id": "doc-xyz-456",
+    "_index": "wazuh-alerts-4.x-2026.06.01",
+    "_source": {
+        "agent": {"id": "001", "name": "web-01"},
+        "rule": {"description": "brute force attempt", "level": 10},
+        "@timestamp": "2026-06-06T11:00:00Z",
+    },
+}
+
+
+def _fake_overflow_response(hits, total):
+    """Build a response where total > len(hits) (OpenSearch truncated the result)."""
+    return {"hits": {"hits": hits, "total": {"value": total, "relation": "eq"}}}
+
+
+@pytest.mark.django_db
+class TestLiveFiringDedup:
+    def test_new_findings_link_into_open_incident(self, rule, org):
+        """Second run with a new doc links to the existing open incident, not a new one."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.side_effect = [
+                _fake_opensearch_response(hits=[_FAKE_HIT]),
+                _fake_opensearch_response(hits=[_FAKE_HIT_2]),
+            ]
+
+            incident1 = run(rule, org)
+            incident2 = run(rule, org)
+
+        assert incident1 is not None
+        assert incident2 is not None
+        assert incident1.id == incident2.id
+        assert Incident.objects.filter(organization=org, source_kind="scheduled_search").count() == 1
+        assert incident1.alerts.filter(source_kind="scheduled_search").count() == 2
+
+    def test_fresh_incident_created_after_close(self, rule, org):
+        """After the prior incident is closed a second run with new docs produces a new Incident."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response(hits=[_FAKE_HIT])
+            incident1 = run(rule, org)
+
+        incident1.state = "closed"
+        incident1.save(update_fields=["state", "updated_at"])
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response(hits=[_FAKE_HIT_2])
+            incident2 = run(rule, org)
+
+        assert incident2 is not None
+        assert incident1.id != incident2.id
+        assert Incident.objects.filter(organization=org, source_kind="scheduled_search").count() == 2
+
+    def test_overlapping_window_same_doc_no_new_incident(self, rule, org):
+        """Re-running over an already-seen doc with an open incident produces no new Incident."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response()
+
+            run(rule, org)
+            second = run(rule, org)
+
+        assert second is None
+        assert Incident.objects.filter(organization=org, source_kind="scheduled_search").count() == 1
+
+    def test_search_firing_created_per_run(self, rule, org):
+        """Each run that links new findings creates its own SearchFiring record."""
+        from correlations.services.search_evaluator import run
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.side_effect = [
+                _fake_opensearch_response(hits=[_FAKE_HIT]),
+                _fake_opensearch_response(hits=[_FAKE_HIT_2]),
+            ]
+
+            run(rule, org)
+            run(rule, org)
+
+        assert SearchFiring.objects.filter(rule=rule, organization=org).count() == 2
+
+
+@pytest.mark.django_db
+class TestFloodCap:
+    def test_overflow_note_in_description(self, rule, org):
+        """When OpenSearch total > returned hits, overflow note appears in incident description."""
+        from correlations.services.search_evaluator import run
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_overflow_response(
+                hits=[_FAKE_HIT], total=75
+            )
+
+            incident = run(rule, org)
+
+        assert incident is not None
+        assert "+74 more matched (truncated)" in incident.description
+
+    def test_overflow_event_recorded(self, rule, org):
+        """An overflow event is created on the incident when results are truncated."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import IncidentEvent
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_overflow_response(
+                hits=[_FAKE_HIT], total=120
+            )
+
+            incident = run(rule, org)
+
+        event = IncidentEvent.objects.filter(
+            incident=incident, kind="search_rule_overflow"
+        ).first()
+        assert event is not None
+        assert event.payload["overflow"] == 119
+        assert "+119 more matched (truncated)" in event.payload["note"]
+
+    def test_overflow_event_on_live_incident(self, rule, org):
+        """Overflow is recorded on an existing live incident (dedup + flood cap combined)."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import IncidentEvent
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.side_effect = [
+                _fake_opensearch_response(hits=[_FAKE_HIT]),
+                _fake_overflow_response(hits=[_FAKE_HIT_2], total=60),
+            ]
+
+            incident1 = run(rule, org)
+            incident2 = run(rule, org)
+
+        assert incident1.id == incident2.id
+        overflow_events = IncidentEvent.objects.filter(
+            incident=incident1, kind="search_rule_overflow"
+        )
+        assert overflow_events.count() == 1
+        assert overflow_events.first().payload["overflow"] == 59
+
+    def test_no_overflow_when_total_equals_returned(self, rule, org):
+        """No overflow event when OpenSearch total equals returned hits (no truncation)."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import IncidentEvent
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response(hits=[_FAKE_HIT])
+
+            incident = run(rule, org)
+
+        assert not IncidentEvent.objects.filter(
+            incident=incident, kind="search_rule_overflow"
+        ).exists()
