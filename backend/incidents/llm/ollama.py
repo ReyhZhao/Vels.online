@@ -3,15 +3,26 @@ import json
 import ollama
 from django.conf import settings
 
-from .base import BaseTriageProvider, CorrelationResult, TaskSummaryResult, TriageError, TriageResult
+from .base import (
+    AssistantError,
+    AssistantResult,
+    BaseTriageProvider,
+    CorrelationResult,
+    TaskSummaryResult,
+    TriageError,
+    TriageResult,
+)
 from .gemini import (
     CLOSURE_MESSAGE_SYSTEM_PROMPT,
     CORRELATION_SYSTEM_PROMPT,
     TASK_SUMMARY_SYSTEM_PROMPT,
+    _build_assistant_system_prompt,
     _build_system_prompt,
+    _parse_assistant_result,
     _parse_correlation_result,
     _parse_result,
     _parse_task_summary_result,
+    _strip_code_fence_if_present,
 )
 
 
@@ -160,3 +171,30 @@ class OllamaTriageProvider(BaseTriageProvider):
             return response.message.content.strip()
         except Exception as exc:
             raise TriageError(f"Ollama closure message error: {exc}") from exc
+
+    def assist_incident(self, messages: list, grounding: dict) -> AssistantResult:
+        if not messages:
+            raise AssistantError("No messages provided.")
+
+        system_prompt = _build_assistant_system_prompt(grounding)
+        chat_messages = [{"role": "system", "content": system_prompt}]
+        for msg in messages:
+            role = msg.get("role", "user")
+            if role not in ("user", "assistant"):
+                role = "user"
+            chat_messages.append({"role": role, "content": str(msg.get("content", ""))})
+
+        try:
+            response = self._client.chat(model=self._model, messages=chat_messages)
+            raw = response.message.content.strip()
+        except Exception as exc:
+            raise AssistantError(f"Ollama API error: {exc}") from exc
+
+        raw = _strip_code_fence_if_present(raw)
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise AssistantError(f"Ollama returned non-JSON: {raw[:200]}") from exc
+
+        return _parse_assistant_result(data, grounding)

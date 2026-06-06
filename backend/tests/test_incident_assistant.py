@@ -217,6 +217,59 @@ def test_assistant_field_allowlist_enforced_in_gemini_provider(incident):
     assert len(result.warnings) >= 1
 
 
+@pytest.mark.django_db
+def test_ollama_assist_incident_parses_and_enforces_allowlist(incident):
+    """OllamaTriageProvider.assist_incident must parse replies/actions and strip non-allowlisted fields."""
+    from incidents.llm.ollama import OllamaTriageProvider
+
+    grounding = build_incident_grounding(incident)
+
+    raw_response = json.dumps({
+        "assistant_reply": "Here is my suggestion.",
+        "proposed_actions": [
+            {"type": "update_field", "field": "display_id", "value": "HACKED", "label": "Bad action"},
+            {"type": "update_field", "field": "severity", "value": "high", "label": "Good action"},
+        ],
+    })
+
+    mock_provider = MagicMock(spec=OllamaTriageProvider)
+    mock_response = MagicMock()
+    mock_response.message.content = raw_response
+    mock_provider._client = MagicMock()
+    mock_provider._client.chat.return_value = mock_response
+    mock_provider._model = "mistral"
+
+    result = OllamaTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert result.assistant_reply == "Here is my suggestion."
+    # display_id is not allowlisted — must be stripped
+    assert all(a.payload.get("field") != "display_id" for a in result.proposed_actions)
+    severity_actions = [a for a in result.proposed_actions if a.payload.get("field") == "severity"]
+    assert len(severity_actions) == 1
+    assert len(result.warnings) >= 1
+
+
+@pytest.mark.django_db
+def test_ollama_assist_incident_strips_code_fence(incident):
+    """OllamaTriageProvider.assist_incident must handle JSON wrapped in a markdown code fence."""
+    from incidents.llm.ollama import OllamaTriageProvider
+
+    grounding = build_incident_grounding(incident)
+    raw_response = "```json\n" + json.dumps({"assistant_reply": "Fenced reply.", "proposed_actions": []}) + "\n```"
+
+    mock_provider = MagicMock(spec=OllamaTriageProvider)
+    mock_response = MagicMock()
+    mock_response.message.content = raw_response
+    mock_provider._client = MagicMock()
+    mock_provider._client.chat.return_value = mock_response
+    mock_provider._model = "mistral"
+
+    result = OllamaTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert result.assistant_reply == "Fenced reply."
+    assert result.proposed_actions == []
+
+
 # ── proposed action: transition_state ─────────────────────────────────────────
 
 @pytest.mark.django_db
