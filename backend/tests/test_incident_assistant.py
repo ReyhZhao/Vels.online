@@ -379,3 +379,247 @@ def test_grounding_includes_tasks(incident):
     Task.objects.create(incident=incident, title="Investigate email", display_order=1)
     g = build_incident_grounding(incident)
     assert any(t["title"] == "Investigate email" for t in g["tasks"])
+
+
+# ── grounding: contacts ────────────────────────────────────────────────────────
+
+@pytest.fixture
+def contact(db, acme):
+    from contacts.models import Contact
+    return Contact.objects.create(organisation=acme, name="Alice Smith", email="alice@example.com")
+
+
+@pytest.fixture
+def incident_contact(db, incident, contact):
+    from contacts.models import IncidentContact
+    return IncidentContact.objects.create(incident=incident, contact=contact)
+
+
+@pytest.mark.django_db
+def test_grounding_includes_contacts(incident, incident_contact, contact):
+    g = build_incident_grounding(incident)
+    assert "contacts" in g
+    assert any(c["id"] == contact.id and c["name"] == contact.name for c in g["contacts"])
+
+
+@pytest.mark.django_db
+def test_grounding_contacts_empty_when_none(incident):
+    g = build_incident_grounding(incident)
+    assert g["contacts"] == []
+
+
+# ── proposed action: create_comment ───────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_assistant_create_comment_action_proposed(client, staff, incident):
+    action = ProposedAction(
+        type="create_comment",
+        label="Add internal note",
+        payload={"text": "Check the firewall logs.", "internal": True},
+    )
+    client.force_login(staff)
+    with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider(actions=[action])):
+        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = resp.json()
+    assert len(data["proposed_actions"]) == 1
+    act = data["proposed_actions"][0]
+    assert act["type"] == "create_comment"
+    assert act["payload"]["text"] == "Check the firewall logs."
+    assert act["payload"]["internal"] is True
+
+
+@pytest.mark.django_db
+def test_gemini_create_comment_defaults_to_internal(incident):
+    from incidents.llm.gemini import GeminiTriageProvider
+    from google.genai import types as genai_types
+
+    grounding = build_incident_grounding(incident)
+    raw_response = json.dumps({
+        "assistant_reply": "Adding a note.",
+        "proposed_actions": [
+            {"type": "create_comment", "text": "Suspicious login detected.", "label": "Add note"},
+        ],
+    })
+
+    mock_provider = MagicMock(spec=GeminiTriageProvider)
+    mock_response = MagicMock()
+    mock_response.text = raw_response
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+    mock_provider._client = mock_client
+    mock_provider._types = genai_types
+
+    from django.conf import settings
+    with patch.object(settings, "GEMINI_MODEL", "gemini-test", create=True):
+        result = GeminiTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert len(result.proposed_actions) == 1
+    assert result.proposed_actions[0].payload["internal"] is True
+
+
+@pytest.mark.django_db
+def test_gemini_create_comment_empty_text_stripped(incident):
+    from incidents.llm.gemini import GeminiTriageProvider
+    from google.genai import types as genai_types
+
+    grounding = build_incident_grounding(incident)
+    raw_response = json.dumps({
+        "assistant_reply": ".",
+        "proposed_actions": [
+            {"type": "create_comment", "text": "", "label": "Empty"},
+        ],
+    })
+
+    mock_provider = MagicMock(spec=GeminiTriageProvider)
+    mock_response = MagicMock()
+    mock_response.text = raw_response
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+    mock_provider._client = mock_client
+    mock_provider._types = genai_types
+
+    from django.conf import settings
+    with patch.object(settings, "GEMINI_MODEL", "gemini-test", create=True):
+        result = GeminiTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert result.proposed_actions == []
+    assert len(result.warnings) >= 1
+
+
+# ── proposed action: send_contact_message ─────────────────────────────────────
+
+@pytest.mark.django_db
+def test_assistant_send_contact_message_proposed(client, staff, incident, incident_contact, contact):
+    action = ProposedAction(
+        type="send_contact_message",
+        label=f"Notify {contact.name}",
+        payload={"contact_id": contact.id, "message": "Please investigate.", "contact_name": contact.name},
+    )
+    client.force_login(staff)
+    with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider(actions=[action])):
+        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = resp.json()
+    assert len(data["proposed_actions"]) == 1
+    act = data["proposed_actions"][0]
+    assert act["type"] == "send_contact_message"
+    assert act["payload"]["contact_id"] == contact.id
+    assert act["payload"]["message"] == "Please investigate."
+
+
+@pytest.mark.django_db
+def test_gemini_send_contact_message_valid_contact(incident, incident_contact, contact):
+    from incidents.llm.gemini import GeminiTriageProvider
+    from google.genai import types as genai_types
+
+    grounding = build_incident_grounding(incident)
+    raw_response = json.dumps({
+        "assistant_reply": "Notifying contact.",
+        "proposed_actions": [
+            {
+                "type": "send_contact_message",
+                "contact_id": contact.id,
+                "message": "Your system may be compromised.",
+                "label": f"Notify {contact.name}",
+            },
+        ],
+    })
+
+    mock_provider = MagicMock(spec=GeminiTriageProvider)
+    mock_response = MagicMock()
+    mock_response.text = raw_response
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+    mock_provider._client = mock_client
+    mock_provider._types = genai_types
+
+    from django.conf import settings
+    with patch.object(settings, "GEMINI_MODEL", "gemini-test", create=True):
+        result = GeminiTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert len(result.proposed_actions) == 1
+    pa = result.proposed_actions[0]
+    assert pa.type == "send_contact_message"
+    assert pa.payload["contact_id"] == contact.id
+    assert pa.payload["contact_name"] == contact.name
+    assert result.warnings == []
+
+
+@pytest.mark.django_db
+def test_gemini_send_contact_message_unknown_contact_stripped(incident):
+    from incidents.llm.gemini import GeminiTriageProvider
+    from google.genai import types as genai_types
+
+    grounding = build_incident_grounding(incident)
+    # No contacts attached to this incident
+    raw_response = json.dumps({
+        "assistant_reply": "Notifying contact.",
+        "proposed_actions": [
+            {
+                "type": "send_contact_message",
+                "contact_id": 999999,
+                "message": "You are hacked.",
+                "label": "Notify unknown",
+            },
+        ],
+    })
+
+    mock_provider = MagicMock(spec=GeminiTriageProvider)
+    mock_response = MagicMock()
+    mock_response.text = raw_response
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+    mock_provider._client = mock_client
+    mock_provider._types = genai_types
+
+    from django.conf import settings
+    with patch.object(settings, "GEMINI_MODEL", "gemini-test", create=True):
+        result = GeminiTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert result.proposed_actions == []
+    assert len(result.warnings) >= 1
+
+
+@pytest.mark.django_db
+def test_gemini_send_contact_message_empty_message_stripped(incident, incident_contact, contact):
+    from incidents.llm.gemini import GeminiTriageProvider
+    from google.genai import types as genai_types
+
+    grounding = build_incident_grounding(incident)
+    raw_response = json.dumps({
+        "assistant_reply": ".",
+        "proposed_actions": [
+            {"type": "send_contact_message", "contact_id": contact.id, "message": "", "label": "Empty"},
+        ],
+    })
+
+    mock_provider = MagicMock(spec=GeminiTriageProvider)
+    mock_response = MagicMock()
+    mock_response.text = raw_response
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+    mock_provider._client = mock_client
+    mock_provider._types = genai_types
+
+    from django.conf import settings
+    with patch.object(settings, "GEMINI_MODEL", "gemini-test", create=True):
+        result = GeminiTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert result.proposed_actions == []
+    assert len(result.warnings) >= 1
+
+
+# ── existing action types continue to work ────────────────────────────────────
+
+@pytest.mark.django_db
+def test_existing_action_types_unaffected(client, staff, incident):
+    actions = [
+        ProposedAction(type="update_field", label="Set severity", payload={"field": "severity", "value": "high"}),
+        ProposedAction(type="transition_state", label="Move to in_progress", payload={"state": "in_progress"}),
+    ]
+    client.force_login(staff)
+    with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider(actions=actions)):
+        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = resp.json()
+    types = [a["type"] for a in data["proposed_actions"]]
+    assert "update_field" in types
+    assert "transition_state" in types
