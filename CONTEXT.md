@@ -44,6 +44,21 @@ A Correlation Rule a tenant authors for its own organisation (`organization` set
 A per-org disablement of a System Rule — the rule stops evaluating for that tenant only, without being deleted globally.
 _Avoid_: Disable, Suppress (suppress could be confused with Firing dedup).
 
+### Scheduled search
+
+**Scheduled Search Rule**:
+A user-defined rule that, on a schedule, pushes its pattern-match down into the Wazuh **OpenSearch** backend to detect a pattern of raw Wazuh alerts *without* ingesting all of them into the platform. Authored with the same manual + LLM-assisted builder as a **Correlation Rule**, but it is a distinct concept: it evaluates by *pull* (a periodic query) rather than by *push* (reacting to an ingested **Alert**), it matches over the raw Wazuh document schema rather than the normalised **entity envelope**, and it has no in-app **Alert** rows until it triggers. See [ADR-0006](docs/adr/0006-scheduled-search-rules-pull-engine.md) and [ADR-0007](docs/adr/0007-search-rule-dynamic-field-catalog.md).
+_Avoid_: Correlation Rule (reserved for the in-app, push, multi-leg engine over ingested Alerts), Hunt (connotes interactive/exploratory threat hunting), Saved Search (a Scheduled Search Rule is evaluated and can raise findings, not just stored).
+
+**Finding**:
+A single raw Wazuh document that a Scheduled Search Rule's query matched on a given run. When a rule triggers, each Finding is **materialised** as an in-app **Alert** (the matches are ingested on trigger — only the matches, never the whole index), and the run's Findings together produce one **Incident**. Almost always there is no pre-existing app Alert for a Finding, since the platform does not ingest the full Wazuh stream.
+_Avoid_: Hit, Match (use "match" only as the verb for the query selecting a document).
+
+A Scheduled Search Rule is a **System Rule** (org = null, baseline applied to every tenant, per-org **Mute**) or an **Org Rule** (org set) — the same tiers as a Correlation Rule. **Tenant-isolation invariant:** every query is scoped to one organisation's Wazuh agents (`agent.id` ∈ the org's `wazuh_group` members), and a rule's **Window** / **Correlation Key** join *never* crosses tenants — even `correlation_key = none` correlates only within a single org's agent scope. A System Search Rule achieves this by fanning out per org (excluding mutes) at run time.
+
+**Materialise**:
+To create an in-app **Alert** from a **Finding** at trigger time. The bridge that lets a Scheduled Search Rule reuse the existing Incident / IOC / triage pipeline, which all assume real Alert rows. In v1 a materialised search-alert is **born-linked + suppressed**: created with `source_kind = scheduled_search`, already linked to its rule's Incident. Suppression is two-part — it does not *trigger* streaming evaluation, **and** it is excluded from other rules' streaming window scans — so it participates only in its own Search Rule incident and never seeds streaming cross-source correlation. Its Incident also carries `source_kind = scheduled_search`, keeping it outside the streaming `Supersede` logic. (v2 may relax this — see issue #399.)
+
 ### LLM-assisted detection
 
 **Residual**:
@@ -72,3 +87,4 @@ _Avoid_: Merge (reserve for the deferred A-deep record-level migration).
 
 - "Combination of alerts" was ambiguous between a single-alert classifier (conditions over one alert) and a multi-leg correlation across heterogeneous alerts. **Resolved:** a Correlation Rule is multi-leg correlation; a single-leg rule is the degenerate case that subsumes the old severity auto-promote.
 - The hardcoded `route_alert` steps (severity auto-promote, asset threshold) overlap with Correlation Rules. **Resolved (v1):** both run side by side — fast-path stays synchronous, Correlation Rules run async and **Supersede** any simpler incident they overlap. Eventually the hardcoded steps may be reframed as seed rules (deferred).
+- A **Scheduled Search Rule** reuses the **Leg** / **Correlation Key** / **Window** vocabulary, but its match semantics are **co-occurrence within the window** ("all legs present for the same key"), *not* strict ordering ("leg A *then* leg B"). **Resolved (v1):** co-occurrence only, matching the streaming engine. Strict sequence/ordering is a recognised future axis (may matter once rules run in production for a while) — deferred.
