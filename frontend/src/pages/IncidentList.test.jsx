@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -90,6 +90,28 @@ describe('IncidentList', () => {
     expect(screen.getAllByText('Malware detected').length).toBeGreaterThan(0);
     expect(screen.getAllByText('high').length).toBeGreaterThan(0);
     expect(screen.getAllByText('critical').length).toBeGreaterThan(0);
+  });
+
+  it('aligns desktop State and TLP cells under their own headers', async () => {
+    // Regression for #392: header order was State, TLP but the body rendered
+    // TLP, State — so each value sat under the wrong column header.
+    api.get.mockResolvedValue(PAGE_RESPONSE());
+    renderPage();
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
+
+    const table = screen.getByRole('table');
+    const headers = within(table)
+      .getAllByRole('columnheader')
+      .map(h => h.textContent.trim());
+    const stateIdx = headers.findIndex(h => /^State/.test(h));
+    const tlpIdx = headers.findIndex(h => /^TLP/.test(h));
+    expect(stateIdx).toBeGreaterThanOrEqual(0);
+    expect(tlpIdx).toBeGreaterThanOrEqual(0);
+
+    const firstRow = within(table).getAllByRole('row')[1]; // [0] is the header row
+    const cells = within(firstRow).getAllByRole('cell');
+    expect(cells[stateIdx].textContent).toContain('new');       // INC-2026-0001.state
+    expect(cells[tlpIdx].textContent).toContain('TLP:AMBER');    // INC-2026-0001.tlp
   });
 
   it('shows page heading', async () => {

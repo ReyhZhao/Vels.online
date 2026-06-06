@@ -809,13 +809,13 @@ export default function IncidentList() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TLP_CLASSES[inc.tlp] ?? ''}`}>
-                      TLP:{inc.tlp?.toUpperCase()}
+                    <span className={`text-xs font-medium ${STATE_CLASSES[inc.state] ?? 'text-muted-foreground'}`}>
+                      {inc.state?.replace('_', ' ')}
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`text-xs font-medium ${STATE_CLASSES[inc.state] ?? 'text-muted-foreground'}`}>
-                      {inc.state?.replace('_', ' ')}
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TLP_CLASSES[inc.tlp] ?? ''}`}>
+                      TLP:{inc.tlp?.toUpperCase()}
                     </span>
                   </td>
                   <td className="px-4 py-3">
