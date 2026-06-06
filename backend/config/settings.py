@@ -261,6 +261,10 @@ INCIDENT_ASSISTANT_LLM_PROVIDER = os.environ.get(
     "INCIDENT_ASSISTANT_LLM_PROVIDER",
     "correlations.llm.gemini.GeminiTriageProvider",
 )
+CLOSURE_LLM_PROVIDER = os.environ.get(
+    "CLOSURE_LLM_PROVIDER",
+    "correlations.llm.gemini.GeminiTriageProvider",
+)
 GROUNDING_WINDOW_DAYS = int(os.environ.get("GROUNDING_WINDOW_DAYS", "30"))
 GROUNDING_VALUE_CAP   = int(os.environ.get("GROUNDING_VALUE_CAP", "50"))
 GROUNDING_SAMPLE_CAP  = int(os.environ.get("GROUNDING_SAMPLE_CAP", "15"))
