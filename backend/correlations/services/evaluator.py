@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import timedelta
 
@@ -55,16 +56,54 @@ def _link_alert_to_incident(alert, incident, rule):
     )
 
 
+def _compose_description(rule, key_value, matching_alerts):
+    """Build a human-readable incident description from the contributing alerts.
+
+    Includes the rule name, the correlation key/value, and per-alert detail
+    (identifier, title, severity, source kind, entities, and the alert's raw
+    source data) so staff and the auto-triage pipeline have real context and so
+    IOC extraction — which reads the incident's title + description — has the
+    alerts' raw content to extract from.
+    """
+    alerts = sorted(matching_alerts, key=lambda a: (a.created_at, a.display_id or ""))
+
+    lines = [
+        f"Correlation rule **{rule.name}** fired.",
+        f"Correlation key: {rule.correlation_key} = {key_value}",
+        "",
+        f"## Contributing alerts ({len(alerts)})",
+        "",
+    ]
+
+    for alert in alerts:
+        entities = ", ".join(
+            f"{e.entity_type}={e.value}" for e in alert.entities.all()
+        ) or "—"
+        lines.append(f"### {alert.display_id}: {alert.title or '(untitled)'}")
+        lines.append(f"- Severity: {alert.severity or '—'}")
+        lines.append(f"- Source kind: {alert.source_kind}")
+        lines.append(f"- Entities: {entities}")
+        if alert.description:
+            lines.append(f"- Detail: {alert.description}")
+        raw = json.dumps(alert.source_ref, default=str, sort_keys=True)
+        lines.append(f"- Raw source data: {raw}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _fire(rule, org, key_value, matching_alerts):
     """Create an incident and CorrelationFiring for a satisfied rule."""
     from incidents.models import Incident
     from incidents.serializers import IncidentCreateSerializer
     from incidents.services.events import record_event
     from incidents.services.identifiers import next_display_id
+    from incidents.services.ioc_extraction import extract_and_save_iocs
     from correlations.models import CorrelationFiring
     from correlations.services.supersede import supersede_simpler_incidents
 
     title = f"{rule.name}: {key_value}"
+    description = _compose_description(rule, key_value, matching_alerts)
 
     # Collect any simpler (non-correlation) incidents that currently own contributing alerts,
     # before relinking mutates alert.incident.
@@ -80,7 +119,7 @@ def _fire(rule, org, key_value, matching_alerts):
                 "title": title,
                 "severity": rule.severity,
                 "source_kind": "correlation",
-                "description": "",
+                "description": description,
                 "tlp": "amber",
                 "pap": "amber",
             }
@@ -108,6 +147,11 @@ def _fire(rule, org, key_value, matching_alerts):
 
         if prior_simpler:
             supersede_simpler_incidents(incident, prior_simpler, rule)
+
+        # Run IOC extraction over the now-populated description so the enrich +
+        # triage pipeline (scheduled on commit by the Incident post_save signal)
+        # has IOCs to enrich, matching the detection-suggestion path.
+        extract_and_save_iocs(incident)
 
     return incident
 

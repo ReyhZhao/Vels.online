@@ -295,6 +295,46 @@ def test_single_leg_rule_title_uses_key_value(org):
     assert "1.2.3.4" in alert.incident.title
 
 
+def test_rule_fired_incident_carries_alert_detail_and_iocs(org):
+    """Regression for #398: rule-fired incidents must carry contributing-alert
+    detail in the description and have IOC extraction run over it."""
+    from incidents.models import IOC
+
+    alert = _make_alert(
+        org,
+        severity="high",
+        title="Brute force login",
+        description="Repeated failed SSH logins",
+        source_ref={"rule_id": "5710", "src_ip": "203.0.113.7"},
+    )
+    _add_entity(alert, "source.ip", "203.0.113.7")
+    rule = _make_rule(org, correlation_key="source.ip", severity="critical")
+    leg = _make_leg(rule)
+    _make_condition(leg, FIELD_KIND_ALERT, "title", OPERATOR_CONTAINS, "brute force")
+
+    evaluate(alert)
+
+    alert.refresh_from_db()
+    inc = alert.incident
+    assert inc is not None
+
+    # Description composes the rule, correlation key/value and per-alert detail.
+    desc = inc.description
+    assert desc
+    assert "Test Rule" in desc
+    assert "source.ip = 203.0.113.7" in desc           # correlation key/value
+    assert alert.display_id in desc                     # alert identifier
+    assert "Brute force login" in desc                  # alert title
+    assert "high" in desc                               # alert severity
+    assert "wazuh_event" in desc                        # alert source kind
+    assert "source.ip=203.0.113.7" in desc             # alert entities
+    assert "Repeated failed SSH logins" in desc         # alert description
+    assert "203.0.113.7" in desc                        # raw source_ref content
+
+    # IOC extraction ran over the composed description.
+    assert IOC.objects.filter(incident=inc, value="203.0.113.7").exists()
+
+
 def test_disabled_rule_does_not_fire(org):
     alert = _make_alert(org, severity="critical")
     rule = _make_rule(org, severity="high")
