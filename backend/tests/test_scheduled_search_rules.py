@@ -1,17 +1,19 @@
-"""Tests for the Scheduled Search Rules walking skeleton.
+"""Tests for Scheduled Search Rules — slice 1 (walking skeleton) + slice 2 (multi-leg co-occurrence).
 
 Covers (external behaviour, stubbed OpenSearch/Wazuh):
-- Compiler: operator → DSL for each supported operator + agent scoping + window bound
+- Compiler: operator → DSL, agent scoping, window bound, agg query shape, key filter
 - Materialiser: idempotency + source_kind
-- Evaluator: single-leg fire creating a linked Incident with source_kind=scheduled_search
+- Evaluator: single-leg fire; multi-leg satisfied-key join; per-key incident creation;
+  single-leg/none degenerate path still fires
 """
 import pytest
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from django.utils import timezone
 
 from correlations.models import (
+    CORRELATION_KEY_NONE,
     SEARCH_OPERATOR_CIDR,
     SEARCH_OPERATOR_CONTAINS,
     SEARCH_OPERATOR_EQUALS,
@@ -23,7 +25,12 @@ from correlations.models import (
     SearchRule,
     SearchRuleLeg,
 )
-from correlations.services.search_compiler import compile_query, _condition_to_clause
+from correlations.services.search_compiler import (
+    CORRELATION_KEY_TO_WAZUH_FIELD,
+    compile_agg_query,
+    compile_query,
+    _condition_to_clause,
+)
 from security.models import Organization
 
 
@@ -384,3 +391,293 @@ class TestScheduleLifecycle:
         delete_rule_schedule(rule)
 
         assert not PeriodicTask.objects.filter(name=f"search_rule_{rule.id}").exists()
+
+
+# ── Compiler: agg query + key filter (slice 2) ───────────────────────────────
+
+class TestSearchCompilerSlice2:
+    def test_compile_agg_query_shape(self):
+        now = timezone.now()
+        window_start = now - timedelta(hours=1)
+        body = compile_agg_query([], ["001"], window_start, now, "agent.name")
+
+        assert body["size"] == 0
+        agg = body["aggregations"]["key_agg"]["terms"]
+        assert agg["field"] == "agent.name"
+        assert agg["size"] == 500  # default max_buckets
+
+    def test_compile_agg_query_carries_conditions(self):
+        cond = _make_condition("rule.level", SEARCH_OPERATOR_GTE, "8")
+        now = timezone.now()
+        body = compile_agg_query([cond], ["001"], now - timedelta(hours=1), now, "agent.name")
+
+        filters = body["query"]["bool"]["filter"]
+        assert any("range" in c and c["range"].get("rule.level") for c in filters)
+
+    def test_compile_query_key_filter_added(self):
+        now = timezone.now()
+        body = compile_query(
+            [], ["001"], now - timedelta(hours=1), now, 50,
+            key_field="agent.name", key_value="web-01",
+        )
+        filters = body["query"]["bool"]["filter"]
+        assert {"term": {"agent.name": "web-01"}} in filters
+
+    def test_compile_query_no_key_filter_when_omitted(self):
+        now = timezone.now()
+        body = compile_query([], ["001"], now - timedelta(hours=1), now, 50)
+        filters = body["query"]["bool"]["filter"]
+        # No extra term filter beyond agents + timestamp
+        term_clauses = [c for c in filters if "term" in c]
+        assert len(term_clauses) == 0
+
+    def test_correlation_key_to_wazuh_field_map_complete(self):
+        expected_keys = {"host.name", "source.ip", "user.name", "file.hash.sha256", "process.name"}
+        assert expected_keys == set(CORRELATION_KEY_TO_WAZUH_FIELD.keys())
+
+
+# ── Multi-leg evaluator (slice 2) ─────────────────────────────────────────────
+
+def _make_agg_response(buckets):
+    """Build a fake OpenSearch agg response."""
+    return {
+        "hits": {"hits": [], "total": {"value": 0}},
+        "aggregations": {
+            "key_agg": {
+                "buckets": [{"key": k, "doc_count": v} for k, v in buckets.items()]
+            }
+        },
+    }
+
+
+def _make_hit(doc_id, key_field, key_value):
+    return {
+        "_id": doc_id,
+        "_index": "wazuh-alerts-4.x-2026.06.01",
+        "_source": {
+            "agent": {"id": "001", "name": key_value},
+            key_field: key_value,
+            "rule": {"description": "test event", "level": 5},
+            "@timestamp": "2026-06-06T10:00:00Z",
+        },
+    }
+
+
+@pytest.fixture
+def multi_leg_rule(org):
+    """A two-leg rule with correlation_key=host.name."""
+    r = SearchRule.objects.create(
+        organization=org,
+        name="Multi-leg Rule",
+        severity="high",
+        correlation_key="host.name",
+        window_minutes=60,
+        interval_minutes=15,
+        max_findings_per_run=50,
+    )
+    leg1 = SearchRuleLeg.objects.create(rule=r, display_order=0, count=2)
+    SearchLegCondition.objects.create(
+        leg=leg1, field_name="rule.groups", operator=SEARCH_OPERATOR_EQUALS, value="authentication_failure"
+    )
+    leg2 = SearchRuleLeg.objects.create(rule=r, display_order=1, count=1)
+    SearchLegCondition.objects.create(
+        leg=leg2, field_name="rule.groups", operator=SEARCH_OPERATOR_EQUALS, value="authentication_success"
+    )
+    return r
+
+
+@pytest.mark.django_db
+class TestMultiLegEvaluator:
+    def test_satisfied_key_creates_incident(self, multi_leg_rule, org):
+        """When both legs meet their count for the same key an Incident is created."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        agg_response_leg1 = _make_agg_response({"web-01": 3, "web-02": 1})
+        agg_response_leg2 = _make_agg_response({"web-01": 1, "web-03": 2})
+        hit_response = _fake_opensearch_response(
+            hits=[_make_hit("doc-1", "agent.name", "web-01")]
+        )
+
+        # agg calls first, then hit-fetch calls (one per leg per satisfied key)
+        side_effects = [agg_response_leg1, agg_response_leg2, hit_response, hit_response]
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.side_effect = side_effects
+
+            result = run(multi_leg_rule, org)
+
+        assert result is not None
+        assert Incident.objects.filter(organization=org, source_kind="scheduled_search").exists()
+
+    def test_no_satisfied_key_no_incident(self, multi_leg_rule, org):
+        """When legs have no common key the rule does not fire."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        # leg1 satisfied for web-01; leg2 satisfied for web-03 — no intersection
+        agg_response_leg1 = _make_agg_response({"web-01": 3})
+        agg_response_leg2 = _make_agg_response({"web-03": 2})
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.side_effect = [agg_response_leg1, agg_response_leg2]
+
+            result = run(multi_leg_rule, org)
+
+        assert result is None
+        assert not Incident.objects.filter(organization=org).exists()
+
+    def test_only_leg_meeting_count_threshold_included(self, multi_leg_rule, org):
+        """Key present in both aggs but below count for leg1 — should not fire."""
+        from correlations.services.search_evaluator import run
+
+        # leg1 requires count >= 2 but web-01 only has 1
+        agg_response_leg1 = _make_agg_response({"web-01": 1})
+        agg_response_leg2 = _make_agg_response({"web-01": 5})
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.side_effect = [agg_response_leg1, agg_response_leg2]
+
+            result = run(multi_leg_rule, org)
+
+        assert result is None
+
+    def test_per_key_incident_creation(self, multi_leg_rule, org):
+        """Two satisfied keys produce two Incidents."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        # Both keys satisfy both legs
+        agg_response_leg1 = _make_agg_response({"web-01": 2, "web-02": 3})
+        agg_response_leg2 = _make_agg_response({"web-01": 1, "web-02": 2})
+        # 2 satisfied keys × 2 legs = 4 hit-fetch calls (sorted order: web-01, web-02)
+        hit_web01 = _fake_opensearch_response(hits=[_make_hit("d1", "agent.name", "web-01")])
+        hit_web02 = _fake_opensearch_response(hits=[_make_hit("d2", "agent.name", "web-02")])
+
+        side_effects = [
+            agg_response_leg1, agg_response_leg2,
+            hit_web01, hit_web01,  # web-01 leg1 + leg2 hit fetches
+            hit_web02, hit_web02,  # web-02 leg1 + leg2 hit fetches
+        ]
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.side_effect = side_effects
+
+            run(multi_leg_rule, org)
+
+        incidents = Incident.objects.filter(organization=org, source_kind="scheduled_search")
+        assert incidents.count() == 2
+
+    def test_single_leg_with_correlation_key_uses_degenerate_path(self, org):
+        """A rule with correlation_key set but only one leg uses the simple path."""
+        from correlations.services.search_evaluator import run
+
+        r = SearchRule.objects.create(
+            organization=org,
+            name="Single Leg With Key",
+            severity="medium",
+            correlation_key="host.name",
+            window_minutes=60,
+            interval_minutes=15,
+            max_findings_per_run=50,
+        )
+        leg = SearchRuleLeg.objects.create(rule=r, display_order=0, count=1)
+        SearchLegCondition.objects.create(
+            leg=leg, field_name="rule.level", operator=SEARCH_OPERATOR_GTE, value="5"
+        )
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response()
+
+            result = run(r, org)
+
+        # Simple path: exactly one _search call (no agg)
+        assert MockOS.return_value._search.call_count == 1
+        assert result is not None
+
+    def test_correlation_key_none_uses_degenerate_path(self, org):
+        """A two-leg rule with correlation_key=none uses the simple single-leg path."""
+        from correlations.services.search_evaluator import run
+
+        r = SearchRule.objects.create(
+            organization=org,
+            name="None Key Two Legs",
+            severity="medium",
+            correlation_key=CORRELATION_KEY_NONE,
+            window_minutes=60,
+            interval_minutes=15,
+            max_findings_per_run=50,
+        )
+        for i in range(2):
+            leg = SearchRuleLeg.objects.create(rule=r, display_order=i, count=1)
+            SearchLegCondition.objects.create(
+                leg=leg, field_name="rule.level", operator=SEARCH_OPERATOR_GTE, value="5"
+            )
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response()
+
+            result = run(r, org)
+
+        # Simple path: exactly one _search call (uses first leg only)
+        assert MockOS.return_value._search.call_count == 1
+        assert result is not None
+
+    def test_search_firing_records_key_value(self, multi_leg_rule, org):
+        """SearchFiring.key_value is set to the correlation key value that fired."""
+        from correlations.services.search_evaluator import run
+
+        agg_response_leg1 = _make_agg_response({"db-server": 2})
+        agg_response_leg2 = _make_agg_response({"db-server": 1})
+        hit_response = _fake_opensearch_response(
+            hits=[_make_hit("doc-x", "agent.name", "db-server")]
+        )
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.side_effect = [
+                agg_response_leg1, agg_response_leg2, hit_response, hit_response
+            ]
+
+            run(multi_leg_rule, org)
+
+        firing = SearchFiring.objects.filter(rule=multi_leg_rule, organization=org).first()
+        assert firing is not None
+        assert firing.key_value == "db-server"

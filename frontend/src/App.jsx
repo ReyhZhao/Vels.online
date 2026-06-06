@@ -43,6 +43,7 @@ import AssetsPage from './pages/AssetsPage';
 import AssetDetail from './pages/AssetDetail';
 import OnCallCalendarPage from './pages/admin/OnCallCalendarPage';
 import CorrelationRulesAdmin from './pages/admin/CorrelationRulesAdmin';
+import SearchRulesAdmin from './pages/admin/SearchRulesAdmin';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -75,6 +76,7 @@ function App() {
           <Route path="/admin/wazuh-responses" element={<WazuhResponsesAdmin />} />
           <Route path="/admin/incidents/oncall" element={<OnCallCalendarPage />} />
           <Route path="/admin/correlations/rules" element={<CorrelationRulesAdmin />} />
+          <Route path="/admin/correlations/search-rules" element={<SearchRulesAdmin />} />
           <Route path="/admin/tasks/history" element={<TaskHistory />} />
           <Route path="/admin/tasks/scheduled" element={<ScheduledTasks />} />
           <Route path="/admin/email-templates" element={<EmailTemplates />} />

@@ -214,6 +214,9 @@ class CorrelationCatalogView(APIView):
                 {"value": "process.name", "label": "Process (process.name)"},
             ],
             "severities": ["critical", "high", "medium", "low", "info"],
+            "search_operators": [
+                {"value": v, "label": l} for v, l in SEARCH_OPERATOR_CHOICES
+            ],
         })
 
 
@@ -517,7 +520,7 @@ class _SearchRuleLegSerializer(_s.ModelSerializer):
 
     class Meta:
         model = SearchRuleLeg
-        fields = ["id", "display_order", "conditions"]
+        fields = ["id", "count", "display_order", "conditions"]
 
 
 class _SearchRuleSerializer(_s.ModelSerializer):
@@ -527,7 +530,7 @@ class _SearchRuleSerializer(_s.ModelSerializer):
         model = SearchRule
         fields = [
             "id", "organization", "name", "description",
-            "severity", "window_minutes", "interval_minutes",
+            "severity", "correlation_key", "window_minutes", "interval_minutes",
             "max_findings_per_run", "enabled", "created_at", "updated_at",
             "legs",
         ]

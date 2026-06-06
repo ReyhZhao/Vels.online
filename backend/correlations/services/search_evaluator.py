@@ -6,14 +6,21 @@ from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
 
-from correlations.services.search_compiler import _ALERTS_INDEX, compile_query
+from correlations.models import CORRELATION_KEY_NONE
+from correlations.services.search_compiler import (
+    _ALERTS_INDEX,
+    CORRELATION_KEY_TO_WAZUH_FIELD,
+    compile_agg_query,
+    compile_query,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _compose_description(rule, alerts) -> str:
+def _compose_description(rule, alerts, key_value=None) -> str:
+    key_label = f" (key: {key_value})" if key_value and key_value != "none" else ""
     lines = [
-        f"Scheduled search rule **{rule.name}** fired.",
+        f"Scheduled search rule **{rule.name}** fired{key_label}.",
         f"Description: {rule.description}" if rule.description else "",
         "",
         f"## Matched documents ({len(alerts)})",
@@ -28,13 +35,11 @@ def _compose_description(rule, alerts) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def run(rule, org):
-    """Execute rule against OpenSearch for org; materialise alerts and create an Incident.
+def _materialise_and_fire(rule, org, hits, key_value="none"):
+    """Persist alerts for *hits* and create one Incident for the given key_value.
 
-    Returns the Incident on success, or None if no new findings.
+    Returns the Incident, or None if all hits were already seen (idempotent).
     """
-    from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
-    from security.opensearch import OpenSearchClient, OpenSearchError
     from alerts.models import Alert
     from alerts.services.identifiers import next_alert_display_id
     from correlations.models import SearchFinding, SearchFiring
@@ -43,44 +48,6 @@ def run(rule, org):
     from incidents.services.identifiers import next_display_id
     from incidents.services.ioc_extraction import extract_and_save_iocs
     from incidents.tasks import acquire_triage_lock, enrich_iocs_then_triage
-
-    # Resolve the org's Wazuh agent IDs
-    try:
-        raw_agents = WazuhClient().get_agents(org.wazuh_group)
-        agent_ids = [a["id"] for a in raw_agents]
-    except (WazuhAPIError, WazuhAuthError):
-        logger.exception("search_evaluator.run: failed to fetch agents for org %s", org.id)
-        return None
-
-    if not agent_ids:
-        logger.info("search_evaluator.run: org %s has no agents — skipping rule %s", org.id, rule.id)
-        return None
-
-    leg = rule.legs.prefetch_related("conditions").first()
-    if not leg:
-        logger.info("search_evaluator.run: rule %s has no legs — skipping", rule.id)
-        return None
-
-    now = timezone.now()
-    window_start = now - timedelta(minutes=rule.window_minutes)
-
-    body = compile_query(
-        list(leg.conditions.all()),
-        agent_ids,
-        window_start,
-        now,
-        rule.max_findings_per_run,
-    )
-
-    try:
-        result = OpenSearchClient()._search(_ALERTS_INDEX, body)
-    except OpenSearchError:
-        logger.exception("search_evaluator.run: OpenSearch query failed for rule %s", rule.id)
-        return None
-
-    hits = result.get("hits", {}).get("hits", [])
-    if not hits:
-        return None
 
     with transaction.atomic():
         new_alerts = []
@@ -123,11 +90,12 @@ def run(rule, org):
         if not new_alerts:
             return None
 
-        description = _compose_description(rule, new_alerts)
+        description = _compose_description(rule, new_alerts, key_value)
+        key_label = f" [{key_value}]" if key_value and key_value != "none" else ""
 
         ser = IncidentCreateSerializer(
             data={
-                "title": f"{rule.name}: {len(new_alerts)} matching document(s)",
+                "title": f"{rule.name}{key_label}: {len(new_alerts)} matching document(s)",
                 "severity": rule.severity,
                 "source_kind": "scheduled_search",
                 "description": description,
@@ -147,6 +115,7 @@ def run(rule, org):
                 "source": "scheduled_search_rule",
                 "rule_id": rule.id,
                 "rule_name": rule.name,
+                "key_value": key_value,
             },
         )
 
@@ -168,6 +137,7 @@ def run(rule, org):
             rule=rule,
             organization=org,
             incident=incident,
+            key_value=key_value,
             finding_count=len(new_alerts),
         )
 
@@ -177,3 +147,139 @@ def run(rule, org):
             transaction.on_commit(lambda: enrich_iocs_then_triage.delay(incident_id))
 
     return incident
+
+
+def _run_single_leg(rule, org, agent_ids, leg, now, window_start):
+    """Degenerate path: one query, one Incident for all matched docs."""
+    from security.opensearch import OpenSearchClient, OpenSearchError
+
+    body = compile_query(
+        list(leg.conditions.all()),
+        agent_ids,
+        window_start,
+        now,
+        rule.max_findings_per_run,
+    )
+
+    try:
+        result = OpenSearchClient()._search(_ALERTS_INDEX, body)
+    except OpenSearchError:
+        logger.exception("search_evaluator: OpenSearch query failed for rule %s", rule.id)
+        return None
+
+    hits = result.get("hits", {}).get("hits", [])
+    if not hits:
+        return None
+
+    return _materialise_and_fire(rule, org, hits, key_value="none")
+
+
+def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
+    """Multi-leg co-occurrence path via per-leg terms aggregations.
+
+    1. Per leg: run a terms agg on the correlation key field to count docs per key.
+    2. Find the intersection: key values where every leg's doc_count >= leg.count.
+    3. Per satisfied key: fetch actual docs for all legs and create one Incident.
+
+    Returns the last Incident created, or None.
+    """
+    from security.opensearch import OpenSearchClient, OpenSearchError
+
+    wazuh_field = CORRELATION_KEY_TO_WAZUH_FIELD[rule.correlation_key]
+
+    # Step 1: per-leg agg to find which key values satisfy each leg's count threshold.
+    satisfied_keys = None
+    for leg in legs:
+        agg_body = compile_agg_query(
+            list(leg.conditions.all()),
+            agent_ids,
+            window_start,
+            now,
+            wazuh_field,
+        )
+        try:
+            result = OpenSearchClient()._search(_ALERTS_INDEX, agg_body)
+        except OpenSearchError:
+            logger.exception(
+                "search_evaluator: agg query failed for rule %s leg %s", rule.id, leg.id
+            )
+            return None
+
+        buckets = result.get("aggregations", {}).get("key_agg", {}).get("buckets", [])
+        leg_satisfied = {b["key"] for b in buckets if b["doc_count"] >= leg.count}
+
+        if satisfied_keys is None:
+            satisfied_keys = leg_satisfied
+        else:
+            satisfied_keys &= leg_satisfied  # intersection: all legs must fire for the same key
+
+    if not satisfied_keys:
+        return None
+
+    # Step 2: for each satisfied key fetch the actual documents and materialise an Incident.
+    last_incident = None
+    for key_value in sorted(satisfied_keys):
+        all_hits = []
+        for leg in legs:
+            body = compile_query(
+                list(leg.conditions.all()),
+                agent_ids,
+                window_start,
+                now,
+                rule.max_findings_per_run,
+                key_field=wazuh_field,
+                key_value=key_value,
+            )
+            try:
+                result = OpenSearchClient()._search(_ALERTS_INDEX, body)
+                all_hits.extend(result.get("hits", {}).get("hits", []))
+            except OpenSearchError:
+                logger.exception(
+                    "search_evaluator: hit fetch failed for rule %s key %r", rule.id, key_value
+                )
+                continue
+
+        if all_hits:
+            incident = _materialise_and_fire(rule, org, all_hits, key_value=key_value)
+            if incident:
+                last_incident = incident
+
+    return last_incident
+
+
+def run(rule, org):
+    """Execute rule against OpenSearch for org; materialise alerts and create Incident(s).
+
+    For rules with correlation_key != "none" and multiple legs: runs the multi-leg
+    co-occurrence path — one Incident per satisfied key.  Otherwise uses the simpler
+    single-leg path that produces one Incident for all matched documents.
+
+    Returns the last Incident created on success, or None if no new findings.
+    """
+    from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
+
+    try:
+        raw_agents = WazuhClient().get_agents(org.wazuh_group)
+        agent_ids = [a["id"] for a in raw_agents]
+    except (WazuhAPIError, WazuhAuthError):
+        logger.exception("search_evaluator.run: failed to fetch agents for org %s", org.id)
+        return None
+
+    if not agent_ids:
+        logger.info("search_evaluator.run: org %s has no agents — skipping rule %s", org.id, rule.id)
+        return None
+
+    legs = list(rule.legs.prefetch_related("conditions"))
+    if not legs:
+        logger.info("search_evaluator.run: rule %s has no legs — skipping", rule.id)
+        return None
+
+    now = timezone.now()
+    window_start = now - timedelta(minutes=rule.window_minutes)
+
+    use_multi = rule.correlation_key != CORRELATION_KEY_NONE and len(legs) > 1
+
+    if use_multi:
+        return _run_multi_leg(rule, org, agent_ids, legs, now, window_start)
+    else:
+        return _run_single_leg(rule, org, agent_ids, legs[0], now, window_start)

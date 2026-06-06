@@ -1,0 +1,607 @@
+import { useState, useEffect } from 'react';
+import { Play } from 'lucide-react';
+import api from '@/lib/axios';
+
+const SEVERITY_COLORS = {
+  critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+  high: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+  medium: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+  low: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+  info: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+};
+
+const EMPTY_CONDITION = { field_name: '', operator: 'equals', value: '' };
+const EMPTY_LEG = { count: 1, display_order: 0, conditions: [{ ...EMPTY_CONDITION }] };
+
+// ── ConditionRow ───────────────────────────────────────────────────────────
+
+function ConditionRow({ cond, index, operators, onChange, onRemove }) {
+  return (
+    <div className="flex gap-2 items-start flex-wrap">
+      <input
+        value={cond.field_name}
+        onChange={e => onChange(index, { ...cond, field_name: e.target.value })}
+        placeholder="Wazuh field (e.g. rule.level)"
+        aria-label="Field name"
+        className="flex-1 min-w-32 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+      />
+      <select
+        value={cond.operator}
+        onChange={e => onChange(index, { ...cond, operator: e.target.value })}
+        aria-label="Operator"
+        className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+      >
+        {(operators ?? []).map(op => (
+          <option key={op.value} value={op.value}>{op.label}</option>
+        ))}
+      </select>
+      <input
+        value={cond.value}
+        onChange={e => onChange(index, { ...cond, value: e.target.value })}
+        placeholder="Value"
+        aria-label="Value"
+        className="flex-1 min-w-20 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+      />
+      <button
+        type="button"
+        onClick={() => onRemove(index)}
+        aria-label="Remove condition"
+        className="text-xs text-red-500 hover:text-red-700 px-1"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// ── LegEditor ─────────────────────────────────────────────────────────────
+
+function LegEditor({ leg, legIndex, operators, onChange, onRemove, showRemove }) {
+  function updateCondition(condIdx, updates) {
+    const conds = leg.conditions.map((c, i) => i === condIdx ? { ...c, ...updates } : c);
+    onChange(legIndex, { ...leg, conditions: conds });
+  }
+
+  function removeCondition(condIdx) {
+    const conds = leg.conditions.filter((_, i) => i !== condIdx);
+    onChange(legIndex, { ...leg, conditions: conds });
+  }
+
+  function addCondition() {
+    onChange(legIndex, { ...leg, conditions: [...leg.conditions, { ...EMPTY_CONDITION }] });
+  }
+
+  return (
+    <div className="rounded border border-border bg-muted/20 p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Leg {legIndex + 1}
+          </span>
+          <label className="flex items-center gap-1 text-xs text-foreground">
+            Count ≥
+            <input
+              type="number"
+              min={1}
+              value={leg.count}
+              onChange={e => onChange(legIndex, { ...leg, count: Number(e.target.value) })}
+              aria-label={`Leg ${legIndex + 1} count`}
+              className="w-14 rounded border border-border bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            matching docs
+          </label>
+        </div>
+        {showRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(legIndex)}
+            className="text-xs text-muted-foreground hover:text-red-600"
+          >
+            Remove leg
+          </button>
+        )}
+      </div>
+
+      <div className="space-y-1.5">
+        {leg.conditions.map((cond, ci) => (
+          <ConditionRow
+            key={ci}
+            cond={cond}
+            index={ci}
+            operators={operators}
+            onChange={updateCondition}
+            onRemove={removeCondition}
+          />
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={addCondition}
+        className="text-xs text-primary hover:underline"
+      >
+        + Add condition
+      </button>
+    </div>
+  );
+}
+
+// ── RuleDrawer ─────────────────────────────────────────────────────────────
+
+function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
+  const isEdit = !!(rule?.id);
+
+  const [name, setName] = useState(rule?.name ?? '');
+  const [description, setDescription] = useState(rule?.description ?? '');
+  const [severity, setSeverity] = useState(rule?.severity ?? 'medium');
+  const [correlationKey, setCorrelationKey] = useState(rule?.correlation_key ?? 'none');
+  const [windowMinutes, setWindowMinutes] = useState(rule?.window_minutes ?? 60);
+  const [intervalMinutes, setIntervalMinutes] = useState(rule?.interval_minutes ?? 60);
+  const [maxFindings, setMaxFindings] = useState(rule?.max_findings_per_run ?? 50);
+  const [enabled, setEnabled] = useState(rule?.enabled ?? true);
+  const [orgId, setOrgId] = useState(rule?.organization ?? (orgs[0]?.id ?? ''));
+  const [legs, setLegs] = useState(
+    rule?.legs?.length
+      ? rule.legs.map(l => ({
+          count: l.count ?? 1,
+          display_order: l.display_order,
+          conditions: l.conditions.map(c => ({
+            field_name: c.field_name,
+            operator: c.operator,
+            value: c.value,
+          })),
+        }))
+      : [{ ...EMPTY_LEG, conditions: [{ ...EMPTY_CONDITION }] }]
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const operators = catalog?.search_operators ?? [];
+  const correlationKeys = catalog?.correlation_keys ?? [];
+  const severities = catalog?.severities ?? ['critical', 'high', 'medium', 'low', 'info'];
+
+  function updateLeg(legIdx, updated) {
+    setLegs(prev => prev.map((l, i) => i === legIdx ? updated : l));
+  }
+
+  function removeLeg(legIdx) {
+    setLegs(prev => prev.filter((_, i) => i !== legIdx));
+  }
+
+  function addLeg() {
+    setLegs(prev => [
+      ...prev,
+      { count: 1, display_order: prev.length, conditions: [{ ...EMPTY_CONDITION }] },
+    ]);
+  }
+
+  async function handleSave() {
+    setError(null);
+    setSaving(true);
+    const payload = {
+      name: name.trim(),
+      description: description.trim(),
+      severity,
+      correlation_key: correlationKey,
+      window_minutes: Number(windowMinutes),
+      interval_minutes: Number(intervalMinutes),
+      max_findings_per_run: Number(maxFindings),
+      enabled,
+      organization: orgId,
+      legs: legs.map((l, i) => ({ ...l, display_order: i })),
+    };
+    try {
+      let res;
+      if (isEdit) {
+        res = await api.patch(`/api/correlations/search-rules/${rule.id}/`, payload);
+      } else {
+        res = await api.post('/api/correlations/search-rules/', payload);
+      }
+      onSaved(res.data);
+    } catch (err) {
+      const data = err.response?.data;
+      if (typeof data === 'object' && data !== null) {
+        const msgs = Object.entries(data)
+          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+          .join('; ');
+        setError(msgs);
+      } else {
+        setError('Failed to save rule.');
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const canSave = name.trim().length > 0 && legs.length > 0 && orgId;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative flex h-full w-full max-w-lg flex-col border-l border-border bg-card shadow-2xl">
+
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">
+              {isEdit ? 'Edit Search Rule' : 'New Scheduled Search Rule'}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Periodically query OpenSearch and raise incidents on matching documents
+            </p>
+          </div>
+          <button onClick={onClose} className="text-lg text-muted-foreground hover:text-foreground transition-colors">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto thin-scrollbar px-6 py-5 space-y-5">
+
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Rule details</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-foreground mb-1">Name *</label>
+                <input
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Rule name"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-foreground mb-1">Description</label>
+                <input
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder="Optional description"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-foreground mb-1">Organization *</label>
+                <select
+                  value={orgId}
+                  onChange={e => setOrgId(Number(e.target.value))}
+                  aria-label="Organization"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {orgs.map(o => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Correlation key</label>
+                <select
+                  value={correlationKey}
+                  onChange={e => setCorrelationKey(e.target.value)}
+                  aria-label="Correlation key"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {correlationKeys.map(ck => (
+                    <option key={ck.value} value={ck.value}>{ck.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Incident severity</label>
+                <select
+                  value={severity}
+                  onChange={e => setSeverity(e.target.value)}
+                  aria-label="Severity"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {severities.map(s => (
+                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Window (minutes)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={windowMinutes}
+                  onChange={e => setWindowMinutes(e.target.value)}
+                  aria-label="Window minutes"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Interval (minutes)</label>
+                <input
+                  type="number"
+                  min={5}
+                  value={intervalMinutes}
+                  onChange={e => setIntervalMinutes(e.target.value)}
+                  aria-label="Interval minutes"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Max findings / run</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={maxFindings}
+                  onChange={e => setMaxFindings(e.target.value)}
+                  aria-label="Max findings per run"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="flex items-end pb-1">
+                <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={e => setEnabled(e.target.checked)}
+                    className="rounded"
+                  />
+                  Enabled
+                </label>
+              </div>
+            </div>
+
+            {correlationKey !== 'none' && legs.length > 1 && (
+              <div className="rounded-md bg-blue-50 dark:bg-blue-900/20 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
+                Multi-leg co-occurrence: an incident fires only when all legs have ≥ their count for the same <strong>{correlationKey}</strong> value.
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Legs</p>
+              <button
+                type="button"
+                onClick={addLeg}
+                className="text-xs text-primary hover:underline"
+              >
+                + Add leg
+              </button>
+            </div>
+            {legs.length === 0 && (
+              <p className="text-xs text-muted-foreground">No legs. Add at least one leg.</p>
+            )}
+            {legs.map((leg, li) => (
+              <LegEditor
+                key={li}
+                leg={leg}
+                legIndex={li}
+                operators={operators}
+                onChange={updateLeg}
+                onRemove={removeLeg}
+                showRemove={legs.length > 1}
+              />
+            ))}
+          </div>
+
+        </div>
+
+        <div className="shrink-0 border-t border-border bg-card px-6 py-4 space-y-3">
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!canSave || saving}
+              className="flex-1 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create rule'}
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// ── RuleRow ────────────────────────────────────────────────────────────────
+
+function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow }) {
+  const [toggling, setToggling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [runFeedback, setRunFeedback] = useState(null);
+
+  const orgName = orgs.find(o => o.id === rule.organization)?.name ?? `#${rule.organization}`;
+
+  async function handleToggle() {
+    setToggling(true);
+    try { await onToggle(rule); } finally { setToggling(false); }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`Delete rule "${rule.name}"?`)) return;
+    setDeleting(true);
+    try { await onDelete(rule); } finally { setDeleting(false); }
+  }
+
+  async function handleRunNow() {
+    setRunning(true);
+    setRunFeedback(null);
+    try {
+      const res = await onRunNow(rule);
+      setRunFeedback(`Queued: ${res.task_id.slice(0, 8)}…`);
+    } catch {
+      setRunFeedback('Failed.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+      <td className="px-4 py-3 font-medium text-foreground">{rule.name}</td>
+      <td className="px-4 py-3 text-xs text-muted-foreground">{orgName}</td>
+      <td className="px-4 py-3 text-xs text-muted-foreground">
+        {rule.correlation_key === 'none' ? 'None' : rule.correlation_key}
+      </td>
+      <td className="px-4 py-3 text-xs text-muted-foreground">{rule.window_minutes}m / {rule.interval_minutes}m</td>
+      <td className="px-4 py-3">
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_COLORS[rule.severity] ?? ''}`}>
+          {rule.severity}
+        </span>
+      </td>
+      <td className="px-4 py-3 text-center text-xs text-muted-foreground">{rule.legs?.length ?? 0}</td>
+      <td className="px-4 py-3">
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${rule.enabled ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500'}`}>
+          {rule.enabled ? 'Enabled' : 'Disabled'}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex gap-2 flex-wrap items-center">
+          <button onClick={() => onEdit(rule)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">Edit</button>
+          <button onClick={handleToggle} disabled={toggling} className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50 transition-colors">
+            {rule.enabled ? 'Disable' : 'Enable'}
+          </button>
+          <button
+            onClick={handleRunNow}
+            disabled={running}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            <Play className="h-3 w-3" />
+            {running ? 'Queuing…' : 'Run now'}
+          </button>
+          <button onClick={handleDelete} disabled={deleting} className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors">Delete</button>
+          {runFeedback && (
+            <span className={`text-xs ${runFeedback.startsWith('Queued') ? 'text-green-600' : 'text-destructive'}`}>{runFeedback}</span>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ── SearchRulesAdmin ───────────────────────────────────────────────────────
+
+export default function SearchRulesAdmin() {
+  const [rules, setRules] = useState([]);
+  const [catalog, setCatalog] = useState(null);
+  const [orgs, setOrgs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [drawerRule, setDrawerRule] = useState(undefined);
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/api/correlations/search-rules/'),
+      api.get('/api/correlations/catalog/'),
+      api.get('/api/security/organizations/'),
+    ])
+      .then(([rulesRes, catalogRes, orgsRes]) => {
+        setRules(rulesRes.data);
+        setCatalog(catalogRes.data);
+        setOrgs(orgsRes.data);
+      })
+      .catch(() => setError('Failed to load data.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  function handleSaved(updated) {
+    setRules(prev => {
+      const idx = prev.findIndex(r => r.id === updated.id);
+      return idx >= 0 ? prev.map(r => r.id === updated.id ? updated : r) : [...prev, updated];
+    });
+    setDrawerRule(undefined);
+  }
+
+  async function handleToggle(rule) {
+    try {
+      const res = await api.patch(`/api/correlations/search-rules/${rule.id}/`, { enabled: !rule.enabled });
+      setRules(prev => prev.map(r => r.id === rule.id ? res.data : r));
+    } catch {
+      setError('Failed to update rule.');
+    }
+  }
+
+  async function handleDelete(rule) {
+    try {
+      await api.delete(`/api/correlations/search-rules/${rule.id}/`);
+      setRules(prev => prev.filter(r => r.id !== rule.id));
+    } catch {
+      setError('Failed to delete rule.');
+    }
+  }
+
+  async function handleRunNow(rule) {
+    const res = await api.post(`/api/correlations/search-rules/${rule.id}/run/`);
+    return res.data;
+  }
+
+  return (
+    <div className="space-y-6 p-6">
+      {drawerRule !== undefined && (
+        <RuleDrawer
+          rule={drawerRule || null}
+          catalog={catalog}
+          orgs={orgs}
+          onClose={() => setDrawerRule(undefined)}
+          onSaved={handleSaved}
+        />
+      )}
+
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Scheduled Search Rules</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Periodically query OpenSearch for matching events and raise incidents.
+          </p>
+        </div>
+        <button
+          onClick={() => setDrawerRule(null)}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          New rule
+        </button>
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-max">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Org</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Corr. key</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Window / Interval</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
+                <th className="px-4 py-3 text-center font-medium text-muted-foreground">Legs</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+              ) : rules.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No scheduled search rules.</td></tr>
+              ) : (
+                rules.map(rule => (
+                  <RuleRow
+                    key={rule.id}
+                    rule={rule}
+                    orgs={orgs}
+                    onEdit={setDrawerRule}
+                    onToggle={handleToggle}
+                    onDelete={handleDelete}
+                    onRunNow={handleRunNow}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
