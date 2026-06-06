@@ -56,10 +56,14 @@ describe('TopNav', () => {
   });
 
   it('shows Login link when not authenticated', () => {
+    // Pin the login URL so the assertion is deterministic regardless of the
+    // ambient VITE_LOGIN_URL (e.g. the Docker dev container overrides it).
+    vi.stubEnv('VITE_LOGIN_URL', '/auth/oidc/authentik/login/');
     renderTopNav();
     const loginLink = screen.getByRole('link', { name: /login/i });
     expect(loginLink).toBeInTheDocument();
     expect(loginLink).toHaveAttribute('href', '/auth/oidc/authentik/login/');
+    vi.unstubAllEnvs();
   });
 
   it('does not show Logout button when not authenticated', () => {
