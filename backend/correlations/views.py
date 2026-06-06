@@ -21,14 +21,18 @@ from .models import (
     OPERATOR_CIDR,
     OPERATOR_GTE,
     OPERATOR_LTE,
+    SEARCH_OPERATOR_CHOICES,
     SOURCE_REF_CATALOG,
     CorrelationRule,
     CorrelationRuleLeg,
     DetectionSuggestion,
     LegCondition,
+    SearchRule,
+    SearchRuleLeg,
+    SearchLegCondition,
     SystemRuleMute,
 )
-from .tasks import _create_incident_from_suggestion
+from .tasks import _create_incident_from_suggestion, run_scheduled_search_rule
 
 logger = logging.getLogger(__name__)
 
@@ -498,3 +502,153 @@ class CorrelationDraftView(APIView):
             "assistant_reply": result.assistant_reply,
             "warnings": result.warnings + sanitizer_warnings,
         })
+
+
+# ── Scheduled Search Rule CRUD ────────────────────────────────────────────────
+
+class _SearchLegConditionSerializer(_s.ModelSerializer):
+    class Meta:
+        model = SearchLegCondition
+        fields = ["id", "field_name", "operator", "value"]
+
+
+class _SearchRuleLegSerializer(_s.ModelSerializer):
+    conditions = _SearchLegConditionSerializer(many=True)
+
+    class Meta:
+        model = SearchRuleLeg
+        fields = ["id", "display_order", "conditions"]
+
+
+class _SearchRuleSerializer(_s.ModelSerializer):
+    legs = _SearchRuleLegSerializer(many=True)
+
+    class Meta:
+        model = SearchRule
+        fields = [
+            "id", "organization", "name", "description",
+            "severity", "window_minutes", "interval_minutes",
+            "max_findings_per_run", "enabled", "created_at", "updated_at",
+            "legs",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_interval_minutes(self, value):
+        from correlations.models import _MIN_INTERVAL_MINUTES
+        if value < _MIN_INTERVAL_MINUTES:
+            raise _s.ValidationError(
+                f"interval_minutes must be at least {_MIN_INTERVAL_MINUTES}."
+            )
+        return value
+
+    def _create_legs(self, rule, legs_data):
+        for leg_data in legs_data:
+            conditions_data = leg_data.pop("conditions", [])
+            leg = SearchRuleLeg.objects.create(rule=rule, **leg_data)
+            for cond_data in conditions_data:
+                SearchLegCondition.objects.create(leg=leg, **cond_data)
+
+    def create(self, validated_data):
+        from correlations.services.search_schedule import sync_rule_schedule
+        legs_data = validated_data.pop("legs", [])
+        rule = SearchRule.objects.create(**validated_data)
+        self._create_legs(rule, legs_data)
+        sync_rule_schedule(rule)
+        return rule
+
+    def update(self, instance, validated_data):
+        from correlations.services.search_schedule import sync_rule_schedule
+        legs_data = validated_data.pop("legs", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if legs_data is not None:
+            instance.legs.all().delete()
+            self._create_legs(instance, legs_data)
+        sync_rule_schedule(instance)
+        return instance
+
+
+def _fetch_search_rule(pk):
+    try:
+        return SearchRule.objects.prefetch_related("legs__conditions").get(pk=pk)
+    except SearchRule.DoesNotExist:
+        return None
+
+
+class SearchRuleListView(APIView):
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        rules = SearchRule.objects.prefetch_related("legs__conditions").order_by("name")
+        return Response(_SearchRuleSerializer(rules, many=True).data)
+
+    def post(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        serializer = _SearchRuleSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        rule = serializer.save()
+        return Response(
+            _SearchRuleSerializer(
+                SearchRule.objects.prefetch_related("legs__conditions").get(pk=rule.pk)
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SearchRuleDetailView(APIView):
+    def get(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_SearchRuleSerializer(rule).data)
+
+    def patch(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = _SearchRuleSerializer(rule, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(
+            _SearchRuleSerializer(
+                SearchRule.objects.prefetch_related("legs__conditions").get(pk=pk)
+            ).data
+        )
+
+    def delete(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        from correlations.services.search_schedule import delete_rule_schedule
+        delete_rule_schedule(rule)
+        rule.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SearchRuleRunNowView(APIView):
+    """Staff-only: immediately enqueue a SearchRule run."""
+
+    def post(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        result = run_scheduled_search_rule.delay(rule.id)
+        return Response({"task_id": result.id}, status=status.HTTP_202_ACCEPTED)

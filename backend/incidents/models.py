@@ -79,6 +79,7 @@ class Incident(models.Model):
     SOURCE_WORKFLOW = "workflow"
     SOURCE_EXTERNAL = "external"
     SOURCE_CORRELATION = "correlation"
+    SOURCE_SCHEDULED_SEARCH = "scheduled_search"
     SOURCE_CHOICES = [
         (SOURCE_MANUAL, "Manual"),
         (SOURCE_API, "API"),
@@ -89,6 +90,7 @@ class Incident(models.Model):
         (SOURCE_WORKFLOW, "Workflow"),
         (SOURCE_EXTERNAL, "External"),
         (SOURCE_CORRELATION, "Correlation Rule"),
+        (SOURCE_SCHEDULED_SEARCH, "Scheduled Search Rule"),
     ]
 
     SEVERITY_CRITICAL = "critical"

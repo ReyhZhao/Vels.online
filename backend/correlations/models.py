@@ -177,5 +177,105 @@ class SystemRuleMute(models.Model):
     class Meta:
         unique_together = [("organization", "rule")]
 
+
+# ── Scheduled Search Rules ────────────────────────────────────────────────────
+
+SEARCH_OPERATOR_EQUALS = "equals"
+SEARCH_OPERATOR_CONTAINS = "contains"
+SEARCH_OPERATOR_GTE = "gte"
+SEARCH_OPERATOR_LTE = "lte"
+SEARCH_OPERATOR_CIDR = "cidr"
+
+SEARCH_OPERATOR_CHOICES = [
+    (SEARCH_OPERATOR_EQUALS, "Equals"),
+    (SEARCH_OPERATOR_CONTAINS, "Contains"),
+    (SEARCH_OPERATOR_GTE, ">="),
+    (SEARCH_OPERATOR_LTE, "<="),
+    (SEARCH_OPERATOR_CIDR, "IP in CIDR"),
+]
+
+_MAX_FINDINGS_DEFAULT = 50
+_MIN_INTERVAL_MINUTES = 5
+
+
+class SearchRule(models.Model):
+    organization = models.ForeignKey(
+        "security.Organization",
+        on_delete=models.CASCADE,
+        related_name="search_rules",
+    )
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, default="medium")
+    window_minutes = models.PositiveIntegerField(default=60)
+    interval_minutes = models.PositiveIntegerField(default=60)
+    max_findings_per_run = models.PositiveIntegerField(default=_MAX_FINDINGS_DEFAULT)
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
     def __str__(self):
-        return f"{self.organization} mutes {self.rule}"
+        return self.name
+
+
+class SearchRuleLeg(models.Model):
+    rule = models.ForeignKey(SearchRule, on_delete=models.CASCADE, related_name="legs")
+    display_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["display_order", "id"]
+
+    def __str__(self):
+        return f"Leg {self.display_order} of {self.rule}"
+
+
+class SearchLegCondition(models.Model):
+    leg = models.ForeignKey(SearchRuleLeg, on_delete=models.CASCADE, related_name="conditions")
+    field_name = models.CharField(max_length=200)
+    operator = models.CharField(max_length=10, choices=SEARCH_OPERATOR_CHOICES)
+    value = models.TextField()
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.field_name} {self.operator} {self.value!r}"
+
+
+class SearchFiring(models.Model):
+    rule = models.ForeignKey(SearchRule, on_delete=models.CASCADE, related_name="firings")
+    organization = models.ForeignKey(
+        "security.Organization", on_delete=models.CASCADE, related_name="search_firings"
+    )
+    key_value = models.CharField(max_length=500, default="none")
+    incident = models.ForeignKey(
+        "incidents.Incident", on_delete=models.SET_NULL, null=True, related_name="search_firings"
+    )
+    finding_count = models.PositiveIntegerField(default=0)
+    fired_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fired_at"]
+
+    def __str__(self):
+        return f"{self.rule} fired at {self.fired_at} ({self.finding_count} findings)"
+
+
+class SearchFinding(models.Model):
+    rule = models.ForeignKey(SearchRule, on_delete=models.CASCADE, related_name="findings")
+    alert = models.ForeignKey(
+        "alerts.Alert", on_delete=models.CASCADE, related_name="search_findings"
+    )
+    source_index = models.CharField(max_length=200)
+    wazuh_doc_id = models.CharField(max_length=200)
+    found_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("rule", "source_index", "wazuh_doc_id")]
+        ordering = ["-found_at"]
+
+    def __str__(self):
+        return f"Finding {self.wazuh_doc_id} for {self.rule}"

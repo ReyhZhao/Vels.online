@@ -7,6 +7,27 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 _RESIDUAL_SETTLE_MINUTES = 15
+
+
+@shared_task(name="correlations.tasks.run_scheduled_search_rule")
+def run_scheduled_search_rule(rule_id: int):
+    """Run a SearchRule against OpenSearch for all orgs (single-org rule runs for its own org)."""
+    from correlations.models import SearchRule
+    from correlations.services.search_evaluator import run
+
+    try:
+        rule = SearchRule.objects.select_related("organization").prefetch_related("legs__conditions").get(id=rule_id)
+    except SearchRule.DoesNotExist:
+        logger.warning("run_scheduled_search_rule: rule %s not found", rule_id)
+        return
+
+    if not rule.enabled:
+        return
+
+    try:
+        run(rule, rule.organization)
+    except Exception:
+        logger.exception("run_scheduled_search_rule: failed for rule %s", rule_id)
 _RESIDUAL_LOOKBACK_HOURS = 24
 _RESIDUAL_CONFIDENCE_THRESHOLD = 0.6
 _RESIDUAL_BATCH_LIMIT = 200

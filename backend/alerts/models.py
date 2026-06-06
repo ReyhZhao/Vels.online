@@ -10,6 +10,7 @@ SOURCE_CHOICES = [
     ("inbound_email", "Inbound Email"),
     ("workflow", "Workflow"),
     ("external", "External"),
+    ("scheduled_search", "Scheduled Search Rule"),
 ]
 
 TLP_WHITE = "white"
