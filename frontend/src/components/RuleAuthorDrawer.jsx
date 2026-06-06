@@ -370,9 +370,9 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSend();
                   }}
                   placeholder="Describe what to detect… (⌘Enter to send)"
-                  rows={2}
+                  rows={4}
                   disabled={loading}
-                  className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring resize-none disabled:opacity-50"
+                  className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring resize-none disabled:opacity-50"
                 />
                 <button
                   type="button"
