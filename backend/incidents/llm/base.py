@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
+
+# Fields the incident assistant is allowed to propose updating.
+ASSISTANT_FIELD_ALLOWLIST = {"severity", "tlp", "pap", "description", "subject", "assignee"}
 
 VALID_ACTIONS = {
     "escalate",
@@ -64,6 +67,28 @@ class ResidualGroupingResult:
     provider: str = ""
 
 
+class AssistantError(Exception):
+    """Raised when the LLM returns an unparseable or invalid assistant response."""
+
+
+class AssistantConfigError(Exception):
+    """Raised when the assistant provider is misconfigured. Not retriable."""
+
+
+@dataclass
+class ProposedAction:
+    type: str
+    label: str
+    payload: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AssistantResult:
+    assistant_reply: str = ""
+    proposed_actions: List[ProposedAction] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
 class BaseTriageProvider(ABC):
     @abstractmethod
     def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
@@ -84,3 +109,7 @@ class BaseTriageProvider(ABC):
     def generate_closure_message(self, incident_context: dict) -> str:
         """Generate a plain-language closure notification for a non-technical reporter. Returns empty string by default."""
         return ""
+
+    def assist_incident(self, messages: list, grounding: dict) -> AssistantResult:
+        """Conversational assistant grounded in an incident's current state. Override in providers that support it."""
+        return AssistantResult(assistant_reply="Assistant is not available for this provider.")

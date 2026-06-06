@@ -72,6 +72,10 @@ _Avoid_: Alert (a Suggestion is about a *group* of alerts and is analyst-facing,
 An unsaved, proposed **Correlation Rule** the LLM assembles from a natural-language detection description (e.g. "alert when a new user is created then logs in within 24h"). Presented pre-filled in the rule builder for a human to review, edit, and save; it is never persisted until saved as a real Correlation Rule, and the LLM never activates a rule itself. Produced by a stateless, multi-turn drafting conversation grounded in the scope's recent alerts. See [ADR-0005](docs/adr/0005-rule-author-assistant-ephemeral-stateless.md).
 _Avoid_: Detection Suggestion (that is the LLM acting on a *group of past alerts* to propose an Incident; a Rule Draft is the LLM acting on *a human's words* to propose a future-matching Rule). Avoid Suggestion (overloaded with Detection Suggestion).
 
+**Incident Assistant**:
+A staff-only, conversational LLM interface embedded in the incident detail view. Answers questions about a specific incident using live server-side grounding (fields, linked alerts, IOCs, tasks, available task templates) and proposes a bounded set of one-click actions (field update, state transition, or task-template application) for human confirmation. The conversation is ephemeral (client state, not persisted), grounding is recomputed server-side every turn, and the assistant never mutates incident data on its own — every proposed change is confirmed by the analyst and executed through the existing mutation endpoints. See [ADR-0008](docs/adr/0008-incident-assistant-propose-and-confirm.md).
+_Avoid_: autonomous writes (the assistant always proposes; a human confirms). _Avoid_: conflating with Detection Suggestion (which is about grouping alerts pre-incident) or Rule Draft (which is about authoring Correlation Rules).
+
 ## Relationships
 
 - A **Correlation Rule** is either a **System Rule** (org = null) or an **Org Rule**; it has one or more **Legs** and exactly one **Correlation Key**.

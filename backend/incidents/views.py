@@ -2199,3 +2199,109 @@ class IncidentTriageDebugView(APIView):
             "raw_response": raw_response,
             "result": parsed,
         })
+
+
+# ── Incident assistant ─────────────────────────────────────────────────────────
+
+class IncidentAssistantView(APIView):
+    """Staff-only: multi-turn conversational assistant grounded in a specific incident.
+
+    Stateless endpoint: accepts messages[] and recomputes grounding server-side every turn.
+    Returns an assistant reply plus an allowlisted set of proposed actions for human confirmation.
+    """
+
+    def post(self, request, display_id):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            incident = Incident.objects.select_related(
+                "organization", "subject", "assignee"
+            ).prefetch_related(
+                "incident_assets__asset", "iocs", "tasks__assignee"
+            ).get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_incident(request.user, incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        messages = request.data.get("messages") or []
+        if not messages:
+            return Response({"detail": "messages is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from incidents.llm.grounding import build_incident_grounding
+        from incidents.llm.factory import get_assistant_provider
+        from incidents.llm.base import AssistantConfigError, AssistantError, TriageConfigError
+
+        grounding = build_incident_grounding(incident)
+
+        try:
+            provider = get_assistant_provider()
+        except (AssistantConfigError, TriageConfigError) as exc:
+            return Response(
+                {"detail": "Incident assistant is unavailable.", "reason": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            result = provider.assist_incident(messages, grounding)
+        except (AssistantConfigError, TriageConfigError) as exc:
+            return Response(
+                {"detail": "Incident assistant is unavailable.", "reason": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except AssistantError as exc:
+            logger.warning("IncidentAssistantView: provider error: %s", exc)
+            return Response(
+                {"detail": "Assistant failed to produce a valid response.", "reason": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        proposed_actions = [
+            {"type": a.type, "label": a.label, "payload": a.payload}
+            for a in result.proposed_actions
+        ]
+
+        return Response({
+            "assistant_reply": result.assistant_reply,
+            "proposed_actions": proposed_actions,
+            "warnings": result.warnings,
+        })
+
+
+class IncidentAssistantConfirmView(APIView):
+    """Staff-only: record an audit timeline event when a user confirms an assistant-proposed action.
+
+    Called by the frontend after the actual mutation endpoint succeeds, purely for audit.
+    Does not mutate incident data itself.
+    """
+
+    def post(self, request, display_id):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            incident = Incident.objects.get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_incident(request.user, incident):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        action_type = request.data.get("action_type")
+        action_label = request.data.get("action_label", "")
+        if not action_type:
+            return Response({"detail": "action_type is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        record_event(
+            incident,
+            "assistant_action",
+            actor=request.user,
+            payload={"action_type": action_type, "label": action_label},
+        )
+        return Response({"recorded": True})

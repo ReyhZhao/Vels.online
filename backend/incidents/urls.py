@@ -4,6 +4,8 @@ from .views import (
     ApplyTemplateView,
     IncidentAssetLinkView,
     IncidentAssetUnlinkView,
+    IncidentAssistantView,
+    IncidentAssistantConfirmView,
     IncidentContactDetailView,
     IncidentContactListView,
     IncidentContactMessageListView,
@@ -56,4 +58,6 @@ urlpatterns = [
     path("<str:display_id>/contact-messages/", IncidentContactMessageListView.as_view()),
     path("<str:display_id>/contact-messages/mark-read/", IncidentContactMessageMarkReadView.as_view()),
     path("<str:display_id>/alerts/", IncidentLinkedAlertsView.as_view()),
+    path("<str:display_id>/assistant/", IncidentAssistantView.as_view()),
+    path("<str:display_id>/assistant-confirm/", IncidentAssistantConfirmView.as_view()),
 ]
