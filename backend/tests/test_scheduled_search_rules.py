@@ -896,3 +896,140 @@ class TestFloodCap:
         assert not IncidentEvent.objects.filter(
             incident=incident, kind="search_rule_overflow"
         ).exists()
+
+
+# ── Slice 4: streaming suppression ───────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestStreamingSuppression:
+    """Materialised search-alerts must not participate in streaming correlation.
+
+    Two suppression layers are tested:
+    1. evaluate_correlation_rules task is a no-op for source_kind=scheduled_search.
+    2. _get_window_alerts excludes scheduled_search from streaming window scans.
+    """
+
+    def _make_streaming_rule(self, org, count=1, match_title="brute force"):
+        from correlations.models import (
+            CorrelationRule, CorrelationRuleLeg, LegCondition,
+            FIELD_KIND_ALERT, OPERATOR_CONTAINS,
+        )
+        rule = CorrelationRule.objects.create(
+            organization=org,
+            name="Streaming Rule",
+            correlation_key="none",
+            window_minutes=60,
+            severity="critical",
+            enabled=True,
+        )
+        leg = CorrelationRuleLeg.objects.create(rule=rule, count=count, display_order=0)
+        LegCondition.objects.create(
+            leg=leg,
+            field_kind=FIELD_KIND_ALERT,
+            field_name="title",
+            operator=OPERATOR_CONTAINS,
+            value=match_title,
+        )
+        return rule
+
+    def _make_alert(self, org, source_kind, title="Test alert", severity="high", **kwargs):
+        from alerts.models import Alert
+        count = Alert.objects.count()
+        return Alert.objects.create(
+            organization=org,
+            display_id=f"AL-{count + 1:04d}",
+            source_kind=source_kind,
+            source_ref={},
+            title=title,
+            severity=severity,
+            state="new",
+            **kwargs,
+        )
+
+    def test_evaluate_task_skips_scheduled_search_alert(self, org):
+        """evaluate_correlation_rules task is a no-op for scheduled_search alerts."""
+        from correlations.tasks import evaluate_correlation_rules
+        from incidents.models import Incident
+
+        self._make_streaming_rule(org, count=1, match_title="brute force")
+        search_alert = self._make_alert(org, "scheduled_search", title="brute force: SSH")
+
+        evaluate_correlation_rules(search_alert.id)
+
+        search_alert.refresh_from_db()
+        assert search_alert.incident is None
+        assert Incident.objects.filter(source_kind="correlation").count() == 0
+
+    def test_window_scan_excludes_scheduled_search(self, org):
+        """_get_window_alerts never returns scheduled_search alerts."""
+        from correlations.services.evaluator import _get_window_alerts
+        from django.utils import timezone
+
+        search_alert = self._make_alert(org, "scheduled_search", title="brute force: SSH")
+        regular_alert = self._make_alert(org, "wazuh_event", title="Port scan")
+
+        window_start = timezone.now() - timedelta(minutes=60)
+        result = _get_window_alerts(org, "none", "none", window_start)
+
+        result_ids = {a.id for a in result}
+        assert search_alert.id not in result_ids
+        assert regular_alert.id in result_ids
+
+    def test_streaming_rule_does_not_fire_via_search_alert_in_window(self, org):
+        """Evaluating an ordinary alert cannot satisfy a rule using a search-alert window hit."""
+        from correlations.services.evaluator import evaluate
+        from incidents.models import Incident
+
+        # Rule needs 2 hits matching "brute force"; without suppression the search_alert
+        # would be the first hit and the regular alert would be the second.
+        self._make_streaming_rule(org, count=2, match_title="brute force")
+        self._make_alert(org, "scheduled_search", title="brute force: SSH")
+        regular_alert = self._make_alert(org, "wazuh_event", title="brute force: RDP")
+
+        evaluate(regular_alert)
+
+        regular_alert.refresh_from_db()
+        assert regular_alert.incident is None
+        assert Incident.objects.filter(source_kind="correlation").count() == 0
+
+    def test_search_alert_incident_untouched_when_streaming_evaluates(self, org):
+        """Evaluating an ordinary alert does not reassign a search-alert's incident."""
+        from incidents.models import Incident
+        from alerts.models import Alert
+        from correlations.services.evaluator import evaluate
+
+        # Create a search incident owning a search alert
+        search_incident = Incident.objects.create(
+            organization=org,
+            display_id="INC-S001",
+            title="Search Incident",
+            severity="high",
+            source_kind="scheduled_search",
+            state="new",
+            tlp="amber",
+            pap="amber",
+        )
+        search_alert = Alert.objects.create(
+            organization=org,
+            display_id="AL-S001",
+            source_kind="scheduled_search",
+            source_ref={},
+            title="brute force: SSH",
+            severity="high",
+            state="imported",
+            incident=search_incident,
+        )
+
+        # A streaming rule with count=1 — without suppression it would fire and
+        # _link_alert_to_incident would reassign search_alert to the correlation incident.
+        self._make_streaming_rule(org, count=1, match_title="brute force")
+
+        # Trigger evaluation via an ordinary alert that also matches the leg
+        ordinary_alert = self._make_alert(org, "wazuh_event", title="brute force: RDP")
+        evaluate(ordinary_alert)
+
+        # The streaming rule fires for the ordinary alert (it satisfies count=1 by itself),
+        # but the search_alert must remain linked to its own incident.
+        search_alert.refresh_from_db()
+        assert search_alert.incident_id == search_incident.id
+        assert search_alert.state == "imported"

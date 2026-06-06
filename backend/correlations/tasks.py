@@ -51,6 +51,9 @@ def evaluate_correlation_rules(alert_id: int):
         logger.warning("evaluate_correlation_rules: alert %s not found", alert_id)
         return
 
+    if alert.source_kind == "scheduled_search":
+        return  # Materialised search-alerts participate only in their own SearchRule incident
+
     evaluate(alert)
 
 
