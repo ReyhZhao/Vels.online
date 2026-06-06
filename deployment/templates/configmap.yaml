@@ -13,8 +13,8 @@ data:
   ONCALL_ROUTING: llm_guided
   ALLOWED_HOSTS: "vels.online,backend.velsonline.svc.cluster.local"
 
-  EXCEPTION_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
+  EXCEPTION_LLM_PROVIDER: exceptions.llm.ollama.OllamaProvider
   TRIAGE_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
-  CORRELATION_LLM_PROVIDER: incidents.llm.ollama.OllamaDraftProvider
+  CORRELATION_LLM_PROVIDER: correlations.llm.ollama.OllamaDraftProvider
   CLOSURE_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
   INCIDENT_ASSISTANT_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
