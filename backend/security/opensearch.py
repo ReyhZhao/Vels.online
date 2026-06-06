@@ -1,4 +1,5 @@
 import os
+import time
 
 import requests
 import urllib3
@@ -7,6 +8,23 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _ALERTS_INDEX = "wazuh-alerts-4.x-*"
 _VULNS_INDEX = "wazuh-states-vulnerabilities-wazuh"
+
+_MAPPING_TTL = 300  # seconds
+_RULE_CATALOG_TTL = 300
+
+_field_mapping_cache: dict = {}  # {"ts": float, "data": dict}
+_rule_catalog_cache: dict = {}   # {cache_key: {"ts": float, "data": dict}}
+
+
+def _flatten_mapping(properties: dict, prefix: str, result: dict) -> None:
+    """Recursively flatten OpenSearch field properties into {dot.path: type}."""
+    for name, defn in properties.items():
+        path = f"{prefix}.{name}" if prefix else name
+        if "type" in defn:
+            result[path] = defn["type"]
+        sub_props = defn.get("properties")
+        if sub_props:
+            _flatten_mapping(sub_props, path, result)
 
 _SEVERITY_LEVEL_RANGES = {
     "critical": {"gte": 12},
@@ -48,6 +66,86 @@ class OpenSearchClient:
         except requests.exceptions.HTTPError as exc:
             raise OpenSearchError(f"OpenSearch error on {index}: {exc}") from exc
         return response.json()
+
+    def get_field_mapping(self) -> dict:
+        """Return {field_path: type} for the alerts index, flattened. TTL-cached."""
+        now = time.time()
+        if _field_mapping_cache.get("data") is not None and now - _field_mapping_cache.get("ts", 0) < _MAPPING_TTL:
+            return _field_mapping_cache["data"]
+
+        try:
+            response = requests.get(
+                f"{self._base_url}/{_ALERTS_INDEX}/_mapping",
+                auth=self._auth,
+                verify=False,
+                timeout=15,
+            )
+            response.raise_for_status()
+            raw = response.json()
+        except requests.exceptions.HTTPError as exc:
+            raise OpenSearchError(f"OpenSearch mapping error: {exc}") from exc
+
+        mapping: dict = {}
+        for index_data in raw.values():
+            props = index_data.get("mappings", {}).get("properties", {})
+            _flatten_mapping(props, "", mapping)
+
+        _field_mapping_cache["data"] = mapping
+        _field_mapping_cache["ts"] = now
+        return mapping
+
+    def get_rule_catalog(self, agent_ids: list | None = None, window_days: int = 7) -> dict:
+        """Return rules seen in the data, keyed on rule.id. TTL-cached.
+
+        Returns {rule_id: {description, groups, level, seen_count}}.
+        agent_ids restricts the window to specific agents (scope-aware).
+        """
+        cache_key = ",".join(sorted(str(a) for a in (agent_ids or [])))
+        now = time.time()
+        entry = _rule_catalog_cache.get(cache_key)
+        if entry and now - entry.get("ts", 0) < _RULE_CATALOG_TTL:
+            return entry["data"]
+
+        filters: list = [{"range": {"@timestamp": {"gte": f"now-{window_days}d"}}}]
+        if agent_ids:
+            filters.append({"terms": {"agent.id": [str(a) for a in agent_ids]}})
+
+        body = {
+            "size": 0,
+            "query": {"bool": {"filter": filters}},
+            "aggregations": {
+                "by_rule_id": {
+                    "terms": {"field": "rule.id", "size": 1000},
+                    "aggs": {
+                        "desc": {"terms": {"field": "rule.description.keyword", "size": 1}},
+                        "groups": {"terms": {"field": "rule.groups", "size": 10}},
+                        "level": {"terms": {"field": "rule.level", "size": 1}},
+                    },
+                }
+            },
+        }
+
+        try:
+            result = self._search(_ALERTS_INDEX, body)
+        except OpenSearchError:
+            _rule_catalog_cache[cache_key] = {"ts": now, "data": {}}
+            return {}
+
+        catalog: dict = {}
+        for bucket in result.get("aggregations", {}).get("by_rule_id", {}).get("buckets", []):
+            rule_id = str(bucket["key"])
+            desc_b = bucket.get("desc", {}).get("buckets", [])
+            groups_b = bucket.get("groups", {}).get("buckets", [])
+            level_b = bucket.get("level", {}).get("buckets", [])
+            catalog[rule_id] = {
+                "description": desc_b[0]["key"] if desc_b else "",
+                "groups": [b["key"] for b in groups_b],
+                "level": level_b[0]["key"] if level_b else 0,
+                "seen_count": bucket["doc_count"],
+            }
+
+        _rule_catalog_cache[cache_key] = {"ts": now, "data": catalog}
+        return catalog
 
     def get_agent_events(self, agent_id, hours=24, offset=0, limit=100, severity=None, search=""):
         filters = [

@@ -509,10 +509,46 @@ class CorrelationDraftView(APIView):
 
 # ── Scheduled Search Rule CRUD ────────────────────────────────────────────────
 
+# Curated core fields exposed in the search rule builder (friendly labels + expected types).
+_SEARCH_CORE_FIELDS = [
+    {"value": "rule.id",           "label": "Rule ID",          "type": "keyword"},
+    {"value": "rule.level",        "label": "Rule Level",        "type": "long"},
+    {"value": "rule.description",  "label": "Rule Description",  "type": "text"},
+    {"value": "rule.groups",       "label": "Rule Groups",       "type": "keyword"},
+    {"value": "agent.name",        "label": "Agent Name",        "type": "keyword"},
+    {"value": "agent.id",          "label": "Agent ID",          "type": "keyword"},
+    {"value": "data.srcip",        "label": "Source IP",         "type": "ip"},
+    {"value": "data.dstip",        "label": "Destination IP",    "type": "ip"},
+    {"value": "data.dstuser",      "label": "Destination User",  "type": "keyword"},
+    {"value": "data.audit.comm",   "label": "Audit Command",     "type": "keyword"},
+    {"value": "data.sha256",       "label": "File SHA256",       "type": "keyword"},
+]
+
+
+def _get_mapping_safe() -> dict:
+    """Fetch the live field mapping; return {} on any error."""
+    try:
+        from security.opensearch import OpenSearchClient
+        return OpenSearchClient().get_field_mapping()
+    except Exception:
+        logger.warning("SearchRule validation: could not fetch field mapping — skipping type check")
+        return {}
+
+
 class _SearchLegConditionSerializer(_s.ModelSerializer):
     class Meta:
         model = SearchLegCondition
         fields = ["id", "field_name", "operator", "value"]
+
+    def validate(self, data):
+        from correlations.services.search_compiler import validate_search_field
+        field_name = data.get("field_name", "")
+        operator = data.get("operator", "")
+        mapping = _get_mapping_safe()
+        ok, reason = validate_search_field(field_name, operator, mapping)
+        if not ok:
+            raise _s.ValidationError({"field_name": reason})
+        return data
 
 
 class _SearchRuleLegSerializer(_s.ModelSerializer):
@@ -542,6 +578,23 @@ class _SearchRuleSerializer(_s.ModelSerializer):
             raise _s.ValidationError(
                 f"interval_minutes must be at least {_MIN_INTERVAL_MINUTES}."
             )
+        return value
+
+    def validate_correlation_key(self, value):
+        from correlations.models import CORRELATION_KEY_NONE
+        from correlations.services.search_compiler import (
+            CORRELATION_KEY_TO_WAZUH_FIELD,
+            is_aggregatable_field,
+        )
+        if value == CORRELATION_KEY_NONE:
+            return value
+        wazuh_field = CORRELATION_KEY_TO_WAZUH_FIELD.get(value)
+        if wazuh_field:
+            mapping = _get_mapping_safe()
+            if mapping and not is_aggregatable_field(wazuh_field, mapping):
+                raise _s.ValidationError(
+                    f"'{value}' maps to a non-aggregatable text field and cannot be used as a correlation key."
+                )
         return value
 
     def _create_legs(self, rule, legs_data):
@@ -655,3 +708,84 @@ class SearchRuleRunNowView(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         result = run_scheduled_search_rule.delay(rule.id)
         return Response({"task_id": result.id}, status=status.HTTP_202_ACCEPTED)
+
+
+class SearchCatalogView(APIView):
+    """Staff-only: return the field catalog for the search rule builder.
+
+    Returns the curated core fields plus all fields populated in the index mapping,
+    each annotated with valid operators for that field type. Also returns the rule
+    catalog (top rule.id values seen in recent data) for scope-aware grounding.
+    """
+
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+
+        from correlations.services.search_compiler import _operators_for_type
+        from security.opensearch import OpenSearchClient, OpenSearchError
+
+        scope = request.query_params.get("scope", "all")
+
+        # Resolve agent IDs for scope-aware rule catalog.
+        agent_ids: list | None = None
+        if scope != "all":
+            try:
+                org = Organization.objects.get(slug=scope)
+                from security.wazuh import WazuhClient, WazuhAPIError, WazuhAuthError
+                try:
+                    raw_agents = WazuhClient().get_agents(org.wazuh_group)
+                    agent_ids = [a["id"] for a in raw_agents]
+                except (WazuhAPIError, WazuhAuthError):
+                    agent_ids = []
+            except Organization.DoesNotExist:
+                return Response({"detail": "Unknown scope."}, status=status.HTTP_400_BAD_REQUEST)
+
+        client = OpenSearchClient()
+
+        # Fetch live mapping.
+        mapping: dict = {}
+        try:
+            mapping = client.get_field_mapping()
+        except OpenSearchError:
+            logger.warning("SearchCatalogView: could not fetch field mapping")
+
+        # Fetch rule catalog.
+        rule_catalog: dict = {}
+        try:
+            rule_catalog = client.get_rule_catalog(agent_ids=agent_ids)
+        except OpenSearchError:
+            logger.warning("SearchCatalogView: could not fetch rule catalog")
+
+        core_field_names = {f["value"] for f in _SEARCH_CORE_FIELDS}
+
+        # Annotate core fields with operators from live mapping (fall back to declared type).
+        core_fields = []
+        for f in _SEARCH_CORE_FIELDS:
+            live_type = mapping.get(f["value"], f["type"])
+            core_fields.append({
+                **f,
+                "type": live_type,
+                "operators": _operators_for_type(live_type),
+                "core": True,
+            })
+
+        # Non-core mapping fields for autocomplete.
+        extra_fields = [
+            {
+                "value": field,
+                "label": field,
+                "type": ftype,
+                "operators": _operators_for_type(ftype),
+                "core": False,
+            }
+            for field, ftype in sorted(mapping.items())
+            if field not in core_field_names
+        ]
+
+        return Response({
+            "core_fields": core_fields,
+            "fields": extra_fields,
+            "rule_catalog": rule_catalog,
+        })

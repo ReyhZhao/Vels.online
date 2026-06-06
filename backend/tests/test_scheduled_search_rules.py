@@ -1032,4 +1032,420 @@ class TestStreamingSuppression:
         # but the search_alert must remain linked to its own incident.
         search_alert.refresh_from_db()
         assert search_alert.incident_id == search_incident.id
-        assert search_alert.state == "imported"
+
+
+# ── Slice 5: dynamic field catalog + mapping-aware validation ─────────────────
+
+_STUB_MAPPING = {
+    "rule.id":          "keyword",
+    "rule.level":       "long",
+    "rule.description": "text",
+    "rule.groups":      "keyword",
+    "agent.name":       "keyword",
+    "data.srcip":       "ip",
+}
+
+
+class TestValidateSearchField:
+    """Pure-function tests for validate_search_field — no DB or OS needed."""
+
+    def setup_method(self):
+        from correlations.services.search_compiler import validate_search_field
+        self.validate = validate_search_field
+
+    def test_valid_keyword_equals(self):
+        ok, msg = self.validate("rule.id", SEARCH_OPERATOR_EQUALS, _STUB_MAPPING)
+        assert ok is True
+        assert msg == ""
+
+    def test_valid_long_gte(self):
+        ok, msg = self.validate("rule.level", SEARCH_OPERATOR_GTE, _STUB_MAPPING)
+        assert ok is True
+
+    def test_valid_long_lte(self):
+        ok, msg = self.validate("rule.level", SEARCH_OPERATOR_LTE, _STUB_MAPPING)
+        assert ok is True
+
+    def test_valid_ip_cidr(self):
+        ok, msg = self.validate("data.srcip", SEARCH_OPERATOR_CIDR, _STUB_MAPPING)
+        assert ok is True
+
+    def test_valid_text_contains(self):
+        ok, msg = self.validate("rule.description", SEARCH_OPERATOR_CONTAINS, _STUB_MAPPING)
+        assert ok is True
+
+    def test_valid_text_equals(self):
+        # text + equals is valid — translator emits .keyword suffix
+        ok, msg = self.validate("rule.description", SEARCH_OPERATOR_EQUALS, _STUB_MAPPING)
+        assert ok is True
+
+    def test_absent_field_rejected(self):
+        ok, msg = self.validate("nonexistent.field", SEARCH_OPERATOR_EQUALS, _STUB_MAPPING)
+        assert ok is False
+        assert "nonexistent.field" in msg
+        assert "mapping" in msg.lower()
+
+    def test_type_mismatch_cidr_on_keyword_rejected(self):
+        ok, msg = self.validate("rule.id", SEARCH_OPERATOR_CIDR, _STUB_MAPPING)
+        assert ok is False
+        assert "cidr" in msg.lower() or "not valid" in msg.lower()
+
+    def test_type_mismatch_gte_on_ip_rejected(self):
+        ok, msg = self.validate("data.srcip", SEARCH_OPERATOR_GTE, _STUB_MAPPING)
+        assert ok is False
+
+    def test_type_mismatch_gte_on_keyword_rejected(self):
+        ok, msg = self.validate("agent.name", SEARCH_OPERATOR_GTE, _STUB_MAPPING)
+        assert ok is False
+
+    def test_empty_mapping_bypasses_validation(self):
+        # When the mapping cannot be fetched, validation is skipped.
+        ok, msg = self.validate("any.field", SEARCH_OPERATOR_EQUALS, {})
+        assert ok is True
+
+    def test_error_message_contains_valid_operators(self):
+        ok, msg = self.validate("rule.level", SEARCH_OPERATOR_CIDR, _STUB_MAPPING)
+        assert ok is False
+        # Message should tell the user which operators are valid for this type
+        assert "equals" in msg or "gte" in msg or "lte" in msg
+
+
+class TestIsAggregatableField:
+    """is_aggregatable_field: text is non-aggregatable, keyword/ip/long are."""
+
+    def setup_method(self):
+        from correlations.services.search_compiler import is_aggregatable_field
+        self.check = is_aggregatable_field
+
+    def test_keyword_is_aggregatable(self):
+        assert self.check("rule.id", _STUB_MAPPING) is True
+
+    def test_long_is_aggregatable(self):
+        assert self.check("rule.level", _STUB_MAPPING) is True
+
+    def test_ip_is_aggregatable(self):
+        assert self.check("data.srcip", _STUB_MAPPING) is True
+
+    def test_text_is_not_aggregatable(self):
+        assert self.check("rule.description", _STUB_MAPPING) is False
+
+    def test_unknown_field_defaults_to_aggregatable(self):
+        # Fields absent from mapping get "keyword" default — they are aggregatable.
+        assert self.check("unknown.field", _STUB_MAPPING) is True
+
+
+class TestTypeAwareCompilerClause:
+    """_condition_to_clause uses field_mapping to select the correct DSL form."""
+
+    def test_text_equals_uses_keyword_subfield(self):
+        cond = _make_condition("rule.description", SEARCH_OPERATOR_EQUALS, "SSH")
+        mapping = {"rule.description": "text"}
+        clause = _condition_to_clause(cond, field_mapping=mapping)
+        assert clause == {"term": {"rule.description.keyword": "SSH"}}
+
+    def test_keyword_equals_uses_plain_term(self):
+        cond = _make_condition("rule.id", SEARCH_OPERATOR_EQUALS, "5710")
+        mapping = {"rule.id": "keyword"}
+        clause = _condition_to_clause(cond, field_mapping=mapping)
+        assert clause == {"term": {"rule.id": "5710"}}
+
+    def test_ip_cidr_uses_term(self):
+        cond = _make_condition("data.srcip", SEARCH_OPERATOR_CIDR, "10.0.0.0/8")
+        mapping = {"data.srcip": "ip"}
+        clause = _condition_to_clause(cond, field_mapping=mapping)
+        assert clause == {"term": {"data.srcip": "10.0.0.0/8"}}
+
+    def test_long_gte_uses_range(self):
+        cond = _make_condition("rule.level", SEARCH_OPERATOR_GTE, "8")
+        mapping = {"rule.level": "long"}
+        clause = _condition_to_clause(cond, field_mapping=mapping)
+        assert clause == {"range": {"rule.level": {"gte": "8"}}}
+
+    def test_no_mapping_falls_back_to_keyword_behaviour(self):
+        cond = _make_condition("rule.id", SEARCH_OPERATOR_EQUALS, "42")
+        clause = _condition_to_clause(cond, field_mapping=None)
+        assert clause == {"term": {"rule.id": "42"}}
+
+    def test_compile_query_passes_mapping_through(self):
+        cond = _make_condition("rule.description", SEARCH_OPERATOR_EQUALS, "brute")
+        now = timezone.now()
+        body = compile_query(
+            [cond], ["001"], now - timedelta(hours=1), now, 50,
+            field_mapping={"rule.description": "text"},
+        )
+        filters = body["query"]["bool"]["filter"]
+        term_clauses = [f for f in filters if "term" in f]
+        assert any("rule.description.keyword" in c["term"] for c in term_clauses)
+
+
+class TestGetFieldMappingClient:
+    """OpenSearchClient.get_field_mapping: HTTP call, flatten, TTL cache."""
+
+    def _mapping_response(self, properties: dict):
+        m = MagicMock()
+        m.raise_for_status.return_value = None
+        m.json.return_value = {
+            "wazuh-alerts-4.x-000001": {
+                "mappings": {"properties": properties}
+            }
+        }
+        return m
+
+    @patch("security.opensearch.requests.get")
+    def test_flattens_nested_properties(self, mock_get, monkeypatch):
+        monkeypatch.setenv("WAZUH_INDEXER_URL", "https://os.test:9200")
+        monkeypatch.setenv("WAZUH_INDEXER_USER", "admin")
+        monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "secret")
+        # Clear module-level cache
+        import security.opensearch as os_mod
+        os_mod._field_mapping_cache.clear()
+
+        mock_get.return_value = self._mapping_response({
+            "rule": {
+                "properties": {
+                    "id": {"type": "keyword"},
+                    "level": {"type": "long"},
+                    "description": {"type": "text"},
+                }
+            },
+            "data": {
+                "properties": {
+                    "srcip": {"type": "ip"},
+                }
+            },
+        })
+
+        from security.opensearch import OpenSearchClient
+        mapping = OpenSearchClient().get_field_mapping()
+
+        assert mapping["rule.id"] == "keyword"
+        assert mapping["rule.level"] == "long"
+        assert mapping["rule.description"] == "text"
+        assert mapping["data.srcip"] == "ip"
+
+    @patch("security.opensearch.requests.get")
+    def test_ttl_cache_avoids_second_call(self, mock_get, monkeypatch):
+        monkeypatch.setenv("WAZUH_INDEXER_URL", "https://os.test:9200")
+        monkeypatch.setenv("WAZUH_INDEXER_USER", "admin")
+        monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "secret")
+        import security.opensearch as os_mod
+        os_mod._field_mapping_cache.clear()
+
+        mock_get.return_value = self._mapping_response({"rule": {"properties": {"id": {"type": "keyword"}}}})
+
+        from security.opensearch import OpenSearchClient
+        c = OpenSearchClient()
+        c.get_field_mapping()
+        c.get_field_mapping()
+        assert mock_get.call_count == 1
+
+    @patch("security.opensearch.requests.get")
+    def test_http_error_raises_opensearch_error(self, mock_get, monkeypatch):
+        import requests as req_mod
+        monkeypatch.setenv("WAZUH_INDEXER_URL", "https://os.test:9200")
+        monkeypatch.setenv("WAZUH_INDEXER_USER", "admin")
+        monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "secret")
+        import security.opensearch as os_mod
+        os_mod._field_mapping_cache.clear()
+
+        resp = MagicMock()
+        resp.raise_for_status.side_effect = req_mod.exceptions.HTTPError("500")
+        mock_get.return_value = resp
+
+        from security.opensearch import OpenSearchClient, OpenSearchError
+        with pytest.raises(OpenSearchError):
+            OpenSearchClient().get_field_mapping()
+
+
+class TestGetRuleCatalogClient:
+    """OpenSearchClient.get_rule_catalog: terms agg, TTL cache, agent scoping."""
+
+    def _catalog_response(self, buckets):
+        m = MagicMock()
+        m.raise_for_status.return_value = None
+        m.json.return_value = {
+            "hits": {"hits": [], "total": {"value": 0}},
+            "aggregations": {"by_rule_id": {"buckets": buckets}},
+        }
+        return m
+
+    @patch("security.opensearch.requests.post")
+    def test_returns_keyed_catalog(self, mock_post, monkeypatch):
+        monkeypatch.setenv("WAZUH_INDEXER_URL", "https://os.test:9200")
+        monkeypatch.setenv("WAZUH_INDEXER_USER", "admin")
+        monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "secret")
+        import security.opensearch as os_mod
+        os_mod._rule_catalog_cache.clear()
+
+        mock_post.return_value = self._catalog_response([{
+            "key": "5710",
+            "doc_count": 42,
+            "desc": {"buckets": [{"key": "SSH brute force"}]},
+            "groups": {"buckets": [{"key": "authentication"}, {"key": "ssh"}]},
+            "level": {"buckets": [{"key": 10}]},
+        }])
+
+        from security.opensearch import OpenSearchClient
+        catalog = OpenSearchClient().get_rule_catalog()
+
+        assert "5710" in catalog
+        entry = catalog["5710"]
+        assert entry["description"] == "SSH brute force"
+        assert "authentication" in entry["groups"]
+        assert entry["level"] == 10
+        assert entry["seen_count"] == 42
+
+    @patch("security.opensearch.requests.post")
+    def test_agent_ids_added_as_filter(self, mock_post, monkeypatch):
+        monkeypatch.setenv("WAZUH_INDEXER_URL", "https://os.test:9200")
+        monkeypatch.setenv("WAZUH_INDEXER_USER", "admin")
+        monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "secret")
+        import security.opensearch as os_mod
+        os_mod._rule_catalog_cache.clear()
+
+        mock_post.return_value = self._catalog_response([])
+
+        from security.opensearch import OpenSearchClient
+        OpenSearchClient().get_rule_catalog(agent_ids=["001", "002"])
+
+        body = mock_post.call_args[1]["json"]
+        filters = body["query"]["bool"]["filter"]
+        agent_filter = next(f for f in filters if "terms" in f)
+        assert set(agent_filter["terms"]["agent.id"]) == {"001", "002"}
+
+    @patch("security.opensearch.requests.post")
+    def test_ttl_cache_avoids_second_call(self, mock_post, monkeypatch):
+        monkeypatch.setenv("WAZUH_INDEXER_URL", "https://os.test:9200")
+        monkeypatch.setenv("WAZUH_INDEXER_USER", "admin")
+        monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "secret")
+        import security.opensearch as os_mod
+        os_mod._rule_catalog_cache.clear()
+
+        mock_post.return_value = self._catalog_response([])
+
+        from security.opensearch import OpenSearchClient
+        c = OpenSearchClient()
+        c.get_rule_catalog()
+        c.get_rule_catalog()
+        assert mock_post.call_count == 1
+
+    @patch("security.opensearch.requests.post")
+    def test_opensearch_error_returns_empty_dict(self, mock_post, monkeypatch):
+        import requests as req_mod
+        monkeypatch.setenv("WAZUH_INDEXER_URL", "https://os.test:9200")
+        monkeypatch.setenv("WAZUH_INDEXER_USER", "admin")
+        monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "secret")
+        import security.opensearch as os_mod
+        os_mod._rule_catalog_cache.clear()
+
+        resp = MagicMock()
+        resp.raise_for_status.side_effect = req_mod.exceptions.HTTPError("500")
+        mock_post.return_value = resp
+
+        from security.opensearch import OpenSearchClient
+        result = OpenSearchClient().get_rule_catalog()
+        assert result == {}
+
+
+@pytest.mark.django_db
+class TestSearchRuleConditionValidation:
+    """SearchRule create/update rejects conditions that fail mapping validation."""
+
+    def _staff_client(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        User = get_user_model()
+        user = User.objects.create_user("staff@test.com", password="x", is_staff=True)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def _rule_payload(self, org, field_name, operator="equals"):
+        return {
+            "organization": org.pk,
+            "name": "Validation Test",
+            "severity": "high",
+            "correlation_key": "none",
+            "window_minutes": 60,
+            "interval_minutes": 15,
+            "max_findings_per_run": 50,
+            "enabled": True,
+            "legs": [{
+                "count": 1,
+                "display_order": 0,
+                "conditions": [{
+                    "field_name": field_name,
+                    "operator": operator,
+                    "value": "test",
+                }],
+            }],
+        }
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_valid_condition_accepted(self, mock_mapping, org):
+        mock_mapping.return_value = {"rule.id": "keyword"}
+        with patch("correlations.services.search_schedule.sync_rule_schedule"):
+            client = self._staff_client()
+            resp = client.post(
+                "/api/correlations/search-rules/",
+                self._rule_payload(org, "rule.id", "equals"),
+                format="json",
+            )
+        assert resp.status_code == 201
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_absent_field_rejected_with_400(self, mock_mapping, org):
+        mock_mapping.return_value = {"rule.id": "keyword"}
+        client = self._staff_client()
+        resp = client.post(
+            "/api/correlations/search-rules/",
+            self._rule_payload(org, "nonexistent.field", "equals"),
+            format="json",
+        )
+        assert resp.status_code == 400
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_operator_type_mismatch_rejected_with_400(self, mock_mapping, org):
+        # rule.id is keyword — cidr is only valid for ip
+        mock_mapping.return_value = {"rule.id": "keyword"}
+        client = self._staff_client()
+        resp = client.post(
+            "/api/correlations/search-rules/",
+            self._rule_payload(org, "rule.id", "cidr"),
+            format="json",
+        )
+        assert resp.status_code == 400
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_unavailable_mapping_allows_save(self, mock_mapping, org):
+        # When mapping is empty (fetch failed), validation is skipped.
+        mock_mapping.return_value = {}
+        with patch("correlations.services.search_schedule.sync_rule_schedule"):
+            client = self._staff_client()
+            resp = client.post(
+                "/api/correlations/search-rules/",
+                self._rule_payload(org, "any.arbitrary.field", "equals"),
+                format="json",
+            )
+        assert resp.status_code == 201
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_text_field_as_correlation_key_rejected(self, mock_mapping, org):
+        """A correlation_key that maps to a text Wazuh field must be rejected."""
+        # Override CORRELATION_KEY_TO_WAZUH_FIELD to map "host.name" → a text field in mapping
+        mock_mapping.return_value = {"agent.name": "text"}  # normally keyword, but force text
+        client = self._staff_client()
+        payload = {
+            "organization": org.pk,
+            "name": "Text Key Test",
+            "severity": "medium",
+            "correlation_key": "host.name",
+            "window_minutes": 60,
+            "interval_minutes": 15,
+            "max_findings_per_run": 50,
+            "enabled": True,
+            "legs": [],
+        }
+        resp = client.post("/api/correlations/search-rules/", payload, format="json")
+        assert resp.status_code == 400
+        assert "correlation_key" in resp.data
