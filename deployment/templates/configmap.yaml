@@ -15,6 +15,6 @@ data:
 
   EXCEPTION_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
   TRIAGE_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
-  CORRELATION_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
+  CORRELATION_LLM_PROVIDER: incidents.llm.ollama.OllamaDraftProvider
   CLOSURE_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
   INCIDENT_ASSISTANT_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
