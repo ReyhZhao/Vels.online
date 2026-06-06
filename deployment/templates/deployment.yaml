@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend
-    annotations:
+  annotations:
     configmap.reloader.stakater.com/reload: "backend-config"
 spec:
   replicas: 1
