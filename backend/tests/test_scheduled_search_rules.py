@@ -1449,3 +1449,279 @@ class TestSearchRuleConditionValidation:
         resp = client.post("/api/correlations/search-rules/", payload, format="json")
         assert resp.status_code == 400
         assert "correlation_key" in resp.data
+
+
+# ── Slice 6: System Rules (per-org fan-out, mute, failure isolation) ──────────
+
+@pytest.fixture
+def system_rule(db):
+    """A SearchRule with organization=None (system rule)."""
+    r = SearchRule.objects.create(
+        organization=None,
+        name="System Brute Force",
+        severity="high",
+        window_minutes=60,
+        interval_minutes=15,
+        max_findings_per_run=50,
+    )
+    leg = SearchRuleLeg.objects.create(rule=r, display_order=0)
+    SearchLegCondition.objects.create(
+        leg=leg,
+        field_name="rule.description",
+        operator=SEARCH_OPERATOR_CONTAINS,
+        value="brute force",
+    )
+    return r
+
+
+@pytest.fixture
+def org2(db):
+    return Organization.objects.create(
+        name="SecondOrg",
+        slug="secondorg",
+        wazuh_group="secondorg",
+        alert_match_lookback_days=30,
+        alert_auto_promote_threshold=5,
+        alert_auto_promote_window_minutes=60,
+    )
+
+
+class TestSystemRuleFanOut:
+    """System rules iterate all orgs; muted orgs are skipped; per-org failures are isolated."""
+
+    def test_fanout_produces_incident_per_org(self, system_rule, org, org2):
+        """Fan-out over two orgs produces two separate firings (one incident each).
+
+        Each org has distinct document IDs (real orgs see different agents), so
+        the SearchFinding idempotency guard does not suppress the second org.
+        """
+        from correlations.services.search_evaluator import run
+
+        def hit_for(doc_id):
+            return {
+                "_id": doc_id,
+                "_index": "wazuh-alerts-4.x-2026.06.01",
+                "_source": {
+                    "agent": {"id": "001", "name": "agent"},
+                    "rule": {"description": "brute force attempt", "level": 10},
+                    "@timestamp": "2026-06-06T10:00:00Z",
+                },
+            }
+
+        with (
+            patch(_WAZUH_CLIENT) as mock_wazuh,
+            patch(_OS_CLIENT) as mock_os,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            mock_wazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            mock_os.return_value._search.side_effect = [
+                _fake_opensearch_response([hit_for("doc-org1-001")]),
+                _fake_opensearch_response([hit_for("doc-org2-001")]),
+            ]
+
+            run(system_rule, org)
+            run(system_rule, org2)
+
+        org_firings = SearchFiring.objects.filter(rule=system_rule, organization=org)
+        org2_firings = SearchFiring.objects.filter(rule=system_rule, organization=org2)
+        assert org_firings.count() == 1
+        assert org2_firings.count() == 1
+        # Incidents are tenant-isolated
+        assert org_firings.first().incident.organization == org
+        assert org2_firings.first().incident.organization == org2
+
+    def test_fanout_task_skips_muted_org(self, system_rule, org, org2):
+        """run_scheduled_search_rule skips orgs that have muted the system rule."""
+        from correlations.models import SearchRuleMute
+        from correlations.tasks import run_scheduled_search_rule
+
+        SearchRuleMute.objects.create(organization=org, rule=system_rule)
+
+        with (
+            patch(_WAZUH_CLIENT) as mock_wazuh,
+            patch(_OS_CLIENT) as mock_os,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            mock_wazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            mock_os.return_value._search.return_value = _fake_opensearch_response()
+
+            run_scheduled_search_rule(system_rule.id)
+
+        # org muted — no firing for it
+        assert SearchFiring.objects.filter(rule=system_rule, organization=org).count() == 0
+        # org2 not muted — fired
+        assert SearchFiring.objects.filter(rule=system_rule, organization=org2).count() == 1
+
+    def test_per_org_failure_does_not_abort_others(self, system_rule, org, org2):
+        """If one org's OpenSearch call raises, the other orgs still complete."""
+        from correlations.tasks import run_scheduled_search_rule
+        from security.opensearch import OpenSearchError
+
+        call_count = {"n": 0}
+
+        def side_effect_search(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise OpenSearchError("simulated failure")
+            return _fake_opensearch_response()
+
+        with (
+            patch(_WAZUH_CLIENT) as mock_wazuh,
+            patch(_OS_CLIENT) as mock_os,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            mock_wazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            mock_os.return_value._search.side_effect = side_effect_search
+
+            # Should not raise despite first org failing
+            run_scheduled_search_rule(system_rule.id)
+
+        # At least one org succeeded (the second one)
+        total_firings = SearchFiring.objects.filter(rule=system_rule).count()
+        assert total_firings >= 1
+
+    def test_no_cross_tenant_incident(self, system_rule, org, org2):
+        """Incidents created for org do not include alerts belonging to org2."""
+        from correlations.services.search_evaluator import run
+
+        def org_hit(org_slug):
+            return {
+                "_id": f"doc-{org_slug}",
+                "_index": "wazuh-alerts-4.x-2026.06.01",
+                "_source": {
+                    "agent": {"id": "001", "name": f"agent-{org_slug}"},
+                    "rule": {"description": "brute force attempt", "level": 10},
+                    "@timestamp": "2026-06-06T10:00:00Z",
+                },
+            }
+
+        with (
+            patch(_WAZUH_CLIENT) as mock_wazuh,
+            patch(_OS_CLIENT) as mock_os,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            mock_wazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            mock_os.return_value._search.side_effect = [
+                _fake_opensearch_response([org_hit("org1")]),
+                _fake_opensearch_response([org_hit("org2")]),
+            ]
+
+            run(system_rule, org)
+            run(system_rule, org2)
+
+        firing_org = SearchFiring.objects.get(rule=system_rule, organization=org)
+        firing_org2 = SearchFiring.objects.get(rule=system_rule, organization=org2)
+        # Incidents are distinct and org-scoped
+        assert firing_org.incident_id != firing_org2.incident_id
+        assert firing_org.incident.organization_id == org.id
+        assert firing_org2.incident.organization_id == org2.id
+
+    def test_org_rule_still_runs_for_its_org_only(self, rule, org, org2):
+        """An org-scoped rule only runs for its own org (no fan-out)."""
+        from correlations.tasks import run_scheduled_search_rule
+
+        with (
+            patch(_WAZUH_CLIENT) as mock_wazuh,
+            patch(_OS_CLIENT) as mock_os,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            mock_wazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            mock_os.return_value._search.return_value = _fake_opensearch_response()
+
+            run_scheduled_search_rule(rule.id)
+
+        assert SearchFiring.objects.filter(rule=rule, organization=org).count() == 1
+        assert SearchFiring.objects.filter(rule=rule, organization=org2).count() == 0
+
+
+class TestSystemSearchRuleMuteAPI:
+    """OrgSystemSearchRulesView and OrgSystemSearchRuleMuteView."""
+
+    def _staff_client(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        User = get_user_model()
+        user = User.objects.create_user("staff2@test.com", password="x", is_staff=True)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_list_system_search_rules_includes_mute_status(self, system_rule, org):
+        client = self._staff_client()
+        resp = client.get(f"/api/correlations/org-system-search-rules/?org={org.slug}")
+        assert resp.status_code == 200
+        assert len(resp.data) == 1
+        row = resp.data[0]
+        assert row["id"] == system_rule.id
+        assert row["muted"] is False
+
+    def test_mute_creates_record(self, system_rule, org):
+        from correlations.models import SearchRuleMute
+        client = self._staff_client()
+        resp = client.post(
+            f"/api/correlations/org-system-search-rules/{system_rule.id}/mute/",
+            {"org": org.slug},
+            format="json",
+        )
+        assert resp.status_code == 200
+        assert resp.data["muted"] is True
+        assert SearchRuleMute.objects.filter(organization=org, rule=system_rule).exists()
+
+    def test_unmute_removes_record(self, system_rule, org):
+        from correlations.models import SearchRuleMute
+        SearchRuleMute.objects.create(organization=org, rule=system_rule)
+        client = self._staff_client()
+        resp = client.delete(
+            f"/api/correlations/org-system-search-rules/{system_rule.id}/mute/?org={org.slug}",
+        )
+        assert resp.status_code == 200
+        assert resp.data["muted"] is False
+        assert not SearchRuleMute.objects.filter(organization=org, rule=system_rule).exists()
+
+    def test_list_reflects_muted_state(self, system_rule, org):
+        from correlations.models import SearchRuleMute
+        SearchRuleMute.objects.create(organization=org, rule=system_rule)
+        client = self._staff_client()
+        resp = client.get(f"/api/correlations/org-system-search-rules/?org={org.slug}")
+        assert resp.status_code == 200
+        assert resp.data[0]["muted"] is True
+
+    def test_org_rule_not_returned_as_system_rule(self, rule, org):
+        """Org-scoped rules must not appear in the system search rules list."""
+        client = self._staff_client()
+        resp = client.get(f"/api/correlations/org-system-search-rules/?org={org.slug}")
+        assert resp.status_code == 200
+        ids = [r["id"] for r in resp.data]
+        assert rule.id not in ids
+
+    def test_mute_idempotent(self, system_rule, org):
+        """POSTing mute twice does not error or create duplicate records."""
+        from correlations.models import SearchRuleMute
+        client = self._staff_client()
+        client.post(
+            f"/api/correlations/org-system-search-rules/{system_rule.id}/mute/",
+            {"org": org.slug},
+            format="json",
+        )
+        resp = client.post(
+            f"/api/correlations/org-system-search-rules/{system_rule.id}/mute/",
+            {"org": org.slug},
+            format="json",
+        )
+        assert resp.status_code == 200
+        assert SearchRuleMute.objects.filter(organization=org, rule=system_rule).count() == 1
+
+    def test_non_staff_cannot_list(self, system_rule, org):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        User = get_user_model()
+        user = User.objects.create_user("nostaff@test.com", password="x", is_staff=False)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        resp = client.get(f"/api/correlations/org-system-search-rules/?org={org.slug}")
+        assert resp.status_code == 403

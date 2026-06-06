@@ -10,6 +10,8 @@ from .views import (
     DetectionSuggestionListView,
     OrgSystemRuleMuteView,
     OrgSystemRulesView,
+    OrgSystemSearchRuleMuteView,
+    OrgSystemSearchRulesView,
     SearchCatalogView,
     SearchRuleDetailView,
     SearchRuleListView,
@@ -30,4 +32,6 @@ urlpatterns = [
     path("search-rules/<int:pk>/", SearchRuleDetailView.as_view()),
     path("search-rules/<int:pk>/run/", SearchRuleRunNowView.as_view()),
     path("search-catalog/", SearchCatalogView.as_view()),
+    path("org-system-search-rules/", OrgSystemSearchRulesView.as_view()),
+    path("org-system-search-rules/<int:pk>/mute/", OrgSystemSearchRuleMuteView.as_view()),
 ]

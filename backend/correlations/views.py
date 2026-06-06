@@ -30,6 +30,7 @@ from .models import (
     SearchRule,
     SearchRuleLeg,
     SearchLegCondition,
+    SearchRuleMute,
     SystemRuleMute,
 )
 from .tasks import _create_incident_from_suggestion, run_scheduled_search_rule
@@ -789,3 +790,64 @@ class SearchCatalogView(APIView):
             "fields": extra_fields,
             "rule_catalog": rule_catalog,
         })
+
+
+# ── Per-org system search rule mute views ─────────────────────────────────────
+
+class OrgSystemSearchRulesView(APIView):
+    """List system search rules with per-org mute status. Staff only."""
+
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        org, err = _get_org_for_staff(request)
+        if err:
+            return err
+
+        system_rules = (
+            SearchRule.objects
+            .filter(organization=None)
+            .prefetch_related("legs__conditions")
+            .order_by("name")
+        )
+        muted_ids = set(
+            SearchRuleMute.objects.filter(organization=org).values_list("rule_id", flat=True)
+        )
+        data = []
+        for rule in system_rules:
+            row = _SearchRuleSerializer(rule).data
+            row["muted"] = rule.id in muted_ids
+            data.append(row)
+        return Response(data)
+
+
+class OrgSystemSearchRuleMuteView(APIView):
+    """Create or remove a mute record for a system search rule + org pair. Staff only."""
+
+    def _resolve(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return None, None, err
+        org, err = _get_org_for_staff(request)
+        if err:
+            return None, None, err
+        try:
+            rule = SearchRule.objects.get(pk=pk, organization=None)
+        except SearchRule.DoesNotExist:
+            return None, None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return rule, org, None
+
+    def post(self, request, pk):
+        rule, org, err = self._resolve(request, pk)
+        if err:
+            return err
+        SearchRuleMute.objects.get_or_create(organization=org, rule=rule)
+        return Response({"rule_id": rule.id, "muted": True})
+
+    def delete(self, request, pk):
+        rule, org, err = self._resolve(request, pk)
+        if err:
+            return err
+        SearchRuleMute.objects.filter(organization=org, rule=rule).delete()
+        return Response({"rule_id": rule.id, "muted": False})

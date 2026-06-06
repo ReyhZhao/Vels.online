@@ -198,10 +198,27 @@ _MAX_FINDINGS_DEFAULT = 50
 _MIN_INTERVAL_MINUTES = 5
 
 
+class SearchRuleMute(models.Model):
+    organization = models.ForeignKey(
+        "security.Organization", on_delete=models.CASCADE, related_name="search_rule_mutes"
+    )
+    rule = models.ForeignKey(
+        "SearchRule", on_delete=models.CASCADE, related_name="mutes"
+    )
+
+    class Meta:
+        unique_together = [("organization", "rule")]
+
+    def __str__(self):
+        return f"{self.organization} mutes search rule {self.rule_id}"
+
+
 class SearchRule(models.Model):
     organization = models.ForeignKey(
         "security.Organization",
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="search_rules",
     )
     name = models.CharField(max_length=200)

@@ -139,7 +139,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   const [intervalMinutes, setIntervalMinutes] = useState(rule?.interval_minutes ?? 60);
   const [maxFindings, setMaxFindings] = useState(rule?.max_findings_per_run ?? 50);
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
-  const [orgId, setOrgId] = useState(rule?.organization ?? (orgs[0]?.id ?? ''));
+  const [orgId, setOrgId] = useState(rule === undefined || rule === null ? (orgs[0]?.id ?? '') : (rule?.organization ?? ''));
   const [legs, setLegs] = useState(
     rule?.legs?.length
       ? rule.legs.map(l => ({
@@ -187,7 +187,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
       interval_minutes: Number(intervalMinutes),
       max_findings_per_run: Number(maxFindings),
       enabled,
-      organization: orgId,
+      organization: orgId === '' ? null : orgId,
       legs: legs.map((l, i) => ({ ...l, display_order: i })),
     };
     try {
@@ -213,7 +213,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
     }
   }
 
-  const canSave = name.trim().length > 0 && legs.length > 0 && orgId;
+  const canSave = name.trim().length > 0 && legs.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -257,13 +257,14 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
                 />
               </div>
               <div className="col-span-2">
-                <label className="block text-xs font-medium text-foreground mb-1">Organization *</label>
+                <label className="block text-xs font-medium text-foreground mb-1">Organization</label>
                 <select
                   value={orgId}
-                  onChange={e => setOrgId(Number(e.target.value))}
+                  onChange={e => setOrgId(e.target.value === '' ? '' : Number(e.target.value))}
                   aria-label="Organization"
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 >
+                  <option value="">System rule (all orgs)</option>
                   {orgs.map(o => (
                     <option key={o.id} value={o.id}>{o.name}</option>
                   ))}
@@ -411,7 +412,8 @@ function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow }) {
   const [running, setRunning] = useState(false);
   const [runFeedback, setRunFeedback] = useState(null);
 
-  const orgName = orgs.find(o => o.id === rule.organization)?.name ?? `#${rule.organization}`;
+  const isSystem = rule.organization === null;
+  const orgName = isSystem ? 'All orgs (system)' : (orgs.find(o => o.id === rule.organization)?.name ?? `#${rule.organization}`);
 
   async function handleToggle() {
     setToggling(true);
@@ -439,7 +441,12 @@ function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow }) {
 
   return (
     <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
-      <td className="px-4 py-3 font-medium text-foreground">{rule.name}</td>
+      <td className="px-4 py-3 font-medium text-foreground">
+        {rule.name}
+        {isSystem && (
+          <span className="ml-2 inline-flex items-center rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 text-xs font-medium">system</span>
+        )}
+      </td>
       <td className="px-4 py-3 text-xs text-muted-foreground">{orgName}</td>
       <td className="px-4 py-3 text-xs text-muted-foreground">
         {rule.correlation_key === 'none' ? 'None' : rule.correlation_key}

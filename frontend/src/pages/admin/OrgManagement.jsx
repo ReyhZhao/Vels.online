@@ -127,6 +127,10 @@ function OrgRow({ org }) {
   const [loadingSystemRules, setLoadingSystemRules] = useState(false);
   const [muteTogglingId, setMuteTogglingId] = useState(null);
 
+  const [systemSearchRules, setSystemSearchRules] = useState(null);
+  const [loadingSystemSearchRules, setLoadingSystemSearchRules] = useState(false);
+  const [searchMuteTogglingId, setSearchMuteTogglingId] = useState(null);
+
   async function loadInvitations() {
     if (invitations !== null) return;
     setLoadingInvites(true);
@@ -171,10 +175,42 @@ function OrgRow({ org }) {
     }
   }
 
+  async function loadSystemSearchRules() {
+    if (systemSearchRules !== null) return;
+    setLoadingSystemSearchRules(true);
+    try {
+      const res = await api.get(`/api/correlations/org-system-search-rules/?org=${org.slug}`);
+      setSystemSearchRules(res.data);
+    } catch {
+      setSystemSearchRules([]);
+    } finally {
+      setLoadingSystemSearchRules(false);
+    }
+  }
+
+  async function handleToggleSearchMute(rule) {
+    setSearchMuteTogglingId(rule.id);
+    try {
+      if (rule.muted) {
+        await api.delete(`/api/correlations/org-system-search-rules/${rule.id}/mute/?org=${org.slug}`);
+      } else {
+        await api.post(`/api/correlations/org-system-search-rules/${rule.id}/mute/`, { org: org.slug });
+      }
+      setSystemSearchRules(prev =>
+        prev.map(r => (r.id === rule.id ? { ...r, muted: !r.muted } : r))
+      );
+    } catch {
+      // leave state unchanged on error
+    } finally {
+      setSearchMuteTogglingId(null);
+    }
+  }
+
   function handleToggle() {
     if (!expanded) {
       loadInvitations();
       loadSystemRules();
+      loadSystemSearchRules();
     }
     setExpanded(v => !v);
   }
@@ -398,6 +434,44 @@ function OrgRow({ org }) {
                             aria-label={rule.muted ? `Unmute ${rule.name} for ${org.name}` : `Mute ${rule.name} for ${org.name}`}
                           >
                             {muteTogglingId === rule.id ? '…' : rule.muted ? 'Unmute' : 'Mute'}
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="space-y-2 border-t border-border/50 pt-3 mt-3">
+              <p className="text-xs font-semibold text-foreground uppercase tracking-wider">System Search Rules</p>
+              {loadingSystemSearchRules && <p className="text-sm text-muted-foreground">Loading system search rules…</p>}
+              {!loadingSystemSearchRules && systemSearchRules !== null && systemSearchRules.length === 0 && (
+                <p className="text-sm text-muted-foreground">No system search rules defined.</p>
+              )}
+              {!loadingSystemSearchRules && systemSearchRules && systemSearchRules.length > 0 && (
+                <table className="w-full text-xs" aria-label={`System search rules for ${org.name}`}>
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th className="pb-1 font-medium">Rule</th>
+                      <th className="pb-1 font-medium">Severity</th>
+                      <th className="pb-1 font-medium text-right">Mute for this org</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {systemSearchRules.map(rule => (
+                      <tr key={rule.id} className="border-t border-border/50">
+                        <td className="py-1.5 text-foreground">{rule.name}</td>
+                        <td className="py-1.5 text-muted-foreground capitalize">{rule.severity}</td>
+                        <td className="py-1.5 text-right">
+                          <Button
+                            size="sm"
+                            variant={rule.muted ? 'default' : 'outline'}
+                            disabled={searchMuteTogglingId === rule.id}
+                            onClick={() => handleToggleSearchMute(rule)}
+                            aria-label={rule.muted ? `Unmute ${rule.name} for ${org.name}` : `Mute ${rule.name} for ${org.name}`}
+                          >
+                            {searchMuteTogglingId === rule.id ? '…' : rule.muted ? 'Unmute' : 'Mute'}
                           </Button>
                         </td>
                       </tr>
