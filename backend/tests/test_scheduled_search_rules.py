@@ -1938,3 +1938,125 @@ class TestSingleLegDiversityEvaluator:
         assert "NL" in incident.title and "US" in incident.title and "RU" in incident.title
         assert "## Diversity" in incident.description
         assert "NL (3)" in incident.description
+
+
+# ── Diversity Constraint — slice 2: multi-leg composition ─────────────────────
+
+@pytest.fixture
+def multi_leg_diversity_rule(org):
+    """leg1: successful logins spanning ≥2 countries; leg2: a privilege-escalation event.
+    Both must hold for the same user within the window."""
+    r = SearchRule.objects.create(
+        organization=org,
+        name="Travel + PrivEsc",
+        severity="critical",
+        correlation_key="user.name",
+        window_minutes=60,
+        interval_minutes=15,
+        max_findings_per_run=50,
+    )
+    leg1 = SearchRuleLeg.objects.create(
+        rule=r, display_order=0, count=1,
+        distinct_field="GeoLocation.country_name", min_distinct=2,
+    )
+    SearchLegCondition.objects.create(
+        leg=leg1, field_name="rule.groups",
+        operator=SEARCH_OPERATOR_EQUALS, value="authentication_success",
+    )
+    leg2 = SearchRuleLeg.objects.create(rule=r, display_order=1, count=1)
+    SearchLegCondition.objects.create(
+        leg=leg2, field_name="rule.groups",
+        operator=SEARCH_OPERATOR_EQUALS, value="privilege_escalation",
+    )
+    return r
+
+
+@pytest.mark.django_db
+class TestMultiLegDiversityComposition:
+    def test_fires_when_both_legs_satisfied(self, multi_leg_diversity_rule, org):
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        agg_div = _make_div_agg_response({"alice": [("NL", 2), ("US", 1)]})
+        agg_plain = _make_agg_response({"alice": 1})
+        hit = _fake_opensearch_response(hits=[_make_hit("d1", "data.dstuser", "alice")])
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value.get_field_mapping.return_value = {}
+            # leg1 agg, leg2 agg, then per satisfied key: leg1 hit, leg2 hit
+            MockOS.return_value._search.side_effect = [agg_div, agg_plain, hit, hit]
+
+            incident = run(multi_leg_diversity_rule, org)
+
+        assert incident is not None
+        assert Incident.objects.filter(organization=org, source_kind="scheduled_search").count() == 1
+
+    def test_no_fire_when_plain_leg_key_absent(self, multi_leg_diversity_rule, org):
+        """Diversity leg satisfied for alice, but the plain leg only has bob → no intersection."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        agg_div = _make_div_agg_response({"alice": [("NL", 2), ("US", 1)]})
+        agg_plain = _make_agg_response({"bob": 3})
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value.get_field_mapping.return_value = {}
+            MockOS.return_value._search.side_effect = [agg_div, agg_plain]
+
+            result = run(multi_leg_diversity_rule, org)
+
+        assert result is None
+        assert not Incident.objects.filter(organization=org).exists()
+
+    def test_no_fire_when_diversity_fails_but_plain_present(self, multi_leg_diversity_rule, org):
+        """Plain leg has alice, but the diversity leg sees only one country for alice → no fire."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        agg_div = _make_div_agg_response({"alice": [("NL", 5)]})
+        agg_plain = _make_agg_response({"alice": 2})
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value.get_field_mapping.return_value = {}
+            MockOS.return_value._search.side_effect = [agg_div, agg_plain]
+
+            result = run(multi_leg_diversity_rule, org)
+
+        assert result is None
+        assert not Incident.objects.filter(organization=org).exists()
+
+    def test_incident_names_spread_from_diversity_leg(self, multi_leg_diversity_rule, org):
+        from correlations.services.search_evaluator import run
+
+        agg_div = _make_div_agg_response({"alice": [("NL", 2), ("BE", 1)]})
+        agg_plain = _make_agg_response({"alice": 1})
+        hit = _fake_opensearch_response(hits=[_make_hit("d1", "data.dstuser", "alice")])
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value.get_field_mapping.return_value = {}
+            MockOS.return_value._search.side_effect = [agg_div, agg_plain, hit, hit]
+
+            incident = run(multi_leg_diversity_rule, org)
+
+        assert "## Diversity" in incident.description
+        assert "NL" in incident.description and "BE" in incident.description
