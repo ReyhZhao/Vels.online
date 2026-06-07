@@ -63,7 +63,10 @@ function ConditionRow({ cond, index, onChange, onRemove }) {
   );
 }
 
-function LegEditor({ leg, legIndex, onChange, onRemove }) {
+function LegEditor({ leg, legIndex, correlationKey, onChange, onRemove }) {
+  const hasDiversity = !!(leg.distinct_field && leg.distinct_field.trim());
+  const diversityNeedsKey = hasDiversity && correlationKey === 'none';
+
   function updateCondition(condIdx, updates) {
     const conds = leg.conditions.map((c, i) => i === condIdx ? { ...c, ...updates } : c);
     onChange(legIndex, { ...leg, conditions: conds });
@@ -126,6 +129,40 @@ function LegEditor({ leg, legIndex, onChange, onRemove }) {
       >
         + Add condition
       </button>
+
+      {/* Diversity Constraint (ADR-0009) */}
+      <div className="border-t border-border/60 pt-2 space-y-1">
+        <div className="flex items-center gap-2 flex-wrap text-xs text-foreground">
+          <span className="text-muted-foreground">Diversity (optional):</span>
+          <span>distinct values of</span>
+          <input
+            value={leg.distinct_field ?? ''}
+            onChange={e => onChange(legIndex, { ...leg, distinct_field: e.target.value })}
+            placeholder="e.g. GeoLocation.country_name"
+            aria-label={`Leg ${legIndex + 1} distinct field`}
+            className="flex-1 min-w-40 rounded border border-border bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {hasDiversity && (
+            <label className="flex items-center gap-1 whitespace-nowrap">
+              ≥
+              <input
+                type="number"
+                min={2}
+                value={leg.min_distinct ?? 2}
+                onChange={e => onChange(legIndex, { ...leg, min_distinct: Number(e.target.value) })}
+                aria-label={`Leg ${legIndex + 1} min distinct`}
+                className="w-14 rounded border border-border bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              distinct
+            </label>
+          )}
+        </div>
+        {diversityNeedsKey && (
+          <p className="text-xs text-destructive">
+            A diversity constraint requires a correlation key (not “None”) to group by.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -512,6 +549,7 @@ export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved 
                     key={li}
                     leg={leg}
                     legIndex={li}
+                    correlationKey={draft.correlation_key}
                     onChange={updateLeg}
                     onRemove={removeLeg}
                   />

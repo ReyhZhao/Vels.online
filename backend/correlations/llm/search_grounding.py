@@ -25,6 +25,8 @@ _SEARCH_CORE_FIELDS = [
     {"value": "data.dstuser",      "type": "keyword"},
     {"value": "data.audit.comm",   "type": "keyword"},
     {"value": "data.sha256",       "type": "keyword"},
+    # Geo enrichment — the canonical Diversity Constraint target (ADR-0009).
+    {"value": "GeoLocation.country_name", "type": "keyword"},
 ]
 
 

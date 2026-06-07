@@ -5,7 +5,10 @@ this validates field_name + operator against the live index mapping per ADR-0007
 An empty mapping bypasses field validation (same behaviour as validate_search_field).
 """
 from correlations.models import CORRELATION_KEY_CHOICES
-from correlations.services.search_compiler import _operators_for_type
+from correlations.services.search_compiler import (
+    _operators_for_type,
+    validate_diversity_constraint,
+)
 
 _VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
 _VALID_CORR_KEYS = frozenset(k for k, _ in CORRELATION_KEY_CHOICES)
@@ -92,11 +95,30 @@ def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
 
         count = _coerce_int(leg.get("count"), 1)
 
-        sanitized_legs.append({
+        sanitized_leg = {
             "count": count,
             "display_order": leg_i,
             "conditions": sanitized_conditions,
-        })
+        }
+
+        # Diversity Constraint (ADR-0009): preserve when valid, else strip with an
+        # unmistakable warning (the constraint is load-bearing — a silent strip would
+        # leave a draft that looks fine but no longer checks distinct values).
+        distinct_field = str(leg.get("distinct_field", "")).strip()
+        if distinct_field:
+            raw_min = leg.get("min_distinct", 2)
+            ok, reason = validate_diversity_constraint(distinct_field, raw_min, corr_key, mapping)
+            if ok:
+                sanitized_leg["distinct_field"] = distinct_field
+                sanitized_leg["min_distinct"] = max(2, int(raw_min))
+            else:
+                warnings.append(
+                    f"⚠ Leg {leg_i + 1}: diversity constraint on '{distinct_field}' was REMOVED — "
+                    f"this rule no longer checks for distinct values. {reason} "
+                    f"Re-add the diversity constraint in the builder before saving."
+                )
+
+        sanitized_legs.append(sanitized_leg)
 
     return {
         "name": name,

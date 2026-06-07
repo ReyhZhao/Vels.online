@@ -41,6 +41,8 @@ draft_rule schema:
     {{
       "count": integer (min 1) — minimum matching docs required in this leg,
       "display_order": integer — 0-indexed position,
+      "distinct_field": "string (optional) — Diversity Constraint: an aggregatable Wazuh field. The leg fires only when its matches span at least min_distinct DISTINCT values of this field for the same correlation key. Leave empty for no constraint.",
+      "min_distinct": integer (min 2, default 2) — required when distinct_field is set,
       "conditions": [
         {{
           "field_name": "Wazuh document field path (e.g. rule.id, agent.name, data.srcip)",
@@ -74,6 +76,11 @@ Rules:
 - Only use field_name values that exist in the Wazuh index mapping
 - Conditions have field_name + operator + value only — no field_kind
 - Prefer field values drawn from the expanded fields above when available
+- For "same X seen across multiple different Y" detections (e.g. one user logging in from \
+two or more different countries, or one host contacting many distinct destination IPs), set \
+distinct_field (e.g. GeoLocation.country_name) and min_distinct (>= 2) on the leg, and pick a \
+matching correlation_key (e.g. user.name). distinct_field must be aggregatable (not a free-text \
+field) and must differ from the correlation key's field. Diversity requires a non-'none' correlation_key.
 - If a current draft is provided, update it based on the latest instruction
 - Return only valid JSON. No markdown, no code fences, no explanation outside the JSON.
 """

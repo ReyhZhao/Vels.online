@@ -275,6 +275,102 @@ def test_sanitizer_draft_not_persisted_or_activated():
     assert sanitized["enabled"] is False
 
 
+# ── sanitize_search_draft: Diversity Constraint (ADR-0009) ─────────────────────
+
+def _diversity_mapping():
+    return {
+        "rule.groups": "keyword",
+        "GeoLocation.country_name": "keyword",
+        "data.dstuser": "keyword",
+        "rule.description": "text",
+    }
+
+
+def _diversity_draft(distinct_field="GeoLocation.country_name", min_distinct=2,
+                     correlation_key="user.name"):
+    return {
+        "name": "Impossible travel",
+        "description": "",
+        "correlation_key": correlation_key,
+        "severity": "high",
+        "window_minutes": 60,
+        "interval_minutes": 15,
+        "max_findings_per_run": 50,
+        "enabled": True,
+        "legs": [{
+            "count": 1,
+            "display_order": 0,
+            "distinct_field": distinct_field,
+            "min_distinct": min_distinct,
+            "conditions": [
+                {"field_name": "rule.groups", "operator": "equals", "value": "authentication_success"},
+            ],
+        }],
+    }
+
+
+def test_sanitizer_preserves_valid_diversity():
+    sanitized, warnings = sanitize_search_draft(_diversity_draft(), _diversity_mapping())
+    leg = sanitized["legs"][0]
+    assert leg["distinct_field"] == "GeoLocation.country_name"
+    assert leg["min_distinct"] == 2
+    assert warnings == []
+
+
+def test_sanitizer_strips_diversity_when_key_is_none():
+    sanitized, warnings = sanitize_search_draft(
+        _diversity_draft(correlation_key="none"), _diversity_mapping()
+    )
+    assert "distinct_field" not in sanitized["legs"][0]
+    assert any("removed" in w.lower() and "diversity" in w.lower() for w in warnings)
+
+
+def test_sanitizer_strips_diversity_on_non_aggregatable_field():
+    sanitized, warnings = sanitize_search_draft(
+        _diversity_draft(distinct_field="rule.description"), _diversity_mapping()
+    )
+    assert "distinct_field" not in sanitized["legs"][0]
+    assert any("removed" in w.lower() for w in warnings)
+
+
+def test_sanitizer_strips_diversity_when_min_distinct_below_two():
+    sanitized, warnings = sanitize_search_draft(
+        _diversity_draft(min_distinct=1), _diversity_mapping()
+    )
+    assert "distinct_field" not in sanitized["legs"][0]
+    assert any("removed" in w.lower() for w in warnings)
+
+
+def test_sanitizer_strips_diversity_on_correlation_key_field():
+    # user.name → data.dstuser; diversifying on the key field is a dead rule.
+    sanitized, warnings = sanitize_search_draft(
+        _diversity_draft(distinct_field="data.dstuser"), _diversity_mapping()
+    )
+    assert "distinct_field" not in sanitized["legs"][0]
+    assert any("removed" in w.lower() for w in warnings)
+
+
+def test_sanitizer_keeps_plain_leg_when_diversity_stripped():
+    """Stripping the diversity must leave the leg intact as a plain count leg."""
+    sanitized, _ = sanitize_search_draft(
+        _diversity_draft(correlation_key="none"), _diversity_mapping()
+    )
+    leg = sanitized["legs"][0]
+    assert leg["count"] == 1
+    assert len(leg["conditions"]) == 1
+
+
+@patch(_OS_CLIENT)
+def test_grounding_core_fields_include_country(mock_cls):
+    client = MagicMock()
+    client.get_field_mapping.return_value = {}
+    client.get_rule_catalog.return_value = {}
+    mock_cls.return_value = client
+    g = build_search_grounding()
+    names = [f["value"] for f in g["core_fields"]]
+    assert "GeoLocation.country_name" in names
+
+
 # ── SearchRuleDraftView endpoint ───────────────────────────────────────────────
 
 _MESSAGES = [{"role": "user", "content": "detect SSH brute force from external IPs"}]
