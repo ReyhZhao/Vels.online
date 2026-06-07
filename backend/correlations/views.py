@@ -1017,6 +1017,37 @@ class SearchRuleTestRunAllView(APIView):
         return Response({"summary": summary, "results": results})
 
 
+class SearchRuleTestGenerateView(APIView):
+    """Staff-only: LLM-generate candidate Sample Documents for a rule (review before save)."""
+
+    def post(self, request, rule_pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(rule_pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        expect_fire = bool(request.data.get("expect_fire", True))
+        scope = request.data.get("scope")
+
+        from correlations.llm.sample_generator import generate_samples
+
+        try:
+            result = generate_samples(rule, expect_fire, scope=scope)
+        except DraftConfigError as exc:
+            return Response(
+                {"detail": "Sample generator is unavailable.", "reason": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except DraftError as exc:
+            return Response(
+                {"detail": "Sample generation failed.", "reason": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(result)
+
+
 class SearchCatalogView(APIView):
     """Staff-only: return the field catalog for the search rule builder.
 

@@ -86,6 +86,75 @@ field) and must differ from the correlation key's field. Diversity requires a no
 """
 
 
+_SAMPLE_GEN_TEMPLATE = """\
+You are a detection-engineering test-data assistant. Given a Scheduled Search Rule, \
+generate synthetic raw Wazuh alert documents to TEST it.
+
+The author wants {goal_text}.
+
+Return a JSON object with exactly these fields:
+  samples (array of objects, required) — synthetic raw Wazuh documents
+  reasoning (string) — 1-2 sentence explanation
+
+Rules for the documents:
+- Each document is a partial raw Wazuh alert (a JSON object), shaped like the real samples below.
+- Every document MUST include an "@timestamp" field (ISO-8601). For a should-fire test, put all \
+documents within {window_minutes} minutes of each other.
+- Only use field paths that exist in the field reference below; do not invent fields.
+- Make the documents realistic — resemble genuine attack or benign logs, not just the rule's \
+conditions echoed back.
+- {goal_detail}
+- Return only valid JSON. No markdown, no code fences, no explanation outside the JSON.
+
+Rule under test:
+{rule_text}
+
+Field reference (paths you may use):
+{fields_text}
+
+Real example documents from this environment (for shape/realism):
+{samples_text}
+"""
+
+
+def build_sample_gen_prompt(grounding: dict, expect_fire: bool) -> str:
+    """System prompt for generating should-fire / should-not-fire Sample Documents."""
+    rule = grounding.get("rule", {})
+    window_minutes = rule.get("window_minutes", 60)
+
+    if expect_fire:
+        goal_text = "documents that SHOULD make the rule fire (a true-positive test)"
+        goal_detail = (
+            "Together, the documents must satisfy every leg of the rule for the same "
+            "correlation key within the window (including any diversity constraint)."
+        )
+    else:
+        goal_text = "documents that should NOT make the rule fire (a true-negative test)"
+        goal_detail = (
+            "The documents must fall just short — e.g. miss a leg, fall under a count "
+            "threshold, sit outside the window, or lack the required diversity."
+        )
+
+    core = grounding.get("core_fields", [])
+    expanded = grounding.get("expanded_fields", {})
+    field_lines = [f"  {f['value']} (type: {f['type']})" for f in core]
+    for field, info in expanded.items():
+        field_lines.append(f"  {field} (type: {info.get('type', 'keyword')})")
+    fields_text = "\n".join(field_lines) if field_lines else "  (none)"
+
+    samples_text = json.dumps(grounding.get("sample_docs", [])[:5], indent=2) or "  (none)"
+    rule_text = json.dumps(rule, indent=2)
+
+    return _SAMPLE_GEN_TEMPLATE.format(
+        goal_text=goal_text,
+        goal_detail=goal_detail,
+        window_minutes=window_minutes,
+        rule_text=rule_text,
+        fields_text=fields_text,
+        samples_text=samples_text,
+    )
+
+
 def build_rule_selection_prompt(grounding: dict) -> str:
     rule_catalog = grounding.get("rule_catalog", {})
     window_days = 7  # consistent with grounding builder default

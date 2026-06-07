@@ -68,6 +68,22 @@ describe('SearchRuleTestsDrawer', () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
+  it('generates samples with AI and fills the editor', async () => {
+    api.get.mockResolvedValue({ data: [] });
+    api.post.mockResolvedValue({ data: { samples: [{ '@timestamp': '2026-06-06T10:00:00Z', rule: { id: '5710' } }], warnings: ['dropped foo'] } });
+    const user = userEvent.setup();
+    renderDrawer();
+
+    await waitFor(() => screen.getByText('No tests yet.'));
+    await user.click(screen.getByText('+ Add test'));
+    await user.click(screen.getByText('Generate with AI'));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/correlations/search-rules/7/tests/generate/', { expect_fire: true }));
+    const textarea = await screen.findByLabelText('Sample documents JSON');
+    expect(textarea.value).toContain('5710');
+    expect(screen.getByText('dropped foo')).toBeInTheDocument();
+  });
+
   it('runs a test and shows the pass result', async () => {
     api.get.mockResolvedValue({ data: [
       { id: 1, name: 'fires on burst', description: '', expect_fire: true, samples: [], last_status: 'never' },

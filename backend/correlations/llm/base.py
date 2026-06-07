@@ -45,3 +45,12 @@ class BaseDraftProvider(ABC):
         current_draft: Optional[dict] = None,
     ) -> RuleDraftResult:
         """Pass 2: given messages and expanded grounding, return a drafted search rule."""
+
+    def generate_sample_docs(self, grounding: dict, expect_fire: bool) -> list:
+        """Generate synthetic Sample Documents for a Rule Test (PRD #439).
+
+        Returns a list of partial raw Wazuh document dicts. Default implementation is
+        unsupported; concrete providers override it. Not abstract so existing providers
+        keep working without change.
+        """
+        raise DraftError("This provider does not support sample-document generation.")

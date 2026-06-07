@@ -4,7 +4,11 @@ from django.conf import settings
 
 from .base import BaseDraftProvider, DraftError, RuleDraftResult
 from .gemini import _build_system_prompt, _strip_code_fence
-from .search_prompt import build_rule_selection_prompt, build_search_draft_prompt
+from .search_prompt import (
+    build_rule_selection_prompt,
+    build_sample_gen_prompt,
+    build_search_draft_prompt,
+)
 
 
 class OllamaDraftProvider(BaseDraftProvider):
@@ -66,3 +70,12 @@ class OllamaDraftProvider(BaseDraftProvider):
             assistant_reply=str(data.get("assistant_reply", "")),
             warnings=[],
         )
+
+    def generate_sample_docs(self, grounding: dict, expect_fire: bool) -> list:
+        raw = self._chat(
+            build_sample_gen_prompt(grounding, expect_fire),
+            [{"role": "user", "content": "Generate the sample documents now."}],
+        )
+        data = self._parse_json(raw, "sample generation")
+        samples = data.get("samples", [])
+        return samples if isinstance(samples, list) else []

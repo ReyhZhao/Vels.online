@@ -190,3 +190,14 @@ class GeminiDraftProvider(BaseDraftProvider):
             assistant_reply=str(data.get("assistant_reply", "")),
             warnings=[],
         )
+
+    def generate_sample_docs(self, grounding: dict, expect_fire: bool) -> list:
+        from .search_prompt import build_sample_gen_prompt
+        instruction = "Generate the sample documents now."
+        raw = self._generate(
+            build_sample_gen_prompt(grounding, expect_fire),
+            self._build_contents([{"role": "user", "content": instruction}]),
+        )
+        data = self._parse_json(raw, "sample generation")
+        samples = data.get("samples", [])
+        return samples if isinstance(samples, list) else []

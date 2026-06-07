@@ -17,8 +17,24 @@ function statusLabel(s) {
   return { pass: 'Pass', fail: 'Fail', error: 'Error', never: 'Never run' }[s] || s;
 }
 
-function TestForm({ initial, onCancel, onSave, saving, error }) {
+function TestForm({ initial, onCancel, onSave, onGenerate, saving, error }) {
   const [form, setForm] = useState(initial);
+  const [generating, setGenerating] = useState(false);
+  const [genWarnings, setGenWarnings] = useState(null);
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setGenWarnings(null);
+    try {
+      const data = await onGenerate(form.expect_fire);
+      setForm(f => ({ ...f, samplesText: JSON.stringify(data.samples, null, 2) }));
+      setGenWarnings(data.warnings || []);
+    } catch {
+      setGenWarnings(['Generation failed.']);
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   return (
     <div className="rounded-md border border-border bg-background p-3 space-y-3">
@@ -46,9 +62,24 @@ function TestForm({ initial, onCancel, onSave, saving, error }) {
         Expect the rule to fire (true-positive). Uncheck for a should-not-fire (true-negative) test.
       </label>
       <div>
-        <label className="block text-xs font-medium text-muted-foreground mb-1" htmlFor="samples-json">
-          Sample Documents (JSON array of partial Wazuh docs)
-        </label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-xs font-medium text-muted-foreground" htmlFor="samples-json">
+            Sample Documents (JSON array of partial Wazuh docs)
+          </label>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={generating}
+            className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            {generating ? 'Generating…' : 'Generate with AI'}
+          </button>
+        </div>
+        {genWarnings && genWarnings.length > 0 && (
+          <ul className="mb-1 list-disc pl-4 text-[11px] text-amber-600">
+            {genWarnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        )}
         <textarea
           id="samples-json"
           value={form.samplesText}
@@ -157,6 +188,11 @@ export default function SearchRuleTestsDrawer({ rule, onClose }) {
     }
   }
 
+  async function generateSamples(expectFire) {
+    const res = await api.post(`${base}/generate/`, { expect_fire: expectFire });
+    return res.data;
+  }
+
   async function deleteTest(id) {
     if (!window.confirm('Delete this test?')) return;
     try {
@@ -223,6 +259,7 @@ export default function SearchRuleTestsDrawer({ rule, onClose }) {
                       }}
                       onCancel={() => setEditing(null)}
                       onSave={saveTest}
+                      onGenerate={generateSamples}
                       saving={saving}
                       error={formError}
                     />
@@ -267,6 +304,7 @@ export default function SearchRuleTestsDrawer({ rule, onClose }) {
                   initial={EMPTY_FORM}
                   onCancel={() => setEditing(null)}
                   onSave={saveTest}
+                  onGenerate={generateSamples}
                   saving={saving}
                   error={formError}
                 />
