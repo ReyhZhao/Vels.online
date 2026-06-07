@@ -477,22 +477,24 @@ class CorrelationDraftView(APIView):
         try:
             provider = get_draft_provider()
         except DraftConfigError as exc:
+            logger.exception("CorrelationDraftView: provider config error")
             return Response(
-                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                {"detail": "Rule-author assistant is unavailable."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
         try:
             result = provider.draft_rule(messages, grounding, current_draft)
         except DraftConfigError as exc:
+            logger.exception("CorrelationDraftView: provider config error during draft")
             return Response(
-                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                {"detail": "Rule-author assistant is unavailable."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         except DraftError as exc:
             logger.warning("CorrelationDraftView: provider error: %s", exc)
             return Response(
-                {"detail": "Assistant failed to produce a valid draft.", "reason": str(exc)},
+                {"detail": "Assistant failed to produce a valid draft."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
@@ -547,8 +549,9 @@ class SearchRuleDraftView(APIView):
         try:
             provider = get_draft_provider()
         except DraftConfigError as exc:
+            logger.exception("SearchRuleDraftView: provider config error")
             return Response(
-                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                {"detail": "Rule-author assistant is unavailable."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
@@ -576,14 +579,15 @@ class SearchRuleDraftView(APIView):
             # Pass 2: LLM drafts the rule using expanded fields.
             result = provider.draft_search_rule(messages, grounding, current_draft)
         except DraftConfigError as exc:
+            logger.exception("SearchRuleDraftView: provider config error during pass 2")
             return Response(
-                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                {"detail": "Rule-author assistant is unavailable."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         except DraftError as exc:
             logger.warning("SearchRuleDraftView pass 2 error: %s", exc)
             return Response(
-                {"detail": "Assistant failed to produce a valid draft.", "reason": str(exc)},
+                {"detail": "Assistant failed to produce a valid draft."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 

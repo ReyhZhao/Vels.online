@@ -342,7 +342,8 @@ def debug_run(rule, org) -> dict:
         raw_agents = WazuhClient().get_agents(org.wazuh_group)
         agent_ids = [a["id"] for a in raw_agents]
     except (WazuhAPIError, WazuhAuthError) as exc:
-        return {"error": f"Failed to fetch agents: {exc}"}
+        logger.warning("debug_run: failed to fetch agents for org %s: %s", org.slug, exc)
+        return {"error": f"Failed to fetch agents ({type(exc).__name__}). See server logs for details."}
 
     if not agent_ids:
         return {"error": f"Org '{org.slug}' has no Wazuh agents."}
@@ -377,7 +378,8 @@ def debug_run(rule, org) -> dict:
                 agg_response = client._search(_ALERTS_INDEX, agg_body)
                 leg_entry["agg_response"] = agg_response
             except OpenSearchError as exc:
-                leg_entry["agg_error"] = str(exc)
+                logger.warning("debug_run: agg query failed for leg %s: %s", leg.id, exc)
+                leg_entry["agg_error"] = f"Aggregation query failed ({type(exc).__name__}). See server logs for details."
 
         hit_body = compile_query(conditions, agent_ids, window_start, now, rule.max_findings_per_run)
         leg_entry["hit_query"] = hit_body
@@ -385,7 +387,8 @@ def debug_run(rule, org) -> dict:
             hit_response = client._search(_ALERTS_INDEX, hit_body)
             leg_entry["hit_response"] = hit_response
         except OpenSearchError as exc:
-            leg_entry["hit_error"] = str(exc)
+            logger.warning("debug_run: hit query failed for leg %s: %s", leg.id, exc)
+            leg_entry["hit_error"] = f"Query failed ({type(exc).__name__}). See server logs for details."
 
         result["legs"].append(leg_entry)
 

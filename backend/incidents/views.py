@@ -2180,7 +2180,8 @@ class IncidentTriageDebugView(APIView):
         try:
             provider = get_triage_provider()
         except TriageConfigError as exc:
-            return Response({"detail": f"LLM provider misconfigured: {exc}"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            logger.exception("IncidentTriageDebugView: provider config error for %s", display_id)
+            return Response({"detail": "LLM provider misconfigured."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         if not hasattr(provider, "debug_triage_incident"):
             return Response({"detail": "This provider does not support debug mode."}, status=status.HTTP_501_NOT_IMPLEMENTED)
@@ -2188,10 +2189,11 @@ class IncidentTriageDebugView(APIView):
         try:
             raw_response, parsed = provider.debug_triage_incident(system_prompt, user_payload)
         except TriageError as exc:
-            return Response({"detail": f"LLM error: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+            logger.warning("IncidentTriageDebugView: LLM error for %s: %s", display_id, exc)
+            return Response({"detail": "LLM error."}, status=status.HTTP_502_BAD_GATEWAY)
         except Exception as exc:
             logger.exception("IncidentTriageDebugView: unexpected error for %s", display_id)
-            return Response({"detail": f"Unexpected error: {exc}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"detail": "Unexpected error."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({
             "system_prompt": system_prompt,
@@ -2241,22 +2243,24 @@ class IncidentAssistantView(APIView):
         try:
             provider = get_assistant_provider()
         except (AssistantConfigError, TriageConfigError) as exc:
+            logger.exception("IncidentAssistantView: provider config error for %s", display_id)
             return Response(
-                {"detail": "Incident assistant is unavailable.", "reason": str(exc)},
+                {"detail": "Incident assistant is unavailable."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
         try:
             result = provider.assist_incident(messages, grounding)
         except (AssistantConfigError, TriageConfigError) as exc:
+            logger.exception("IncidentAssistantView: provider config error during assist for %s", display_id)
             return Response(
-                {"detail": "Incident assistant is unavailable.", "reason": str(exc)},
+                {"detail": "Incident assistant is unavailable."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         except AssistantError as exc:
             logger.warning("IncidentAssistantView: provider error: %s", exc)
             return Response(
-                {"detail": "Assistant failed to produce a valid response.", "reason": str(exc)},
+                {"detail": "Assistant failed to produce a valid response."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
