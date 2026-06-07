@@ -382,11 +382,37 @@ class Asset(models.Model):
         (KIND_ROUTE, "Route"),
     ]
 
+    ROLE_WORKSTATION = "workstation"
+    ROLE_SERVER = "server"
+    ROLE_DNS_SERVER = "dns-server"
+    ROLE_DOMAIN_CONTROLLER = "domain-controller"
+    ROLE_JUMPHOST = "jumphost"
+    ROLE_FIREWALL = "firewall"
+    ROLE_ROUTER = "router"
+    ROLE_SWITCH = "switch"
+    ROLE_DATABASE_SERVER = "database-server"
+    ROLE_WEB_SERVER = "web-server"
+    ROLE_OTHER = "other"
+    ROLE_CHOICES = [
+        (ROLE_WORKSTATION, "Workstation"),
+        (ROLE_SERVER, "Server"),
+        (ROLE_DNS_SERVER, "DNS Server"),
+        (ROLE_DOMAIN_CONTROLLER, "Domain Controller"),
+        (ROLE_JUMPHOST, "Jumphost"),
+        (ROLE_FIREWALL, "Firewall"),
+        (ROLE_ROUTER, "Router"),
+        (ROLE_SWITCH, "Switch"),
+        (ROLE_DATABASE_SERVER, "Database Server"),
+        (ROLE_WEB_SERVER, "Web Server"),
+        (ROLE_OTHER, "Other"),
+    ]
+
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="assets")
     kind = models.CharField(max_length=10, choices=KIND_CHOICES)
     name = models.CharField(max_length=255)
     agent_name = models.CharField(max_length=255, null=True, blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
+    role = models.CharField(max_length=32, choices=ROLE_CHOICES, null=True, blank=True)
     route = models.ForeignKey(
         "ingress.Route", on_delete=models.SET_NULL, null=True, blank=True, related_name="assets"
     )

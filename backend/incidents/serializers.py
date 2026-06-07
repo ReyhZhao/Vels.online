@@ -81,7 +81,7 @@ class AssetSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Asset
-        fields = ["id", "kind", "name", "agent_name", "ip_address", "route", "route_fqdn", "org_slug", "is_active", "is_permanent", "last_seen_at", "created_at"]
+        fields = ["id", "kind", "name", "agent_name", "ip_address", "role", "route", "route_fqdn", "org_slug", "is_active", "is_permanent", "last_seen_at", "created_at"]
         read_only_fields = ["id", "created_at"]
 
     def get_route_fqdn(self, obj):
