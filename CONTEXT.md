@@ -63,6 +63,24 @@ _Avoid_: Condition (reserved for the field-level predicate *filter* inside a leg
 **Materialise**:
 To create an in-app **Alert** from a **Finding** at trigger time. The bridge that lets a Scheduled Search Rule reuse the existing Incident / IOC / triage pipeline, which all assume real Alert rows. In v1 a materialised search-alert is **born-linked + suppressed**: created with `source_kind = scheduled_search`, already linked to its rule's Incident. Suppression is two-part — it does not *trigger* streaming evaluation, **and** it is excluded from other rules' streaming window scans — so it participates only in its own Search Rule incident and never seeds streaming cross-source correlation. Its Incident also carries `source_kind = scheduled_search`, keeping it outside the streaming `Supersede` logic. (v2 may relax this — see issue #399.)
 
+### Detection testing
+
+**Rule Test**:
+A named, saved test attached to one **Scheduled Search Rule** — the detection-as-code "unit test" for that rule. It bundles a set of **Sample Documents** and one **Expectation**, and is run on demand to check whether the rule still behaves as its author intended. A rule has zero or more Rule Tests; running one produces a **Test Result**. It tests the *whole rule's* external behaviour (does it fire?), never a **Leg** or **Condition** in isolation.
+_Avoid_: "logging rule" (a Rule Test is not a kind of detection rule), Fixture (too generic), Correlation Rule / Scheduled Search Rule (a Rule Test is *about* a rule, it is not itself a rule that detects).
+
+**Sample Document**:
+One synthetic raw Wazuh document supplied to a **Rule Test** as input the rule under test is evaluated against. Shaped like a real Wazuh OpenSearch document so the same compiled query/match logic applies. Deliberately distinct from a **Finding** (a *real* matched document from production data) and from an **Alert** (a Sample Document is never materialised or ingested).
+_Avoid_: Finding, Alert, Sample Log (prefer "Document" to match the Wazuh document schema the rule matches over).
+
+**Expectation**:
+What a **Rule Test** asserts the rule should do with its **Sample Documents** — at minimum *should-fire* vs *should-not-fire* (true-positive / true-negative). Expressed at whole-rule granularity.
+_Avoid_: Assertion at leg/condition level (out of scope; the Expectation is about the rule firing, not internal leg satisfaction).
+
+**Test Result**:
+The outcome of running a **Rule Test**: pass/fail against its **Expectation**, plus diagnostics explaining *why* (e.g. which **Leg** fell short, which key satisfied/missed, diversity shortfall). The diagnostics are explanatory only — they are not authored **Expectation**s.
+_Avoid_: Finding, Firing (a Test Result records a test run, not a production detection event).
+
 ### LLM-assisted detection
 
 **Residual**:

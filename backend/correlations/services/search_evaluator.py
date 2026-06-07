@@ -1,6 +1,7 @@
 """End-to-end evaluator for Scheduled Search Rules."""
 import json
 import logging
+from dataclasses import dataclass, field
 
 from django.db import transaction
 from django.utils import timezone
@@ -15,6 +16,29 @@ from correlations.services.search_compiler import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── Decide/materialise seam (ADR-0010) ──────────────────────────────────────
+# The firing *decision* (queries + key-join + Diversity Constraint) is computed
+# separately from its *effects* (materialising Alerts/Incident/firing rows). The
+# production run() path runs decide then materialise; the Rule Test sandbox runs
+# decide only, against an ephemeral index, performing zero DB writes.
+
+@dataclass
+class FireUnit:
+    """One thing the rule would fire for: a correlation key and the docs behind it."""
+    key_value: str
+    hits: list
+    overflow: int = 0
+    distinct_info: dict | None = None
+
+
+@dataclass
+class Decision:
+    """Outcome of the firing decision, with no side effects performed."""
+    would_fire: bool
+    units: list = field(default_factory=list)
+    diagnostics: dict = field(default_factory=dict)
 
 
 def _get_mapping_safe() -> dict:
@@ -262,10 +286,37 @@ def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinc
     return incident
 
 
-def _run_single_leg(rule, org, agent_ids, leg, now, window_start):
-    """Degenerate path: one query, one Incident for all matched docs."""
-    from security.opensearch import OpenSearchClient, OpenSearchError
+def decide(rule, agent_ids, now, window_start, *, index=_ALERTS_INDEX, client=None) -> Decision:
+    """Run the firing decision for *rule* against *index* WITHOUT materialising.
 
+    Returns a Decision (would_fire + fire units + diagnostics). Performs **no DB writes**
+    and creates no Incident/Alert/SearchFiring/SearchFinding. The production run() path
+    runs decide then materialises each unit; the Rule Test sandbox (ADR-0010) runs decide
+    only, against an ephemeral index.
+
+    `index` lets callers target a different OpenSearch index; `agent_ids=None` omits the
+    agent filter. `client` lets callers inject an OpenSearch client. May raise
+    OpenSearchError if the single-leg query or a multi-leg agg query fails — run() catches
+    this and returns None, preserving prior behaviour.
+    """
+    from security.opensearch import OpenSearchClient
+
+    if client is None:
+        client = OpenSearchClient()
+
+    legs = list(rule.legs.prefetch_related("conditions"))
+    if not legs:
+        return Decision(False, [], {"mode": "empty", "satisfied_keys": [], "legs": []})
+
+    has_diversity = any(leg.has_diversity for leg in legs)
+    use_multi = rule.correlation_key != CORRELATION_KEY_NONE and (len(legs) > 1 or has_diversity)
+    if use_multi:
+        return _decide_multi_leg(rule, agent_ids, legs, now, window_start, index=index, client=client)
+    return _decide_single_leg(rule, agent_ids, legs[0], now, window_start, index=index, client=client)
+
+
+def _decide_single_leg(rule, agent_ids, leg, now, window_start, *, index, client) -> Decision:
+    """Degenerate path: one query; one fire unit (key 'none') for all matched docs."""
     body = compile_query(
         list(leg.conditions.all()),
         agent_ids,
@@ -273,34 +324,36 @@ def _run_single_leg(rule, org, agent_ids, leg, now, window_start):
         now,
         rule.max_findings_per_run,
     )
-
-    try:
-        result = OpenSearchClient()._search(_ALERTS_INDEX, body)
-    except OpenSearchError:
-        logger.exception("search_evaluator: OpenSearch query failed for rule %s", rule.id)
-        return None
+    result = client._search(index, body)
 
     hits_block = result.get("hits", {})
     hits = hits_block.get("hits", [])
-    if not hits:
-        return None
-
     total_count = hits_block.get("total", {}).get("value", 0)
     overflow = max(0, total_count - len(hits))
 
-    return _materialise_and_fire(rule, org, hits, key_value="none", overflow=overflow)
+    units = [FireUnit("none", hits, overflow, None)] if hits else []
+    diagnostics = {
+        "mode": "single",
+        "satisfied_keys": ["none"] if hits else [],
+        "legs": [{
+            "display_order": leg.display_order,
+            "count": leg.count,
+            "matched": len(hits),
+            "total": total_count,
+        }],
+    }
+    return Decision(bool(units), units, diagnostics)
 
 
-def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
+def _decide_multi_leg(rule, agent_ids, legs, now, window_start, *, index, client) -> Decision:
     """Multi-leg co-occurrence path via per-leg terms aggregations.
 
-    1. Per leg: run a terms agg on the correlation key field to count docs per key.
-    2. Find the intersection: key values where every leg's doc_count >= leg.count.
-    3. Per satisfied key: fetch actual docs for all legs and create one Incident.
-
-    Returns the last Incident created, or None.
+    1. Per leg: a terms agg on the correlation key field counts docs per key.
+    2. Intersection: key values where every leg's doc_count >= leg.count (and, for a
+       Diversity Constraint leg, distinct(distinct_field) >= leg.min_distinct).
+    3. Per satisfied key: fetch the actual docs for all legs into one fire unit.
     """
-    from security.opensearch import OpenSearchClient, OpenSearchError
+    from security.opensearch import OpenSearchError
 
     wazuh_field = CORRELATION_KEY_TO_WAZUH_FIELD[rule.correlation_key]
 
@@ -308,11 +361,10 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
     mapping = _get_mapping_safe() if any(leg.has_diversity for leg in legs) else {}
 
     # Step 1: per-leg agg to find which key values satisfy each leg's thresholds.
-    #   - doc_count >= leg.count (always), AND
-    #   - distinct(distinct_field) >= leg.min_distinct (Diversity Constraint, ADR-0009).
     # distinct_by_leg[leg.id][key] = [(value, doc_count), ...] for legs with a diversity constraint.
     satisfied_keys = None
     distinct_by_leg: dict = {}
+    leg_diag = []
     for leg in legs:
         agg_body = compile_agg_query(
             list(leg.conditions.all()),
@@ -323,13 +375,7 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
             field_mapping=mapping,
             distinct_field=leg.distinct_field or None,
         )
-        try:
-            result = OpenSearchClient()._search(_ALERTS_INDEX, agg_body)
-        except OpenSearchError:
-            logger.exception(
-                "search_evaluator: agg query failed for rule %s leg %s", rule.id, leg.id
-            )
-            return None
+        result = client._search(index, agg_body)
 
         buckets = result.get("aggregations", {}).get("key_agg", {}).get("buckets", [])
         leg_satisfied = set()
@@ -345,16 +391,28 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
                 ]
             leg_satisfied.add(b["key"])
 
+        leg_diag.append({
+            "display_order": leg.display_order,
+            "count": leg.count,
+            "min_distinct": leg.min_distinct if leg.has_diversity else None,
+            "distinct_field": leg.distinct_field or None,
+            "satisfied_key_count": len(leg_satisfied),
+        })
+
         if satisfied_keys is None:
             satisfied_keys = leg_satisfied
         else:
             satisfied_keys &= leg_satisfied  # intersection: all legs must fire for the same key
 
-    if not satisfied_keys:
-        return None
+    satisfied_keys = satisfied_keys or set()
+    diagnostics = {
+        "mode": "multi",
+        "satisfied_keys": sorted(satisfied_keys),
+        "legs": leg_diag,
+    }
 
-    # Step 2: for each satisfied key fetch the actual documents and materialise an Incident.
-    last_incident = None
+    # Step 2: for each satisfied key fetch the actual documents into a fire unit.
+    units = []
     for key_value in sorted(satisfied_keys):
         all_hits = []
         total_overflow = 0
@@ -370,7 +428,7 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
                 field_mapping=mapping,
             )
             try:
-                result = OpenSearchClient()._search(_ALERTS_INDEX, body)
+                result = client._search(index, body)
                 hits_block = result.get("hits", {})
                 leg_hits = hits_block.get("hits", [])
                 leg_total = hits_block.get("total", {}).get("value", 0)
@@ -390,14 +448,9 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
                 distinct_info.setdefault(leg.distinct_field, []).extend(per_key[key_value])
 
         if all_hits:
-            incident = _materialise_and_fire(
-                rule, org, all_hits, key_value=key_value, overflow=total_overflow,
-                distinct_info=distinct_info or None,
-            )
-            if incident:
-                last_incident = incident
+            units.append(FireUnit(key_value, all_hits, total_overflow, distinct_info or None))
 
-    return last_incident
+    return Decision(bool(units), units, diagnostics)
 
 
 def debug_run(rule, org) -> dict:
@@ -508,12 +561,21 @@ def run(rule, org):
     now = timezone.now()
     window_start = now - timedelta(minutes=rule.window_minutes)
 
-    # The aggregation path is required for multi-leg co-occurrence AND for any rule whose
-    # leg carries a Diversity Constraint (single-leg impossible-travel routes here too).
-    has_diversity = any(leg.has_diversity for leg in legs)
-    use_multi = rule.correlation_key != CORRELATION_KEY_NONE and (len(legs) > 1 or has_diversity)
+    from security.opensearch import OpenSearchError
 
-    if use_multi:
-        return _run_multi_leg(rule, org, effective_agent_ids, legs, now, window_start)
-    else:
-        return _run_single_leg(rule, org, effective_agent_ids, legs[0], now, window_start)
+    try:
+        decision = decide(rule, effective_agent_ids, now, window_start)
+    except OpenSearchError:
+        logger.exception("search_evaluator.run: OpenSearch query failed for rule %s", rule.id)
+        return None
+
+    last_incident = None
+    for unit in decision.units:
+        incident = _materialise_and_fire(
+            rule, org, unit.hits,
+            key_value=unit.key_value, overflow=unit.overflow, distinct_info=unit.distinct_info,
+        )
+        if incident:
+            last_incident = incident
+
+    return last_incident
