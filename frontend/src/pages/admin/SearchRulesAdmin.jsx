@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Play, Sparkles } from 'lucide-react';
+import { Play, Sparkles, Bug } from 'lucide-react';
 import api from '@/lib/axios';
 import SearchRuleAuthorDrawer from '@/components/SearchRuleAuthorDrawer';
 
@@ -405,9 +405,152 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   );
 }
 
+// ── DebugModal ─────────────────────────────────────────────────────────────
+
+function DebugModal({ rule, orgs, onClose }) {
+  const [orgSlug, setOrgSlug] = useState(orgs[0]?.slug ?? '');
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  async function runDebug() {
+    if (!orgSlug) return;
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await api.post(`/api/correlations/search-rules/${rule.id}/debug/`, { org_slug: orgSlug });
+      setResult(res.data);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Debug run failed.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-lg border border-border bg-card shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Debug Run: {rule.name}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Executes queries against OpenSearch without creating alerts or incidents.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-lg text-muted-foreground hover:text-foreground">✕</button>
+        </div>
+
+        <div className="shrink-0 flex items-end gap-3 px-6 py-4 border-b border-border">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-foreground mb-1">Organization</label>
+            <select
+              value={orgSlug}
+              onChange={e => setOrgSlug(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              {orgs.map(o => (
+                <option key={o.slug} value={o.slug}>{o.name}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={runDebug}
+            disabled={running || !orgSlug}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            <Bug className="h-4 w-4" />
+            {running ? 'Running…' : 'Run debug'}
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto thin-scrollbar px-6 py-4 space-y-4">
+          {error && (
+            <div className="rounded-md bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
+          )}
+
+          {result && (
+            <>
+              <div className="flex gap-4 text-xs text-muted-foreground flex-wrap">
+                <span>Mode: <strong className="text-foreground">{result.mode}</strong></span>
+                <span>Agents: <strong className="text-foreground">{result.agent_count}</strong></span>
+                <span>Window: <strong className="text-foreground">{result.window_start?.slice(0, 19).replace('T', ' ')} → {result.window_end?.slice(0, 19).replace('T', ' ')}</strong></span>
+              </div>
+
+              {result.error && (
+                <div className="rounded-md bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">{result.error}</div>
+              )}
+
+              {result.legs?.map((leg, i) => (
+                <div key={i} className="space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Leg {i + 1} {result.mode === 'multi' ? '(co-occurrence)' : ''}
+                  </p>
+
+                  {leg.agg_query && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-foreground">Aggregation query</p>
+                      <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                        {JSON.stringify(leg.agg_query, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {leg.agg_error && (
+                    <p className="text-xs text-red-600">Agg error: {leg.agg_error}</p>
+                  )}
+                  {leg.agg_response && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-foreground">
+                        Aggregation response
+                        {leg.agg_response?.aggregations?.key_agg?.buckets && (
+                          <span className="ml-2 text-muted-foreground">({leg.agg_response.aggregations.key_agg.buckets.length} bucket(s))</span>
+                        )}
+                      </p>
+                      <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                        {JSON.stringify(leg.agg_response, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-foreground">Hit query</p>
+                    <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                      {JSON.stringify(leg.hit_query, null, 2)}
+                    </pre>
+                  </div>
+                  {leg.hit_error && (
+                    <p className="text-xs text-red-600">Hit error: {leg.hit_error}</p>
+                  )}
+                  {leg.hit_response && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-foreground">
+                        Hit response
+                        <span className="ml-2 text-muted-foreground">
+                          ({leg.hit_response?.hits?.total?.value ?? 0} total, {leg.hit_response?.hits?.hits?.length ?? 0} returned)
+                        </span>
+                      </p>
+                      <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                        {JSON.stringify(leg.hit_response, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+
+          {!result && !error && !running && (
+            <p className="text-sm text-muted-foreground">Select an organization and click Run debug to see the OpenSearch queries and responses.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── RuleRow ────────────────────────────────────────────────────────────────
 
-function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow }) {
+function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug }) {
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [running, setRunning] = useState(false);
@@ -478,6 +621,14 @@ function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow }) {
             <Play className="h-3 w-3" />
             {running ? 'Queuing…' : 'Run now'}
           </button>
+          <button
+            onClick={() => onDebug(rule)}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+            title="Debug run — shows queries and OpenSearch responses without creating alerts"
+          >
+            <Bug className="h-3 w-3" />
+            Debug
+          </button>
           <button onClick={handleDelete} disabled={deleting} className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors">Delete</button>
           {runFeedback && (
             <span className={`text-xs ${runFeedback.startsWith('Queued') ? 'text-green-600' : 'text-destructive'}`}>{runFeedback}</span>
@@ -498,6 +649,7 @@ export default function SearchRulesAdmin() {
   const [error, setError] = useState(null);
   const [drawerRule, setDrawerRule] = useState(undefined);
   const [showAiDrawer, setShowAiDrawer] = useState(false);
+  const [debugRule, setDebugRule] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -565,6 +717,9 @@ export default function SearchRulesAdmin() {
           }}
         />
       )}
+      {debugRule && (
+        <DebugModal rule={debugRule} orgs={orgs} onClose={() => setDebugRule(null)} />
+      )}
 
       <div className="flex items-center justify-between">
         <div>
@@ -622,6 +777,7 @@ export default function SearchRulesAdmin() {
                     onToggle={handleToggle}
                     onDelete={handleDelete}
                     onRunNow={handleRunNow}
+                    onDebug={setDebugRule}
                   />
                 ))
               )}
