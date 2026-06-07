@@ -17,15 +17,50 @@ from correlations.services.search_compiler import (
 logger = logging.getLogger(__name__)
 
 
-def _compose_description(rule, alerts, key_value=None) -> str:
+def _get_mapping_safe() -> dict:
+    """Fetch the live field mapping; return {} on any error (used for .keyword resolution)."""
+    try:
+        from security.opensearch import OpenSearchClient
+        return OpenSearchClient().get_field_mapping()
+    except Exception:
+        return {}
+
+
+def _distinct_label(field: str) -> str:
+    """Friendly label for a diversity field, e.g. GeoLocation.country_name → 'country'."""
+    seg = field.rsplit(".", 1)[-1]
+    if seg.endswith("_name"):
+        seg = seg[: -len("_name")]
+    return seg.replace("_", " ") or field
+
+
+def _format_distinct_title(distinct_info) -> str:
+    """One-line spread summary for the incident title, e.g. '3 distinct country (NL, US, RU)'."""
+    parts = []
+    for field, values in distinct_info.items():
+        vals = [str(v) for v, _ in values]
+        shown = ", ".join(vals[:10]) + ("…" if len(vals) > 10 else "")
+        parts.append(f"{len(vals)} distinct {_distinct_label(field)} ({shown})")
+    return "; ".join(parts)
+
+
+def _compose_description(rule, alerts, key_value=None, distinct_info=None) -> str:
     key_label = f" (key: {key_value})" if key_value and key_value != "none" else ""
     lines = [
         f"Scheduled search rule **{rule.name}** fired{key_label}.",
         f"Description: {rule.description}" if rule.description else "",
         "",
-        f"## Matched documents ({len(alerts)})",
-        "",
     ]
+    if distinct_info:
+        lines.append("## Diversity")
+        lines.append("")
+        for field, values in distinct_info.items():
+            lines.append(f"- **{field}** ({len(values)} distinct):")
+            for value, count in values:
+                lines.append(f"  - {value} ({count})")
+        lines.append("")
+    lines.append(f"## Matched documents ({len(alerts)})")
+    lines.append("")
     for alert in alerts:
         raw = json.dumps(alert.source_ref, default=str, sort_keys=True)
         lines.append(f"### {alert.display_id}: {alert.title or '(untitled)'}")
@@ -35,7 +70,7 @@ def _compose_description(rule, alerts, key_value=None) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0):
+def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinct_info=None):
     """Persist alerts for *hits* and create/update an Incident for the given key_value.
 
     - Idempotent: docs already in SearchFinding are skipped.
@@ -147,15 +182,20 @@ def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0):
             return incident
 
         # No live incident — create a fresh one.
-        description = _compose_description(rule, new_alerts, key_value)
+        description = _compose_description(rule, new_alerts, key_value, distinct_info)
         if overflow > 0:
             description += f"\n+{overflow} more matched (truncated)\n"
 
         key_label = f" [{key_value}]" if key_value and key_value != "none" else ""
 
+        if distinct_info:
+            title = f"{rule.name}{key_label}: {_format_distinct_title(distinct_info)}"
+        else:
+            title = f"{rule.name}{key_label}: {len(new_alerts)} matching document(s)"
+
         ser = IncidentCreateSerializer(
             data={
-                "title": f"{rule.name}{key_label}: {len(new_alerts)} matching document(s)",
+                "title": title[:255],
                 "severity": rule.severity,
                 "source_kind": "scheduled_search",
                 "description": description,
@@ -264,8 +304,15 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
 
     wazuh_field = CORRELATION_KEY_TO_WAZUH_FIELD[rule.correlation_key]
 
-    # Step 1: per-leg agg to find which key values satisfy each leg's count threshold.
+    # Mapping is needed only to resolve .keyword for any leg's diversity field.
+    mapping = _get_mapping_safe() if any(leg.has_diversity for leg in legs) else {}
+
+    # Step 1: per-leg agg to find which key values satisfy each leg's thresholds.
+    #   - doc_count >= leg.count (always), AND
+    #   - distinct(distinct_field) >= leg.min_distinct (Diversity Constraint, ADR-0009).
+    # distinct_by_leg[leg.id][key] = [(value, doc_count), ...] for legs with a diversity constraint.
     satisfied_keys = None
+    distinct_by_leg: dict = {}
     for leg in legs:
         agg_body = compile_agg_query(
             list(leg.conditions.all()),
@@ -273,6 +320,8 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
             window_start,
             now,
             wazuh_field,
+            field_mapping=mapping,
+            distinct_field=leg.distinct_field or None,
         )
         try:
             result = OpenSearchClient()._search(_ALERTS_INDEX, agg_body)
@@ -283,7 +332,18 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
             return None
 
         buckets = result.get("aggregations", {}).get("key_agg", {}).get("buckets", [])
-        leg_satisfied = {b["key"] for b in buckets if b["doc_count"] >= leg.count}
+        leg_satisfied = set()
+        for b in buckets:
+            if b["doc_count"] < leg.count:
+                continue
+            if leg.has_diversity:
+                d_buckets = b.get("distinct_agg", {}).get("buckets", [])
+                if len(d_buckets) < leg.min_distinct:
+                    continue
+                distinct_by_leg.setdefault(leg.id, {})[b["key"]] = [
+                    (db["key"], db["doc_count"]) for db in d_buckets
+                ]
+            leg_satisfied.add(b["key"])
 
         if satisfied_keys is None:
             satisfied_keys = leg_satisfied
@@ -307,6 +367,7 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
                 rule.max_findings_per_run,
                 key_field=wazuh_field,
                 key_value=key_value,
+                field_mapping=mapping,
             )
             try:
                 result = OpenSearchClient()._search(_ALERTS_INDEX, body)
@@ -321,8 +382,18 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
                 )
                 continue
 
+        # Merge the per-leg distinct values for this key (across all diversity legs).
+        distinct_info: dict = {}
+        for leg in legs:
+            per_key = distinct_by_leg.get(leg.id, {})
+            if key_value in per_key:
+                distinct_info.setdefault(leg.distinct_field, []).extend(per_key[key_value])
+
         if all_hits:
-            incident = _materialise_and_fire(rule, org, all_hits, key_value=key_value, overflow=total_overflow)
+            incident = _materialise_and_fire(
+                rule, org, all_hits, key_value=key_value, overflow=total_overflow,
+                distinct_info=distinct_info or None,
+            )
             if incident:
                 last_incident = incident
 
@@ -357,8 +428,10 @@ def debug_run(rule, org) -> dict:
     now = timezone.now()
     window_start = now - timedelta(minutes=rule.window_minutes)
 
-    use_multi = rule.correlation_key != CORRELATION_KEY_NONE and len(legs) > 1
+    has_diversity = any(leg.has_diversity for leg in legs)
+    use_multi = rule.correlation_key != CORRELATION_KEY_NONE and (len(legs) > 1 or has_diversity)
     wazuh_field = CORRELATION_KEY_TO_WAZUH_FIELD.get(rule.correlation_key)
+    mapping = _get_mapping_safe() if has_diversity else {}
 
     client = OpenSearchClient()
     result = {
@@ -375,7 +448,10 @@ def debug_run(rule, org) -> dict:
         conditions = list(leg.conditions.all())
 
         if use_multi:
-            agg_body = compile_agg_query(conditions, effective_agent_ids, window_start, now, wazuh_field)
+            agg_body = compile_agg_query(
+                conditions, effective_agent_ids, window_start, now, wazuh_field,
+                field_mapping=mapping, distinct_field=leg.distinct_field or None,
+            )
             leg_entry["agg_query"] = agg_body
             try:
                 agg_response = client._search(_ALERTS_INDEX, agg_body)
@@ -429,7 +505,10 @@ def run(rule, org):
     now = timezone.now()
     window_start = now - timedelta(minutes=rule.window_minutes)
 
-    use_multi = rule.correlation_key != CORRELATION_KEY_NONE and len(legs) > 1
+    # The aggregation path is required for multi-leg co-occurrence AND for any rule whose
+    # leg carries a Diversity Constraint (single-leg impossible-travel routes here too).
+    has_diversity = any(leg.has_diversity for leg in legs)
+    use_multi = rule.correlation_key != CORRELATION_KEY_NONE and (len(legs) > 1 or has_diversity)
 
     if use_multi:
         return _run_multi_leg(rule, org, effective_agent_ids, legs, now, window_start)

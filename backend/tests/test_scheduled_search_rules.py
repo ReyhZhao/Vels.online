@@ -1725,3 +1725,216 @@ class TestSystemSearchRuleMuteAPI:
         client.force_authenticate(user=user)
         resp = client.get(f"/api/correlations/org-system-search-rules/?org={org.slug}")
         assert resp.status_code == 403
+
+
+# ── Diversity Constraint (ADR-0009) — slice 1: validator + compiler + evaluator ─
+
+_DIV_MAPPING = {
+    "GeoLocation.country_name": "keyword",
+    "data.dstuser": "keyword",
+    "rule.description": "text",
+    "rule.groups": "keyword",
+}
+
+
+class TestValidateDiversityConstraint:
+    """Pure-function tests for the four Diversity Constraint invariants."""
+
+    def setup_method(self):
+        from correlations.services.search_compiler import validate_diversity_constraint
+        self.v = validate_diversity_constraint
+
+    def test_empty_field_is_no_constraint(self):
+        ok, msg = self.v("", 2, "user.name", _DIV_MAPPING)
+        assert ok is True and msg == ""
+
+    def test_none_key_rejected(self):
+        ok, msg = self.v("GeoLocation.country_name", 2, "none", _DIV_MAPPING)
+        assert ok is False
+        assert "correlation key" in msg.lower()
+
+    def test_min_distinct_below_two_rejected(self):
+        ok, msg = self.v("GeoLocation.country_name", 1, "user.name", _DIV_MAPPING)
+        assert ok is False
+        assert "at least 2" in msg
+
+    def test_non_aggregatable_field_rejected(self):
+        ok, msg = self.v("rule.description", 2, "user.name", _DIV_MAPPING)
+        assert ok is False
+        assert "non-aggregatable" in msg.lower() or "text" in msg.lower()
+
+    def test_same_as_correlation_key_field_rejected(self):
+        # user.name → data.dstuser; diversifying on the key field is a dead rule.
+        ok, msg = self.v("data.dstuser", 2, "user.name", _DIV_MAPPING)
+        assert ok is False
+        assert "differ" in msg.lower()
+
+    def test_absent_field_rejected(self):
+        ok, msg = self.v("nope.field", 2, "user.name", _DIV_MAPPING)
+        assert ok is False
+        assert "does not exist" in msg.lower()
+
+    def test_valid_constraint_accepted(self):
+        ok, msg = self.v("GeoLocation.country_name", 2, "user.name", _DIV_MAPPING)
+        assert ok is True and msg == ""
+
+    def test_empty_mapping_bypasses_type_check(self):
+        ok, msg = self.v("any.field", 2, "user.name", {})
+        assert ok is True
+
+
+class TestDiversityCompiler:
+    """compile_agg_query nests a size-capped terms sub-agg when distinct_field is set."""
+
+    def _now_window(self):
+        now = timezone.now()
+        return now - timedelta(hours=1), now
+
+    def test_distinct_subagg_added(self):
+        ws, now = self._now_window()
+        body = compile_agg_query([], ["001"], ws, now, "data.dstuser",
+                                 distinct_field="GeoLocation.country_name")
+        sub = body["aggregations"]["key_agg"]["aggregations"]["distinct_agg"]["terms"]
+        assert sub["field"] == "GeoLocation.country_name"
+        assert sub["size"] == 50
+
+    def test_distinct_subagg_keyword_resolution_for_text(self):
+        ws, now = self._now_window()
+        body = compile_agg_query([], ["001"], ws, now, "data.dstuser",
+                                 distinct_field="GeoLocation.country_name",
+                                 field_mapping={"GeoLocation.country_name": "text"})
+        sub = body["aggregations"]["key_agg"]["aggregations"]["distinct_agg"]["terms"]
+        assert sub["field"] == "GeoLocation.country_name.keyword"
+
+    def test_no_subagg_when_distinct_field_omitted(self):
+        ws, now = self._now_window()
+        body = compile_agg_query([], ["001"], ws, now, "data.dstuser")
+        assert "aggregations" not in body["aggregations"]["key_agg"]
+
+
+def _make_div_agg_response(buckets):
+    """buckets: {key_value: [(distinct_value, count), ...]} → fake agg response with sub-agg."""
+    return {
+        "hits": {"hits": [], "total": {"value": 0}},
+        "aggregations": {"key_agg": {"buckets": [
+            {
+                "key": k,
+                "doc_count": sum(c for _, c in dvals),
+                "distinct_agg": {"buckets": [{"key": dv, "doc_count": c} for dv, c in dvals]},
+            }
+            for k, dvals in buckets.items()
+        ]}},
+    }
+
+
+@pytest.fixture
+def diversity_rule(org):
+    """Single-leg impossible-travel-lite rule: ≥2 logins spanning ≥2 countries per user."""
+    r = SearchRule.objects.create(
+        organization=org,
+        name="Impossible Travel",
+        severity="high",
+        correlation_key="user.name",
+        window_minutes=60,
+        interval_minutes=15,
+        max_findings_per_run=50,
+    )
+    leg = SearchRuleLeg.objects.create(
+        rule=r, display_order=0, count=2,
+        distinct_field="GeoLocation.country_name", min_distinct=2,
+    )
+    SearchLegCondition.objects.create(
+        leg=leg, field_name="rule.groups",
+        operator=SEARCH_OPERATOR_EQUALS, value="authentication_success",
+    )
+    return r
+
+
+@pytest.mark.django_db
+class TestSingleLegDiversityEvaluator:
+    def test_fires_when_distinct_threshold_met(self, diversity_rule, org):
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        agg = _make_div_agg_response({"alice": [("NL", 3), ("US", 1)]})
+        hit = _fake_opensearch_response(hits=[_make_hit("d1", "data.dstuser", "alice")])
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value.get_field_mapping.return_value = {}
+            MockOS.return_value._search.side_effect = [agg, hit]
+
+            incident = run(diversity_rule, org)
+
+        assert incident is not None
+        assert Incident.objects.filter(organization=org, source_kind="scheduled_search").count() == 1
+
+    def test_does_not_fire_with_single_distinct_value(self, diversity_rule, org):
+        """doc_count >= count but only 1 distinct country → no incident."""
+        from correlations.services.search_evaluator import run
+        from incidents.models import Incident
+
+        agg = _make_div_agg_response({"alice": [("NL", 5)]})
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value.get_field_mapping.return_value = {}
+            MockOS.return_value._search.side_effect = [agg]
+
+            result = run(diversity_rule, org)
+
+        assert result is None
+        assert not Incident.objects.filter(organization=org).exists()
+
+    def test_single_leg_diversity_uses_agg_path(self, diversity_rule, org):
+        """A single-leg diversity rule routes through the agg path (agg + hit fetch), not degenerate."""
+        from correlations.services.search_evaluator import run
+
+        agg = _make_div_agg_response({"alice": [("NL", 2), ("RU", 1)]})
+        hit = _fake_opensearch_response(hits=[_make_hit("d1", "data.dstuser", "alice")])
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value.get_field_mapping.return_value = {}
+            MockOS.return_value._search.side_effect = [agg, hit]
+
+            run(diversity_rule, org)
+
+        # agg call + one hit-fetch for the satisfied key == 2 (degenerate path would be 1)
+        assert MockOS.return_value._search.call_count == 2
+
+    def test_incident_names_the_spread(self, diversity_rule, org):
+        from correlations.services.search_evaluator import run
+
+        agg = _make_div_agg_response({"alice": [("NL", 3), ("US", 1), ("RU", 2)]})
+        hit = _fake_opensearch_response(hits=[_make_hit("d1", "data.dstuser", "alice")])
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value.get_field_mapping.return_value = {}
+            MockOS.return_value._search.side_effect = [agg, hit]
+
+            incident = run(diversity_rule, org)
+
+        assert "alice" in incident.title
+        assert "NL" in incident.title and "US" in incident.title and "RU" in incident.title
+        assert "## Diversity" in incident.description
+        assert "NL (3)" in incident.description

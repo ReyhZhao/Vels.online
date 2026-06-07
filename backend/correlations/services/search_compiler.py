@@ -24,6 +24,10 @@ CORRELATION_KEY_TO_WAZUH_FIELD = {
 
 _DEFAULT_AGG_MAX_BUCKETS = 500
 
+# Size cap for the Diversity Constraint distinct-value sub-aggregation (ADR-0009).
+# Bounds the cost of a `terms` sub-agg when distinct_field is high-cardinality.
+_DISTINCT_SUBAGG_SIZE = 50
+
 # Field types that are not aggregatable (cannot be used as correlation key).
 _TEXT_TYPES = frozenset({"text", "match_only_text"})
 
@@ -72,6 +76,67 @@ def validate_search_field(field: str, operator: str, mapping: dict) -> tuple[boo
 def is_aggregatable_field(field: str, mapping: dict) -> bool:
     """Return False if the field type is non-aggregatable (text); True otherwise."""
     return mapping.get(field, "keyword") not in _TEXT_TYPES
+
+
+def _agg_target(field: str, mapping: dict | None) -> str:
+    """Resolve the aggregatable form of a field: text → its .keyword subfield."""
+    if mapping and mapping.get(field) in _TEXT_TYPES:
+        return f"{field}.keyword"
+    return field
+
+
+def validate_diversity_constraint(
+    distinct_field: str, min_distinct, correlation_key: str, mapping: dict
+) -> tuple[bool, str]:
+    """Validate a leg's Diversity Constraint (ADR-0009).
+
+    Returns (True, "") when there is no constraint (empty distinct_field) or it is valid;
+    otherwise (False, reason). The four invariants:
+      1. requires a non-'none' correlation key to group by,
+      2. min_distinct must be >= 2 (a floor of 1 is satisfied by every non-empty bucket),
+      3. distinct_field must be aggregatable (text resolved via .keyword) and present,
+      4. distinct_field must not resolve to the same Wazuh field as the correlation key.
+    An empty mapping bypasses the existence/type checks (consistent with validate_search_field).
+    """
+    from correlations.models import CORRELATION_KEY_NONE
+
+    if not distinct_field:
+        return True, ""
+
+    if correlation_key == CORRELATION_KEY_NONE:
+        return False, (
+            "A diversity constraint requires a correlation key to group by "
+            "(correlation_key cannot be 'none')."
+        )
+
+    try:
+        md = int(min_distinct)
+    except (TypeError, ValueError):
+        md = 0
+    if md < 2:
+        return False, (
+            "min_distinct must be at least 2 for a diversity constraint "
+            "(a threshold of 1 is satisfied by any single value)."
+        )
+
+    base = distinct_field[: -len(".keyword")] if distinct_field.endswith(".keyword") else distinct_field
+    key_field = CORRELATION_KEY_TO_WAZUH_FIELD.get(correlation_key)
+    if key_field and base == key_field:
+        return False, (
+            f"distinct_field '{distinct_field}' must differ from the correlation key field "
+            f"'{key_field}' — a key cannot diversify on itself (the rule could never fire)."
+        )
+
+    if mapping:
+        if distinct_field not in mapping and base not in mapping:
+            return False, f"distinct_field '{distinct_field}' does not exist in the index mapping."
+        if not is_aggregatable_field(base, mapping):
+            return False, (
+                f"distinct_field '{distinct_field}' is a non-aggregatable text field "
+                f"and cannot be used for a diversity constraint."
+            )
+
+    return True, ""
 
 
 def _condition_to_clause(condition, field_mapping: dict | None = None) -> dict | None:
@@ -156,21 +221,36 @@ def compile_agg_query(
     key_field: str,
     max_buckets: int = _DEFAULT_AGG_MAX_BUCKETS,
     field_mapping: dict | None = None,
+    distinct_field: str | None = None,
+    distinct_size: int = _DISTINCT_SUBAGG_SIZE,
 ) -> dict:
     """Build an OpenSearch body that returns a terms aggregation on key_field with no hits.
 
     Used by the multi-leg evaluator to count matches per key before fetching documents.
     field_mapping is forwarded to _condition_to_clause for type-aware DSL generation.
+
+    When distinct_field is supplied (Diversity Constraint, ADR-0009), a size-capped `terms`
+    sub-aggregation is nested under key_agg so each key bucket carries the distinct values
+    (and per-value doc_count) of distinct_field. The sub-agg target is resolved to its
+    .keyword subfield for text-typed fields.
     """
     base = compile_query(
         conditions, agent_ids, window_start, window_end, max_size=0, field_mapping=field_mapping
     )
-    base["aggregations"] = {
-        "key_agg": {
-            "terms": {
-                "field": key_field,
-                "size": max_buckets,
-            }
+    key_agg: dict = {
+        "terms": {
+            "field": key_field,
+            "size": max_buckets,
         }
     }
+    if distinct_field:
+        key_agg["aggregations"] = {
+            "distinct_agg": {
+                "terms": {
+                    "field": _agg_target(distinct_field, field_mapping),
+                    "size": distinct_size,
+                }
+            }
+        }
+    base["aggregations"] = {"key_agg": key_agg}
     return base

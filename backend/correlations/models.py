@@ -246,12 +246,22 @@ class SearchRuleLeg(models.Model):
     rule = models.ForeignKey(SearchRule, on_delete=models.CASCADE, related_name="legs")
     count = models.PositiveIntegerField(default=1)
     display_order = models.PositiveIntegerField(default=0)
+    # Diversity Constraint (ADR-0009): when distinct_field is set, this leg is satisfied
+    # for a correlation key only when its matching docs span at least min_distinct distinct
+    # values of distinct_field (in addition to doc_count >= count). Empty = no constraint.
+    distinct_field = models.CharField(max_length=200, blank=True, default="")
+    min_distinct = models.PositiveIntegerField(default=1)
 
     class Meta:
         ordering = ["display_order", "id"]
 
     def __str__(self):
         return f"Leg {self.display_order} of {self.rule}"
+
+    @property
+    def has_diversity(self) -> bool:
+        """True when this leg carries an active Diversity Constraint."""
+        return bool(self.distinct_field)
 
 
 class SearchLegCondition(models.Model):
