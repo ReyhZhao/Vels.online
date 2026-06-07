@@ -329,6 +329,69 @@ def _run_multi_leg(rule, org, agent_ids, legs, now, window_start):
     return last_incident
 
 
+def debug_run(rule, org) -> dict:
+    """Execute rule queries against OpenSearch for org WITHOUT materialising any results.
+
+    Returns a dict describing the queries sent and raw OpenSearch responses, for
+    troubleshooting purposes.  No alerts, incidents, or SearchFinding records are created.
+    """
+    from security.opensearch import OpenSearchClient, OpenSearchError
+    from security.wazuh import WazuhAPIError, WazuhAuthError, WazuhClient
+
+    try:
+        raw_agents = WazuhClient().get_agents(org.wazuh_group)
+        agent_ids = [a["id"] for a in raw_agents]
+    except (WazuhAPIError, WazuhAuthError) as exc:
+        return {"error": f"Failed to fetch agents: {exc}"}
+
+    if not agent_ids:
+        return {"error": f"Org '{org.slug}' has no Wazuh agents."}
+
+    legs = list(rule.legs.prefetch_related("conditions"))
+    if not legs:
+        return {"error": "Rule has no legs."}
+
+    now = timezone.now()
+    window_start = now - timedelta(minutes=rule.window_minutes)
+
+    use_multi = rule.correlation_key != CORRELATION_KEY_NONE and len(legs) > 1
+    wazuh_field = CORRELATION_KEY_TO_WAZUH_FIELD.get(rule.correlation_key)
+
+    client = OpenSearchClient()
+    result = {
+        "mode": "multi" if use_multi else "single",
+        "window_start": window_start.isoformat(),
+        "window_end": now.isoformat(),
+        "agent_count": len(agent_ids),
+        "legs": [],
+    }
+
+    for leg in legs:
+        leg_entry: dict = {"leg_id": leg.id, "display_order": leg.display_order}
+        conditions = list(leg.conditions.all())
+
+        if use_multi:
+            agg_body = compile_agg_query(conditions, agent_ids, window_start, now, wazuh_field)
+            leg_entry["agg_query"] = agg_body
+            try:
+                agg_response = client._search(_ALERTS_INDEX, agg_body)
+                leg_entry["agg_response"] = agg_response
+            except OpenSearchError as exc:
+                leg_entry["agg_error"] = str(exc)
+
+        hit_body = compile_query(conditions, agent_ids, window_start, now, rule.max_findings_per_run)
+        leg_entry["hit_query"] = hit_body
+        try:
+            hit_response = client._search(_ALERTS_INDEX, hit_body)
+            leg_entry["hit_response"] = hit_response
+        except OpenSearchError as exc:
+            leg_entry["hit_error"] = str(exc)
+
+        result["legs"].append(leg_entry)
+
+    return result
+
+
 def run(rule, org):
     """Execute rule against OpenSearch for org; materialise alerts and create Incident(s).
 

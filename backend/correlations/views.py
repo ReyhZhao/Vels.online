@@ -801,6 +801,38 @@ class SearchRuleRunNowView(APIView):
         return Response({"task_id": result.id}, status=status.HTTP_202_ACCEPTED)
 
 
+class SearchRuleDebugView(APIView):
+    """Staff-only: dry-run a SearchRule and return the raw queries + OpenSearch responses.
+
+    POST body: { "org_slug": "<slug>" }
+
+    No alerts, incidents, or findings are created. Useful for troubleshooting rule
+    conditions before enabling a rule in production.
+    """
+
+    def post(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+
+        rule = _fetch_search_rule(pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        org_slug = request.data.get("org_slug")
+        if not org_slug:
+            return Response({"detail": "org_slug is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            org = Organization.objects.get(slug=org_slug)
+        except Organization.DoesNotExist:
+            return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        from correlations.services.search_evaluator import debug_run
+        result = debug_run(rule, org)
+        return Response(result)
+
+
 class SearchCatalogView(APIView):
     """Staff-only: return the field catalog for the search rule builder.
 
