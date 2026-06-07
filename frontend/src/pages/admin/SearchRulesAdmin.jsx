@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Play, Sparkles, Bug } from 'lucide-react';
+import { Play, Sparkles, Bug, FlaskConical } from 'lucide-react';
 import api from '@/lib/axios';
 import SearchRuleAuthorDrawer from '@/components/SearchRuleAuthorDrawer';
+import SearchRuleTestsDrawer from '@/components/SearchRuleTestsDrawer';
 
 const SEVERITY_COLORS = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -700,7 +701,7 @@ function DebugModal({ rule, orgs, onClose }) {
 
 // ── RuleRow ────────────────────────────────────────────────────────────────
 
-function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug }) {
+function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug, onTests }) {
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [running, setRunning] = useState(false);
@@ -779,6 +780,14 @@ function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug }) 
             <Bug className="h-3 w-3" />
             Debug
           </button>
+          <button
+            onClick={() => onTests(rule)}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+            title="Manage and run detection tests for this rule"
+          >
+            <FlaskConical className="h-3 w-3" />
+            Tests
+          </button>
           <button onClick={handleDelete} disabled={deleting} className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors">Delete</button>
           {runFeedback && (
             <span className={`text-xs ${runFeedback.startsWith('Queued') ? 'text-green-600' : 'text-destructive'}`}>{runFeedback}</span>
@@ -800,6 +809,7 @@ export default function SearchRulesAdmin() {
   const [drawerRule, setDrawerRule] = useState(undefined);
   const [showAiDrawer, setShowAiDrawer] = useState(false);
   const [debugRule, setDebugRule] = useState(null);
+  const [testsRule, setTestsRule] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -870,6 +880,9 @@ export default function SearchRulesAdmin() {
       {debugRule && (
         <DebugModal rule={debugRule} orgs={orgs} onClose={() => setDebugRule(null)} />
       )}
+      {testsRule && (
+        <SearchRuleTestsDrawer rule={testsRule} onClose={() => setTestsRule(null)} />
+      )}
 
       <div className="flex items-center justify-between">
         <div>
@@ -928,6 +941,7 @@ export default function SearchRulesAdmin() {
                     onDelete={handleDelete}
                     onRunNow={handleRunNow}
                     onDebug={setDebugRule}
+                    onTests={setTestsRule}
                   />
                 ))
               )}
