@@ -3,6 +3,21 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 
+const ASSET_ROLES = [
+  { value: '', label: 'Unknown / unset' },
+  { value: 'workstation', label: 'Workstation' },
+  { value: 'server', label: 'Server' },
+  { value: 'dns-server', label: 'DNS Server' },
+  { value: 'domain-controller', label: 'Domain Controller' },
+  { value: 'jumphost', label: 'Jumphost' },
+  { value: 'firewall', label: 'Firewall' },
+  { value: 'router', label: 'Router' },
+  { value: 'switch', label: 'Switch' },
+  { value: 'database-server', label: 'Database Server' },
+  { value: 'web-server', label: 'Web Server' },
+  { value: 'other', label: 'Other' },
+];
+
 function ConfirmDeleteModal({ open, onConfirm, onCancel, loading }) {
   if (!open) return null;
   return (
@@ -127,7 +142,7 @@ export default function AssetDetail() {
   const [asset, setAsset] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [form, setForm] = useState({ name: '', ip_address: '' });
+  const [form, setForm] = useState({ name: '', ip_address: '', role: '' });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -137,7 +152,7 @@ export default function AssetDetail() {
     api.get(`/api/assets/${id}/`)
       .then(res => {
         setAsset(res.data);
-        setForm({ name: res.data.name, ip_address: res.data.ip_address || '', is_permanent: res.data.is_permanent ?? false });
+        setForm({ name: res.data.name, ip_address: res.data.ip_address || '', role: res.data.role || '', is_permanent: res.data.is_permanent ?? false });
       })
       .catch(() => setError('Asset not found.'))
       .finally(() => setLoading(false));
@@ -151,8 +166,9 @@ export default function AssetDetail() {
     e.preventDefault();
     setSaving(true);
     setSaveError(null);
+    const payload = { ...form, role: form.role || null };
     try {
-      const res = await api.patch(`/api/assets/${id}/`, form);
+      const res = await api.patch(`/api/assets/${id}/`, payload);
       setAsset(res.data);
     } catch (err) {
       const data = err.response?.data;
@@ -246,6 +262,20 @@ export default function AssetDetail() {
             placeholder="Optional"
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-foreground mb-1" htmlFor="field-role">Role</label>
+          <select
+            id="field-role"
+            disabled={!isHost}
+            value={form.role}
+            onChange={e => set('role', e.target.value)}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          >
+            {ASSET_ROLES.map(r => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
         </div>
         {asset.last_seen_at && (
           <p className="text-xs text-muted-foreground">
