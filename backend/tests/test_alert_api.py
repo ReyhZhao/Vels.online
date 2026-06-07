@@ -708,3 +708,79 @@ def test_bulk_promote_invalid_override_pap_returns_400(client, staff_user, acme)
         content_type="application/json",
     )
     assert resp.status_code == 400
+
+
+# ── GET /api/alerts/ — has_incident filter (#426) ────────────────────────────
+
+
+def test_list_filter_has_incident_true_returns_linked(client, member, acme):
+    inc = Incident.objects.create(organization=acme, display_id="INC-2026-0001", title="I", severity="medium", state="new")
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+                         title="Linked", severity="medium", state="imported", incident=inc)
+    Alert.objects.create(organization=acme, display_id="AL-0002", source_kind="wazuh_event",
+                         title="Unlinked", severity="medium", state="new")
+    client.force_login(member)
+    resp = client.get("/api/alerts/?has_incident=true")
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["results"][0]["display_id"] == "AL-0001"
+
+
+def test_list_filter_has_incident_false_returns_unlinked(client, member, acme):
+    inc = Incident.objects.create(organization=acme, display_id="INC-2026-0001", title="I", severity="medium", state="new")
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+                         title="Linked", severity="medium", state="imported", incident=inc)
+    Alert.objects.create(organization=acme, display_id="AL-0002", source_kind="wazuh_event",
+                         title="Unlinked", severity="medium", state="new")
+    client.force_login(member)
+    resp = client.get("/api/alerts/?has_incident=false")
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["results"][0]["display_id"] == "AL-0002"
+
+
+# ── GET /api/alerts/ — search filter (#426) ──────────────────────────────────
+
+
+def test_list_search_matches_title(client, member, acme):
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+                         title="Brute force login detected", severity="high", state="new")
+    Alert.objects.create(organization=acme, display_id="AL-0002", source_kind="wazuh_event",
+                         title="Port scan from external host", severity="medium", state="new")
+    client.force_login(member)
+    resp = client.get("/api/alerts/?search=brute+force")
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["results"][0]["display_id"] == "AL-0001"
+
+
+def test_list_search_matches_description(client, member, acme):
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+                         title="Alert A", description="Suspicious lateral movement via RDP",
+                         severity="high", state="new")
+    Alert.objects.create(organization=acme, display_id="AL-0002", source_kind="wazuh_event",
+                         title="Alert B", description="Normal user login",
+                         severity="low", state="new")
+    client.force_login(member)
+    resp = client.get("/api/alerts/?search=lateral+movement")
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["results"][0]["display_id"] == "AL-0001"
+
+
+def test_list_search_is_case_insensitive(client, member, acme):
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+                         title="Ransomware detected on WORKSTATION-01", severity="critical", state="new")
+    client.force_login(member)
+    resp = client.get("/api/alerts/?search=ransomware")
+    data = resp.json()
+    assert data["count"] == 1
+
+
+def test_list_search_no_match_returns_empty(client, member, acme):
+    Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event",
+                         title="Normal event", severity="low", state="new")
+    client.force_login(member)
+    resp = client.get("/api/alerts/?search=ransomware")
+    data = resp.json()
+    assert data["count"] == 0

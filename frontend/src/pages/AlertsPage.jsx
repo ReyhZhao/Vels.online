@@ -324,6 +324,10 @@ function AlertsPage() {
   const [filterSeverity, setFilterSeverity] = useState('');
   const [filterSourceKind, setFilterSourceKind] = useState('');
   const [showIgnored, setShowIgnored] = useState(false);
+  const [filterLinked, setFilterLinked] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [search, setSearch] = useState('');
 
   // Selection
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -346,6 +350,11 @@ function AlertsPage() {
       if (filterSeverity) params.severity = filterSeverity;
       if (filterSourceKind) params.source_kind = filterSourceKind;
       if (!showIgnored && !filterState) params.exclude_state = 'ignored';
+      if (filterLinked === 'linked') params.has_incident = 'true';
+      if (filterLinked === 'unlinked') params.has_incident = 'false';
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      if (search) params.search = search;
 
       const resp = await api.get('/api/alerts/', { params });
       setData(resp.data);
@@ -354,7 +363,7 @@ function AlertsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, filterState, filterSeverity, filterSourceKind, showIgnored]);
+  }, [page, filterState, filterSeverity, filterSourceKind, showIgnored, filterLinked, dateFrom, dateTo, search]);
 
   useEffect(() => {
     fetchAlerts();
@@ -522,6 +531,14 @@ function AlertsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-muted/20">
+        <input
+          type="search"
+          placeholder="Search alerts…"
+          value={search}
+          onChange={e => { setSearch(e.target.value); setPage(1); }}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground w-44 focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+
         <select
           value={filterSeverity}
           onChange={e => { setFilterSeverity(e.target.value); setPage(1); }}
@@ -548,6 +565,36 @@ function AlertsPage() {
           <option value="">All sources</option>
           {SOURCE_KIND_OPTIONS.map(s => <option key={s} value={s}>{SOURCE_KIND_LABELS[s] ?? s}</option>)}
         </select>
+
+        <select
+          value={filterLinked}
+          onChange={e => { setFilterLinked(e.target.value); setPage(1); }}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground"
+        >
+          <option value="">All incidents</option>
+          <option value="linked">Linked to incident</option>
+          <option value="unlinked">Not linked</option>
+        </select>
+
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <span>From</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => { setDateFrom(e.target.value); setPage(1); }}
+            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <span>To</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => { setDateTo(e.target.value); setPage(1); }}
+            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
 
         <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
           <input
@@ -592,7 +639,7 @@ function AlertsPage() {
             ) : results.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  {filterState || filterSeverity || filterSourceKind
+                  {filterState || filterSeverity || filterSourceKind || filterLinked || dateFrom || dateTo || search
                     ? 'No alerts match the current filters.'
                     : showIgnored
                       ? 'No alerts.'

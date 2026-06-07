@@ -91,6 +91,8 @@ class AlertListIngestView(APIView):
             OpenApiParameter("date_from", OpenApiTypes.DATE, description="Created on or after this date (YYYY-MM-DD)"),
             OpenApiParameter("date_to", OpenApiTypes.DATE, description="Created on or before this date (YYYY-MM-DD)"),
             OpenApiParameter("exclude_state", OpenApiTypes.STR, description="Comma-separated states to exclude, e.g. closed,ignored"),
+            OpenApiParameter("has_incident", OpenApiTypes.STR, description="Filter by incident linkage: true = linked to an incident, false = unlinked"),
+            OpenApiParameter("search", OpenApiTypes.STR, description="Search term matched against alert title and description (case-insensitive)"),
             OpenApiParameter("page", OpenApiTypes.INT, description="Page number (default: 1)"),
             OpenApiParameter("per_page", OpenApiTypes.INT, description="Page size (default: 25, max: 100)"),
         ],

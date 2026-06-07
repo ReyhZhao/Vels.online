@@ -220,3 +220,108 @@ describe('AlertsPage — Codify as rule', () => {
     expect(msg).toContain('AL-0002');
   });
 });
+
+describe('AlertsPage — improved filters (#426)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockNavigate.mockReset();
+    api.get.mockImplementation(url => {
+      if (url === '/api/correlations/suggestions/') return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: EMPTY_ALERTS });
+    });
+  });
+
+  it('renders a search input', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+    expect(screen.getByPlaceholderText('Search alerts…')).toBeInTheDocument();
+  });
+
+  it('sends search param when text is entered', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+
+    fireEvent.change(screen.getByPlaceholderText('Search alerts…'), { target: { value: 'brute force' } });
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        '/api/alerts/',
+        expect.objectContaining({ params: expect.objectContaining({ search: 'brute force' }) })
+      )
+    );
+  });
+
+  it('renders an incident linkage filter dropdown', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+    expect(screen.getByRole('combobox', { name: (_, el) => el.textContent.includes('All incidents') })).toBeInTheDocument();
+  });
+
+  it('sends has_incident=true when "Linked to incident" is selected', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+
+    const select = screen.getByRole('combobox', { name: (_, el) => el.textContent.includes('All incidents') });
+    fireEvent.change(select, { target: { value: 'linked' } });
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        '/api/alerts/',
+        expect.objectContaining({ params: expect.objectContaining({ has_incident: 'true' }) })
+      )
+    );
+  });
+
+  it('sends has_incident=false when "Not linked" is selected', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+
+    const select = screen.getByRole('combobox', { name: (_, el) => el.textContent.includes('All incidents') });
+    fireEvent.change(select, { target: { value: 'unlinked' } });
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        '/api/alerts/',
+        expect.objectContaining({ params: expect.objectContaining({ has_incident: 'false' }) })
+      )
+    );
+  });
+
+  it('renders From and To date inputs', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+    const dateInputs = screen.getAllByDisplayValue('');
+    const dateTypeInputs = document.querySelectorAll('input[type="date"]');
+    expect(dateTypeInputs).toHaveLength(2);
+  });
+
+  it('sends date_from param when a from date is entered', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+
+    const [fromInput] = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(fromInput, { target: { value: '2026-06-01' } });
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        '/api/alerts/',
+        expect.objectContaining({ params: expect.objectContaining({ date_from: '2026-06-01' }) })
+      )
+    );
+  });
+
+  it('sends date_to param when a to date is entered', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[1], { target: { value: '2026-06-07' } });
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        '/api/alerts/',
+        expect.objectContaining({ params: expect.objectContaining({ date_to: '2026-06-07' }) })
+      )
+    );
+  });
+});
