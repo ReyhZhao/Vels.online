@@ -26,6 +26,14 @@ The platform is built around a Wazuh-integrated SOC workflow: detections flow in
 |-----------------|----------------|--|
 | ![On-Call Calendar placeholder](docs/screenshots/oncall-calendar.png) | ![On-Call Widget placeholder](docs/screenshots/oncall-widget.png) | |
 
+| Correlation Rules | Detection Suggestions | Incident Assistant |
+|-------------------|----------------------|--------------------|
+| ![Correlation Rules placeholder](docs/screenshots/correlation-rules.png) | ![Detection Suggestions placeholder](docs/screenshots/detection-suggestions.png) | ![Incident Assistant placeholder](docs/screenshots/incident-assistant.png) |
+
+| Scheduled Search Rules | Search Rule Author | |
+|------------------------|-------------------|--|
+| ![Scheduled Search Rules placeholder](docs/screenshots/scheduled-search-rules.png) | ![Search Rule Author placeholder](docs/screenshots/search-rule-author.png) | |
+
 ---
 
 ## Features
@@ -41,8 +49,10 @@ A pre-incident layer that records every detection before it becomes an incident.
 - **Bulk promote** — select multiple alerts from the inbox and promote them to a single incident in one action; a preview modal shows the auto-derived incident fields before writing.
 - **Linked Alerts panel** — every incident shows a collapsible panel listing all `AL-NNN` records behind it, with state badges and timestamps.
 - **Alert enrichment passthrough** — third-party tools (N8N, webhooks) can pass `title`, `description`, `severity`, `pap`, and `tlp` at ingestion time; promoted incidents inherit these values instead of auto-derived placeholders.
-- **Source kinds** — alerts can be tagged as `wazuh`, `inbound_email`, `workflow`, or `external_source` so the origin of every detection is visible and filterable.
+- **Source kinds** — alerts can be tagged as `wazuh`, `inbound_email`, `workflow`, `external_source`, or `scheduled_search` so the origin of every detection is visible and filterable.
 - **Per-org thresholds** — configure the auto-promote count, time window, and match lookback window per organisation in settings.
+- **Delete alert** — individual alerts can be removed from the inbox when they are noise or duplicates that should not be promoted.
+- **Create correlation rule from selection** — select one or more alerts and open the rule-author assistant pre-seeded with those alerts as grounding context, turning a recurring signal into a permanent Correlation Rule in one step.
 
 ### Incident Management
 
@@ -77,6 +87,62 @@ Manage 24/7 analyst coverage and automatically route post-triage incidents to th
 - **Compact on-call widget** — the incident list header shows who is currently on-call and when their shift ends, so analysts always know who owns incoming work without leaving their main workspace.
 - **shift_swap notifications** — swap requests and cover offers trigger notifications via email, in-app, or push. At least one channel must remain enabled per analyst so coverage-critical requests are never missed.
 
+### Alert Correlation Engine
+
+Detect multi-step attack patterns from individually-unremarkable signals — without reading every raw alert.
+
+- **ECS entity envelope** — every ingested alert carries a normalised ECS entity envelope (`host.name`, `source.ip`, `user.name`, `file.hash.sha256`, `process.name`). Values are canonicalised on ingest (case-folding, domain stripping) so cross-source entities join correctly. Stored in an indexed `AlertEntity` table for fast window joins.
+- **Correlation Rules** — SOC-authored rules define one or more **Legs** (AND-ed field predicates) that must all be satisfied for the same **Correlation Key** value within a rolling **Window**. When every leg fires, the engine raises a single incident at a rule-defined severity with all matching alerts attached as evidence. Semantics are unordered co-occurrence (all-of-N, not a sequence).
+- **Per-leg operators** — `equals`, `in [list]`, `contains`, severity `≥/≤`, and IP/CIDR match across alert fields, ECS entities, and selected Wazuh `source_ref` keys (`rule_id`, `rule_description`, `level`, `cve_id`).
+- **Correlation keys** — bind legs by `host.name`, `source.ip`, `user.name`, or `none` (for absolute-count threshold rules that do not require a shared entity).
+- **Dedup and re-linking** — at most one live firing per `(rule, entity_value)` while the incident is open. Subsequent matching alerts link into the existing incident; a new incident is only raised after the prior one closes.
+- **Supersede** — when a correlation fires over alerts already promoted by the simpler fast-path, the engine relinks those alerts to the richer chain incident and marks the simpler incident as a duplicate. Active-work guard rail: incidents `in_progress` or actively assigned are never auto-superseded.
+- **System rules** — rules with no org assignment apply as baseline detections to every tenant automatically; they are authored once by Vels SOC staff and propagate on the next evaluator run.
+- **Per-org mutes** — admins can mute any system rule for a specific tenant from the Org Management UI. Muting stops that rule evaluating for the tenant only, without removing it globally.
+- **LLM residual safety-net** — a periodic batch task reviews *residual* alerts (unlinked, past a settle delay) and groups related signals using the LLM into **Detection Suggestions**. Each suggestion shows the rationale, confidence score, and the contributing alerts.
+- **Detection Suggestion review** — pending suggestions surface in the alert inbox. Accepting a suggestion promotes the grouped alerts into a new incident (entering the full IOC-enrichment and triage pipeline); dismissing removes it from the queue. Auto-creation defaults to off so the LLM never manufactures incidents without analyst approval.
+- **Admin rule-builder UI** — a leg-builder drawer lets staff create and edit Correlation Rules visually: add legs, set field/operator/value per condition, choose the correlation key, window, severity, and enabled state. No code editing required.
+- **Rule-author assistant** — describe a detection in plain language; the LLM drafts a Correlation Rule (legs, conditions, key, window, severity) grounded in the *actual* alert corpus for the chosen scope (a specific org or all orgs). The draft is pre-filled into the builder for review; the assistant never activates a rule.
+- **Alert-grounded drafting** — before drafting, the assistant samples the real alert corpus (source kinds present, entity types, rule IDs and titles, severity mix) so proposed fields and values genuinely exist in the data.
+- **Conversational refinement** — after the initial draft, analysts can iterate in a multi-turn chat to tighten conditions, change the correlation key, or adjust the window before saving.
+- **Scope selection and ownership** — drafting for a specific org defaults the rule to an Org Rule; drafting against all orgs defaults to a System Rule.
+- **Codify as rule** — a Detection Suggestion has a "Codify as rule" action that opens the rule-author assistant pre-seeded with the suggestion's context, turning a recurring LLM-flagged pattern into a permanent durable rule.
+- **Create correlation rule from selected alerts** — select one or more alerts in the inbox and open the rule-author assistant pre-populated with those alerts as grounding context.
+
+### Scheduled Search Rules
+
+Pull-based detection over the full Wazuh OpenSearch data stream — without ingesting every event into the platform.
+
+- **Pull model** — unlike the streaming engine, Scheduled Search Rules push their query *into* the Wazuh OpenSearch backend on a schedule. Only when the pattern is matched do the relevant documents get pulled in as **Findings** (materialised Alerts) and grouped into one Incident. The full Wazuh stream stays in OpenSearch.
+- **Same leg/condition builder** — Scheduled Search Rules use the identical leg, condition, correlation key, and window model as Correlation Rules, so analysts learn one mental model for both engines.
+- **Dynamic field catalog** — the platform pulls the live OpenSearch index mapping (TTL-cached) to populate field choices. Operators and values are validated against the real mapping so analysts cannot save a rule that references a non-existent or wrongly-typed field.
+- **Multi-leg co-occurrence** — multi-leg rules require all legs satisfied for the same correlation-key value within the window; the evaluator uses per-leg `terms` aggregations and a Python join, keeping query cost bounded.
+- **Schedule lifecycle** — each rule gets its own `django-celery-beat` `PeriodicTask` (minimum 5-minute cadence). The schedule is created, updated, or deleted automatically whenever the rule is saved or removed — no manual Celery configuration needed.
+- **Run state inline** — the rules admin table shows each rule's last-run time, next-run time, and total run count so operators know the rule is healthy at a glance.
+- **Run now** — a per-rule "Run now" button dispatches the evaluator immediately for ad-hoc testing without waiting for the schedule.
+- **Run history** — each rule's run history (status, duration, errors) is accessible from the admin UI for debugging failing rules.
+- **Dedup and idempotency** — `SearchFinding` records carry a unique `(rule, source_index, wazuh_doc_id)` key so re-runs over overlapping windows never materialise duplicate Alerts. A live-firing record per `(rule, entity_value)` ensures new Findings for the same key link into the open incident rather than spawning a new one.
+- **Flood cap** — at most 50 Findings are materialised per run; if more documents match, an overflow note is added to the incident so operators are aware of the capped set.
+- **Streaming suppression** — materialised search-alerts are excluded from the streaming correlation evaluator so the two engines never produce competing incidents from the same documents.
+- **System rules and per-org fan-out** — system Scheduled Search Rules (no org) run for every tenant with each query scoped to that org's Wazuh agents. Tenants are always fully isolated; no cross-tenant correlation can occur.
+- **Per-org failure isolation** — if one tenant's OpenSearch query fails during a system rule fan-out, the error is recorded and the remaining tenants continue running.
+- **Per-org mutes** — admins can mute any system Scheduled Search Rule for a specific tenant, mirroring the Correlation Rule mute mechanism.
+- **LLM-assisted author drawer** — a two-pass drafting flow: first the assistant fetches a menu of real Wazuh rule IDs and titles (from a live `rule.id` aggregation over OpenSearch) so analysts pick the relevant rules; then it expands those selections into a full leg-and-condition draft grounded in the actual Wazuh data — not synthetic guesses.
+- **Mapping-aware sanitizer** — the LLM draft is validated against the live index mapping before it reaches the builder; invalid fields and operator/type mismatches are dropped with a warning rather than silently accepted.
+- **`scheduled_search` source kind** — incidents raised by this engine are tagged with a distinct `source_kind` so they are filterable in the inbox and clearly distinguishable from push-based incidents.
+- **IOC extraction and triage** — incidents created from Scheduled Search Rules pass through the same IOC enrichment and LLM triage pipeline as any other incident.
+
+### Incident Assistant
+
+An interactive AI panel embedded in the incident detail page for conversational investigation and action.
+
+- **Propose-and-confirm panel** — analysts open a chat drawer on any incident and ask the assistant questions or request actions. The assistant proposes responses or changes; the analyst confirms before anything is written.
+- **Create timeline comments** — the assistant can draft and post comments to the incident timeline, with the analyst reviewing the text before it is submitted.
+- **Send contact messages** — the assistant can draft outbound messages to linked incident contacts (employees, asset owners), with the analyst confirming the recipient and content before the email is sent.
+- **Incident context aware** — the assistant is grounded in the full incident context: title, description, severity, state, linked alerts, IOCs, assets, and timeline. Responses are relevant to the specific incident rather than generic.
+- **Ollama and Gemini support** — the incident assistant respects the same pluggable LLM provider configuration (`ASSISTANT_LLM_PROVIDER`) as the rest of the platform, so it works with locally-hosted Ollama models as well as Google Gemini.
+- **Grouped residual alert analysis** — the Ollama triage provider can group residual (unlinked) alerts and return a structured analysis, surfacing clusters of related signals the static engine did not catch.
+
 ### Inbound Phishing Ingestion
 
 Turn phishing reports into incidents with zero analyst effort.
@@ -86,6 +152,9 @@ Turn phishing reports into incidents with zero analyst effort.
 - Extracts URLs, domains, sender addresses, and email addresses as IOCs and enriches them immediately (see IOC Enrichment below).
 - LLM triage annotates phishing incidents with email-specific context (sender reputation, URL risk, attachment analysis).
 - **Contacts allow list** — known-safe senders (internal staff and registered contacts) are excluded from phishing incident creation to prevent analyst noise.
+- **Auto-link forwarder as contact** — the user who forwarded the phishing email is automatically added as an `IncidentContact` on the created incident so they can be updated as the investigation progresses.
+- **Forwarder as incident creator** — if the forwarding address matches a platform user record, that user is set as the incident's `created_by` so ownership is accurate rather than attributed to the IMAP poller.
+- **Closure contact notifications** — when a phishing incident is closed, a notification email is sent to linked contacts. If the phishing email address can be identified as a drop address, a dedicated drop-confirmation email is sent.
 
 ### IOC Enrichment
 
@@ -226,6 +295,7 @@ Built-in blog for publishing security advisories, runbook documentation, or cust
 | Frontend | React 18 · Vite · Tailwind CSS · shadcn/ui |
 | LLM providers | Google Gemini · Ollama (pluggable) |
 | Security monitoring | Wazuh |
+| Detection backend | Wazuh OpenSearch (Scheduled Search Rules pull engine) |
 | Threat intelligence | AbuseIPDB · VirusTotal |
 | WAF / reverse proxy | BunkerWeb (ModSecurity + OWASP CRS) |
 | Automation runner | Semaphore CI |
@@ -278,6 +348,11 @@ Copy `backend/.env.example` to `backend/.env` and fill in the values:
 | `IMAP_HOST` | IMAP server host (for inbound contact replies and phishing ingestion) |
 | `IMAP_USER` | IMAP account username |
 | `IMAP_PASSWORD` | IMAP account password |
+| `CORRELATION_LLM_PROVIDER` | Dotted path to LLM provider for the correlation rule-author assistant |
+| `ASSISTANT_LLM_PROVIDER` | Dotted path to LLM provider for the incident assistant |
+| `OPENSEARCH_URL` | Wazuh OpenSearch base URL (for Scheduled Search Rules and field-catalog queries) |
+| `OPENSEARCH_USER` | OpenSearch username |
+| `OPENSEARCH_PASSWORD` | OpenSearch password |
 
 ### Kubernetes / Helm
 
@@ -290,8 +365,9 @@ A Helm chart is provided under `deployment/`. See `deployment/values.yaml` for t
 ```
 .
 ├── backend/              # Django application
-│   ├── alerts/           # Alert ingestion pipeline, inbox, auto-routing
-│   ├── incidents/        # Incident lifecycle, tasks, LLM triage
+│   ├── alerts/           # Alert ingestion pipeline, inbox, auto-routing, ECS entity envelope
+│   ├── incidents/        # Incident lifecycle, tasks, LLM triage, incident assistant
+│   ├── correlations/     # Correlation Rules, Scheduled Search Rules, Detection Suggestions, rule-author assistant
 │   ├── security/         # Organisations, assets, vulnerabilities, CVE advisories
 │   ├── exceptions/       # Wazuh exception rule management
 │   ├── ingress/          # BunkerWeb-backed reverse proxy routes
