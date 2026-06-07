@@ -57,6 +57,33 @@ def test_list_staff_sees_all(admin_client, acme, contoso):
     assert c2.id in ids
 
 
+@pytest.mark.django_db
+def test_list_org_filter_scopes_to_org(admin_client, acme, contoso):
+    c1 = make_contact(acme, email="a@acme.com")
+    c2 = make_contact(contoso, email="b@contoso.com")
+    data = admin_client.get("/api/contacts/?org=acme").json()
+    ids = [c["id"] for c in data]
+    assert c1.id in ids
+    assert c2.id not in ids
+
+
+@pytest.mark.django_db
+def test_list_org_filter_bounded_by_membership(client, acme_member, acme, contoso):
+    """A non-member passing another org's slug still gets nothing."""
+    make_contact(contoso, email="other@contoso.com")
+    client.force_login(acme_member)
+    data = client.get("/api/contacts/?org=contoso").json()
+    assert data == []
+
+
+@pytest.mark.django_db
+def test_serializer_exposes_org(admin_client, acme):
+    make_contact(acme, email="a@acme.com")
+    data = admin_client.get("/api/contacts/?org=acme").json()
+    assert data[0]["org_slug"] == "acme"
+    assert data[0]["org_name"] == "Acme"
+
+
 # ── POST /api/contacts/ ───────────────────────────────────────────────────────
 
 

@@ -67,6 +67,21 @@ describe('ContactsPage', () => {
     expect(screen.getByText('New Contact', { selector: 'h2' })).toBeInTheDocument();
   });
 
+  it('defaults to current-org filter then toggles to all contacts with org column', async () => {
+    api.get.mockResolvedValue({ data: [{ ...CONTACTS[0], org_slug: 'acme', org_name: 'Acme' }] });
+    renderPage();
+    await waitFor(() => screen.getByText('Alice Smith'));
+    // default request scopes to the selected org
+    expect(api.get).toHaveBeenCalledWith('/api/contacts/', { params: { org: 'acme' } });
+    // no org column in current-org mode
+    expect(screen.queryByText('Organisation')).not.toBeInTheDocument();
+    // toggle to all contacts
+    fireEvent.click(screen.getByText('All contacts'));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/contacts/', { params: {} }));
+    expect(screen.getByText('Organisation')).toBeInTheDocument();
+    expect(screen.getByText('Acme')).toBeInTheDocument();
+  });
+
   it('creates a contact and adds it to the list', async () => {
     api.get.mockResolvedValue({ data: [] });
     api.post.mockResolvedValue({ data: { id: 3, name: 'Carol White', email: 'carol@acme.com', job_title: '', department: '', created_at: '2026-01-03T00:00:00Z' } });

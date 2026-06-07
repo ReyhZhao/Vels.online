@@ -163,14 +163,16 @@ export default function ContactsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editContact, setEditContact] = useState(null);
   const [search, setSearch] = useState('');
+  const [currentOrgOnly, setCurrentOrgOnly] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    api.get('/api/contacts/')
+    const params = currentOrgOnly && selectedOrg ? { org: selectedOrg.slug } : {};
+    api.get('/api/contacts/', { params })
       .then(res => setContacts(res.data))
       .catch(() => setError('Failed to load contacts.'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [currentOrgOnly, selectedOrg?.slug]);
 
   async function handleDelete(contact) {
     if (!confirm(`Delete contact "${contact.name}"?`)) return;
@@ -216,7 +218,7 @@ export default function ContactsPage() {
         </button>
       </div>
 
-      <div>
+      <div className="flex items-center gap-3">
         <input
           type="search"
           placeholder="Search contacts…"
@@ -224,6 +226,22 @@ export default function ContactsPage() {
           onChange={e => setSearch(e.target.value)}
           className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-64"
         />
+        <div className="inline-flex rounded-md border border-border overflow-hidden text-sm">
+          <button
+            type="button"
+            onClick={() => setCurrentOrgOnly(true)}
+            className={`px-3 py-1.5 font-medium transition-colors ${currentOrgOnly ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-accent'}`}
+          >
+            {selectedOrg ? selectedOrg.name : 'Current org'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurrentOrgOnly(false)}
+            className={`px-3 py-1.5 font-medium transition-colors ${!currentOrgOnly ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-accent'}`}
+          >
+            All contacts
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -235,6 +253,9 @@ export default function ContactsPage() {
             <tr className="border-b border-border">
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Email</th>
+              {!currentOrgOnly && (
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Organisation</th>
+              )}
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Department</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Job Title</th>
               <th className="px-4 py-3" />
@@ -243,11 +264,11 @@ export default function ContactsPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={currentOrgOnly ? 5 : 6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={currentOrgOnly ? 5 : 6} className="px-4 py-8 text-center text-muted-foreground">
                   {search ? 'No contacts match your search.' : 'No contacts yet.'}
                 </td>
               </tr>
@@ -257,6 +278,9 @@ export default function ContactsPage() {
                   <Link to={`/contacts/${contact.id}`} className="hover:underline">{contact.name}</Link>
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">{contact.email}</td>
+                {!currentOrgOnly && (
+                  <td className="px-4 py-3 text-muted-foreground">{contact.org_name || '—'}</td>
+                )}
                 <td className="px-4 py-3 text-muted-foreground">{contact.department || '—'}</td>
                 <td className="px-4 py-3 text-muted-foreground">{contact.job_title || '—'}</td>
                 <td className="px-4 py-3">

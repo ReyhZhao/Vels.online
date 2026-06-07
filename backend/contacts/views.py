@@ -38,6 +38,9 @@ class ContactListView(APIView):
         qs = Contact.objects.select_related("organisation").order_by("name")
         if org_ids is not None:
             qs = qs.filter(organisation_id__in=org_ids)
+        org_slug = request.query_params.get("org")
+        if org_slug:
+            qs = qs.filter(organisation__slug=org_slug)
         return Response(ContactSerializer(qs, many=True).data)
 
     def post(self, request):

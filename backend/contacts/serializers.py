@@ -3,9 +3,12 @@ from .models import Contact
 
 
 class ContactSerializer(serializers.ModelSerializer):
+    org_slug = serializers.CharField(source="organisation.slug", read_only=True)
+    org_name = serializers.CharField(source="organisation.name", read_only=True)
+
     class Meta:
         model = Contact
-        fields = ["id", "name", "email", "job_title", "department", "created_at"]
+        fields = ["id", "name", "email", "job_title", "department", "org_slug", "org_name", "created_at"]
         read_only_fields = ["id", "created_at"]
 
 
