@@ -701,11 +701,34 @@ function DebugModal({ rule, orgs, onClose }) {
 
 // ── RuleRow ────────────────────────────────────────────────────────────────
 
-function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug, onTests }) {
+function TestHealthBadge({ summary }) {
+  if (!summary || summary.total === 0) {
+    return <span className="inline-flex items-center rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 px-2 py-0.5 text-xs font-medium" title="No tests">No tests</span>;
+  }
+  const { total, passing, failing, error, never } = summary;
+  let cls;
+  if (never === total) cls = 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400';
+  else if (failing > 0 || error > 0) cls = 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+  else if (passing === total) cls = 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+  else cls = 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`} title={`${passing} passing, ${failing} failing, ${error} error, ${never} never run`}>
+      Tests {passing}/{total}
+    </span>
+  );
+}
+
+function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug, onTests, onRunTests }) {
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [running, setRunning] = useState(false);
   const [runFeedback, setRunFeedback] = useState(null);
+  const [runningTests, setRunningTests] = useState(false);
+
+  async function handleRunTests() {
+    setRunningTests(true);
+    try { await onRunTests(rule); } finally { setRunningTests(false); }
+  }
 
   const isSystem = rule.organization === null;
   const orgName = isSystem ? 'All orgs (system)' : (orgs.find(o => o.id === rule.organization)?.name ?? `#${rule.organization}`);
@@ -753,6 +776,7 @@ function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug, on
         </span>
       </td>
       <td className="px-4 py-3 text-center text-xs text-muted-foreground">{rule.legs?.length ?? 0}</td>
+      <td className="px-4 py-3"><TestHealthBadge summary={rule.test_summary} /></td>
       <td className="px-4 py-3">
         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${rule.enabled ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500'}`}>
           {rule.enabled ? 'Enabled' : 'Disabled'}
@@ -787,6 +811,14 @@ function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug, on
           >
             <FlaskConical className="h-3 w-3" />
             Tests
+          </button>
+          <button
+            onClick={handleRunTests}
+            disabled={runningTests}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+            title="Run all detection tests for this rule"
+          >
+            {runningTests ? 'Testing…' : 'Run tests'}
           </button>
           <button onClick={handleDelete} disabled={deleting} className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors">Delete</button>
           {runFeedback && (
@@ -857,6 +889,15 @@ export default function SearchRulesAdmin() {
     return res.data;
   }
 
+  async function handleRunTests(rule) {
+    try {
+      const res = await api.post(`/api/correlations/search-rules/${rule.id}/tests/run-all/`);
+      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, test_summary: res.data.summary } : r));
+    } catch {
+      setError('Failed to run tests.');
+    }
+  }
+
   return (
     <div className="space-y-6 p-6">
       {drawerRule !== undefined && (
@@ -921,15 +962,16 @@ export default function SearchRulesAdmin() {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Window / Interval</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
                 <th className="px-4 py-3 text-center font-medium text-muted-foreground">Legs</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tests</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
               ) : rules.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No scheduled search rules.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No scheduled search rules.</td></tr>
               ) : (
                 rules.map(rule => (
                   <RuleRow
@@ -942,6 +984,7 @@ export default function SearchRulesAdmin() {
                     onRunNow={handleRunNow}
                     onDebug={setDebugRule}
                     onTests={setTestsRule}
+                    onRunTests={handleRunTests}
                   />
                 ))
               )}

@@ -20,6 +20,7 @@ from .views import (
     SearchRuleRunNowView,
     SearchRuleTestDetailView,
     SearchRuleTestListView,
+    SearchRuleTestRunAllView,
     SearchRuleTestRunView,
 )
 
@@ -39,6 +40,7 @@ urlpatterns = [
     path("search-rules/<int:pk>/run/", SearchRuleRunNowView.as_view()),
     path("search-rules/<int:pk>/debug/", SearchRuleDebugView.as_view()),
     path("search-rules/<int:rule_pk>/tests/", SearchRuleTestListView.as_view()),
+    path("search-rules/<int:rule_pk>/tests/run-all/", SearchRuleTestRunAllView.as_view()),
     path("search-rules/<int:rule_pk>/tests/<int:pk>/", SearchRuleTestDetailView.as_view()),
     path("search-rules/<int:rule_pk>/tests/<int:pk>/run/", SearchRuleTestRunView.as_view()),
     path("search-catalog/", SearchCatalogView.as_view()),

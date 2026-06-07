@@ -213,3 +213,31 @@ class TestRuleTestAPI:
         r = client.delete(f"{_BASE}/{rule.id}/tests/{test.id}/")
         assert r.status_code == 204
         assert not SearchRuleTest.objects.filter(id=test.id).exists()
+
+
+class TestRunAllAndSummary:
+    def test_rule_list_includes_test_summary(self, client, staff, rule):
+        SearchRuleTest.objects.create(rule=rule, name="a", expect_fire=True, samples=[], last_status="pass")
+        SearchRuleTest.objects.create(rule=rule, name="b", expect_fire=True, samples=[], last_status="fail")
+        client.force_login(staff)
+        r = client.get(f"{_BASE}/")
+        summary = next(x["test_summary"] for x in r.json() if x["id"] == rule.id)
+        assert summary == {"total": 2, "passing": 1, "failing": 1, "error": 0, "never": 0}
+
+    def test_run_all_aggregates_and_refreshes(self, client, staff, rule):
+        # One should-fire test (will pass) and one should-not-fire test (will fail, since it fires).
+        SearchRuleTest.objects.create(rule=rule, name="tp", expect_fire=True, samples=[_sample()])
+        SearchRuleTest.objects.create(rule=rule, name="tn", expect_fire=False, samples=[_sample()])
+        client.force_login(staff)
+        m = _os_mock([{"_id": "d1", "_source": _sample()}])
+        with patch(_OS_CLIENT, return_value=m):
+            r = client.post(f"{_BASE}/{rule.id}/tests/run-all/")
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["summary"]["total"] == 2
+        assert body["summary"]["passing"] == 1
+        assert body["summary"]["failing"] == 1
+        assert len(body["results"]) == 2
+        # No production side effects from running the whole suite.
+        assert Incident.objects.count() == 0

@@ -655,8 +655,21 @@ class _SearchRuleLegSerializer(_s.ModelSerializer):
         fields = ["id", "count", "display_order", "distinct_field", "min_distinct", "conditions"]
 
 
+def _compute_test_summary(tests) -> dict:
+    """Aggregate last-run statuses across a rule's Rule Tests for the list-row badge."""
+    tests = list(tests)
+    return {
+        "total": len(tests),
+        "passing": sum(1 for t in tests if t.last_status == "pass"),
+        "failing": sum(1 for t in tests if t.last_status == "fail"),
+        "error": sum(1 for t in tests if t.last_status == "error"),
+        "never": sum(1 for t in tests if t.last_status == "never"),
+    }
+
+
 class _SearchRuleSerializer(_s.ModelSerializer):
     legs = _SearchRuleLegSerializer(many=True)
+    test_summary = _s.SerializerMethodField()
 
     class Meta:
         model = SearchRule
@@ -664,9 +677,12 @@ class _SearchRuleSerializer(_s.ModelSerializer):
             "id", "organization", "name", "description",
             "severity", "correlation_key", "window_minutes", "interval_minutes",
             "max_findings_per_run", "include_agentless", "enabled", "created_at", "updated_at",
-            "legs",
+            "legs", "test_summary",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_test_summary(self, obj):
+        return _compute_test_summary(obj.tests.all())
 
     def validate_interval_minutes(self, value):
         from correlations.models import _MIN_INTERVAL_MINUTES
@@ -754,7 +770,7 @@ class _SearchRuleSerializer(_s.ModelSerializer):
 
 def _fetch_search_rule(pk):
     try:
-        return SearchRule.objects.prefetch_related("legs__conditions").get(pk=pk)
+        return SearchRule.objects.prefetch_related("legs__conditions", "tests").get(pk=pk)
     except SearchRule.DoesNotExist:
         return None
 
@@ -764,7 +780,7 @@ class SearchRuleListView(APIView):
         err = _require_staff(request)
         if err:
             return err
-        rules = SearchRule.objects.prefetch_related("legs__conditions").order_by("name")
+        rules = SearchRule.objects.prefetch_related("legs__conditions", "tests").order_by("name")
         return Response(_SearchRuleSerializer(rules, many=True).data)
 
     def post(self, request):
@@ -777,7 +793,7 @@ class SearchRuleListView(APIView):
         rule = serializer.save()
         return Response(
             _SearchRuleSerializer(
-                SearchRule.objects.prefetch_related("legs__conditions").get(pk=rule.pk)
+                SearchRule.objects.prefetch_related("legs__conditions", "tests").get(pk=rule.pk)
             ).data,
             status=status.HTTP_201_CREATED,
         )
@@ -806,7 +822,7 @@ class SearchRuleDetailView(APIView):
         serializer.save()
         return Response(
             _SearchRuleSerializer(
-                SearchRule.objects.prefetch_related("legs__conditions").get(pk=pk)
+                SearchRule.objects.prefetch_related("legs__conditions", "tests").get(pk=pk)
             ).data
         )
 
@@ -977,6 +993,28 @@ class SearchRuleTestRunView(APIView):
         from correlations.services.search_test_runner import run_rule_test_and_save
         result = run_rule_test_and_save(test)
         return Response(result)
+
+
+class SearchRuleTestRunAllView(APIView):
+    """Staff-only: run all of a rule's Rule Tests and return the aggregate health."""
+
+    def post(self, request, rule_pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(rule_pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        from correlations.services.search_test_runner import run_rule_test_and_save
+
+        results = []
+        for test in rule.tests.all():
+            res = run_rule_test_and_save(test)
+            results.append({"id": test.id, "name": test.name, "status": res["status"]})
+
+        summary = _compute_test_summary(rule.tests.all())
+        return Response({"summary": summary, "results": results})
 
 
 class SearchCatalogView(APIView):
