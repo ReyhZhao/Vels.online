@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Play } from 'lucide-react';
+import { Play, Sparkles } from 'lucide-react';
 import api from '@/lib/axios';
+import SearchRuleAuthorDrawer from '@/components/SearchRuleAuthorDrawer';
 
 const SEVERITY_COLORS = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -496,6 +497,7 @@ export default function SearchRulesAdmin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [drawerRule, setDrawerRule] = useState(undefined);
+  const [showAiDrawer, setShowAiDrawer] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -554,6 +556,15 @@ export default function SearchRulesAdmin() {
           onSaved={handleSaved}
         />
       )}
+      {showAiDrawer && (
+        <SearchRuleAuthorDrawer
+          onClose={() => setShowAiDrawer(false)}
+          onSaved={rule => {
+            handleSaved(rule);
+            setShowAiDrawer(false);
+          }}
+        />
+      )}
 
       <div className="flex items-center justify-between">
         <div>
@@ -562,12 +573,21 @@ export default function SearchRulesAdmin() {
             Periodically query OpenSearch for matching events and raise incidents.
           </p>
         </div>
-        <button
-          onClick={() => setDrawerRule(null)}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          New rule
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowAiDrawer(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+          >
+            <Sparkles className="h-4 w-4" />
+            Draft with AI
+          </button>
+          <button
+            onClick={() => setDrawerRule(null)}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            New rule
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}

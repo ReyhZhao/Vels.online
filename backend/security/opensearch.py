@@ -530,3 +530,106 @@ class OpenSearchClient:
         }
         data = self._search(_ALERTS_INDEX, body)
         return data["hits"]["total"]["value"]
+
+    def get_fields_for_rules(
+        self,
+        rule_ids: list,
+        agent_ids=None,
+        window_days: int = 7,
+        mapping: dict = None,
+        top_values_cap: int = 15,
+    ) -> dict:
+        """Return populated fields + top values for docs matching rule_ids.
+
+        Returns {field_path: {type, top_values, operators}}.
+        Only aggregates on aggregatable (non-text) fields from the mapping.
+        """
+        from correlations.services.search_compiler import _operators_for_type, _TEXT_TYPES
+
+        mapping = mapping or {}
+
+        # Build candidate field list: core fields + aggregatable mapping fields
+        _CORE_FIELD_NAMES = [
+            "rule.id", "rule.level", "rule.groups",
+            "agent.name", "agent.id",
+            "data.srcip", "data.dstip", "data.dstuser",
+            "data.audit.comm", "data.sha256",
+            "decoder.name",
+        ]
+        candidate_fields = list(_CORE_FIELD_NAMES)
+        # Add aggregatable fields from mapping not already in core list
+        for field, ftype in mapping.items():
+            if ftype not in _TEXT_TYPES and field not in candidate_fields:
+                candidate_fields.append(field)
+            if len(candidate_fields) >= 60:
+                break
+
+        filters: list = [
+            {"range": {"@timestamp": {"gte": f"now-{window_days}d"}}},
+            {"terms": {"rule.id": [str(r) for r in rule_ids]}},
+        ]
+        if agent_ids:
+            filters.append({"terms": {"agent.id": [str(a) for a in agent_ids]}})
+
+        aggs = {}
+        for field in candidate_fields:
+            agg_key = field.replace(".", "_DOT_")
+            aggs[agg_key] = {"terms": {"field": field, "size": top_values_cap}}
+
+        body = {
+            "size": 0,
+            "query": {"bool": {"filter": filters}},
+            "aggregations": aggs,
+        }
+
+        try:
+            result = self._search(_ALERTS_INDEX, body)
+        except OpenSearchError:
+            return {}
+
+        expanded: dict = {}
+        for field in candidate_fields:
+            agg_key = field.replace(".", "_DOT_")
+            buckets = result.get("aggregations", {}).get(agg_key, {}).get("buckets", [])
+            if not buckets:
+                continue
+            field_type = mapping.get(field, "keyword")
+            expanded[field] = {
+                "type": field_type,
+                "top_values": [b["key"] for b in buckets],
+                "operators": _operators_for_type(field_type),
+            }
+
+        return expanded
+
+    def get_sample_docs(
+        self,
+        rule_ids=None,
+        agent_ids=None,
+        window_days: int = 7,
+        limit: int = 10,
+    ) -> list:
+        """Return a sample of raw Wazuh document _source dicts for grounding."""
+        filters: list = [{"range": {"@timestamp": {"gte": f"now-{window_days}d"}}}]
+        if rule_ids:
+            filters.append({"terms": {"rule.id": [str(r) for r in rule_ids]}})
+        if agent_ids:
+            filters.append({"terms": {"agent.id": [str(a) for a in agent_ids]}})
+
+        body = {
+            "size": limit,
+            "query": {"bool": {"filter": filters}},
+            "sort": [{"@timestamp": {"order": "desc"}}],
+            "_source": [
+                "rule.id", "rule.level", "rule.description", "rule.groups",
+                "agent.name", "data.srcip", "data.dstip", "data.dstuser",
+                "decoder.name",
+            ],
+        }
+
+        try:
+            data = self._search(_ALERTS_INDEX, body)
+        except OpenSearchError:
+            return []
+
+        return [h.get("_source", {}) for h in data.get("hits", {}).get("hits", [])]

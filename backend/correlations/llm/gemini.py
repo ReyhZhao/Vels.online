@@ -3,6 +3,7 @@ import json
 from django.conf import settings
 
 from .base import BaseDraftProvider, DraftConfigError, DraftError, RuleDraftResult
+from .search_prompt import build_rule_selection_prompt, build_search_draft_prompt
 
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are a security rule-author assistant. Given a natural-language description of a detection \
@@ -121,12 +122,7 @@ class GeminiDraftProvider(BaseDraftProvider):
         self._client = genai.Client(api_key=api_key)
         self._types = types
 
-    def draft_rule(self, messages: list, grounding: dict, current_draft=None) -> RuleDraftResult:
-        if not messages:
-            raise DraftError("No messages provided.")
-
-        system_prompt = _build_system_prompt(grounding)
-
+    def _build_contents(self, messages: list, current_draft=None):
         contents = []
         for i, msg in enumerate(messages):
             role = msg.get("role", "user")
@@ -141,7 +137,9 @@ class GeminiDraftProvider(BaseDraftProvider):
                     parts=[self._types.Part.from_text(text=text)],
                 )
             )
+        return contents
 
+    def _generate(self, system_prompt: str, contents: list) -> str:
         try:
             response = self._client.models.generate_content(
                 model=settings.GEMINI_MODEL,
@@ -150,17 +148,43 @@ class GeminiDraftProvider(BaseDraftProvider):
                     system_instruction=system_prompt,
                 ),
             )
-            raw = response.text.strip()
+            return response.text.strip()
         except Exception as exc:
             raise DraftError(f"Gemini API error: {exc}") from exc
 
+    def _parse_json(self, raw: str, context: str) -> dict:
         raw = _strip_code_fence(raw)
-
         try:
-            data = json.loads(raw)
+            return json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise DraftError(f"Gemini returned non-JSON: {raw[:200]}") from exc
+            raise DraftError(f"Gemini returned non-JSON ({context}): {raw[:200]}") from exc
 
+    def draft_rule(self, messages: list, grounding: dict, current_draft=None) -> RuleDraftResult:
+        if not messages:
+            raise DraftError("No messages provided.")
+        raw = self._generate(_build_system_prompt(grounding), self._build_contents(messages, current_draft))
+        data = self._parse_json(raw, "correlation draft")
+        return RuleDraftResult(
+            updated_draft=data.get("draft_rule") or {},
+            assistant_reply=str(data.get("assistant_reply", "")),
+            warnings=[],
+        )
+
+    def select_relevant_rule_ids(self, messages: list, grounding: dict) -> list:
+        if not messages:
+            raise DraftError("No messages provided.")
+        raw = self._generate(build_rule_selection_prompt(grounding), self._build_contents(messages))
+        data = self._parse_json(raw, "rule selection")
+        return [str(r) for r in data.get("selected_rule_ids", []) if r]
+
+    def draft_search_rule(self, messages: list, grounding: dict, current_draft=None) -> RuleDraftResult:
+        if not messages:
+            raise DraftError("No messages provided.")
+        raw = self._generate(
+            build_search_draft_prompt(grounding),
+            self._build_contents(messages, current_draft),
+        )
+        data = self._parse_json(raw, "search draft")
         return RuleDraftResult(
             updated_draft=data.get("draft_rule") or {},
             assistant_reply=str(data.get("assistant_reply", "")),

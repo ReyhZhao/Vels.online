@@ -508,6 +508,96 @@ class CorrelationDraftView(APIView):
         })
 
 
+# ── Search Rule author assistant ─────────────────────────────────────────────
+
+class SearchRuleDraftView(APIView):
+    """Staff-only: two-pass search rule drafter (ADR-0007).
+
+    Pass 1 — provider selects relevant rule.ids from the cached catalog.
+    Pass 2 — provider drafts a SearchRule using lazily-expanded fields for those ids.
+    Endpoint is a pure function of {scope, messages[], current_draft}; nothing is persisted.
+    """
+
+    def post(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+
+        messages = request.data.get("messages") or []
+        if not messages:
+            return Response({"detail": "messages is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        current_draft = request.data.get("current_draft") or None
+        scope = request.data.get("scope")
+
+        org_for_draft = None
+        agent_ids = None
+        if scope and scope != "all":
+            try:
+                org_for_draft = Organization.objects.get(slug=scope)
+            except Organization.DoesNotExist:
+                return Response({"detail": "Unknown scope."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                from security.wazuh import WazuhClient, WazuhAPIError, WazuhAuthError
+                raw_agents = WazuhClient().get_agents(org_for_draft.wazuh_group)
+                agent_ids = [a["id"] for a in raw_agents]
+            except Exception:
+                agent_ids = []
+
+        try:
+            provider = get_draft_provider()
+        except DraftConfigError as exc:
+            return Response(
+                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        from .llm.search_grounding import build_search_grounding, expand_rule_fields
+        from .llm.search_sanitizer import sanitize_search_draft
+
+        grounding = build_search_grounding(scope=scope, agent_ids=agent_ids)
+
+        try:
+            # Pass 1: LLM selects relevant rule.ids from the catalog.
+            selected_ids = provider.select_relevant_rule_ids(messages, grounding)
+        except (DraftConfigError, DraftError) as exc:
+            logger.warning("SearchRuleDraftView pass 1 error: %s", exc)
+            selected_ids = []
+
+        # Lazy field expansion for the selected rule.ids.
+        expanded = expand_rule_fields(
+            rule_ids=selected_ids,
+            agent_ids=agent_ids,
+            mapping=grounding.get("mapping", {}),
+        )
+        grounding["expanded_fields"] = expanded
+
+        try:
+            # Pass 2: LLM drafts the rule using expanded fields.
+            result = provider.draft_search_rule(messages, grounding, current_draft)
+        except DraftConfigError as exc:
+            return Response(
+                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except DraftError as exc:
+            logger.warning("SearchRuleDraftView pass 2 error: %s", exc)
+            return Response(
+                {"detail": "Assistant failed to produce a valid draft.", "reason": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        mapping = grounding.get("mapping", {})
+        sanitized, sanitizer_warnings = sanitize_search_draft(result.updated_draft, mapping)
+        sanitized["organization"] = org_for_draft.pk if org_for_draft else None
+
+        return Response({
+            "updated_draft": sanitized,
+            "assistant_reply": result.assistant_reply,
+            "warnings": result.warnings + sanitizer_warnings,
+        })
+
+
 # ── Scheduled Search Rule CRUD ────────────────────────────────────────────────
 
 # Curated core fields exposed in the search rule builder (friendly labels + expected types).
