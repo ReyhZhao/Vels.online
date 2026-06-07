@@ -31,6 +31,7 @@ from .models import (
     SearchRuleLeg,
     SearchLegCondition,
     SearchRuleMute,
+    SearchRuleTest,
     SystemRuleMute,
 )
 from .tasks import _create_incident_from_suggestion, run_scheduled_search_rule
@@ -865,6 +866,116 @@ class SearchRuleDebugView(APIView):
 
         from correlations.services.search_evaluator import debug_run
         result = debug_run(rule, org)
+        return Response(result)
+
+
+# ── Rule Tests (PRD #439, ADR-0010) ──────────────────────────────────────────
+
+class _SearchRuleTestSerializer(_s.ModelSerializer):
+    class Meta:
+        model = SearchRuleTest
+        fields = [
+            "id", "rule", "name", "description", "expect_fire", "samples",
+            "last_run_at", "last_status", "last_diagnostics", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "rule", "last_run_at", "last_status", "last_diagnostics",
+            "created_at", "updated_at",
+        ]
+
+    def validate_samples(self, value):
+        if not isinstance(value, list):
+            raise _s.ValidationError("samples must be a list of documents.")
+        if not all(isinstance(d, dict) for d in value):
+            raise _s.ValidationError("each sample document must be a JSON object.")
+        from correlations.services.search_test_runner import MAX_SAMPLES_PER_TEST
+        if len(value) > MAX_SAMPLES_PER_TEST:
+            raise _s.ValidationError(f"at most {MAX_SAMPLES_PER_TEST} sample documents are allowed.")
+        return value
+
+
+class SearchRuleTestListView(APIView):
+    """Staff-only: list/create Rule Tests for a saved Scheduled Search Rule."""
+
+    def get(self, request, rule_pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(rule_pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        tests = rule.tests.all()
+        return Response(_SearchRuleTestSerializer(tests, many=True).data)
+
+    def post(self, request, rule_pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(rule_pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = _SearchRuleTestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        test = serializer.save(rule=rule)
+        return Response(_SearchRuleTestSerializer(test).data, status=status.HTTP_201_CREATED)
+
+
+def _fetch_test(rule_pk, pk):
+    try:
+        return SearchRuleTest.objects.select_related("rule").get(pk=pk, rule_id=rule_pk)
+    except SearchRuleTest.DoesNotExist:
+        return None
+
+
+class SearchRuleTestDetailView(APIView):
+    """Staff-only: retrieve/update/delete a single Rule Test."""
+
+    def get(self, request, rule_pk, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        test = _fetch_test(rule_pk, pk)
+        if test is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_SearchRuleTestSerializer(test).data)
+
+    def patch(self, request, rule_pk, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        test = _fetch_test(rule_pk, pk)
+        if test is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = _SearchRuleTestSerializer(test, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(_SearchRuleTestSerializer(test).data)
+
+    def delete(self, request, rule_pk, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        test = _fetch_test(rule_pk, pk)
+        if test is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        test.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SearchRuleTestRunView(APIView):
+    """Staff-only: run a single Rule Test synchronously and return the Test Result."""
+
+    def post(self, request, rule_pk, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        test = _fetch_test(rule_pk, pk)
+        if test is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        from correlations.services.search_test_runner import run_rule_test_and_save
+        result = run_rule_test_and_save(test)
         return Response(result)
 
 

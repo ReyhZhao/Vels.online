@@ -311,3 +311,44 @@ class SearchFinding(models.Model):
 
     def __str__(self):
         return f"Finding {self.wazuh_doc_id} for {self.rule}"
+
+
+# Rule Test last-run statuses (PRD #439, ADR-0010).
+TEST_STATUS_NEVER = "never"
+TEST_STATUS_PASS = "pass"
+TEST_STATUS_FAIL = "fail"
+TEST_STATUS_ERROR = "error"
+TEST_STATUS_CHOICES = [
+    (TEST_STATUS_NEVER, "Never run"),
+    (TEST_STATUS_PASS, "Pass"),
+    (TEST_STATUS_FAIL, "Fail"),
+    (TEST_STATUS_ERROR, "Error"),
+]
+
+
+class SearchRuleTest(models.Model):
+    """A detection-as-code Rule Test on a Scheduled Search Rule (PRD #439, ADR-0010).
+
+    Bundles a set of synthetic Sample Documents (partial raw Wazuh docs, stored as an
+    opaque JSON list) with a whole-rule fire/no-fire Expectation. Run on demand against
+    an ephemeral OpenSearch index using the real matcher; the last result is summarised
+    inline. Samples are a JSON blob, not a child table (an unordered set fed together).
+    """
+    rule = models.ForeignKey(SearchRule, on_delete=models.CASCADE, related_name="tests")
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    expect_fire = models.BooleanField(default=True)
+    samples = models.JSONField(default=list)  # list of partial raw Wazuh docs
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    last_status = models.CharField(
+        max_length=10, choices=TEST_STATUS_CHOICES, default=TEST_STATUS_NEVER
+    )
+    last_diagnostics = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"Test {self.name!r} for {self.rule}"

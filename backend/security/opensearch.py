@@ -1,3 +1,4 @@
+import json
 import os
 import time
 
@@ -66,6 +67,96 @@ class OpenSearchClient:
         except requests.exceptions.HTTPError as exc:
             raise OpenSearchError(f"OpenSearch error on {index}: {exc}") from exc
         return response.json()
+
+    def get_raw_mapping(self) -> dict:
+        """Return the alerts index's raw mappings body ({"properties": {...}, ...}).
+
+        Unlike get_field_mapping (which flattens to {path: type}), this returns the nested
+        mapping suitable for re-applying when creating an index — used by the Rule Test
+        sandbox to clone the live alerts mapping onto its ephemeral test index (ADR-0010).
+        """
+        try:
+            response = requests.get(
+                f"{self._base_url}/{_ALERTS_INDEX}/_mapping",
+                auth=self._auth,
+                verify=False,
+                timeout=15,
+            )
+            response.raise_for_status()
+            raw = response.json()
+        except requests.exceptions.HTTPError as exc:
+            raise OpenSearchError(f"OpenSearch mapping error: {exc}") from exc
+
+        for index_data in raw.values():
+            mappings = index_data.get("mappings")
+            if mappings:
+                return mappings
+        return {}
+
+    def create_index(self, index: str, mappings: dict | None = None) -> dict:
+        """Create an index, optionally with an explicit mappings body."""
+        body: dict = {}
+        if mappings:
+            body["mappings"] = mappings
+        try:
+            response = requests.put(
+                f"{self._base_url}/{index}",
+                json=body,
+                auth=self._auth,
+                verify=False,
+                timeout=15,
+            )
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise OpenSearchError(f"OpenSearch create-index error on {index}: {exc}") from exc
+        return response.json()
+
+    def bulk_index(self, index: str, docs: list) -> dict:
+        """Bulk-index *docs* (list of dicts) into *index*. Each doc is a full _source body."""
+        lines = []
+        for doc in docs:
+            lines.append('{"index":{}}')
+            lines.append(json.dumps(doc, default=str))
+        payload = "\n".join(lines) + "\n"
+        try:
+            response = requests.post(
+                f"{self._base_url}/{index}/_bulk",
+                data=payload,
+                headers={"Content-Type": "application/x-ndjson"},
+                auth=self._auth,
+                verify=False,
+                timeout=15,
+            )
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise OpenSearchError(f"OpenSearch bulk-index error on {index}: {exc}") from exc
+        return response.json()
+
+    def refresh(self, index: str) -> None:
+        """Force a refresh so freshly-indexed docs become searchable immediately."""
+        try:
+            response = requests.post(
+                f"{self._base_url}/{index}/_refresh",
+                auth=self._auth,
+                verify=False,
+                timeout=15,
+            )
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise OpenSearchError(f"OpenSearch refresh error on {index}: {exc}") from exc
+
+    def delete_index(self, index: str) -> None:
+        """Delete an index. Used to tear down the Rule Test sandbox index."""
+        try:
+            response = requests.delete(
+                f"{self._base_url}/{index}",
+                auth=self._auth,
+                verify=False,
+                timeout=15,
+            )
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            raise OpenSearchError(f"OpenSearch delete-index error on {index}: {exc}") from exc
 
     def get_field_mapping(self) -> dict:
         """Return {field_path: type} for the alerts index, flattened. TTL-cached."""

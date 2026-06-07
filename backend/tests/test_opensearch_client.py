@@ -415,3 +415,58 @@ def test_http_error_raises_opensearch_error(mock_post):
     mock_post.return_value = resp
     with pytest.raises(OpenSearchError, match="500"):
         OpenSearchClient().get_agent_events("001")
+
+
+# ------------------------------------------ write methods (Rule Test sandbox, ADR-0010)
+
+
+def _ok_response(payload=None):
+    m = MagicMock()
+    m.raise_for_status.return_value = None
+    m.json.return_value = payload or {}
+    return m
+
+
+@patch("security.opensearch.requests.get")
+def test_get_raw_mapping_returns_nested_mappings(mock_get):
+    mock_get.return_value = _ok_response({
+        "wazuh-alerts-4.x-2026.06": {"mappings": {"properties": {"a": {"type": "keyword"}}}}
+    })
+    mappings = OpenSearchClient().get_raw_mapping()
+    assert mappings == {"properties": {"a": {"type": "keyword"}}}
+
+
+@patch("security.opensearch.requests.put")
+def test_create_index_puts_mappings(mock_put):
+    mock_put.return_value = _ok_response({"acknowledged": True})
+    OpenSearchClient().create_index("vels-ruletest-abc", mappings={"properties": {}})
+    url = mock_put.call_args[0][0]
+    assert url.endswith("/vels-ruletest-abc")
+    assert mock_put.call_args.kwargs["json"] == {"mappings": {"properties": {}}}
+
+
+@patch("security.opensearch.requests.post")
+def test_bulk_index_sends_ndjson(mock_post):
+    mock_post.return_value = _ok_response({"errors": False})
+    OpenSearchClient().bulk_index("vels-ruletest-abc", [{"x": 1}, {"y": 2}])
+    url = mock_post.call_args[0][0]
+    assert url.endswith("/vels-ruletest-abc/_bulk")
+    body = mock_post.call_args.kwargs["data"]
+    assert body.count('{"index":{}}') == 2
+    assert body.endswith("\n")
+
+
+@patch("security.opensearch.requests.delete")
+def test_delete_index(mock_delete):
+    mock_delete.return_value = _ok_response({"acknowledged": True})
+    OpenSearchClient().delete_index("vels-ruletest-abc")
+    assert mock_delete.call_args[0][0].endswith("/vels-ruletest-abc")
+
+
+@patch("security.opensearch.requests.put")
+def test_create_index_http_error_raises(mock_put):
+    resp = MagicMock()
+    resp.raise_for_status.side_effect = requests.exceptions.HTTPError("400")
+    mock_put.return_value = resp
+    with pytest.raises(OpenSearchError):
+        OpenSearchClient().create_index("vels-ruletest-abc")
