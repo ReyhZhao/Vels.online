@@ -12,7 +12,7 @@ const SEVERITY_COLORS = {
 };
 
 const EMPTY_CONDITION = { field_name: '', operator: 'equals', value: '' };
-const EMPTY_LEG = { count: 1, display_order: 0, conditions: [{ ...EMPTY_CONDITION }] };
+const EMPTY_LEG = { count: 1, display_order: 0, distinct_field: '', min_distinct: 2, conditions: [{ ...EMPTY_CONDITION }] };
 
 // ── ConditionRow ───────────────────────────────────────────────────────────
 
@@ -57,7 +57,9 @@ function ConditionRow({ cond, index, operators, onChange, onRemove }) {
 
 // ── LegEditor ─────────────────────────────────────────────────────────────
 
-function LegEditor({ leg, legIndex, operators, onChange, onRemove, showRemove }) {
+function LegEditor({ leg, legIndex, operators, correlationKey, onChange, onRemove, showRemove }) {
+  const hasDiversity = !!(leg.distinct_field && leg.distinct_field.trim());
+  const diversityNeedsKey = hasDiversity && correlationKey === 'none';
   function updateCondition(condIdx, updates) {
     const conds = leg.conditions.map((c, i) => i === condIdx ? { ...c, ...updates } : c);
     onChange(legIndex, { ...leg, conditions: conds });
@@ -123,6 +125,46 @@ function LegEditor({ leg, legIndex, operators, onChange, onRemove, showRemove })
       >
         + Add condition
       </button>
+
+      {/* Diversity Constraint (ADR-0009): fire only when matches span N distinct values */}
+      <div className="border-t border-border/60 pt-2 space-y-1">
+        <div className="flex items-center gap-2 flex-wrap text-xs text-foreground">
+          <span className="text-muted-foreground">Diversity (optional):</span>
+          <span>distinct values of</span>
+          <input
+            value={leg.distinct_field ?? ''}
+            onChange={e => onChange(legIndex, { ...leg, distinct_field: e.target.value })}
+            placeholder="e.g. GeoLocation.country_name"
+            aria-label={`Leg ${legIndex + 1} distinct field`}
+            className="flex-1 min-w-40 rounded border border-border bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {hasDiversity && (
+            <label className="flex items-center gap-1 whitespace-nowrap">
+              ≥
+              <input
+                type="number"
+                min={2}
+                value={leg.min_distinct ?? 2}
+                onChange={e => onChange(legIndex, { ...leg, min_distinct: Number(e.target.value) })}
+                aria-label={`Leg ${legIndex + 1} min distinct`}
+                className="w-14 rounded border border-border bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              distinct
+            </label>
+          )}
+        </div>
+        {hasDiversity && (
+          <p className="text-xs text-muted-foreground">
+            This leg fires only when its matches span ≥ {leg.min_distinct ?? 2} distinct values of{' '}
+            <code>{leg.distinct_field}</code> for the same correlation key.
+          </p>
+        )}
+        {diversityNeedsKey && (
+          <p className="text-xs text-destructive">
+            A diversity constraint requires a correlation key (not “None”) to group by.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -147,6 +189,8 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
       ? rule.legs.map(l => ({
           count: l.count ?? 1,
           display_order: l.display_order,
+          distinct_field: l.distinct_field ?? '',
+          min_distinct: l.min_distinct ?? 2,
           conditions: l.conditions.map(c => ({
             field_name: c.field_name,
             operator: c.operator,
@@ -173,7 +217,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   function addLeg() {
     setLegs(prev => [
       ...prev,
-      { count: 1, display_order: prev.length, conditions: [{ ...EMPTY_CONDITION }] },
+      { count: 1, display_order: prev.length, distinct_field: '', min_distinct: 2, conditions: [{ ...EMPTY_CONDITION }] },
     ]);
   }
 
@@ -386,6 +430,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
                 leg={leg}
                 legIndex={li}
                 operators={operators}
+                correlationKey={correlationKey}
                 onChange={updateLeg}
                 onRemove={removeLeg}
                 showRemove={legs.length > 1}

@@ -2060,3 +2060,114 @@ class TestMultiLegDiversityComposition:
 
         assert "## Diversity" in incident.description
         assert "NL" in incident.description and "BE" in incident.description
+
+
+# ── Diversity Constraint — slice 3: serializer (manual builder) validation ─────
+
+_DIV_SER_MAPPING = {
+    "rule.groups": "keyword",
+    "GeoLocation.country_name": "keyword",
+    "data.dstuser": "keyword",
+    "rule.description": "text",
+}
+
+
+@pytest.mark.django_db
+class TestSearchRuleDiversityValidation:
+    """SearchRule create rejects diversity constraints that violate the four invariants."""
+
+    def _staff_client(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        User = get_user_model()
+        user = User.objects.create_user("divstaff@test.com", password="x", is_staff=True)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def _payload(self, org, *, correlation_key="user.name",
+                 distinct_field="GeoLocation.country_name", min_distinct=2):
+        return {
+            "organization": org.pk,
+            "name": "Diversity Test",
+            "severity": "high",
+            "correlation_key": correlation_key,
+            "window_minutes": 60,
+            "interval_minutes": 15,
+            "max_findings_per_run": 50,
+            "enabled": True,
+            "legs": [{
+                "count": 1,
+                "display_order": 0,
+                "distinct_field": distinct_field,
+                "min_distinct": min_distinct,
+                "conditions": [{
+                    "field_name": "rule.groups",
+                    "operator": "equals",
+                    "value": "authentication_success",
+                }],
+            }],
+        }
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_valid_diversity_rule_saves(self, mock_mapping, org):
+        mock_mapping.return_value = _DIV_SER_MAPPING
+        with patch("correlations.services.search_schedule.sync_rule_schedule"):
+            resp = self._staff_client().post(
+                "/api/correlations/search-rules/", self._payload(org), format="json"
+            )
+        assert resp.status_code == 201, resp.data
+        assert resp.data["legs"][0]["distinct_field"] == "GeoLocation.country_name"
+        assert resp.data["legs"][0]["min_distinct"] == 2
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_none_key_with_diversity_rejected(self, mock_mapping, org):
+        mock_mapping.return_value = _DIV_SER_MAPPING
+        resp = self._staff_client().post(
+            "/api/correlations/search-rules/",
+            self._payload(org, correlation_key="none"), format="json",
+        )
+        assert resp.status_code == 400
+        assert "legs" in resp.data
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_min_distinct_below_two_rejected(self, mock_mapping, org):
+        mock_mapping.return_value = _DIV_SER_MAPPING
+        resp = self._staff_client().post(
+            "/api/correlations/search-rules/",
+            self._payload(org, min_distinct=1), format="json",
+        )
+        assert resp.status_code == 400
+        assert "legs" in resp.data
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_distinct_field_equal_to_key_field_rejected(self, mock_mapping, org):
+        # user.name → data.dstuser; diversifying on the key field is a dead rule.
+        mock_mapping.return_value = _DIV_SER_MAPPING
+        resp = self._staff_client().post(
+            "/api/correlations/search-rules/",
+            self._payload(org, distinct_field="data.dstuser"), format="json",
+        )
+        assert resp.status_code == 400
+        assert "legs" in resp.data
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_non_aggregatable_distinct_field_rejected(self, mock_mapping, org):
+        mock_mapping.return_value = _DIV_SER_MAPPING
+        resp = self._staff_client().post(
+            "/api/correlations/search-rules/",
+            self._payload(org, distinct_field="rule.description"), format="json",
+        )
+        assert resp.status_code == 400
+        assert "legs" in resp.data
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_no_diversity_rule_unaffected(self, mock_mapping, org):
+        """A leg without a distinct_field saves normally (no diversity validation)."""
+        mock_mapping.return_value = _DIV_SER_MAPPING
+        with patch("correlations.services.search_schedule.sync_rule_schedule"):
+            resp = self._staff_client().post(
+                "/api/correlations/search-rules/",
+                self._payload(org, distinct_field=""), format="json",
+            )
+        assert resp.status_code == 201, resp.data

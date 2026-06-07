@@ -647,7 +647,7 @@ class _SearchRuleLegSerializer(_s.ModelSerializer):
 
     class Meta:
         model = SearchRuleLeg
-        fields = ["id", "count", "display_order", "conditions"]
+        fields = ["id", "count", "display_order", "distinct_field", "min_distinct", "conditions"]
 
 
 class _SearchRuleSerializer(_s.ModelSerializer):
@@ -687,6 +687,37 @@ class _SearchRuleSerializer(_s.ModelSerializer):
                     f"'{value}' maps to a non-aggregatable text field and cannot be used as a correlation key."
                 )
         return value
+
+    def validate(self, data):
+        """Enforce the Diversity Constraint invariants (ADR-0009) across legs + key.
+
+        A diversity constraint needs the rule's correlation_key to group by, so this is an
+        object-level (cross-field) check. On PATCH, fall back to the saved correlation_key.
+        """
+        from correlations.models import CORRELATION_KEY_NONE
+        from correlations.services.search_compiler import validate_diversity_constraint
+
+        legs = data.get("legs")
+        if legs is None:
+            return data
+
+        corr_key = data.get("correlation_key")
+        if corr_key is None:
+            corr_key = self.instance.correlation_key if self.instance else CORRELATION_KEY_NONE
+
+        mapping = None
+        for i, leg in enumerate(legs):
+            distinct_field = (leg.get("distinct_field") or "").strip()
+            if not distinct_field:
+                continue
+            if mapping is None:
+                mapping = _get_mapping_safe()
+            ok, reason = validate_diversity_constraint(
+                distinct_field, leg.get("min_distinct", 1), corr_key, mapping
+            )
+            if not ok:
+                raise _s.ValidationError({"legs": f"Leg {i + 1}: {reason}"})
+        return data
 
     def _create_legs(self, rule, legs_data):
         for leg_data in legs_data:
