@@ -407,6 +407,93 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
 
 // ── DebugModal ─────────────────────────────────────────────────────────────
 
+function DebugSummary({ result }) {
+  if (!result || result.error || !result.legs?.length) return null;
+
+  const isSingle = result.mode === 'single';
+
+  const legSummaries = result.legs.map((leg, i) => {
+    const needed = leg.count ?? 1;
+    if (isSingle) {
+      if (leg.hit_error) return { index: i, fulfilled: false, reason: `Query error: ${leg.hit_error}`, needed };
+      const total = leg.hit_response?.hits?.total?.value ?? 0;
+      return { index: i, fulfilled: total >= needed, total, needed };
+    } else {
+      if (leg.agg_error) return { index: i, fulfilled: false, reason: `Aggregation error: ${leg.agg_error}`, needed, passing: [], all: [] };
+      const buckets = leg.agg_response?.aggregations?.key_agg?.buckets ?? [];
+      const passing = buckets.filter(b => b.doc_count >= needed);
+      return { index: i, fulfilled: passing.length > 0, needed, passing, all: buckets };
+    }
+  });
+
+  let overallFires = legSummaries.every(s => s.fulfilled);
+  let firingKeys = null;
+  if (!isSingle && overallFires && legSummaries.length > 1) {
+    const sets = legSummaries.map(s => new Set((s.passing ?? []).map(b => b.key)));
+    firingKeys = [...sets[0]].filter(k => sets.slice(1).every(s => s.has(k)));
+    overallFires = firingKeys.length > 0;
+  }
+
+  return (
+    <div className={`rounded-md border px-4 py-3 space-y-3 ${overallFires ? 'border-green-500/40 bg-green-50 dark:bg-green-900/15' : 'border-red-500/40 bg-red-50 dark:bg-red-900/15'}`}>
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Evaluation Summary</p>
+
+      <div className="space-y-2">
+        {legSummaries.map((s) => (
+          <div key={s.index} className="space-y-1">
+            <div className="flex items-center gap-2 text-sm">
+              <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${s.fulfilled ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'}`}>
+                {s.fulfilled ? '✓' : '✗'} Leg {s.index + 1}
+              </span>
+              {isSingle ? (
+                <span className="text-xs text-muted-foreground">
+                  {s.reason ?? (
+                    s.fulfilled
+                      ? <span className="text-green-700 dark:text-green-400">{s.total} hit{s.total !== 1 ? 's' : ''} — threshold met (≥ {s.needed})</span>
+                      : <span className="text-red-700 dark:text-red-400">{s.total} hit{s.total !== 1 ? 's' : ''} — below threshold (≥ {s.needed} required)</span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  {s.reason ?? (
+                    s.fulfilled
+                      ? <span className="text-green-700 dark:text-green-400">{s.passing.length} key value{s.passing.length !== 1 ? 's' : ''} met threshold (≥ {s.needed} hits each)</span>
+                      : s.all.length === 0
+                        ? <span className="text-red-700 dark:text-red-400">No events matched — threshold is ≥ {s.needed} hits per key value</span>
+                        : <span className="text-red-700 dark:text-red-400">No key value reached ≥ {s.needed} hits (best: {Math.max(...s.all.map(b => b.doc_count))})</span>
+                  )}
+                </span>
+              )}
+            </div>
+            {!isSingle && !s.reason && s.passing.length > 0 && (
+              <div className="ml-16 flex flex-wrap gap-1">
+                {s.passing.map(b => (
+                  <span key={b.key} className="rounded bg-green-100 dark:bg-green-900/30 px-1.5 py-0.5 text-xs text-green-800 dark:text-green-300">
+                    {b.key} ({b.doc_count})
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className={`flex items-center gap-2 pt-1 border-t ${overallFires ? 'border-green-500/30' : 'border-red-500/30'}`}>
+        <span className={`text-sm font-medium ${overallFires ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+          {overallFires
+            ? isSingle
+              ? '✓ Rule would fire — all legs met their thresholds'
+              : `✓ Rule would fire for ${firingKeys?.length ?? 1} key value${(firingKeys?.length ?? 1) !== 1 ? 's' : ''}: ${firingKeys?.join(', ')}`
+            : isSingle
+              ? `✗ Rule would NOT fire — ${legSummaries.filter(s => !s.fulfilled).length} leg${legSummaries.filter(s => !s.fulfilled).length !== 1 ? 's' : ''} did not meet threshold`
+              : '✗ Rule would NOT fire — no key value satisfied all legs'
+          }
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function DebugModal({ rule, orgs, onClose }) {
   const [orgSlug, setOrgSlug] = useState(orgs[0]?.slug ?? '');
   const [running, setRunning] = useState(false);
@@ -480,6 +567,8 @@ function DebugModal({ rule, orgs, onClose }) {
               {result.error && (
                 <div className="rounded-md bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">{result.error}</div>
               )}
+
+              <DebugSummary result={result} />
 
               {result.legs?.map((leg, i) => (
                 <div key={i} className="space-y-3">

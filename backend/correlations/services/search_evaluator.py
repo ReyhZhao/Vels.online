@@ -367,7 +367,7 @@ def debug_run(rule, org) -> dict:
     }
 
     for leg in legs:
-        leg_entry: dict = {"leg_id": leg.id, "display_order": leg.display_order}
+        leg_entry: dict = {"leg_id": leg.id, "display_order": leg.display_order, "count": leg.count}
         conditions = list(leg.conditions.all())
 
         if use_multi:
