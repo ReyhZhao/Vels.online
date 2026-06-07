@@ -661,6 +661,83 @@ def test_gemini_send_contact_message_empty_message_stripped(incident, incident_c
     assert len(result.warnings) >= 1
 
 
+# ── prose fallback: non-JSON response treated as assistant_reply ───────────────
+
+@pytest.mark.django_db
+def test_gemini_prose_fallback_returns_result(incident):
+    """When Gemini returns non-JSON prose, assist_incident must return an AssistantResult
+    with the prose as assistant_reply and an empty proposed_actions list."""
+    from incidents.llm.gemini import GeminiTriageProvider
+    from google.genai import types as genai_types
+
+    grounding = build_incident_grounding(incident)
+    prose = "Om een commentaar toe te voegen, moet je naar de incidentpagina gaan."
+
+    mock_provider = MagicMock(spec=GeminiTriageProvider)
+    mock_response = MagicMock()
+    mock_response.text = prose
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+    mock_provider._client = mock_client
+    mock_provider._types = genai_types
+
+    from django.conf import settings
+    with patch.object(settings, "GEMINI_MODEL", "gemini-test", create=True):
+        result = GeminiTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert result.assistant_reply == prose
+    assert result.proposed_actions == []
+    assert len(result.warnings) == 1
+    assert "plain text" in result.warnings[0]
+
+
+@pytest.mark.django_db
+def test_ollama_prose_fallback_returns_result(incident):
+    """When Ollama returns non-JSON prose, assist_incident must return an AssistantResult
+    with the prose as assistant_reply and an empty proposed_actions list."""
+    from incidents.llm.ollama import OllamaTriageProvider
+
+    grounding = build_incident_grounding(incident)
+    prose = "This CVE affects OpenSSL versions prior to 3.0.7 and has a CVSS score of 7.5."
+
+    mock_provider = MagicMock(spec=OllamaTriageProvider)
+    mock_response = MagicMock()
+    mock_response.message.content = prose
+    mock_provider._client = MagicMock()
+    mock_provider._client.chat.return_value = mock_response
+    mock_provider._model = "mistral"
+
+    result = OllamaTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert result.assistant_reply == prose
+    assert result.proposed_actions == []
+    assert len(result.warnings) == 1
+    assert "plain text" in result.warnings[0]
+
+
+@pytest.mark.django_db
+def test_gemini_prose_fallback_returns_200_via_endpoint(client, staff, incident):
+    """Endpoint must return 200 when the provider falls back to prose (no 502)."""
+    from incidents.llm.base import AssistantResult
+    prose_result = AssistantResult(
+        assistant_reply="Dit is een informatieve tekst over het incident.",
+        proposed_actions=[],
+        warnings=["Provider returned plain text instead of the expected JSON envelope; proposed actions are unavailable."],
+    )
+    mock = MagicMock()
+    mock.assist_incident.return_value = prose_result
+
+    client.force_login(staff)
+    with patch("incidents.llm.factory.get_assistant_provider", return_value=mock):
+        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["assistant_reply"] == prose_result.assistant_reply
+    assert data["proposed_actions"] == []
+    assert len(data["warnings"]) == 1
+
+
 # ── existing action types continue to work ────────────────────────────────────
 
 @pytest.mark.django_db

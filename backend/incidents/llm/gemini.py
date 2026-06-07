@@ -519,18 +519,26 @@ class GeminiTriageProvider(BaseTriageProvider):
                 contents=contents,
                 config=self._types.GenerateContentConfig(
                     system_instruction=system_prompt,
+                    response_mime_type="application/json",
                 ),
             )
             raw = response.text.strip()
         except Exception as exc:
             raise AssistantError(f"Gemini API error: {exc}") from exc
 
+        if not raw:
+            raise AssistantError("Gemini returned an empty response.")
+
         raw = _strip_code_fence_if_present(raw)
 
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise AssistantError(f"Gemini returned non-JSON: {raw[:200]}") from exc
+        except json.JSONDecodeError:
+            return AssistantResult(
+                assistant_reply=raw,
+                proposed_actions=[],
+                warnings=["Provider returned plain text instead of the expected JSON envelope; proposed actions are unavailable."],
+            )
 
         return _parse_assistant_result(data, grounding)
 

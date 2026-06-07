@@ -190,11 +190,18 @@ class OllamaTriageProvider(BaseTriageProvider):
         except Exception as exc:
             raise AssistantError(f"Ollama API error: {exc}") from exc
 
+        if not raw:
+            raise AssistantError("Ollama returned an empty response.")
+
         raw = _strip_code_fence_if_present(raw)
 
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise AssistantError(f"Ollama returned non-JSON: {raw[:200]}") from exc
+        except json.JSONDecodeError:
+            return AssistantResult(
+                assistant_reply=raw,
+                proposed_actions=[],
+                warnings=["Provider returned plain text instead of the expected JSON envelope; proposed actions are unavailable."],
+            )
 
         return _parse_assistant_result(data, grounding)
