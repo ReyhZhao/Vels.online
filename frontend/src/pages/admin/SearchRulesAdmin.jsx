@@ -140,6 +140,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   const [intervalMinutes, setIntervalMinutes] = useState(rule?.interval_minutes ?? 60);
   const [maxFindings, setMaxFindings] = useState(rule?.max_findings_per_run ?? 50);
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
+  const [includeAgentless, setIncludeAgentless] = useState(rule?.include_agentless ?? false);
   const [orgId, setOrgId] = useState(rule === undefined || rule === null ? (orgs[0]?.id ?? '') : (rule?.organization ?? ''));
   const [legs, setLegs] = useState(
     rule?.legs?.length
@@ -187,6 +188,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
       window_minutes: Number(windowMinutes),
       interval_minutes: Number(intervalMinutes),
       max_findings_per_run: Number(maxFindings),
+      include_agentless: includeAgentless,
       enabled,
       organization: orgId === '' ? null : orgId,
       legs: legs.map((l, i) => ({ ...l, display_order: i })),
@@ -340,6 +342,20 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
                   />
                   Enabled
                 </label>
+              </div>
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeAgentless}
+                    onChange={e => setIncludeAgentless(e.target.checked)}
+                    className="rounded"
+                  />
+                  Include agentless events
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Match events from infrastructure components (e.g. reverse proxy, firewalls) that are not linked to a registered Wazuh agent.
+                </p>
               </div>
             </div>
 

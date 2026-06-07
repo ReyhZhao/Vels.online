@@ -138,7 +138,11 @@ function AlertDetailPanel({ alert, onClose, onStateChange, onDelete, orgSlug }) 
             {Object.entries(alert.source_ref).map(([k, v]) => (
               <div key={k} className="flex gap-2 text-xs">
                 <dt className="text-muted-foreground min-w-[100px] shrink-0">{k}</dt>
-                <dd className="text-foreground font-mono break-all">{String(v)}</dd>
+                <dd className="text-foreground font-mono break-all">
+                  {v !== null && typeof v === 'object'
+                    ? <pre className="whitespace-pre-wrap">{JSON.stringify(v, null, 2)}</pre>
+                    : String(v)}
+                </dd>
               </div>
             ))}
           </dl>

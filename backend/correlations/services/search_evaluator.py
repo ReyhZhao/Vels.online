@@ -344,8 +344,11 @@ def debug_run(rule, org) -> dict:
     except (WazuhAPIError, WazuhAuthError) as exc:
         return {"error": f"Failed to fetch agents: {exc}"}
 
-    if not agent_ids:
+    if not agent_ids and not rule.include_agentless:
         return {"error": f"Org '{org.slug}' has no Wazuh agents."}
+
+    # None tells the compiler to omit the agent.id filter entirely.
+    effective_agent_ids = None if rule.include_agentless else agent_ids
 
     legs = list(rule.legs.prefetch_related("conditions"))
     if not legs:
@@ -363,6 +366,7 @@ def debug_run(rule, org) -> dict:
         "window_start": window_start.isoformat(),
         "window_end": now.isoformat(),
         "agent_count": len(agent_ids),
+        "include_agentless": rule.include_agentless,
         "legs": [],
     }
 
@@ -371,7 +375,7 @@ def debug_run(rule, org) -> dict:
         conditions = list(leg.conditions.all())
 
         if use_multi:
-            agg_body = compile_agg_query(conditions, agent_ids, window_start, now, wazuh_field)
+            agg_body = compile_agg_query(conditions, effective_agent_ids, window_start, now, wazuh_field)
             leg_entry["agg_query"] = agg_body
             try:
                 agg_response = client._search(_ALERTS_INDEX, agg_body)
@@ -379,7 +383,7 @@ def debug_run(rule, org) -> dict:
             except OpenSearchError as exc:
                 leg_entry["agg_error"] = str(exc)
 
-        hit_body = compile_query(conditions, agent_ids, window_start, now, rule.max_findings_per_run)
+        hit_body = compile_query(conditions, effective_agent_ids, window_start, now, rule.max_findings_per_run)
         leg_entry["hit_query"] = hit_body
         try:
             hit_response = client._search(_ALERTS_INDEX, hit_body)
@@ -410,9 +414,12 @@ def run(rule, org):
         logger.exception("search_evaluator.run: failed to fetch agents for org %s", org.id)
         return None
 
-    if not agent_ids:
+    if not agent_ids and not rule.include_agentless:
         logger.info("search_evaluator.run: org %s has no agents — skipping rule %s", org.id, rule.id)
         return None
+
+    # None tells the compiler to omit the agent.id filter entirely.
+    effective_agent_ids = None if rule.include_agentless else agent_ids
 
     legs = list(rule.legs.prefetch_related("conditions"))
     if not legs:
@@ -425,6 +432,6 @@ def run(rule, org):
     use_multi = rule.correlation_key != CORRELATION_KEY_NONE and len(legs) > 1
 
     if use_multi:
-        return _run_multi_leg(rule, org, agent_ids, legs, now, window_start)
+        return _run_multi_leg(rule, org, effective_agent_ids, legs, now, window_start)
     else:
-        return _run_single_leg(rule, org, agent_ids, legs[0], now, window_start)
+        return _run_single_leg(rule, org, effective_agent_ids, legs[0], now, window_start)

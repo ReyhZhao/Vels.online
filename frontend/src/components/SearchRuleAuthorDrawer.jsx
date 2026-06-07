@@ -10,6 +10,7 @@ const EMPTY_DRAFT = {
   interval_minutes: 60,
   max_findings_per_run: 50,
   severity: 'medium',
+  include_agentless: false,
   enabled: true,
   legs: [{ count: 1, display_order: 0, conditions: [{ ...EMPTY_CONDITION }] }],
   organization: undefined,
@@ -475,6 +476,20 @@ export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved 
                     />
                     Enabled
                   </label>
+                </div>
+                <div className="col-span-2">
+                  <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={draft.include_agentless ?? false}
+                      onChange={e => updateDraft({ include_agentless: e.target.checked })}
+                      className="rounded"
+                    />
+                    Include agentless events
+                  </label>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Match events from infrastructure components (e.g. reverse proxy, firewalls) that are not linked to a registered Wazuh agent.
+                  </p>
                 </div>
               </div>
 

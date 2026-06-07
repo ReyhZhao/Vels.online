@@ -113,23 +113,25 @@ def compile_query(
     key_value: str | None = None,
     field_mapping: dict | None = None,
 ) -> dict:
-    """Build an OpenSearch search body scoped to agent_ids and bounded to [window_start, window_end].
+    """Build an OpenSearch search body bounded to [window_start, window_end].
 
+    agent_ids: when a non-empty list, restricts results to those agents; when None,
+    no agent filter is applied (agentless/infrastructure mode).
     If key_field and key_value are supplied an additional term filter is added so results are
     restricted to documents matching that specific correlation key value.
     field_mapping is forwarded to _condition_to_clause for type-aware DSL generation.
     """
-    filters = [
-        {"terms": {"agent.id": [str(a) for a in agent_ids]}},
-        {
-            "range": {
-                "@timestamp": {
-                    "gte": window_start.isoformat(),
-                    "lte": window_end.isoformat(),
-                }
+    filters = []
+    if agent_ids is not None:
+        filters.append({"terms": {"agent.id": [str(a) for a in agent_ids]}})
+    filters.append({
+        "range": {
+            "@timestamp": {
+                "gte": window_start.isoformat(),
+                "lte": window_end.isoformat(),
             }
-        },
-    ]
+        }
+    })
 
     if key_field and key_value is not None:
         filters.append({"term": {key_field: key_value}})

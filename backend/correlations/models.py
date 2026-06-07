@@ -230,6 +230,7 @@ class SearchRule(models.Model):
     window_minutes = models.PositiveIntegerField(default=60)
     interval_minutes = models.PositiveIntegerField(default=60)
     max_findings_per_run = models.PositiveIntegerField(default=_MAX_FINDINGS_DEFAULT)
+    include_agentless = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

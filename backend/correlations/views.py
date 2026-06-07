@@ -658,7 +658,7 @@ class _SearchRuleSerializer(_s.ModelSerializer):
         fields = [
             "id", "organization", "name", "description",
             "severity", "correlation_key", "window_minutes", "interval_minutes",
-            "max_findings_per_run", "enabled", "created_at", "updated_at",
+            "max_findings_per_run", "include_agentless", "enabled", "created_at", "updated_at",
             "legs",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
