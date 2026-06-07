@@ -187,3 +187,51 @@ def test_bulk_update_non_member_cannot_update_asset(client, django_user_model, h
     assert resp.status_code == 404
     host_asset.refresh_from_db()
     assert host_asset.is_permanent is False
+
+
+# ── PATCH /api/assets/<id>/ role ─────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_patch_role_persists(client, staff, host_asset):
+    client.force_login(staff)
+    resp = client.patch(
+        f"/api/assets/{host_asset.pk}/",
+        {"role": Asset.ROLE_FIREWALL},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    assert resp.json()["role"] == Asset.ROLE_FIREWALL
+    host_asset.refresh_from_db()
+    assert host_asset.role == Asset.ROLE_FIREWALL
+
+
+@pytest.mark.django_db
+def test_patch_role_clears_with_empty(client, staff, host_asset):
+    host_asset.role = Asset.ROLE_SERVER
+    host_asset.save(update_fields=["role"])
+    client.force_login(staff)
+    resp = client.patch(
+        f"/api/assets/{host_asset.pk}/",
+        {"role": ""},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    assert resp.json()["role"] is None
+    host_asset.refresh_from_db()
+    assert host_asset.role is None
+
+
+@pytest.mark.django_db
+def test_patch_invalid_role_rejected(client, staff, host_asset):
+    host_asset.role = Asset.ROLE_SERVER
+    host_asset.save(update_fields=["role"])
+    client.force_login(staff)
+    resp = client.patch(
+        f"/api/assets/{host_asset.pk}/",
+        {"role": "not-a-real-role"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    host_asset.refresh_from_db()
+    assert host_asset.role == Asset.ROLE_SERVER

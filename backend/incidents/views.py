@@ -612,6 +612,13 @@ class AssetDetailView(APIView):
             allowed["ip_address"] = request.data["ip_address"] or None
         if "is_permanent" in request.data:
             allowed["is_permanent"] = bool(request.data["is_permanent"])
+        if "role" in request.data:
+            role = request.data["role"] or None
+            if role is not None and role not in dict(Asset.ROLE_CHOICES):
+                return Response(
+                    {"role": "Invalid role."}, status=status.HTTP_400_BAD_REQUEST
+                )
+            allowed["role"] = role
         if not allowed:
             return Response(AssetSerializer(asset).data)
         for field, value in allowed.items():
