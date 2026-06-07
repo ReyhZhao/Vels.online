@@ -8,6 +8,7 @@ from .base import (
     AssistantResult,
     BaseTriageProvider,
     CorrelationResult,
+    ResidualGroupingResult,
     TaskSummaryResult,
     TriageError,
     TriageResult,
@@ -15,11 +16,13 @@ from .base import (
 from .gemini import (
     CLOSURE_MESSAGE_SYSTEM_PROMPT,
     CORRELATION_SYSTEM_PROMPT,
+    RESIDUAL_GROUPING_SYSTEM_PROMPT,
     TASK_SUMMARY_SYSTEM_PROMPT,
     _build_assistant_system_prompt,
     _build_system_prompt,
     _parse_assistant_result,
     _parse_correlation_result,
+    _parse_residual_grouping_result,
     _parse_result,
     _parse_task_summary_result,
     _strip_code_fence_if_present,
@@ -158,6 +161,33 @@ class OllamaTriageProvider(BaseTriageProvider):
 
         return _parse_task_summary_result(data, provider="ollama")
 
+    def group_residual_alerts(self, alerts: list) -> ResidualGroupingResult:
+        if not alerts:
+            return ResidualGroupingResult(provider="ollama")
+        prompt = json.dumps(alerts, indent=2)
+        try:
+            response = self._client.chat(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": RESIDUAL_GROUPING_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            text = response.message.content.strip()
+        except Exception as exc:
+            raise TriageError(f"Ollama residual grouping error: {exc}") from exc
+
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise TriageError(f"Ollama returned non-JSON for residual grouping: {text[:200]}") from exc
+
+        return _parse_residual_grouping_result(data)
+
     def generate_closure_message(self, incident_context: dict) -> str:
         prompt = json.dumps(incident_context, indent=2)
         try:
@@ -190,11 +220,18 @@ class OllamaTriageProvider(BaseTriageProvider):
         except Exception as exc:
             raise AssistantError(f"Ollama API error: {exc}") from exc
 
+        if not raw:
+            raise AssistantError("Ollama returned an empty response.")
+
         raw = _strip_code_fence_if_present(raw)
 
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise AssistantError(f"Ollama returned non-JSON: {raw[:200]}") from exc
+        except json.JSONDecodeError:
+            return AssistantResult(
+                assistant_reply=raw,
+                proposed_actions=[],
+                warnings=["Provider returned plain text instead of the expected JSON envelope; proposed actions are unavailable."],
+            )
 
         return _parse_assistant_result(data, grounding)

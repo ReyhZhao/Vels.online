@@ -21,6 +21,17 @@ function ProposedActionCard({ action, displayId, onConfirmed, onDismiss }) {
         await api.post(`/api/incidents/${displayId}/apply-template/`, {
           template_id: action.payload.template_id,
         });
+      } else if (action.type === 'create_comment') {
+        await api.post(`/api/incidents/${displayId}/comments/`, {
+          body: action.payload.text,
+          is_internal: action.payload.internal !== false,
+        });
+      } else if (action.type === 'send_contact_message') {
+        await api.post(`/api/incidents/${displayId}/contact-messages/`, {
+          contact_id: action.payload.contact_id,
+          role: 'notified',
+          body: action.payload.message,
+        });
       }
       // Record audit event (best-effort; don't block on failure)
       api.post(`/api/incidents/${displayId}/assistant-confirm/`, {
@@ -40,6 +51,8 @@ function ProposedActionCard({ action, displayId, onConfirmed, onDismiss }) {
     update_field: 'Update field',
     transition_state: 'State transition',
     apply_task_template: 'Apply template',
+    create_comment: 'Add comment',
+    send_contact_message: 'Send contact message',
   }[action.type] ?? action.type;
 
   return (
@@ -58,6 +71,18 @@ function ProposedActionCard({ action, displayId, onConfirmed, onDismiss }) {
           ✕
         </button>
       </div>
+      {action.type === 'create_comment' && (
+        <div className="rounded bg-muted px-2 py-1.5 text-xs text-foreground whitespace-pre-wrap">
+          {action.payload.text}
+          <span className="ml-1 text-muted-foreground">({action.payload.internal !== false ? 'internal' : 'org-visible'})</span>
+        </div>
+      )}
+      {action.type === 'send_contact_message' && (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">To: <span className="text-foreground font-medium">{action.payload.contact_name}</span></p>
+          <div className="rounded bg-muted px-2 py-1.5 text-xs text-foreground whitespace-pre-wrap">{action.payload.message}</div>
+        </div>
+      )}
       {error && <p className="text-xs text-destructive">{error}</p>}
       <button
         type="button"

@@ -21,14 +21,19 @@ from .models import (
     OPERATOR_CIDR,
     OPERATOR_GTE,
     OPERATOR_LTE,
+    SEARCH_OPERATOR_CHOICES,
     SOURCE_REF_CATALOG,
     CorrelationRule,
     CorrelationRuleLeg,
     DetectionSuggestion,
     LegCondition,
+    SearchRule,
+    SearchRuleLeg,
+    SearchLegCondition,
+    SearchRuleMute,
     SystemRuleMute,
 )
-from .tasks import _create_incident_from_suggestion
+from .tasks import _create_incident_from_suggestion, run_scheduled_search_rule
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +215,9 @@ class CorrelationCatalogView(APIView):
                 {"value": "process.name", "label": "Process (process.name)"},
             ],
             "severities": ["critical", "high", "medium", "low", "info"],
+            "search_operators": [
+                {"value": v, "label": l} for v, l in SEARCH_OPERATOR_CHOICES
+            ],
         })
 
 
@@ -498,3 +506,438 @@ class CorrelationDraftView(APIView):
             "assistant_reply": result.assistant_reply,
             "warnings": result.warnings + sanitizer_warnings,
         })
+
+
+# ── Search Rule author assistant ─────────────────────────────────────────────
+
+class SearchRuleDraftView(APIView):
+    """Staff-only: two-pass search rule drafter (ADR-0007).
+
+    Pass 1 — provider selects relevant rule.ids from the cached catalog.
+    Pass 2 — provider drafts a SearchRule using lazily-expanded fields for those ids.
+    Endpoint is a pure function of {scope, messages[], current_draft}; nothing is persisted.
+    """
+
+    def post(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+
+        messages = request.data.get("messages") or []
+        if not messages:
+            return Response({"detail": "messages is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        current_draft = request.data.get("current_draft") or None
+        scope = request.data.get("scope")
+
+        org_for_draft = None
+        agent_ids = None
+        if scope and scope != "all":
+            try:
+                org_for_draft = Organization.objects.get(slug=scope)
+            except Organization.DoesNotExist:
+                return Response({"detail": "Unknown scope."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                from security.wazuh import WazuhClient, WazuhAPIError, WazuhAuthError
+                raw_agents = WazuhClient().get_agents(org_for_draft.wazuh_group)
+                agent_ids = [a["id"] for a in raw_agents]
+            except Exception:
+                agent_ids = []
+
+        try:
+            provider = get_draft_provider()
+        except DraftConfigError as exc:
+            return Response(
+                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        from .llm.search_grounding import build_search_grounding, expand_rule_fields
+        from .llm.search_sanitizer import sanitize_search_draft
+
+        grounding = build_search_grounding(scope=scope, agent_ids=agent_ids)
+
+        try:
+            # Pass 1: LLM selects relevant rule.ids from the catalog.
+            selected_ids = provider.select_relevant_rule_ids(messages, grounding)
+        except (DraftConfigError, DraftError) as exc:
+            logger.warning("SearchRuleDraftView pass 1 error: %s", exc)
+            selected_ids = []
+
+        # Lazy field expansion for the selected rule.ids.
+        expanded = expand_rule_fields(
+            rule_ids=selected_ids,
+            agent_ids=agent_ids,
+            mapping=grounding.get("mapping", {}),
+        )
+        grounding["expanded_fields"] = expanded
+
+        try:
+            # Pass 2: LLM drafts the rule using expanded fields.
+            result = provider.draft_search_rule(messages, grounding, current_draft)
+        except DraftConfigError as exc:
+            return Response(
+                {"detail": "Rule-author assistant is unavailable.", "reason": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except DraftError as exc:
+            logger.warning("SearchRuleDraftView pass 2 error: %s", exc)
+            return Response(
+                {"detail": "Assistant failed to produce a valid draft.", "reason": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        mapping = grounding.get("mapping", {})
+        sanitized, sanitizer_warnings = sanitize_search_draft(result.updated_draft, mapping)
+        sanitized["organization"] = org_for_draft.pk if org_for_draft else None
+
+        return Response({
+            "updated_draft": sanitized,
+            "assistant_reply": result.assistant_reply,
+            "warnings": result.warnings + sanitizer_warnings,
+        })
+
+
+# ── Scheduled Search Rule CRUD ────────────────────────────────────────────────
+
+# Curated core fields exposed in the search rule builder (friendly labels + expected types).
+_SEARCH_CORE_FIELDS = [
+    {"value": "rule.id",           "label": "Rule ID",          "type": "keyword"},
+    {"value": "rule.level",        "label": "Rule Level",        "type": "long"},
+    {"value": "rule.description",  "label": "Rule Description",  "type": "text"},
+    {"value": "rule.groups",       "label": "Rule Groups",       "type": "keyword"},
+    {"value": "agent.name",        "label": "Agent Name",        "type": "keyword"},
+    {"value": "agent.id",          "label": "Agent ID",          "type": "keyword"},
+    {"value": "data.srcip",        "label": "Source IP",         "type": "ip"},
+    {"value": "data.dstip",        "label": "Destination IP",    "type": "ip"},
+    {"value": "data.dstuser",      "label": "Destination User",  "type": "keyword"},
+    {"value": "data.audit.comm",   "label": "Audit Command",     "type": "keyword"},
+    {"value": "data.sha256",       "label": "File SHA256",       "type": "keyword"},
+]
+
+
+def _get_mapping_safe() -> dict:
+    """Fetch the live field mapping; return {} on any error."""
+    try:
+        from security.opensearch import OpenSearchClient
+        return OpenSearchClient().get_field_mapping()
+    except Exception:
+        logger.warning("SearchRule validation: could not fetch field mapping — skipping type check")
+        return {}
+
+
+class _SearchLegConditionSerializer(_s.ModelSerializer):
+    class Meta:
+        model = SearchLegCondition
+        fields = ["id", "field_name", "operator", "value"]
+
+    def validate(self, data):
+        from correlations.services.search_compiler import validate_search_field
+        field_name = data.get("field_name", "")
+        operator = data.get("operator", "")
+        mapping = _get_mapping_safe()
+        ok, reason = validate_search_field(field_name, operator, mapping)
+        if not ok:
+            raise _s.ValidationError({"field_name": reason})
+        return data
+
+
+class _SearchRuleLegSerializer(_s.ModelSerializer):
+    conditions = _SearchLegConditionSerializer(many=True)
+
+    class Meta:
+        model = SearchRuleLeg
+        fields = ["id", "count", "display_order", "conditions"]
+
+
+class _SearchRuleSerializer(_s.ModelSerializer):
+    legs = _SearchRuleLegSerializer(many=True)
+
+    class Meta:
+        model = SearchRule
+        fields = [
+            "id", "organization", "name", "description",
+            "severity", "correlation_key", "window_minutes", "interval_minutes",
+            "max_findings_per_run", "enabled", "created_at", "updated_at",
+            "legs",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_interval_minutes(self, value):
+        from correlations.models import _MIN_INTERVAL_MINUTES
+        if value < _MIN_INTERVAL_MINUTES:
+            raise _s.ValidationError(
+                f"interval_minutes must be at least {_MIN_INTERVAL_MINUTES}."
+            )
+        return value
+
+    def validate_correlation_key(self, value):
+        from correlations.models import CORRELATION_KEY_NONE
+        from correlations.services.search_compiler import (
+            CORRELATION_KEY_TO_WAZUH_FIELD,
+            is_aggregatable_field,
+        )
+        if value == CORRELATION_KEY_NONE:
+            return value
+        wazuh_field = CORRELATION_KEY_TO_WAZUH_FIELD.get(value)
+        if wazuh_field:
+            mapping = _get_mapping_safe()
+            if mapping and not is_aggregatable_field(wazuh_field, mapping):
+                raise _s.ValidationError(
+                    f"'{value}' maps to a non-aggregatable text field and cannot be used as a correlation key."
+                )
+        return value
+
+    def _create_legs(self, rule, legs_data):
+        for leg_data in legs_data:
+            conditions_data = leg_data.pop("conditions", [])
+            leg = SearchRuleLeg.objects.create(rule=rule, **leg_data)
+            for cond_data in conditions_data:
+                SearchLegCondition.objects.create(leg=leg, **cond_data)
+
+    def create(self, validated_data):
+        from correlations.services.search_schedule import sync_rule_schedule
+        legs_data = validated_data.pop("legs", [])
+        rule = SearchRule.objects.create(**validated_data)
+        self._create_legs(rule, legs_data)
+        sync_rule_schedule(rule)
+        return rule
+
+    def update(self, instance, validated_data):
+        from correlations.services.search_schedule import sync_rule_schedule
+        legs_data = validated_data.pop("legs", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if legs_data is not None:
+            instance.legs.all().delete()
+            self._create_legs(instance, legs_data)
+        sync_rule_schedule(instance)
+        return instance
+
+
+def _fetch_search_rule(pk):
+    try:
+        return SearchRule.objects.prefetch_related("legs__conditions").get(pk=pk)
+    except SearchRule.DoesNotExist:
+        return None
+
+
+class SearchRuleListView(APIView):
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        rules = SearchRule.objects.prefetch_related("legs__conditions").order_by("name")
+        return Response(_SearchRuleSerializer(rules, many=True).data)
+
+    def post(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        serializer = _SearchRuleSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        rule = serializer.save()
+        return Response(
+            _SearchRuleSerializer(
+                SearchRule.objects.prefetch_related("legs__conditions").get(pk=rule.pk)
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SearchRuleDetailView(APIView):
+    def get(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_SearchRuleSerializer(rule).data)
+
+    def patch(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = _SearchRuleSerializer(rule, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(
+            _SearchRuleSerializer(
+                SearchRule.objects.prefetch_related("legs__conditions").get(pk=pk)
+            ).data
+        )
+
+    def delete(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        from correlations.services.search_schedule import delete_rule_schedule
+        delete_rule_schedule(rule)
+        rule.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SearchRuleRunNowView(APIView):
+    """Staff-only: immediately enqueue a SearchRule run."""
+
+    def post(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        rule = _fetch_search_rule(pk)
+        if rule is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        result = run_scheduled_search_rule.delay(rule.id)
+        return Response({"task_id": result.id}, status=status.HTTP_202_ACCEPTED)
+
+
+class SearchCatalogView(APIView):
+    """Staff-only: return the field catalog for the search rule builder.
+
+    Returns the curated core fields plus all fields populated in the index mapping,
+    each annotated with valid operators for that field type. Also returns the rule
+    catalog (top rule.id values seen in recent data) for scope-aware grounding.
+    """
+
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+
+        from correlations.services.search_compiler import _operators_for_type
+        from security.opensearch import OpenSearchClient, OpenSearchError
+
+        scope = request.query_params.get("scope", "all")
+
+        # Resolve agent IDs for scope-aware rule catalog.
+        agent_ids: list | None = None
+        if scope != "all":
+            try:
+                org = Organization.objects.get(slug=scope)
+                from security.wazuh import WazuhClient, WazuhAPIError, WazuhAuthError
+                try:
+                    raw_agents = WazuhClient().get_agents(org.wazuh_group)
+                    agent_ids = [a["id"] for a in raw_agents]
+                except (WazuhAPIError, WazuhAuthError):
+                    agent_ids = []
+            except Organization.DoesNotExist:
+                return Response({"detail": "Unknown scope."}, status=status.HTTP_400_BAD_REQUEST)
+
+        client = OpenSearchClient()
+
+        # Fetch live mapping.
+        mapping: dict = {}
+        try:
+            mapping = client.get_field_mapping()
+        except OpenSearchError:
+            logger.warning("SearchCatalogView: could not fetch field mapping")
+
+        # Fetch rule catalog.
+        rule_catalog: dict = {}
+        try:
+            rule_catalog = client.get_rule_catalog(agent_ids=agent_ids)
+        except OpenSearchError:
+            logger.warning("SearchCatalogView: could not fetch rule catalog")
+
+        core_field_names = {f["value"] for f in _SEARCH_CORE_FIELDS}
+
+        # Annotate core fields with operators from live mapping (fall back to declared type).
+        core_fields = []
+        for f in _SEARCH_CORE_FIELDS:
+            live_type = mapping.get(f["value"], f["type"])
+            core_fields.append({
+                **f,
+                "type": live_type,
+                "operators": _operators_for_type(live_type),
+                "core": True,
+            })
+
+        # Non-core mapping fields for autocomplete.
+        extra_fields = [
+            {
+                "value": field,
+                "label": field,
+                "type": ftype,
+                "operators": _operators_for_type(ftype),
+                "core": False,
+            }
+            for field, ftype in sorted(mapping.items())
+            if field not in core_field_names
+        ]
+
+        return Response({
+            "core_fields": core_fields,
+            "fields": extra_fields,
+            "rule_catalog": rule_catalog,
+        })
+
+
+# ── Per-org system search rule mute views ─────────────────────────────────────
+
+class OrgSystemSearchRulesView(APIView):
+    """List system search rules with per-org mute status. Staff only."""
+
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        org, err = _get_org_for_staff(request)
+        if err:
+            return err
+
+        system_rules = (
+            SearchRule.objects
+            .filter(organization=None)
+            .prefetch_related("legs__conditions")
+            .order_by("name")
+        )
+        muted_ids = set(
+            SearchRuleMute.objects.filter(organization=org).values_list("rule_id", flat=True)
+        )
+        data = []
+        for rule in system_rules:
+            row = _SearchRuleSerializer(rule).data
+            row["muted"] = rule.id in muted_ids
+            data.append(row)
+        return Response(data)
+
+
+class OrgSystemSearchRuleMuteView(APIView):
+    """Create or remove a mute record for a system search rule + org pair. Staff only."""
+
+    def _resolve(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return None, None, err
+        org, err = _get_org_for_staff(request)
+        if err:
+            return None, None, err
+        try:
+            rule = SearchRule.objects.get(pk=pk, organization=None)
+        except SearchRule.DoesNotExist:
+            return None, None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return rule, org, None
+
+    def post(self, request, pk):
+        rule, org, err = self._resolve(request, pk)
+        if err:
+            return err
+        SearchRuleMute.objects.get_or_create(organization=org, rule=rule)
+        return Response({"rule_id": rule.id, "muted": True})
+
+    def delete(self, request, pk):
+        rule, org, err = self._resolve(request, pk)
+        if err:
+            return err
+        SearchRuleMute.objects.filter(organization=org, rule=rule).delete()
+        return Response({"rule_id": rule.id, "muted": False})

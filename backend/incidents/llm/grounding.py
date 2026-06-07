@@ -62,6 +62,12 @@ def build_incident_grounding(incident) -> dict:
 
     allowed_transitions = sorted(ALLOWED_TRANSITIONS.get(incident.state, set()))
 
+    from contacts.models import IncidentContact
+    contacts = [
+        {"id": r.contact_id, "name": r.contact.name}
+        for r in IncidentContact.objects.filter(incident=incident).select_related("contact")
+    ]
+
     return {
         "incident": {
             "display_id": incident.display_id,
@@ -87,4 +93,5 @@ def build_incident_grounding(incident) -> dict:
         "available_templates": available_templates,
         "allowed_transitions": allowed_transitions,
         "field_allowlist": sorted(ASSISTANT_FIELD_ALLOWLIST),
+        "contacts": contacts,
     }

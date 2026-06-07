@@ -1,59 +1,48 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../lib/axios';
 
-const EMPTY_CONDITION = { field_kind: 'alert_field', field_name: '', operator: '', value: '' };
+const EMPTY_CONDITION = { field_name: '', operator: 'equals', value: '' };
 const EMPTY_DRAFT = {
   name: '',
   description: '',
   correlation_key: 'none',
   window_minutes: 60,
+  interval_minutes: 60,
+  max_findings_per_run: 50,
   severity: 'medium',
   enabled: true,
   legs: [{ count: 1, display_order: 0, conditions: [{ ...EMPTY_CONDITION }] }],
   organization: undefined,
 };
 
-function ConditionRow({ cond, index, catalog, onChange, onRemove }) {
-  const fieldOptions = catalog?.fields?.[cond.field_kind] ?? [];
-  const operatorOptions = catalog?.operators?.[cond.field_kind] ?? [];
+const SEARCH_OPERATORS = [
+  { value: 'equals', label: 'Equals' },
+  { value: 'contains', label: 'Contains' },
+  { value: 'gte', label: '>=' },
+  { value: 'lte', label: '<=' },
+  { value: 'cidr', label: 'IP in CIDR' },
+];
 
+function ConditionRow({ cond, index, onChange, onRemove }) {
   return (
     <div className="flex gap-2 items-start flex-wrap">
-      <select
-        value={cond.field_kind}
-        onChange={e => onChange(index, { field_kind: e.target.value, field_name: '', operator: '', value: '' })}
-        aria-label="Field kind"
-        className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-      >
-        {(catalog?.field_kinds ?? []).map(fk => (
-          <option key={fk.value} value={fk.value}>{fk.label}</option>
-        ))}
-      </select>
-
-      <select
+      <input
         value={cond.field_name}
         onChange={e => onChange(index, { ...cond, field_name: e.target.value })}
+        placeholder="Wazuh field (e.g. rule.id)"
         aria-label="Field name"
-        className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-      >
-        <option value="">Field…</option>
-        {fieldOptions.map(f => (
-          <option key={f.value} value={f.value}>{f.label}</option>
-        ))}
-      </select>
-
+        className="flex-1 min-w-32 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+      />
       <select
         value={cond.operator}
         onChange={e => onChange(index, { ...cond, operator: e.target.value })}
         aria-label="Operator"
         className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
       >
-        <option value="">Op…</option>
-        {operatorOptions.map(op => (
+        {SEARCH_OPERATORS.map(op => (
           <option key={op.value} value={op.value}>{op.label}</option>
         ))}
       </select>
-
       <input
         value={cond.value}
         onChange={e => onChange(index, { ...cond, value: e.target.value })}
@@ -61,7 +50,6 @@ function ConditionRow({ cond, index, catalog, onChange, onRemove }) {
         aria-label="Value"
         className="flex-1 min-w-20 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
       />
-
       <button
         type="button"
         onClick={() => onRemove(index)}
@@ -74,7 +62,7 @@ function ConditionRow({ cond, index, catalog, onChange, onRemove }) {
   );
 }
 
-function LegEditor({ leg, legIndex, catalog, onChange, onRemove }) {
+function LegEditor({ leg, legIndex, onChange, onRemove }) {
   function updateCondition(condIdx, updates) {
     const conds = leg.conditions.map((c, i) => i === condIdx ? { ...c, ...updates } : c);
     onChange(legIndex, { ...leg, conditions: conds });
@@ -106,7 +94,7 @@ function LegEditor({ leg, legIndex, catalog, onChange, onRemove }) {
               aria-label={`Leg ${legIndex + 1} count`}
               className="w-14 rounded border border-border bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
             />
-            alerts
+            matching docs
           </label>
         </div>
         <button
@@ -124,7 +112,6 @@ function LegEditor({ leg, legIndex, catalog, onChange, onRemove }) {
             key={ci}
             cond={cond}
             index={ci}
-            catalog={catalog}
             onChange={updateCondition}
             onRemove={removeCondition}
           />
@@ -143,38 +130,27 @@ function LegEditor({ leg, legIndex, catalog, onChange, onRemove }) {
 }
 
 /**
- * Conversational rule-drafting drawer.
- * Replays messages[] + current_draft to the draft endpoint each turn.
- * Server stays stateless; conversation lives in client state and disappears on close.
- *
- * initialScope  — pre-select scope dropdown (org slug or 'all')
- * initialMessage — if set, auto-sends this as the first turn once data loads
+ * Two-pass AI drafting drawer for Scheduled Search Rules.
+ * Replays messages[] + current_draft to the search-draft endpoint each turn.
+ * Server stays stateless (ADR-0005); conversation lives in client state.
  */
-export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMessage, onClose, onSaved }) {
+export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved }) {
   const [messages, setMessages] = useState([]);
-  const [draft, setDraft] = useState(() => ({ ...EMPTY_DRAFT, ...(initialDraft || {}) }));
+  const [draft, setDraft] = useState({ ...EMPTY_DRAFT });
   const [warnings, setWarnings] = useState([]);
   const [scope, setScope] = useState(initialScope || 'all');
   const [orgs, setOrgs] = useState([]);
-  const [catalog, setCatalog] = useState(null);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const threadRef = useRef(null);
-  const hasAutoSent = useRef(false);
 
   useEffect(() => {
-    Promise.all([
-      api.get('/api/correlations/catalog/'),
-      api.get('/api/security/organizations/'),
-    ]).then(([catalogRes, orgsRes]) => {
-      setCatalog(catalogRes.data);
-      setOrgs(orgsRes.data);
-    }).catch(() => {});
+    api.get('/api/security/organizations/').then(res => setOrgs(res.data)).catch(() => {});
   }, []);
 
-  // Keep draft.organization in sync with the scope selector so pre-AI saves are correct.
+  // Keep draft.organization in sync with the scope selector.
   useEffect(() => {
     if (scope === 'all') {
       setDraft(prev => ({ ...prev, organization: null }));
@@ -184,19 +160,11 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
     }
   }, [scope, orgs]);
 
-  // Auto-scroll conversation thread to bottom.
   useEffect(() => {
     if (threadRef.current) {
       threadRef.current.scrollTop = threadRef.current.scrollHeight;
     }
   }, [messages, loading]);
-
-  // Auto-send initialMessage once catalog is available (signals data load complete).
-  useEffect(() => {
-    if (!initialMessage || hasAutoSent.current || catalog === null) return;
-    hasAutoSent.current = true;
-    handleSend(initialMessage); // eslint-disable-line react-hooks/exhaustive-deps
-  }, [catalog, initialMessage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSend(messageOverride) {
     const content = messageOverride !== undefined ? messageOverride : input.trim();
@@ -209,7 +177,7 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
     setError(null);
 
     try {
-      const res = await api.post('/api/correlations/draft/', {
+      const res = await api.post('/api/correlations/search-draft/', {
         messages: nextMessages,
         current_draft: draft.name ? draft : null,
         scope,
@@ -259,7 +227,7 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
       legs: draft.legs.map((l, i) => ({ ...l, display_order: i })),
     };
     try {
-      const res = await api.post('/api/correlations/rules/', payload);
+      const res = await api.post('/api/correlations/search-rules/', payload);
       onSaved(res.data);
     } catch (err) {
       const d = err.response?.data;
@@ -273,6 +241,16 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
     }
   }
 
+  const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
+  const CORR_KEYS = [
+    { value: 'none', label: 'None (org-wide)' },
+    { value: 'host.name', label: 'Host' },
+    { value: 'source.ip', label: 'Source IP' },
+    { value: 'user.name', label: 'Username' },
+    { value: 'file.hash.sha256', label: 'File Hash' },
+    { value: 'process.name', label: 'Process' },
+  ];
+
   const canSave = draft.name.trim().length > 0 && draft.legs.length > 0;
 
   return (
@@ -283,9 +261,9 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Draft with AI</h2>
+            <h2 className="text-lg font-semibold text-foreground">Draft Search Rule with AI</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Converse to refine — edit any field directly, then save
+              Two-pass drafting: AI selects relevant Wazuh rules, then drafts conditions. Edit and save.
             </p>
           </div>
           <button
@@ -323,7 +301,7 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
             <div ref={threadRef} className="flex-1 overflow-y-auto thin-scrollbar px-4 py-3 space-y-3 min-h-0">
               {messages.length === 0 && !loading && (
                 <p className="text-xs text-muted-foreground text-center mt-8">
-                  Describe what to detect. Follow up to refine the draft.
+                  Describe what to detect in raw Wazuh events. Follow up to refine the draft.
                 </p>
               )}
               {messages.map((msg, i) => (
@@ -342,7 +320,7 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
               {loading && (
                 <div className="flex justify-start">
                   <div className="rounded-lg px-3 py-2 text-xs bg-muted text-muted-foreground">
-                    Drafting…
+                    Selecting rules + drafting…
                   </div>
                 </div>
               )}
@@ -436,8 +414,21 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
                     aria-label="Correlation key"
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   >
-                    {(catalog?.correlation_keys ?? []).map(ck => (
+                    {CORR_KEYS.map(ck => (
                       <option key={ck.value} value={ck.value}>{ck.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">Severity</label>
+                  <select
+                    value={draft.severity}
+                    onChange={e => updateDraft({ severity: e.target.value })}
+                    aria-label="Severity"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    {SEVERITIES.map(s => (
+                      <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
                     ))}
                   </select>
                 </div>
@@ -453,17 +444,26 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-foreground mb-1">Incident severity</label>
-                  <select
-                    value={draft.severity}
-                    onChange={e => updateDraft({ severity: e.target.value })}
-                    aria-label="Severity"
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    {(catalog?.severities ?? ['critical', 'high', 'medium', 'low', 'info']).map(s => (
-                      <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-                    ))}
-                  </select>
+                  <label className="block text-xs font-medium text-foreground mb-1">Interval (minutes)</label>
+                  <input
+                    type="number"
+                    min={5}
+                    value={draft.interval_minutes}
+                    onChange={e => updateDraft({ interval_minutes: Number(e.target.value) })}
+                    aria-label="Interval minutes"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">Max findings / run</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={draft.max_findings_per_run}
+                    onChange={e => updateDraft({ max_findings_per_run: Number(e.target.value) })}
+                    aria-label="Max findings per run"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
                 </div>
                 <div className="flex items-end pb-1">
                   <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
@@ -497,7 +497,6 @@ export default function RuleAuthorDrawer({ initialDraft, initialScope, initialMe
                     key={li}
                     leg={leg}
                     legIndex={li}
-                    catalog={catalog}
                     onChange={updateLeg}
                     onRemove={removeLeg}
                   />

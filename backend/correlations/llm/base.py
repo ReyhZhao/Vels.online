@@ -28,3 +28,20 @@ class BaseDraftProvider(ABC):
         current_draft: Optional[dict] = None,
     ) -> RuleDraftResult:
         """Given conversation messages and vocabulary grounding, return a drafted or updated rule."""
+
+    @abstractmethod
+    def select_relevant_rule_ids(
+        self,
+        messages: list,
+        grounding: dict,
+    ) -> List[str]:
+        """Pass 1: given messages and grounding (with rule_catalog), return relevant rule.id list."""
+
+    @abstractmethod
+    def draft_search_rule(
+        self,
+        messages: list,
+        grounding: dict,
+        current_draft: Optional[dict] = None,
+    ) -> RuleDraftResult:
+        """Pass 2: given messages and expanded grounding, return a drafted search rule."""

@@ -27,7 +27,7 @@ def _get_window_alerts(org, correlation_key, key_value, window_start):
     qs = Alert.objects.filter(
         organization=org,
         created_at__gte=window_start,
-    ).select_related("incident").prefetch_related("entities")
+    ).exclude(source_kind="scheduled_search").select_related("incident").prefetch_related("entities")
 
     if correlation_key != "none":
         qs = qs.filter(entities__entity_type=correlation_key, entities__value=key_value).distinct()

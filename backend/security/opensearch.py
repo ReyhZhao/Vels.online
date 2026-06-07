@@ -1,4 +1,5 @@
 import os
+import time
 
 import requests
 import urllib3
@@ -7,6 +8,23 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _ALERTS_INDEX = "wazuh-alerts-4.x-*"
 _VULNS_INDEX = "wazuh-states-vulnerabilities-wazuh"
+
+_MAPPING_TTL = 300  # seconds
+_RULE_CATALOG_TTL = 300
+
+_field_mapping_cache: dict = {}  # {"ts": float, "data": dict}
+_rule_catalog_cache: dict = {}   # {cache_key: {"ts": float, "data": dict}}
+
+
+def _flatten_mapping(properties: dict, prefix: str, result: dict) -> None:
+    """Recursively flatten OpenSearch field properties into {dot.path: type}."""
+    for name, defn in properties.items():
+        path = f"{prefix}.{name}" if prefix else name
+        if "type" in defn:
+            result[path] = defn["type"]
+        sub_props = defn.get("properties")
+        if sub_props:
+            _flatten_mapping(sub_props, path, result)
 
 _SEVERITY_LEVEL_RANGES = {
     "critical": {"gte": 12},
@@ -48,6 +66,86 @@ class OpenSearchClient:
         except requests.exceptions.HTTPError as exc:
             raise OpenSearchError(f"OpenSearch error on {index}: {exc}") from exc
         return response.json()
+
+    def get_field_mapping(self) -> dict:
+        """Return {field_path: type} for the alerts index, flattened. TTL-cached."""
+        now = time.time()
+        if _field_mapping_cache.get("data") is not None and now - _field_mapping_cache.get("ts", 0) < _MAPPING_TTL:
+            return _field_mapping_cache["data"]
+
+        try:
+            response = requests.get(
+                f"{self._base_url}/{_ALERTS_INDEX}/_mapping",
+                auth=self._auth,
+                verify=False,
+                timeout=15,
+            )
+            response.raise_for_status()
+            raw = response.json()
+        except requests.exceptions.HTTPError as exc:
+            raise OpenSearchError(f"OpenSearch mapping error: {exc}") from exc
+
+        mapping: dict = {}
+        for index_data in raw.values():
+            props = index_data.get("mappings", {}).get("properties", {})
+            _flatten_mapping(props, "", mapping)
+
+        _field_mapping_cache["data"] = mapping
+        _field_mapping_cache["ts"] = now
+        return mapping
+
+    def get_rule_catalog(self, agent_ids: list | None = None, window_days: int = 7) -> dict:
+        """Return rules seen in the data, keyed on rule.id. TTL-cached.
+
+        Returns {rule_id: {description, groups, level, seen_count}}.
+        agent_ids restricts the window to specific agents (scope-aware).
+        """
+        cache_key = ",".join(sorted(str(a) for a in (agent_ids or [])))
+        now = time.time()
+        entry = _rule_catalog_cache.get(cache_key)
+        if entry and now - entry.get("ts", 0) < _RULE_CATALOG_TTL:
+            return entry["data"]
+
+        filters: list = [{"range": {"@timestamp": {"gte": f"now-{window_days}d"}}}]
+        if agent_ids:
+            filters.append({"terms": {"agent.id": [str(a) for a in agent_ids]}})
+
+        body = {
+            "size": 0,
+            "query": {"bool": {"filter": filters}},
+            "aggregations": {
+                "by_rule_id": {
+                    "terms": {"field": "rule.id", "size": 1000},
+                    "aggs": {
+                        "desc": {"terms": {"field": "rule.description.keyword", "size": 1}},
+                        "groups": {"terms": {"field": "rule.groups", "size": 10}},
+                        "level": {"terms": {"field": "rule.level", "size": 1}},
+                    },
+                }
+            },
+        }
+
+        try:
+            result = self._search(_ALERTS_INDEX, body)
+        except OpenSearchError:
+            _rule_catalog_cache[cache_key] = {"ts": now, "data": {}}
+            return {}
+
+        catalog: dict = {}
+        for bucket in result.get("aggregations", {}).get("by_rule_id", {}).get("buckets", []):
+            rule_id = str(bucket["key"])
+            desc_b = bucket.get("desc", {}).get("buckets", [])
+            groups_b = bucket.get("groups", {}).get("buckets", [])
+            level_b = bucket.get("level", {}).get("buckets", [])
+            catalog[rule_id] = {
+                "description": desc_b[0]["key"] if desc_b else "",
+                "groups": [b["key"] for b in groups_b],
+                "level": level_b[0]["key"] if level_b else 0,
+                "seen_count": bucket["doc_count"],
+            }
+
+        _rule_catalog_cache[cache_key] = {"ts": now, "data": catalog}
+        return catalog
 
     def get_agent_events(self, agent_id, hours=24, offset=0, limit=100, severity=None, search=""):
         filters = [
@@ -432,3 +530,106 @@ class OpenSearchClient:
         }
         data = self._search(_ALERTS_INDEX, body)
         return data["hits"]["total"]["value"]
+
+    def get_fields_for_rules(
+        self,
+        rule_ids: list,
+        agent_ids=None,
+        window_days: int = 7,
+        mapping: dict = None,
+        top_values_cap: int = 15,
+    ) -> dict:
+        """Return populated fields + top values for docs matching rule_ids.
+
+        Returns {field_path: {type, top_values, operators}}.
+        Only aggregates on aggregatable (non-text) fields from the mapping.
+        """
+        from correlations.services.search_compiler import _operators_for_type, _TEXT_TYPES
+
+        mapping = mapping or {}
+
+        # Build candidate field list: core fields + aggregatable mapping fields
+        _CORE_FIELD_NAMES = [
+            "rule.id", "rule.level", "rule.groups",
+            "agent.name", "agent.id",
+            "data.srcip", "data.dstip", "data.dstuser",
+            "data.audit.comm", "data.sha256",
+            "decoder.name",
+        ]
+        candidate_fields = list(_CORE_FIELD_NAMES)
+        # Add aggregatable fields from mapping not already in core list
+        for field, ftype in mapping.items():
+            if ftype not in _TEXT_TYPES and field not in candidate_fields:
+                candidate_fields.append(field)
+            if len(candidate_fields) >= 60:
+                break
+
+        filters: list = [
+            {"range": {"@timestamp": {"gte": f"now-{window_days}d"}}},
+            {"terms": {"rule.id": [str(r) for r in rule_ids]}},
+        ]
+        if agent_ids:
+            filters.append({"terms": {"agent.id": [str(a) for a in agent_ids]}})
+
+        aggs = {}
+        for field in candidate_fields:
+            agg_key = field.replace(".", "_DOT_")
+            aggs[agg_key] = {"terms": {"field": field, "size": top_values_cap}}
+
+        body = {
+            "size": 0,
+            "query": {"bool": {"filter": filters}},
+            "aggregations": aggs,
+        }
+
+        try:
+            result = self._search(_ALERTS_INDEX, body)
+        except OpenSearchError:
+            return {}
+
+        expanded: dict = {}
+        for field in candidate_fields:
+            agg_key = field.replace(".", "_DOT_")
+            buckets = result.get("aggregations", {}).get(agg_key, {}).get("buckets", [])
+            if not buckets:
+                continue
+            field_type = mapping.get(field, "keyword")
+            expanded[field] = {
+                "type": field_type,
+                "top_values": [b["key"] for b in buckets],
+                "operators": _operators_for_type(field_type),
+            }
+
+        return expanded
+
+    def get_sample_docs(
+        self,
+        rule_ids=None,
+        agent_ids=None,
+        window_days: int = 7,
+        limit: int = 10,
+    ) -> list:
+        """Return a sample of raw Wazuh document _source dicts for grounding."""
+        filters: list = [{"range": {"@timestamp": {"gte": f"now-{window_days}d"}}}]
+        if rule_ids:
+            filters.append({"terms": {"rule.id": [str(r) for r in rule_ids]}})
+        if agent_ids:
+            filters.append({"terms": {"agent.id": [str(a) for a in agent_ids]}})
+
+        body = {
+            "size": limit,
+            "query": {"bool": {"filter": filters}},
+            "sort": [{"@timestamp": {"order": "desc"}}],
+            "_source": [
+                "rule.id", "rule.level", "rule.description", "rule.groups",
+                "agent.name", "data.srcip", "data.dstip", "data.dstuser",
+                "decoder.name",
+            ],
+        }
+
+        try:
+            data = self._search(_ALERTS_INDEX, body)
+        except OpenSearchError:
+            return []
+
+        return [h.get("_source", {}) for h in data.get("hits", {}).get("hits", [])]

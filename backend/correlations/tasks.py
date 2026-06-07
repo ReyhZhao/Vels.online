@@ -7,6 +7,49 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 _RESIDUAL_SETTLE_MINUTES = 15
+
+
+@shared_task(name="correlations.tasks.run_scheduled_search_rule")
+def run_scheduled_search_rule(rule_id: int):
+    """Run a SearchRule against OpenSearch.
+
+    Org rule: run once for rule.organization.
+    System rule (organization=None): fan out across all orgs, skipping muted orgs.
+    Each org is wrapped so one org's failure does not abort the rest.
+    """
+    from correlations.models import SearchRule, SearchRuleMute
+    from correlations.services.search_evaluator import run
+    from security.models import Organization
+
+    try:
+        rule = SearchRule.objects.select_related("organization").prefetch_related("legs__conditions").get(id=rule_id)
+    except SearchRule.DoesNotExist:
+        logger.warning("run_scheduled_search_rule: rule %s not found", rule_id)
+        return
+
+    if not rule.enabled:
+        return
+
+    if rule.organization_id is not None:
+        try:
+            run(rule, rule.organization)
+        except Exception:
+            logger.exception("run_scheduled_search_rule: failed for rule %s", rule_id)
+        return
+
+    muted_org_ids = set(
+        SearchRuleMute.objects.filter(rule=rule).values_list("organization_id", flat=True)
+    )
+    for org in Organization.objects.all():
+        if org.id in muted_org_ids:
+            logger.debug("run_scheduled_search_rule: org %s muted rule %s — skipping", org.id, rule_id)
+            continue
+        try:
+            run(rule, org)
+        except Exception:
+            logger.exception(
+                "run_scheduled_search_rule: failed for rule %s org %s — continuing", rule_id, org.id
+            )
 _RESIDUAL_LOOKBACK_HOURS = 24
 _RESIDUAL_CONFIDENCE_THRESHOLD = 0.6
 _RESIDUAL_BATCH_LIMIT = 200
@@ -29,6 +72,9 @@ def evaluate_correlation_rules(alert_id: int):
     except Alert.DoesNotExist:
         logger.warning("evaluate_correlation_rules: alert %s not found", alert_id)
         return
+
+    if alert.source_kind == "scheduled_search":
+        return  # Materialised search-alerts participate only in their own SearchRule incident
 
     evaluate(alert)
 

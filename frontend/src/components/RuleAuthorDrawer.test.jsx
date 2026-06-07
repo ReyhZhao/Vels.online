@@ -86,6 +86,13 @@ describe('RuleAuthorDrawer', () => {
     expect(screen.getByRole('button', { name: /send message/i })).toBeInTheDocument();
   });
 
+  it('prompt textarea shows at least 4 rows and uses body-text font size', () => {
+    renderDrawer();
+    const textarea = screen.getByPlaceholderText(/describe what to detect/i);
+    expect(Number(textarea.getAttribute('rows'))).toBeGreaterThanOrEqual(4);
+    expect(textarea.className).not.toMatch(/\btext-xs\b/);
+  });
+
   it('shows empty-thread hint before any messages', () => {
     renderDrawer();
     expect(screen.getByText(/describe what to detect/i, { selector: 'p' })).toBeInTheDocument();

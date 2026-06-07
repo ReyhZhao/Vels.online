@@ -220,6 +220,40 @@ def _parse_assistant_result(data: dict, grounding: dict) -> AssistantResult:
                 label=item.get("label", f"Apply template '{template_name}'"),
                 payload={"template_id": template_id, "template_name": template_name},
             ))
+        elif action_type == "create_comment":
+            text = (item.get("text") or "").strip()
+            if not text:
+                warnings.append("Proposed create_comment has empty text; skipped.")
+                continue
+            internal = item.get("internal")
+            if internal is None:
+                internal = True
+            proposed_actions.append(ProposedAction(
+                type="create_comment",
+                label=item.get("label", "Add comment"),
+                payload={"text": text, "internal": bool(internal)},
+            ))
+        elif action_type == "send_contact_message":
+            contact_id = item.get("contact_id")
+            valid_contact_ids = {c["id"] for c in grounding.get("contacts", [])}
+            if contact_id not in valid_contact_ids:
+                warnings.append(
+                    f"Proposed send_contact_message contact_id {contact_id!r} is not attached to this incident; skipped."
+                )
+                continue
+            message = (item.get("message") or "").strip()
+            if not message:
+                warnings.append("Proposed send_contact_message has empty message; skipped.")
+                continue
+            contact_name = next(
+                (c["name"] for c in grounding.get("contacts", []) if c["id"] == contact_id),
+                str(contact_id),
+            )
+            proposed_actions.append(ProposedAction(
+                type="send_contact_message",
+                label=item.get("label", f"Send message to {contact_name}"),
+                payload={"contact_id": contact_id, "message": message, "contact_name": contact_name},
+            ))
         else:
             warnings.append(f"Unknown proposed action type '{action_type}'; skipped.")
 
@@ -235,11 +269,17 @@ def _build_assistant_system_prompt(grounding: dict) -> str:
     available_templates = grounding.get("available_templates", [])
     allowed_transitions = grounding.get("allowed_transitions", [])
     field_allowlist = grounding.get("field_allowlist", [])
+    contacts = grounding.get("contacts", [])
 
     template_lines = "\n".join(
         f'  - id={t["id"]}: "{t["name"]}" ({t["item_count"]} tasks)'
         for t in available_templates
     ) or "  (none)"
+
+    contact_lines = "\n".join(
+        f'  - id={c["id"]}: {c["name"]}'
+        for c in contacts
+    ) or "  (none attached)"
 
     return f"""\
 You are a senior security analyst assistant helping a staff member investigate an incident.
@@ -272,11 +312,22 @@ Each proposed action must be one of these shapes:
     Available templates for this incident's subject:
 {template_lines}
 
+  Add a comment to the incident:
+    {{"type": "create_comment", "text": "<comment text>", "internal": <true|false>, "label": "<short human label>"}}
+    Default to internal=true (staff-only note). Use internal=false only for org-visible comments.
+
+  Send a message to an incident contact:
+    {{"type": "send_contact_message", "contact_id": <integer id>, "message": "<message body>", "label": "<short human label>"}}
+    The contact_id MUST be one of the contacts already attached to this incident:
+{contact_lines}
+    This is an externally visible action. Only propose it when there is a clear reason to notify a contact.
+
 Rules:
 - Only propose actions from the shapes above. Never invent action types.
 - Only propose transitions to states in the allowed list above.
 - Only propose templates from the available list above.
 - Only propose field updates for fields in the allowlist above.
+- Only propose send_contact_message with a contact_id from the list above.
 - If no actions are warranted, return proposed_actions as [].
 - Return only valid JSON. No markdown fences, no extra text.
 """
@@ -468,18 +519,26 @@ class GeminiTriageProvider(BaseTriageProvider):
                 contents=contents,
                 config=self._types.GenerateContentConfig(
                     system_instruction=system_prompt,
+                    response_mime_type="application/json",
                 ),
             )
             raw = response.text.strip()
         except Exception as exc:
             raise AssistantError(f"Gemini API error: {exc}") from exc
 
+        if not raw:
+            raise AssistantError("Gemini returned an empty response.")
+
         raw = _strip_code_fence_if_present(raw)
 
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise AssistantError(f"Gemini returned non-JSON: {raw[:200]}") from exc
+        except json.JSONDecodeError:
+            return AssistantResult(
+                assistant_reply=raw,
+                proposed_actions=[],
+                warnings=["Provider returned plain text instead of the expected JSON envelope; proposed actions are unavailable."],
+            )
 
         return _parse_assistant_result(data, grounding)
 

@@ -32,6 +32,7 @@ import {
   Mail,
   Users,
   GitBranch,
+  Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -250,6 +251,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     </SidebarLink>
                     <SidebarLink to="/admin/correlations/rules" icon={GitBranch} collapsed={collapsed}>
                       Correlation Rules
+                    </SidebarLink>
+                    <SidebarLink to="/admin/correlations/search-rules" icon={Search} collapsed={collapsed}>
+                      Search Rules
                     </SidebarLink>
                   </>
                 )}
