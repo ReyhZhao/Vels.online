@@ -8,7 +8,8 @@ data:
   SEMAPHORE_PROJECT_ID: "1"
   AUTHENTIK_ENROLLMENT_FLOW_SLUG: default-enrollment-flow
 
-  OLLAMA_MODEL: gemma4:31b-cloud
+  #OLLAMA_MODEL: gemma4:31b-cloud
+  OLLAMA_MODEL: gemma4
   INBOUND_IMAP_HOST: mail.vels.online
   ONCALL_ROUTING: llm_guided
   ALLOWED_HOSTS: "vels.online,backend.velsonline.svc.cluster.local"
