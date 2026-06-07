@@ -718,6 +718,40 @@ function TestHealthBadge({ summary }) {
   );
 }
 
+function relativeTime(iso) {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const secs = Math.round((Date.now() - then) / 1000);
+  if (secs < 60) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.round(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.round(months / 12)}y ago`;
+}
+
+function FiringBadge({ summary }) {
+  if (!summary || !summary.last_fired_at) {
+    return (
+      <span className="inline-flex items-center rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 px-2 py-0.5 text-xs font-medium" title="This rule has never fired">
+        Never fired
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 text-xs font-medium"
+      title={`${summary.count} firing${summary.count === 1 ? '' : 's'}; last fired ${new Date(summary.last_fired_at).toLocaleString()}`}
+    >
+      {relativeTime(summary.last_fired_at)} · {summary.count}×
+    </span>
+  );
+}
+
 function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug, onTests, onRunTests }) {
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -777,6 +811,7 @@ function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug, on
       </td>
       <td className="px-4 py-3 text-center text-xs text-muted-foreground">{rule.legs?.length ?? 0}</td>
       <td className="px-4 py-3"><TestHealthBadge summary={rule.test_summary} /></td>
+      <td className="px-4 py-3"><FiringBadge summary={rule.firing_summary} /></td>
       <td className="px-4 py-3">
         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${rule.enabled ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500'}`}>
           {rule.enabled ? 'Enabled' : 'Disabled'}
@@ -963,15 +998,16 @@ export default function SearchRulesAdmin() {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
                 <th className="px-4 py-3 text-center font-medium text-muted-foreground">Legs</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tests</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Firings</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
               ) : rules.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No scheduled search rules.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">No scheduled search rules.</td></tr>
               ) : (
                 rules.map(rule => (
                   <RuleRow

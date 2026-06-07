@@ -1,5 +1,6 @@
 import logging
 
+from django.db.models import Count, Max
 from rest_framework import serializers as _s
 from rest_framework import status
 from rest_framework.response import Response
@@ -670,6 +671,7 @@ def _compute_test_summary(tests) -> dict:
 class _SearchRuleSerializer(_s.ModelSerializer):
     legs = _SearchRuleLegSerializer(many=True)
     test_summary = _s.SerializerMethodField()
+    firing_summary = _s.SerializerMethodField()
 
     class Meta:
         model = SearchRule
@@ -677,12 +679,30 @@ class _SearchRuleSerializer(_s.ModelSerializer):
             "id", "organization", "name", "description",
             "severity", "correlation_key", "window_minutes", "interval_minutes",
             "max_findings_per_run", "include_agentless", "enabled", "created_at", "updated_at",
-            "legs", "test_summary",
+            "legs", "test_summary", "firing_summary",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def get_test_summary(self, obj):
         return _compute_test_summary(obj.tests.all())
+
+    def get_firing_summary(self, obj):
+        """Per-rule firing count + last fired_at, derived from the SearchFiring ledger.
+
+        Reads queryset annotations (`firing_count` / `last_fired_at`) when present so
+        the list view computes both in a single aggregate (no N+1); falls back to an
+        aggregate for detail/create responses that serialize a single rule.
+        """
+        count = getattr(obj, "firing_count", None)
+        last = getattr(obj, "last_fired_at", None)
+        if count is None:
+            agg = obj.firings.aggregate(count=Count("id"), last=Max("fired_at"))
+            count = agg["count"]
+            last = agg["last"]
+        return {
+            "count": count or 0,
+            "last_fired_at": last.isoformat() if last else None,
+        }
 
     def validate_interval_minutes(self, value):
         from correlations.models import _MIN_INTERVAL_MINUTES
@@ -780,7 +800,11 @@ class SearchRuleListView(APIView):
         err = _require_staff(request)
         if err:
             return err
-        rules = SearchRule.objects.prefetch_related("legs__conditions", "tests").order_by("name")
+        rules = (
+            SearchRule.objects.prefetch_related("legs__conditions", "tests")
+            .annotate(firing_count=Count("firings"), last_fired_at=Max("firings__fired_at"))
+            .order_by("name")
+        )
         return Response(_SearchRuleSerializer(rules, many=True).data)
 
     def post(self, request):

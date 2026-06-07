@@ -2171,3 +2171,50 @@ class TestSearchRuleDiversityValidation:
                 self._payload(org, distinct_field=""), format="json",
             )
         assert resp.status_code == 201, resp.data
+
+
+# ── Firing summary on the search rule list (#438) ───────────────────────────────
+
+
+@pytest.mark.django_db
+class TestFiringSummary:
+    def _staff_client(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        User = get_user_model()
+        user = User.objects.create_user("staff_fs@test.com", password="x", is_staff=True)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_never_fired_rule_reports_null_last_fired(self, rule):
+        client = self._staff_client()
+        resp = client.get("/api/correlations/search-rules/")
+        assert resp.status_code == 200
+        row = next(r for r in resp.data if r["id"] == rule.id)
+        assert row["firing_summary"]["count"] == 0
+        assert row["firing_summary"]["last_fired_at"] is None
+
+    def test_fired_rule_reports_count_and_last_fired(self, rule, org):
+        SearchFiring.objects.create(rule=rule, organization=org, finding_count=1)
+        latest = SearchFiring.objects.create(rule=rule, organization=org, finding_count=2)
+        client = self._staff_client()
+        resp = client.get("/api/correlations/search-rules/")
+        row = next(r for r in resp.data if r["id"] == rule.id)
+        assert row["firing_summary"]["count"] == 2
+        assert row["firing_summary"]["last_fired_at"] is not None
+
+    def test_list_firing_summary_no_n_plus_one(self, rule, org):
+        """The list computes firing summaries via annotation, not per-rule queries."""
+        from django.test.utils import CaptureQueriesContext
+        from django.db import connection
+        SearchFiring.objects.create(rule=rule, organization=org, finding_count=1)
+        # second rule with no firings
+        SearchRule.objects.create(organization=org, name="Second", window_minutes=60, interval_minutes=15)
+        client = self._staff_client()
+        with CaptureQueriesContext(connection) as ctx:
+            resp = client.get("/api/correlations/search-rules/")
+        assert resp.status_code == 200
+        # no aggregate query is issued per-rule: the firing count/last-fired join is annotated.
+        firing_qs = [q["sql"] for q in ctx.captured_queries if "firings" in q["sql"].lower() or "searchfiring" in q["sql"].lower()]
+        assert len(firing_qs) <= 1
