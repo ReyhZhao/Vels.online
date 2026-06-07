@@ -2218,3 +2218,92 @@ class TestFiringSummary:
         # no aggregate query is issued per-rule: the firing count/last-fired join is annotated.
         firing_qs = [q["sql"] for q in ctx.captured_queries if "firings" in q["sql"].lower() or "searchfiring" in q["sql"].lower()]
         assert len(firing_qs) <= 1
+
+
+# ── Spec-based debug run on unsaved rule spec (#437) ────────────────────────────
+
+
+@pytest.mark.django_db
+class TestSpecDebug:
+    _URL = "/api/correlations/search-rules/debug/"
+
+    def _staff_client(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        User = get_user_model()
+        user = User.objects.create_user("staff_sd@test.com", password="x", is_staff=True)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def _spec(self, org, **overrides):
+        spec = {
+            "org_slug": org.slug,
+            "name": "Unsaved rule",
+            "severity": "high",
+            "correlation_key": "none",
+            "window_minutes": 60,
+            "interval_minutes": 15,
+            "max_findings_per_run": 50,
+            "include_agentless": False,
+            "organization": org.id,
+            "legs": [
+                {
+                    "count": 1,
+                    "display_order": 0,
+                    "conditions": [
+                        {"field_name": "rule.description", "operator": "contains", "value": "brute force"},
+                    ],
+                }
+            ],
+        }
+        spec.update(overrides)
+        return spec
+
+    def test_requires_staff(self, org, django_user_model):
+        from rest_framework.test import APIClient
+        user = django_user_model.objects.create_user("plain_sd", password="x", is_staff=False)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        resp = client.post(self._URL, self._spec(org), format="json")
+        assert resp.status_code in (401, 403)
+
+    def test_returns_same_structure_and_persists_nothing(self, org):
+        from correlations.models import SearchRule, SearchRuleLeg, SearchFinding, SearchFiring
+        from alerts.models import Alert
+        from incidents.models import Incident
+
+        with (
+            patch("correlations.views._get_mapping_safe", return_value=_DIV_SER_MAPPING),
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response()
+            resp = self._staff_client().post(self._URL, self._spec(org), format="json")
+
+        assert resp.status_code == 200, resp.data
+        body = resp.data
+        assert body["mode"] == "single"
+        assert "legs" in body
+        assert body["legs"][0]["hit_query"]
+        # Nothing persisted.
+        assert SearchRule.objects.count() == 0
+        assert SearchRuleLeg.objects.count() == 0
+        assert SearchFinding.objects.count() == 0
+        assert SearchFiring.objects.count() == 0
+        assert Alert.objects.count() == 0
+        assert Incident.objects.count() == 0
+
+    def test_invalid_spec_returns_validation_error(self, org):
+        spec = self._spec(org)
+        spec["legs"] = []  # at least one leg required by serializer? empty legs -> debug error or 400
+        spec["window_minutes"] = "not-a-number"
+        resp = self._staff_client().post(self._URL, spec, format="json")
+        assert resp.status_code == 400
+
+    def test_missing_org_slug_rejected(self, org):
+        spec = self._spec(org)
+        del spec["org_slug"]
+        resp = self._staff_client().post(self._URL, spec, format="json")
+        assert resp.status_code == 400

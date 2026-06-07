@@ -203,6 +203,14 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
+  // Test / Debug run (#437): dry-run the current unsaved form values against an org.
+  const [debugOrgSlug, setDebugOrgSlug] = useState(
+    (orgId !== '' ? orgs.find(o => o.id === orgId)?.slug : null) ?? orgs[0]?.slug ?? ''
+  );
+  const [debugRunning, setDebugRunning] = useState(false);
+  const [debugResult, setDebugResult] = useState(null);
+  const [debugError, setDebugError] = useState(null);
+
   const operators = catalog?.search_operators ?? [];
   const correlationKeys = catalog?.correlation_keys ?? [];
   const severities = catalog?.severities ?? ['critical', 'high', 'medium', 'low', 'info'];
@@ -222,10 +230,8 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
     ]);
   }
 
-  async function handleSave() {
-    setError(null);
-    setSaving(true);
-    const payload = {
+  function buildPayload() {
+    return {
       name: name.trim(),
       description: description.trim(),
       severity,
@@ -238,6 +244,39 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
       organization: orgId === '' ? null : orgId,
       legs: legs.map((l, i) => ({ ...l, display_order: i })),
     };
+  }
+
+  async function handleDebug() {
+    if (!debugOrgSlug) return;
+    setDebugError(null);
+    setDebugResult(null);
+    setDebugRunning(true);
+    try {
+      const res = await api.post('/api/correlations/search-rules/debug/', {
+        ...buildPayload(),
+        org_slug: debugOrgSlug,
+      });
+      setDebugResult(res.data);
+    } catch (err) {
+      const data = err.response?.data;
+      if (typeof data === 'object' && data !== null) {
+        setDebugError(
+          Object.entries(data)
+            .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+            .join('; ')
+        );
+      } else {
+        setDebugError('Debug run failed.');
+      }
+    } finally {
+      setDebugRunning(false);
+    }
+  }
+
+  async function handleSave() {
+    setError(null);
+    setSaving(true);
+    const payload = buildPayload();
     try {
       let res;
       if (isEdit) {
@@ -439,6 +478,47 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
             ))}
           </div>
 
+          {/* Test / Debug run (#437): dry-run the current unsaved values against an org */}
+          <div className="space-y-3 border-t border-border pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Test / Debug run</p>
+            <p className="text-xs text-muted-foreground">
+              Dry-run the current (unsaved) rule against an organization. Shows the compiled
+              OpenSearch queries and responses — creates no alerts, findings, or incidents.
+            </p>
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-foreground mb-1">Organization</label>
+                <select
+                  value={debugOrgSlug}
+                  onChange={e => setDebugOrgSlug(e.target.value)}
+                  aria-label="Debug organization"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {orgs.map(o => (
+                    <option key={o.slug} value={o.slug}>{o.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={handleDebug}
+                disabled={debugRunning || !debugOrgSlug || !canSave}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+              >
+                <Bug className="h-4 w-4" />
+                {debugRunning ? 'Running…' : 'Test / Debug run'}
+              </button>
+            </div>
+            {debugError && (
+              <div className="rounded-md bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">{debugError}</div>
+            )}
+            {debugResult && (
+              <div className="space-y-4 rounded-md border border-border bg-muted/20 p-3">
+                <DebugResultView result={debugResult} />
+              </div>
+            )}
+          </div>
+
         </div>
 
         <div className="shrink-0 border-t border-border bg-card px-6 py-4 space-y-3">
@@ -556,6 +636,81 @@ function DebugSummary({ result }) {
   );
 }
 
+function DebugResultView({ result }) {
+  if (!result) return null;
+  return (
+    <>
+      <div className="flex gap-4 text-xs text-muted-foreground flex-wrap">
+        <span>Mode: <strong className="text-foreground">{result.mode}</strong></span>
+        <span>Agents: <strong className="text-foreground">{result.agent_count}</strong></span>
+        <span>Window: <strong className="text-foreground">{result.window_start?.slice(0, 19).replace('T', ' ')} → {result.window_end?.slice(0, 19).replace('T', ' ')}</strong></span>
+      </div>
+
+      {result.error && (
+        <div className="rounded-md bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">{result.error}</div>
+      )}
+
+      <DebugSummary result={result} />
+
+      {result.legs?.map((leg, i) => (
+        <div key={i} className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Leg {i + 1} {result.mode === 'multi' ? '(co-occurrence)' : ''}
+          </p>
+
+          {leg.agg_query && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-foreground">Aggregation query</p>
+              <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                {JSON.stringify(leg.agg_query, null, 2)}
+              </pre>
+            </div>
+          )}
+          {leg.agg_error && (
+            <p className="text-xs text-red-600">Agg error: {leg.agg_error}</p>
+          )}
+          {leg.agg_response && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-foreground">
+                Aggregation response
+                {leg.agg_response?.aggregations?.key_agg?.buckets && (
+                  <span className="ml-2 text-muted-foreground">({leg.agg_response.aggregations.key_agg.buckets.length} bucket(s))</span>
+                )}
+              </p>
+              <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                {JSON.stringify(leg.agg_response, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-foreground">Hit query</p>
+            <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+              {JSON.stringify(leg.hit_query, null, 2)}
+            </pre>
+          </div>
+          {leg.hit_error && (
+            <p className="text-xs text-red-600">Hit error: {leg.hit_error}</p>
+          )}
+          {leg.hit_response && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-foreground">
+                Hit response
+                <span className="ml-2 text-muted-foreground">
+                  ({leg.hit_response?.hits?.total?.value ?? 0} total, {leg.hit_response?.hits?.hits?.length ?? 0} returned)
+                </span>
+              </p>
+              <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                {JSON.stringify(leg.hit_response, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function DebugModal({ rule, orgs, onClose }) {
   const [orgSlug, setOrgSlug] = useState(orgs[0]?.slug ?? '');
   const [running, setRunning] = useState(false);
@@ -618,77 +773,7 @@ function DebugModal({ rule, orgs, onClose }) {
             <div className="rounded-md bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
           )}
 
-          {result && (
-            <>
-              <div className="flex gap-4 text-xs text-muted-foreground flex-wrap">
-                <span>Mode: <strong className="text-foreground">{result.mode}</strong></span>
-                <span>Agents: <strong className="text-foreground">{result.agent_count}</strong></span>
-                <span>Window: <strong className="text-foreground">{result.window_start?.slice(0, 19).replace('T', ' ')} → {result.window_end?.slice(0, 19).replace('T', ' ')}</strong></span>
-              </div>
-
-              {result.error && (
-                <div className="rounded-md bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">{result.error}</div>
-              )}
-
-              <DebugSummary result={result} />
-
-              {result.legs?.map((leg, i) => (
-                <div key={i} className="space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Leg {i + 1} {result.mode === 'multi' ? '(co-occurrence)' : ''}
-                  </p>
-
-                  {leg.agg_query && (
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-foreground">Aggregation query</p>
-                      <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify(leg.agg_query, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                  {leg.agg_error && (
-                    <p className="text-xs text-red-600">Agg error: {leg.agg_error}</p>
-                  )}
-                  {leg.agg_response && (
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-foreground">
-                        Aggregation response
-                        {leg.agg_response?.aggregations?.key_agg?.buckets && (
-                          <span className="ml-2 text-muted-foreground">({leg.agg_response.aggregations.key_agg.buckets.length} bucket(s))</span>
-                        )}
-                      </p>
-                      <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify(leg.agg_response, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium text-foreground">Hit query</p>
-                    <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
-                      {JSON.stringify(leg.hit_query, null, 2)}
-                    </pre>
-                  </div>
-                  {leg.hit_error && (
-                    <p className="text-xs text-red-600">Hit error: {leg.hit_error}</p>
-                  )}
-                  {leg.hit_response && (
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-foreground">
-                        Hit response
-                        <span className="ml-2 text-muted-foreground">
-                          ({leg.hit_response?.hits?.total?.value ?? 0} total, {leg.hit_response?.hits?.hits?.length ?? 0} returned)
-                        </span>
-                      </p>
-                      <pre className="rounded-md bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify(leg.hit_response, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </>
-          )}
+          <DebugResultView result={result} />
 
           {!result && !error && !running && (
             <p className="text-sm text-muted-foreground">Select an organization and click Run debug to see the OpenSearch queries and responses.</p>

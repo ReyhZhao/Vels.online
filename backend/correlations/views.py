@@ -909,6 +909,113 @@ class SearchRuleDebugView(APIView):
         return Response(result)
 
 
+class _InMemoryRelatedManager:
+    """Mimics a reverse related manager over a fixed in-memory list.
+
+    Used to build an *unsaved* rule spec that `debug_run`/the compiler can read
+    (`rule.legs.prefetch_related(...)`, `leg.conditions.all()`) without any DB rows.
+    """
+
+    def __init__(self, items):
+        self._items = list(items)
+
+    def all(self):
+        return list(self._items)
+
+    def prefetch_related(self, *args, **kwargs):
+        return list(self._items)
+
+    def __iter__(self):
+        return iter(self._items)
+
+    def __len__(self):
+        return len(self._items)
+
+
+class _InMemorySpec:
+    def __init__(self, fields):
+        self.__dict__.update(fields)
+
+
+def _build_inmemory_search_rule(validated):
+    """Build an unsaved, duck-typed SearchRule (with .legs/.conditions) from validated spec data.
+
+    Creates no SearchRule / SearchRuleLeg / SearchLegCondition rows — the result is only
+    ever handed to `debug_run`, which reads attributes and queries OpenSearch.
+    """
+    from correlations.models import CORRELATION_KEY_NONE, _MAX_FINDINGS_DEFAULT
+
+    legs_data = validated.pop("legs", []) or []
+    legs = []
+    for idx, leg_data in enumerate(legs_data):
+        conds = [
+            _InMemorySpec({
+                "id": None,
+                "field_name": c.get("field_name", ""),
+                "operator": c.get("operator", ""),
+                "value": c.get("value", ""),
+            })
+            for c in (leg_data.get("conditions") or [])
+        ]
+        distinct_field = leg_data.get("distinct_field") or ""
+        leg = _InMemorySpec({
+            "id": None,
+            "count": leg_data.get("count", 1),
+            "display_order": leg_data.get("display_order", idx),
+            "distinct_field": distinct_field,
+            "min_distinct": leg_data.get("min_distinct", 1),
+            "has_diversity": bool(distinct_field.strip()),
+        })
+        leg.conditions = _InMemoryRelatedManager(conds)
+        legs.append(leg)
+
+    # debug_run takes the target org explicitly; drop any FK from the spec.
+    validated.pop("organization", None)
+    rule = _InMemorySpec(validated)
+    rule.id = None
+    rule.legs = _InMemoryRelatedManager(legs)
+    rule.include_agentless = bool(getattr(rule, "include_agentless", False))
+    rule.window_minutes = getattr(rule, "window_minutes", 60)
+    rule.max_findings_per_run = getattr(rule, "max_findings_per_run", _MAX_FINDINGS_DEFAULT)
+    rule.correlation_key = getattr(rule, "correlation_key", CORRELATION_KEY_NONE)
+    return rule
+
+
+class SearchRuleSpecDebugView(APIView):
+    """Staff-only: dry-run an UNSAVED rule spec against an org (#437).
+
+    POST body: a full rule spec (the same shape the create/edit form submits to the
+    rule list/detail endpoints) plus "org_slug". Builds an in-memory, unsaved rule
+    from the spec and runs the same `debug_run` as the saved-rule debug endpoint.
+    Persists nothing: no SearchRule, SearchRuleLeg, SearchFinding, Alert or Incident.
+    """
+
+    def post(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+
+        org_slug = request.data.get("org_slug")
+        if not org_slug:
+            return Response({"detail": "org_slug is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            org = Organization.objects.get(slug=org_slug)
+        except Organization.DoesNotExist:
+            return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        spec = {k: v for k, v in request.data.items() if k != "org_slug"}
+        serializer = _SearchRuleSerializer(data=spec)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        rule = _build_inmemory_search_rule(dict(serializer.validated_data))
+
+        from correlations.services.search_evaluator import debug_run
+        result = debug_run(rule, org)
+        return Response(result)
+
+
 # ── Rule Tests (PRD #439, ADR-0010) ──────────────────────────────────────────
 
 class _SearchRuleTestSerializer(_s.ModelSerializer):
