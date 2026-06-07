@@ -3,14 +3,29 @@ import { Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 
+const ASSET_ROLES = [
+  { value: '', label: 'Unknown / unset' },
+  { value: 'workstation', label: 'Workstation' },
+  { value: 'server', label: 'Server' },
+  { value: 'dns-server', label: 'DNS Server' },
+  { value: 'domain-controller', label: 'Domain Controller' },
+  { value: 'jumphost', label: 'Jumphost' },
+  { value: 'firewall', label: 'Firewall' },
+  { value: 'router', label: 'Router' },
+  { value: 'switch', label: 'Switch' },
+  { value: 'database-server', label: 'Database Server' },
+  { value: 'web-server', label: 'Web Server' },
+  { value: 'other', label: 'Other' },
+];
+
 function CreateAssetModal({ open, onClose, orgSlug, onCreated }) {
-  const [form, setForm] = useState({ name: '', agent_name: '', ip_address: '', is_permanent: false });
+  const [form, setForm] = useState({ name: '', agent_name: '', ip_address: '', role: '', is_permanent: false });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setForm({ name: '', agent_name: '', ip_address: '', is_permanent: false });
+      setForm({ name: '', agent_name: '', ip_address: '', role: '', is_permanent: false });
       setError(null);
     }
   }, [open]);
@@ -32,6 +47,7 @@ function CreateAssetModal({ open, onClose, orgSlug, onCreated }) {
         name: form.name,
         agent_name: form.agent_name,
         ip_address: form.ip_address || undefined,
+        role: form.role || null,
         is_permanent: form.is_permanent,
       });
       onCreated(res.data);
@@ -69,6 +85,19 @@ function CreateAssetModal({ open, onClose, orgSlug, onCreated }) {
               />
             </div>
           ))}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1" htmlFor="new-role">Role</label>
+            <select
+              id="new-role"
+              value={form.role}
+              onChange={e => set('role', e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {ASSET_ROLES.map(r => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex items-center gap-3">
             <label className="relative inline-flex cursor-pointer items-center">
               <input
@@ -217,6 +246,15 @@ function AssetRow({ asset, selected, onToggle, onDeleted }) {
       <td className="px-4 py-3 text-muted-foreground capitalize">{asset.kind}</td>
       <td className="px-4 py-3 text-muted-foreground">{asset.agent_name || '—'}</td>
       <td className="px-4 py-3 text-muted-foreground">{asset.ip_address || '—'}</td>
+      <td className="px-4 py-3">
+        {asset.role ? (
+          <span className="inline-flex items-center rounded-full bg-sky-100 dark:bg-sky-900/30 px-2 py-0.5 text-xs text-sky-700 dark:text-sky-400">
+            {ASSET_ROLES.find(r => r.value === asset.role)?.label ?? asset.role}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1">
           {asset.is_active === false ? (
@@ -384,6 +422,7 @@ export default function AssetsPage() {
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Kind</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Agent Name</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">IP Address</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Role</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Last Seen</th>
               <th className="px-4 py-3" />
@@ -392,11 +431,11 @@ export default function AssetsPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
                   {search ? 'No assets match your search.' : 'No assets yet.'}
                 </td>
               </tr>
