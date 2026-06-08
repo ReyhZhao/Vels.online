@@ -56,6 +56,7 @@ from .services.attachments import confirm_upload, delete_attachment, issue_downl
 from .services.delegation import delegate, return_delegation
 from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
+from .services.change_org import change_incident_org
 from .services.visibility import can_view_incident, filter_comments_for_user, filter_events_for_user, filter_incidents_for_user
 from .tasks import acquire_triage_lock, enrich_iocs_then_triage, run_incident_triage
 
@@ -1210,6 +1211,39 @@ class IncidentTransferView(APIView):
 
         try:
             incident = transfer_incident(incident, new_assignee, actor=request.user)
+        except ValidationError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(IncidentSerializer(incident).data)
+
+
+class IncidentChangeOrgView(APIView):
+    """Staff-only: move an incident to a different organisation (triage-time correction)."""
+
+    def post(self, request, display_id):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            incident = Incident.objects.select_related(
+                "organization", "created_by", "assignee", "subject"
+            ).get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        slug = request.data.get("organization")
+        if not slug:
+            return Response({"detail": "organization is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            new_org = Organization.objects.get(slug=slug)
+        except Organization.DoesNotExist:
+            return Response({"detail": "Unknown organisation."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            incident = change_incident_org(incident, new_org, actor=request.user)
         except ValidationError as exc:
             return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 

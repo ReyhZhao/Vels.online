@@ -1092,6 +1092,53 @@ function TransferDialog({ onConfirm, onCancel, transferring, staffUsers, isIniti
   );
 }
 
+function ChangeOrgDialog({ onConfirm, onCancel, changing, orgs, currentOrgSlug }) {
+  const [selectedSlug, setSelectedSlug] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Change organisation</h2>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-foreground" htmlFor="change-org">
+            New organisation
+          </label>
+          <select
+            id="change-org"
+            value={selectedSlug}
+            onChange={e => setSelectedSlug(e.target.value)}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">Select an organisation…</option>
+            {orgs.filter(o => o.slug !== currentOrgSlug).map(o => (
+              <option key={o.slug} value={o.slug}>{o.name}</option>
+            ))}
+          </select>
+        </div>
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+          Linked alerts will move to the new organisation. The incident's linked assets
+          will be detached — assets are per-tenant and are not migrated.
+        </p>
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            disabled={changing}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => selectedSlug && onConfirm(selectedSlug)}
+            disabled={!selectedSlug || changing}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {changing ? 'Changing…' : 'Confirm change'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SubjectDropdown({ incident, subjects, onSubjectChange, saving }) {
   const locked = !TRIAGE_STATES.has(incident.state);
   const value = incident.subject ?? '';
@@ -1136,6 +1183,10 @@ export default function IncidentDetail() {
   const [staffUsers, setStaffUsers]       = useState([]);
   const [transferring, setTransferring]   = useState(false);
   const [transferError, setTransferError] = useState(null);
+  const [showChangeOrgDialog, setShowChangeOrgDialog] = useState(false);
+  const [orgs, setOrgs]                   = useState([]);
+  const [changingOrg, setChangingOrg]     = useState(false);
+  const [changeOrgError, setChangeOrgError] = useState(null);
   const [savingBadge, setSavingBadge]     = useState(false);
   const [badgeError, setBadgeError]       = useState(null);
   const [activeTab, setActiveTab]         = useState('details');
@@ -1225,6 +1276,35 @@ export default function IncidentDetail() {
       setTransferError(err.response?.data?.detail || 'Transfer failed.');
     } finally {
       setTransferring(false);
+    }
+  }
+
+  async function handleOpenChangeOrg() {
+    if (orgs.length === 0) {
+      try {
+        const res = await api.get('/api/security/organizations/');
+        setOrgs(res.data);
+      } catch {
+        setChangeOrgError('Failed to load organisations.');
+        return;
+      }
+    }
+    setChangeOrgError(null);
+    setShowChangeOrgDialog(true);
+  }
+
+  async function handleChangeOrg(slug) {
+    setChangingOrg(true);
+    setChangeOrgError(null);
+    try {
+      const res = await api.post(`/api/incidents/${displayId}/change-org/`, { organization: slug });
+      setIncident(res.data);
+      setShowChangeOrgDialog(false);
+      setTimelineRefreshKey(k => k + 1);
+    } catch (err) {
+      setChangeOrgError(err.response?.data?.detail || 'Failed to change organisation.');
+    } finally {
+      setChangingOrg(false);
     }
   }
 
@@ -1326,6 +1406,16 @@ export default function IncidentDetail() {
         />
       )}
 
+      {showChangeOrgDialog && (
+        <ChangeOrgDialog
+          orgs={orgs}
+          changing={changingOrg}
+          currentOrgSlug={incident.org_slug}
+          onConfirm={handleChangeOrg}
+          onCancel={() => setShowChangeOrgDialog(false)}
+        />
+      )}
+
       <CreateExceptionSlideOver
         open={showExceptionSlideOver}
         onClose={() => setShowExceptionSlideOver(false)}
@@ -1391,6 +1481,15 @@ export default function IncidentDetail() {
                 {incident.assignee_username ? 'Transfer' : 'Assign'}
               </button>
             )}
+            {user?.is_staff && TRIAGE_STATES.has(incident.state) && (
+              <button
+                onClick={handleOpenChangeOrg}
+                disabled={transitioning || changingOrg}
+                className="rounded-md border border-slate-400 bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50 transition-colors dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+              >
+                Change Org
+              </button>
+            )}
             {user?.is_staff && incident.source_kind === 'wazuh_event' && (
               <button
                 onClick={() => setShowExceptionSlideOver(true)}
@@ -1419,6 +1518,7 @@ export default function IncidentDetail() {
         </div>
         {transitionError && <p className="text-sm text-red-600">{transitionError}</p>}
         {transferError   && <p className="text-sm text-red-600">{transferError}</p>}
+        {changeOrgError  && <p className="text-sm text-red-600">{changeOrgError}</p>}
         {badgeError      && <p className="text-sm text-red-600">{badgeError}</p>}
         {triageError     && <p className="text-sm text-red-600">{triageError}</p>}
       </div>

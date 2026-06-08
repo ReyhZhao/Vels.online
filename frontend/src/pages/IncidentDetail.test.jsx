@@ -403,6 +403,49 @@ describe('IncidentDetail', () => {
     expect(screen.queryByRole('heading', { name: 'Assign incident' })).not.toBeInTheDocument();
   });
 
+  // ── change org ────────────────────────────────────────────────────────────
+
+  const ORGS = [
+    { slug: 'acme', name: 'Acme' },
+    { slug: 'contoso', name: 'Contoso' },
+  ];
+
+  it('staff can change the incident org in a triage state', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    const MOVED = { ...INCIDENT, org_slug: 'contoso' };
+    api.get.mockImplementation(url => {
+      if (url === '/api/security/organizations/') return Promise.resolve({ data: ORGS });
+      if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
+      if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
+      if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contact-messages/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contacts/')) return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: INCIDENT });
+    });
+    api.post.mockResolvedValue({ data: MOVED });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByRole('button', { name: 'Change Org' }));
+    await user.click(screen.getByRole('button', { name: 'Change Org' }));
+    await waitFor(() => screen.getByRole('heading', { name: 'Change organisation' }));
+    await user.selectOptions(screen.getByLabelText('New organisation'), 'contoso');
+    await user.click(screen.getByRole('button', { name: 'Confirm change' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/incidents/INC-2026-0001/change-org/',
+      { organization: 'contoso' },
+    ));
+  });
+
+  it('hides the Change Org action once the incident leaves triage', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    mockGet({ ...INCIDENT, state: 'in_progress' });
+    renderPage();
+    await waitFor(() => screen.getByText('INC-2026-0001'));
+    expect(screen.queryByRole('button', { name: 'Change Org' })).not.toBeInTheDocument();
+  });
+
   // ── tabs ──────────────────────────────────────────────────────────────────
 
   it('renders Details, Timeline, Attachments, Tasks, and Delegations tab buttons', async () => {
