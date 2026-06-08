@@ -37,6 +37,10 @@ draft_rule schema:
   "max_findings_per_run": integer (min 1, default 50),
   "severity": "string — one of: {severities}",
   "enabled": true,
+  "time_window_start": "string 'HH:MM' or null — OPTIONAL rule-level time-of-day window start, in the organisation's local time",
+  "time_window_end": "string 'HH:MM' or null — window end; may be EARLIER than start to express a window crossing midnight (e.g. 22:00–06:00)",
+  "time_window_days": "array of integers 1-7 — ISO weekdays the window applies to (1=Mon … 7=Sun); empty array for no window",
+  "time_window_mode": "string — 'inside' (consider only docs INSIDE the window) or 'outside' (consider only docs OUTSIDE the window)",
   "legs": [
     {{
       "count": integer (min 1) — minimum matching docs required in this leg,
@@ -81,6 +85,14 @@ two or more different countries, or one host contacting many distinct destinatio
 distinct_field (e.g. GeoLocation.country_name) and min_distinct (>= 2) on the leg, and pick a \
 matching correlation_key (e.g. user.name). distinct_field must be aggregatable (not a free-text \
 field) and must differ from the correlation key's field. Diversity requires a non-'none' correlation_key.
+- Time-of-day window (OPTIONAL): only set time_window_start, time_window_end, and a non-empty \
+time_window_days when the user asks to restrict detection to (or away from) particular hours/days — \
+e.g. "only outside working hours", "only at night", "only on weekends", "during business hours". \
+Use time_window_mode='outside' for "outside/off-hours/after-hours" phrasing and 'inside' for \
+"during/only between". Times are the organisation's LOCAL time. To express a window that crosses \
+midnight (e.g. 22:00 to 06:00) set time_window_end earlier than time_window_start. If the user does \
+NOT mention timing, leave time_window_start and time_window_end null, time_window_days empty, and \
+time_window_mode 'inside' (no constraint). A window needs BOTH start and end and at least one day.
 - If a current draft is provided, update it based on the latest instruction
 - Return only valid JSON. No markdown, no code fences, no explanation outside the JSON.
 """

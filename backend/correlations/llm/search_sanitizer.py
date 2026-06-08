@@ -12,6 +12,79 @@ from correlations.services.search_compiler import (
 
 _VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
 _VALID_CORR_KEYS = frozenset(k for k, _ in CORRELATION_KEY_CHOICES)
+_VALID_TIME_WINDOW_MODES = frozenset({"inside", "outside"})
+
+
+def _sanitize_time_window(draft: dict, warnings: list) -> dict:
+    """Validate the optional time-of-day window (#440) on an LLM draft.
+
+    Returns the window fields the drawer/serializer expect. A window is only kept when
+    start, end, and a non-empty valid day set are all present; otherwise it is cleared
+    (no constraint). Invalid pieces are dropped with a warning rather than raising.
+    """
+    cleared = {
+        "time_window_start": None,
+        "time_window_end": None,
+        "time_window_days": [],
+        "time_window_mode": "inside",
+    }
+
+    def _parse_time(val):
+        """Accept 'HH:MM' or 'HH:MM:SS'; return normalised 'HH:MM:SS' or None."""
+        if not val:
+            return None
+        parts = str(val).strip().split(":")
+        if len(parts) < 2:
+            return None
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            s = int(parts[2]) if len(parts) > 2 else 0
+        except (ValueError, TypeError):
+            return None
+        if not (0 <= h <= 23 and 0 <= m <= 59 and 0 <= s <= 59):
+            return None
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    start = _parse_time(draft.get("time_window_start"))
+    end = _parse_time(draft.get("time_window_end"))
+
+    raw_days = draft.get("time_window_days") or []
+    days = []
+    if isinstance(raw_days, (list, tuple)):
+        for d in raw_days:
+            try:
+                di = int(d)
+            except (ValueError, TypeError):
+                continue
+            if 1 <= di <= 7 and di not in days:
+                days.append(di)
+    days.sort()
+
+    mode = draft.get("time_window_mode", "inside")
+    if mode not in _VALID_TIME_WINDOW_MODES:
+        mode = "inside"
+
+    # Anything set at all signals the LLM intended a window — validate as a group.
+    any_set = bool(draft.get("time_window_start") or draft.get("time_window_end") or raw_days)
+    if not any_set:
+        return cleared
+
+    if not (start and end):
+        warnings.append("Time-of-day window dropped: both a start and end time are required.")
+        return cleared
+    if start == end:
+        warnings.append("Time-of-day window dropped: start and end times must differ.")
+        return cleared
+    if not days:
+        warnings.append("Time-of-day window dropped: at least one day of week is required.")
+        return cleared
+
+    return {
+        "time_window_start": start,
+        "time_window_end": end,
+        "time_window_days": days,
+        "time_window_mode": mode,
+    }
 
 
 def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
@@ -120,6 +193,8 @@ def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
 
         sanitized_legs.append(sanitized_leg)
 
+    time_window = _sanitize_time_window(draft, warnings)
+
     return {
         "name": name,
         "description": description,
@@ -129,5 +204,6 @@ def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
         "interval_minutes": interval,
         "max_findings_per_run": max_findings,
         "enabled": enabled,
+        **time_window,
         "legs": sanitized_legs,
     }, warnings

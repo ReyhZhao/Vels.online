@@ -12,9 +12,15 @@ const EMPTY_DRAFT = {
   severity: 'medium',
   include_agentless: false,
   enabled: true,
+  time_window_start: null,
+  time_window_end: null,
+  time_window_days: [],
+  time_window_mode: 'inside',
   legs: [{ count: 1, display_order: 0, conditions: [{ ...EMPTY_CONDITION }] }],
   organization: undefined,
 };
+
+const WEEKDAYS = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [7, 'Sun']];
 
 const SEARCH_OPERATORS = [
   { value: 'equals', label: 'Equals' },
@@ -554,6 +560,83 @@ export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved 
                     onRemove={removeLeg}
                   />
                 ))}
+              </div>
+
+              {/* Time-of-day window (#440): optional, may be set by the assistant or by hand */}
+              <div className="space-y-3 border-t border-border pt-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Time-of-day window (optional)</p>
+                  {(draft.time_window_start || draft.time_window_end || (draft.time_window_days ?? []).length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => updateDraft({ time_window_start: null, time_window_end: null, time_window_days: [], time_window_mode: 'inside' })}
+                      className="text-xs text-muted-foreground hover:text-red-600"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Restrict matches to (or away from) hours of the day, evaluated in the organization's timezone.
+                  Ask the assistant (e.g. "only outside working hours") or set it here. Leave empty for no constraint.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">Start</label>
+                    <input
+                      type="time"
+                      value={(draft.time_window_start ?? '').slice(0, 5)}
+                      onChange={e => updateDraft({ time_window_start: e.target.value ? `${e.target.value}:00` : null })}
+                      aria-label="Time window start"
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">End</label>
+                    <input
+                      type="time"
+                      value={(draft.time_window_end ?? '').slice(0, 5)}
+                      onChange={e => updateDraft({ time_window_end: e.target.value ? `${e.target.value}:00` : null })}
+                      aria-label="Time window end"
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">Days</label>
+                  <div className="flex gap-1 flex-wrap">
+                    {WEEKDAYS.map(([d, label]) => {
+                      const days = draft.time_window_days ?? [];
+                      const active = days.includes(d);
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => updateDraft({ time_window_days: active ? days.filter(x => x !== d) : [...days, d].sort((a, b) => a - b) })}
+                          className={`rounded-md px-2 py-1 text-xs font-medium border transition-colors ${active ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-muted-foreground border-border hover:bg-accent'}`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">Mode</label>
+                  <select
+                    value={draft.time_window_mode ?? 'inside'}
+                    onChange={e => updateDraft({ time_window_mode: e.target.value })}
+                    aria-label="Time window mode"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="inside">Inside window (only during these hours)</option>
+                    <option value="outside">Outside window (only outside these hours)</option>
+                  </select>
+                </div>
+                {draft.time_window_start && draft.time_window_end && (draft.time_window_days ?? []).length === 0 && (
+                  <p className="text-xs text-destructive">Select at least one day, or clear the window.</p>
+                )}
               </div>
 
             </div>

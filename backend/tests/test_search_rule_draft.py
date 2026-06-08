@@ -616,3 +616,76 @@ def test_search_draft_nothing_persisted(client, staff_user, db):
             content_type="application/json",
         )
     assert SearchRule.objects.count() == initial_count
+
+
+# ── sanitize_search_draft: time-of-day window (#440) ────────────────────────────
+
+
+def test_sanitizer_default_draft_has_cleared_time_window():
+    sanitized, _ = sanitize_search_draft(_valid_search_draft(), _stub_mapping())
+    assert sanitized["time_window_start"] is None
+    assert sanitized["time_window_end"] is None
+    assert sanitized["time_window_days"] == []
+    assert sanitized["time_window_mode"] == "inside"
+
+
+def test_sanitizer_preserves_valid_time_window():
+    draft = _valid_search_draft()
+    draft.update({
+        "time_window_start": "08:00",
+        "time_window_end": "18:00",
+        "time_window_days": [1, 2, 3, 4, 5],
+        "time_window_mode": "outside",
+    })
+    sanitized, warnings = sanitize_search_draft(draft, _stub_mapping())
+    assert sanitized["time_window_start"] == "08:00:00"
+    assert sanitized["time_window_end"] == "18:00:00"
+    assert sanitized["time_window_days"] == [1, 2, 3, 4, 5]
+    assert sanitized["time_window_mode"] == "outside"
+
+
+def test_sanitizer_keeps_cross_midnight_window():
+    draft = _valid_search_draft()
+    draft.update({"time_window_start": "22:00", "time_window_end": "06:00", "time_window_days": [6, 7]})
+    sanitized, _ = sanitize_search_draft(draft, _stub_mapping())
+    assert sanitized["time_window_start"] == "22:00:00"
+    assert sanitized["time_window_end"] == "06:00:00"
+    assert sanitized["time_window_days"] == [6, 7]
+
+
+def test_sanitizer_drops_window_missing_end_with_warning():
+    draft = _valid_search_draft()
+    draft.update({"time_window_start": "08:00", "time_window_days": [1]})
+    sanitized, warnings = sanitize_search_draft(draft, _stub_mapping())
+    assert sanitized["time_window_start"] is None
+    assert any("Time-of-day window dropped" in w for w in warnings)
+
+
+def test_sanitizer_drops_window_missing_days_with_warning():
+    draft = _valid_search_draft()
+    draft.update({"time_window_start": "08:00", "time_window_end": "18:00", "time_window_days": []})
+    sanitized, warnings = sanitize_search_draft(draft, _stub_mapping())
+    assert sanitized["time_window_days"] == []
+    assert any("Time-of-day window dropped" in w for w in warnings)
+
+
+def test_sanitizer_filters_invalid_day_values():
+    draft = _valid_search_draft()
+    draft.update({"time_window_start": "08:00", "time_window_end": "18:00", "time_window_days": [1, 9, 3, 3]})
+    sanitized, _ = sanitize_search_draft(draft, _stub_mapping())
+    assert sanitized["time_window_days"] == [1, 3]
+
+
+def test_sanitizer_unknown_mode_defaults_inside():
+    draft = _valid_search_draft()
+    draft.update({"time_window_start": "08:00", "time_window_end": "18:00", "time_window_days": [1], "time_window_mode": "bogus"})
+    sanitized, _ = sanitize_search_draft(draft, _stub_mapping())
+    assert sanitized["time_window_mode"] == "inside"
+
+
+def test_search_draft_prompt_documents_time_window():
+    from correlations.llm.search_prompt import build_search_draft_prompt
+    prompt = build_search_draft_prompt(dict(_STUB_GROUNDING))
+    assert "time_window_start" in prompt
+    assert "time_window_mode" in prompt
+    assert "outside" in prompt
