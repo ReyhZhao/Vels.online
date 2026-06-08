@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 class LoopCaps:
     max_iterations: int = 5
     per_tool_timeout_s: float = 10.0
-    deadline_s: float = 45.0
+    # Total research-loop budget. Must stay below the gunicorn --timeout (backend/Dockerfile)
+    # so the loop self-limits before gunicorn SIGABRT-kills the worker.
+    deadline_s: float = 60.0
     max_auto_actions: int = 8
 
     @classmethod
@@ -35,7 +37,7 @@ class LoopCaps:
         return cls(
             max_iterations=int(getattr(settings, "ASSISTANT_LOOP_MAX_ITERATIONS", 5)),
             per_tool_timeout_s=float(getattr(settings, "ASSISTANT_TOOL_TIMEOUT_S", 10.0)),
-            deadline_s=float(getattr(settings, "ASSISTANT_LOOP_DEADLINE_S", 45.0)),
+            deadline_s=float(getattr(settings, "ASSISTANT_LOOP_DEADLINE_S", 60.0)),
             max_auto_actions=int(getattr(settings, "ASSISTANT_MAX_AUTO_ACTIONS", 8)),
         )
 

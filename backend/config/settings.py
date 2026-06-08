@@ -275,11 +275,17 @@ GROUNDING_SAMPLE_CAP  = int(os.environ.get("GROUNDING_SAMPLE_CAP", "15"))
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "mistral")
 OLLAMA_API_KEY  = os.environ.get("OLLAMA_API_KEY", "")
+# Per-call HTTP timeout for every Ollama client (chat / web_search) so a hung endpoint
+# raises rather than blocking a gunicorn worker forever. Must stay below the gunicorn
+# --timeout (see backend/Dockerfile) so the worker is never SIGABRT-killed mid-call.
+OLLAMA_TIMEOUT_S = float(os.environ.get("OLLAMA_TIMEOUT_S", "60"))
 
 # Assistant agentic tool-calling loop (ADR-0011). Caps bound a single turn.
+# ASSISTANT_LOOP_DEADLINE_S (research) + pass-1 + pass-2 (each ≤ OLLAMA_TIMEOUT_S) must
+# stay comfortably under the gunicorn --timeout so the loop self-limits before gunicorn.
 ASSISTANT_LOOP_MAX_ITERATIONS = int(os.environ.get("ASSISTANT_LOOP_MAX_ITERATIONS", "5"))
 ASSISTANT_TOOL_TIMEOUT_S      = float(os.environ.get("ASSISTANT_TOOL_TIMEOUT_S", "10"))
-ASSISTANT_LOOP_DEADLINE_S     = float(os.environ.get("ASSISTANT_LOOP_DEADLINE_S", "45"))
+ASSISTANT_LOOP_DEADLINE_S     = float(os.environ.get("ASSISTANT_LOOP_DEADLINE_S", "60"))
 ASSISTANT_MAX_AUTO_ACTIONS    = int(os.environ.get("ASSISTANT_MAX_AUTO_ACTIONS", "8"))
 # Web search is available when an Ollama Cloud key is configured (or Gemini grounding).
 ASSISTANT_WEB_SEARCH_ENABLED  = os.environ.get("ASSISTANT_WEB_SEARCH_ENABLED", "1") == "1"

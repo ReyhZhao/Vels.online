@@ -17,7 +17,8 @@ class OllamaDraftProvider(BaseDraftProvider):
         base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
         api_key = getattr(settings, "OLLAMA_API_KEY", "")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        self._client = ollama.Client(host=base_url, headers=headers)
+        timeout = getattr(settings, "OLLAMA_TIMEOUT_S", 60.0)
+        self._client = ollama.Client(host=base_url, headers=headers, timeout=timeout)
         self._model = getattr(settings, "OLLAMA_MODEL", "mistral")
 
     def _chat(self, system_prompt: str, messages: list, current_draft=None) -> str:
@@ -30,7 +31,7 @@ class OllamaDraftProvider(BaseDraftProvider):
             ollama_messages.append({"role": role, "content": text})
 
         try:
-            response = self._client.chat(model=self._model, messages=ollama_messages)
+            response = self._client.chat(model=self._model, messages=ollama_messages, format="json")
             return response.message.content.strip()
         except Exception as exc:
             raise DraftError(f"Ollama API error: {exc}") from exc

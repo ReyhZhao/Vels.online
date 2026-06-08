@@ -12,7 +12,8 @@ class OllamaProvider(BaseLLMProvider):
         base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
         api_key = getattr(settings, "OLLAMA_API_KEY", "")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        self._client = ollama.Client(host=base_url, headers=headers)
+        timeout = getattr(settings, "OLLAMA_TIMEOUT_S", 60.0)
+        self._client = ollama.Client(host=base_url, headers=headers, timeout=timeout)
         self._model = getattr(settings, "OLLAMA_MODEL", "mistral")
 
     def generate_exception(self, source_ref: dict) -> ExceptionFields:
@@ -23,6 +24,7 @@ class OllamaProvider(BaseLLMProvider):
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
+            format="json",
         )
         text = response.message.content.strip()
         if text.startswith("```"):

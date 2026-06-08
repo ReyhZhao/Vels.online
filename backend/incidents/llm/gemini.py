@@ -1,4 +1,5 @@
 import json
+from typing import Optional
 
 from django.conf import settings
 
@@ -168,6 +169,97 @@ def _strip_code_fence_if_present(text: str) -> str:
         if stripped.endswith("```"):
             stripped = stripped[:-3].strip()
     return stripped
+
+
+def _first_balanced_json_object(text: str) -> Optional[str]:
+    """Return the first balanced top-level ``{...}`` substring, or None.
+
+    Walks the string tracking brace depth (and skipping braces inside JSON strings)
+    so a JSON object embedded in prose can be recovered even when the model wraps
+    the envelope in reasoning text.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
+def _extract_json_object(text: str) -> Optional[dict]:
+    """Best-effort parse of a JSON object from model output that may wrap it in prose.
+
+    Tries the whole (fence-stripped) string first, then falls back to the first
+    balanced ``{...}`` object. Returns a dict, or None if nothing parseable is found.
+    """
+    stripped = _strip_code_fence_if_present(text)
+    try:
+        parsed = json.loads(stripped)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+    candidate = _first_balanced_json_object(stripped)
+    if candidate is None:
+        return None
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+# Used when the model returns no recoverable JSON envelope but the output looks like a
+# failed JSON/reasoning attempt — we must never surface that raw blob to the analyst.
+_ASSISTANT_FALLBACK_REPLY = (
+    "I couldn't produce a structured response for this incident just now. "
+    "Please rephrase your request or try again."
+)
+
+
+def _parse_assistant_envelope(raw: str, grounding: dict) -> AssistantResult:
+    """Turn raw model output into an AssistantResult.
+
+    Shared by all providers so behaviour stays consistent: recovers a JSON envelope
+    even when the model wraps it in prose, and on genuine failure never echoes the
+    model's reasoning preamble or a literal JSON blob back to the analyst.
+    """
+    data = _extract_json_object(raw)
+    if data is not None:
+        return _parse_assistant_result(data, grounding)
+
+    stripped = _strip_code_fence_if_present(raw)
+    # If the output contains a brace it was a failed JSON/reasoning attempt — don't dump it.
+    if "{" in stripped:
+        return AssistantResult(
+            assistant_reply=_ASSISTANT_FALLBACK_REPLY,
+            proposed_actions=[],
+            warnings=["Provider did not return the expected JSON envelope; proposed actions are unavailable."],
+        )
+    # Genuine plain-text answer — safe to surface as the reply.
+    return AssistantResult(
+        assistant_reply=stripped,
+        proposed_actions=[],
+        warnings=["Provider returned plain text instead of the expected JSON envelope; proposed actions are unavailable."],
+    )
 
 
 def _parse_assistant_result(data: dict, grounding: dict) -> AssistantResult:
@@ -551,18 +643,7 @@ class GeminiTriageProvider(BaseTriageProvider):
         if not raw:
             raise AssistantError("Gemini returned an empty response.")
 
-        raw = _strip_code_fence_if_present(raw)
-
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return AssistantResult(
-                assistant_reply=raw,
-                proposed_actions=[],
-                warnings=["Provider returned plain text instead of the expected JSON envelope; proposed actions are unavailable."],
-            )
-
-        return _parse_assistant_result(data, grounding)
+        return _parse_assistant_envelope(raw, grounding)
 
     def generate_closure_message(self, incident_context: dict) -> str:
         prompt = json.dumps(incident_context, indent=2)

@@ -250,6 +250,71 @@ def test_ollama_assist_incident_parses_and_enforces_allowlist(incident):
 
 
 @pytest.mark.django_db
+def test_ollama_assist_incident_constrains_json_and_recovers_envelope_from_prose(incident):
+    """The Ollama synthesis call must force JSON output, and even when the model wraps the
+    envelope in reasoning prose the reply + proposed_actions must be parsed (issue #455)."""
+    from incidents.llm.ollama import OllamaTriageProvider
+
+    grounding = build_incident_grounding(incident)
+    # Reasoning preamble followed by the real envelope — the exact failure mode in the issue.
+    raw_response = (
+        "Add comment internal summarizing findings.\n\n"
+        "We'll output JSON with those actions and reply.\n\n"
+        + json.dumps({
+            "assistant_reply": "Severity should be raised to high.",
+            "proposed_actions": [
+                {"type": "update_field", "field": "severity", "value": "high", "label": "Raise severity"},
+            ],
+        })
+    )
+
+    mock_provider = MagicMock(spec=OllamaTriageProvider)
+    mock_response = MagicMock()
+    mock_response.message.content = raw_response
+    mock_provider._client = MagicMock()
+    mock_provider._client.chat.return_value = mock_response
+    mock_provider._model = "mistral"
+
+    result = OllamaTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    # The synthesis call is constrained to JSON output (parity with Gemini).
+    assert mock_provider._client.chat.call_args.kwargs.get("format") == "json"
+    # The embedded envelope was recovered: clean reply, no reasoning preamble or raw blob.
+    assert result.assistant_reply == "Severity should be raised to high."
+    assert "We'll output JSON" not in result.assistant_reply
+    assert "{" not in result.assistant_reply
+    # The proposed action survived rather than being dropped.
+    severity_actions = [a for a in result.proposed_actions if a.payload.get("field") == "severity"]
+    assert len(severity_actions) == 1
+    assert severity_actions[0].payload["value"] == "high"
+
+
+@pytest.mark.django_db
+def test_ollama_assist_incident_failed_json_does_not_dump_raw_blob(incident):
+    """A genuinely unparseable JSON-looking reply must degrade to a safe generic reply,
+    never surfacing the model's reasoning or a literal JSON blob (issue #455)."""
+    from incidents.llm.ollama import OllamaTriageProvider
+
+    grounding = build_incident_grounding(incident)
+    # Looks like a JSON attempt but is malformed and unrecoverable.
+    raw_response = 'Reasoning: I will now answer. { "assistant_reply": "oops broken'
+
+    mock_provider = MagicMock(spec=OllamaTriageProvider)
+    mock_response = MagicMock()
+    mock_response.message.content = raw_response
+    mock_provider._client = MagicMock()
+    mock_provider._client.chat.return_value = mock_response
+    mock_provider._model = "mistral"
+
+    result = OllamaTriageProvider.assist_incident(mock_provider, _MESSAGES, grounding)
+
+    assert "{" not in result.assistant_reply
+    assert "Reasoning:" not in result.assistant_reply
+    assert result.proposed_actions == []
+    assert len(result.warnings) == 1
+
+
+@pytest.mark.django_db
 def test_ollama_assist_incident_strips_code_fence(incident):
     """OllamaTriageProvider.assist_incident must handle JSON wrapped in a markdown code fence."""
     from incidents.llm.ollama import OllamaTriageProvider

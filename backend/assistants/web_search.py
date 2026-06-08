@@ -46,6 +46,7 @@ def _ollama_web_search(query: str, max_results: int = 5) -> list:
     client = ollama.Client(
         host=getattr(settings, "OLLAMA_BASE_URL", ""),
         headers={"Authorization": f"Bearer {getattr(settings, 'OLLAMA_API_KEY', '')}"},
+        timeout=getattr(settings, "OLLAMA_TIMEOUT_S", 60.0),
     )
     try:
         resp = client.web_search(query=query, max_results=max_results)

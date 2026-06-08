@@ -20,12 +20,11 @@ from .gemini import (
     TASK_SUMMARY_SYSTEM_PROMPT,
     _build_assistant_system_prompt,
     _build_system_prompt,
-    _parse_assistant_result,
+    _parse_assistant_envelope,
     _parse_correlation_result,
     _parse_residual_grouping_result,
     _parse_result,
     _parse_task_summary_result,
-    _strip_code_fence_if_present,
 )
 
 
@@ -34,7 +33,8 @@ class OllamaTriageProvider(BaseTriageProvider):
         base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
         api_key = getattr(settings, "OLLAMA_API_KEY", "")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        self._client = ollama.Client(host=base_url, headers=headers)
+        timeout = getattr(settings, "OLLAMA_TIMEOUT_S", 60.0)
+        self._client = ollama.Client(host=base_url, headers=headers, timeout=timeout)
         self._model = getattr(settings, "OLLAMA_MODEL", "mistral")
 
     def triage_incident(self, payload: dict, extra_context: str = "") -> TriageResult:
@@ -47,6 +47,7 @@ class OllamaTriageProvider(BaseTriageProvider):
                     {"role": "system", "content": _build_system_prompt(source_kind, extra_context)},
                     {"role": "user", "content": prompt},
                 ],
+                format="json",
             )
             text = response.message.content.strip()
         except Exception as exc:
@@ -73,6 +74,7 @@ class OllamaTriageProvider(BaseTriageProvider):
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                format="json",
             )
             text = response.message.content.strip()
         except Exception as exc:
@@ -120,6 +122,7 @@ class OllamaTriageProvider(BaseTriageProvider):
                     {"role": "system", "content": CORRELATION_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
+                format="json",
             )
             text = response.message.content.strip()
         except Exception as exc:
@@ -145,6 +148,7 @@ class OllamaTriageProvider(BaseTriageProvider):
                     {"role": "system", "content": TASK_SUMMARY_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
+                format="json",
             )
             text = response.message.content.strip()
         except Exception as exc:
@@ -172,6 +176,7 @@ class OllamaTriageProvider(BaseTriageProvider):
                     {"role": "system", "content": RESIDUAL_GROUPING_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
+                format="json",
             )
             text = response.message.content.strip()
         except Exception as exc:
@@ -223,7 +228,10 @@ class OllamaTriageProvider(BaseTriageProvider):
             chat_messages.append({"role": role, "content": str(msg.get("content", ""))})
 
         try:
-            response = self._client.chat(model=self._model, messages=chat_messages)
+            # Constrain to JSON output for parity with the Gemini synthesis path
+            # (response_mime_type="application/json"); otherwise the model often emits
+            # reasoning prose around the envelope and the actions are lost.
+            response = self._client.chat(model=self._model, messages=chat_messages, format="json")
             raw = response.message.content.strip()
         except Exception as exc:
             raise AssistantError(f"Ollama API error: {exc}") from exc
@@ -231,15 +239,4 @@ class OllamaTriageProvider(BaseTriageProvider):
         if not raw:
             raise AssistantError("Ollama returned an empty response.")
 
-        raw = _strip_code_fence_if_present(raw)
-
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return AssistantResult(
-                assistant_reply=raw,
-                proposed_actions=[],
-                warnings=["Provider returned plain text instead of the expected JSON envelope; proposed actions are unavailable."],
-            )
-
-        return _parse_assistant_result(data, grounding)
+        return _parse_assistant_envelope(raw, grounding)

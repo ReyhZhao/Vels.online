@@ -90,6 +90,28 @@ def test_deadline_cap_enforced_via_injected_clock():
     assert result.stop_reason == "deadline"
 
 
+def test_loop_self_limits_when_chat_is_slow():
+    """A slow provider.chat must not run the loop forever: the loop's own deadline stops it
+    on the real wall clock (issue #454 — the budget must self-limit before gunicorn intervenes)."""
+    import time
+
+    class SlowProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, tools):
+            self.calls += 1
+            time.sleep(0.05)  # each turn overruns the tiny deadline below
+            return ChatTurn(tool_calls=[ToolCall(name="lookup", arguments={})])
+
+    provider = SlowProvider()
+    caps = LoopCaps(max_iterations=50, per_tool_timeout_s=5, deadline_s=0.02, max_auto_actions=8)
+    result = run_research_phase(provider, [_echo_tool()], [{"role": "user", "content": "go"}], caps)
+    assert result.stop_reason == "deadline"
+    # Stopped early on the deadline rather than running all 50 iterations.
+    assert provider.calls < 50
+
+
 def test_unknown_tool_is_reported_not_fatal():
     provider = FakeProvider([
         ChatTurn(tool_calls=[ToolCall(name="does_not_exist", arguments={})]),
