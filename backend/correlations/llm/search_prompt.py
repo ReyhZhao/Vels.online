@@ -21,7 +21,10 @@ Rules:
 
 _SEARCH_DRAFT_TEMPLATE = """\
 You are a security rule-author assistant. Given a natural-language description, \
-draft a Scheduled Search Rule that periodically queries raw Wazuh alert events in OpenSearch.
+draft a Scheduled Search Rule that periodically queries raw Wazuh alert events in OpenSearch. \
+You can search the internet for threat intelligence to inform the rule; any findings are included \
+below under "Internet research gathered for this request". If asked whether you can look things up \
+online, the answer is yes.
 
 Return a JSON object with exactly these fields:
   draft_rule      (object, required) — the drafted Scheduled Search Rule (schema below)

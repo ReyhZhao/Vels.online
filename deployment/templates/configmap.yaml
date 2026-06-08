@@ -8,7 +8,9 @@ data:
   SEMAPHORE_PROJECT_ID: "1"
   AUTHENTIK_ENROLLMENT_FLOW_SLUG: default-enrollment-flow
 
-  OLLAMA_MODEL: gemma4:31b-cloud
+  # gpt-oss reliably emits OpenAI-style tool_calls (gemma does not), which the
+  # assistant agentic loop (ADR-0011) depends on. Ollama Cloud, tool + web-search capable.
+  OLLAMA_MODEL: gpt-oss:120b-cloud
   INBOUND_IMAP_HOST: mail.vels.online
   ONCALL_ROUTING: llm_guided
   ALLOWED_HOSTS: "vels.online,backend.velsonline.svc.cluster.local"

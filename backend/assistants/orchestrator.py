@@ -117,12 +117,21 @@ def run_research_phase(
 
         turn: ChatTurn = provider.chat(transcript, tools)
 
-        if turn.text:
-            transcript.append({"role": "assistant", "content": turn.text})
-
         if not turn.tool_calls:
+            if turn.text:
+                transcript.append({"role": "assistant", "content": turn.text})
             stop_reason = "model_done"
             break
+
+        # Echo the assistant turn carrying the tool calls BEFORE the tool results, so
+        # the next iteration sees a well-formed call/result history (required by Ollama).
+        transcript.append({
+            "role": "assistant",
+            "content": turn.text or "",
+            "tool_calls": [
+                {"name": c.name, "arguments": c.arguments, "id": c.id} for c in turn.tool_calls
+            ],
+        })
 
         for call in turn.tool_calls:
             spec = registry.get(call.name)

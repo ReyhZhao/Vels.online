@@ -24,6 +24,15 @@ def _to_ollama_messages(messages: list) -> list:
                 "content": str(m.get("content", "")),
                 "tool_name": m.get("name", ""),
             })
+        elif role == "assistant" and m.get("tool_calls"):
+            out.append({
+                "role": "assistant",
+                "content": str(m.get("content", "")),
+                "tool_calls": [
+                    {"function": {"name": c["name"], "arguments": c.get("arguments", {})}}
+                    for c in m["tool_calls"]
+                ],
+            })
         else:
             out.append({"role": role, "content": str(m.get("content", ""))})
     return out
@@ -69,6 +78,15 @@ def _to_gemini_contents(types, messages: list) -> list:
                     response={"result": m.get("content", "")},
                 )],
             ))
+            continue
+        if role == "assistant" and m.get("tool_calls"):
+            parts = []
+            for c in m["tool_calls"]:
+                try:
+                    parts.append(types.Part.from_function_call(name=c["name"], args=c.get("arguments", {})))
+                except Exception:
+                    parts.append(types.Part.from_text(text=str(m.get("content", "") or c["name"])))
+            contents.append(types.Content(role="model", parts=parts))
             continue
         if role == "assistant":
             role = "model"

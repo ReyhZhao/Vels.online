@@ -47,7 +47,11 @@ def _ollama_web_search(query: str, max_results: int = 5) -> list:
         host=getattr(settings, "OLLAMA_BASE_URL", ""),
         headers={"Authorization": f"Bearer {getattr(settings, 'OLLAMA_API_KEY', '')}"},
     )
-    resp = client.web_search(query=query, max_results=max_results)
+    try:
+        resp = client.web_search(query=query, max_results=max_results)
+    except TypeError:
+        # older/newer SDKs may not accept max_results
+        resp = client.web_search(query)
     raw = getattr(resp, "results", None)
     if raw is None and isinstance(resp, dict):
         raw = resp.get("results", [])

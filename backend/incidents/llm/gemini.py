@@ -283,7 +283,11 @@ def _build_assistant_system_prompt(grounding: dict) -> str:
 
     return f"""\
 You are a senior security analyst assistant helping a staff member investigate an incident.
-You have full context about the incident below. Answer questions accurately using only the grounded data.
+You have full context about the incident below, and before answering you can look up related
+incidents, alerts, and assets in the app and search the internet for threat intelligence. Any
+findings from that research are included under INCIDENT CONTEXT as "research_notes" — use them in
+your answer. If asked whether you can search the web or look things up, the answer is yes — you
+already do so automatically as part of answering.
 You may also propose specific actions the user can confirm with one click.
 
 === INCIDENT CONTEXT ===

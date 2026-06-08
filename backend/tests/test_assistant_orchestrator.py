@@ -140,6 +140,24 @@ def test_auto_action_cap_enforced():
     assert capped
 
 
+def test_tool_call_turn_echoed_before_result_in_transcript():
+    # The assistant message carrying the tool_calls must precede the tool result,
+    # so iteration 2 sees a well-formed call/result history (Ollama requirement).
+    provider = FakeProvider([
+        ChatTurn(text="let me check", tool_calls=[ToolCall(name="lookup", arguments={"q": 1}, id="c1")]),
+        ChatTurn(text="done"),
+    ])
+    result = run_research_phase(provider, [_echo_tool(name="lookup")], [{"role": "user", "content": "go"}], CAPS)
+    roles = [m.get("role") for m in result.messages]
+    asst_with_calls = [m for m in result.messages if m.get("role") == "assistant" and m.get("tool_calls")]
+    assert asst_with_calls, "assistant tool-call message was not appended"
+    # the assistant tool-call message comes before the tool result
+    asst_idx = next(i for i, m in enumerate(result.messages)
+                    if m.get("role") == "assistant" and m.get("tool_calls"))
+    tool_idx = next(i for i, m in enumerate(result.messages) if m.get("role") == "tool")
+    assert asst_idx < tool_idx
+
+
 def test_research_notes_render_tool_results():
     provider = FakeProvider([
         ChatTurn(tool_calls=[ToolCall(name="web_search", arguments={"query": "CVE-2025-1"})]),
