@@ -212,9 +212,13 @@ def build_search_draft_prompt(grounding: dict) -> str:
     else:
         expanded_section = "(no expanded fields — rely on core fields above)"
 
-    return _SEARCH_DRAFT_TEMPLATE.format(
+    draft = _SEARCH_DRAFT_TEMPLATE.format(
         corr_keys=corr_keys,
         severities=severities,
         core_fields=core_fields_text,
         expanded_section=expanded_section,
     )
+    research = grounding.get("research_notes")
+    if research:
+        draft += f"\n\n--- Internet research gathered for this request ---\n{research}\n"
+    return draft

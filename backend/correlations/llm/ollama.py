@@ -71,6 +71,14 @@ class OllamaDraftProvider(BaseDraftProvider):
             warnings=[],
         )
 
+    # ── agentic loop (ADR-0011) ──────────────────────────────────────────────
+    def uses_native_web_search(self) -> bool:
+        return False
+
+    def chat(self, messages: list, tools: list):
+        from assistants.providers import ollama_chat
+        return ollama_chat(self._client, self._model, messages, tools)
+
     def generate_sample_docs(self, grounding: dict, expect_fire: bool) -> list:
         raw = self._chat(
             build_sample_gen_prompt(grounding, expect_fire),

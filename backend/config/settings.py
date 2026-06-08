@@ -244,7 +244,10 @@ SEMAPHORE_URL = os.environ.get("SEMAPHORE_URL", "")
 SEMAPHORE_API_TOKEN = os.environ.get("SEMAPHORE_API_TOKEN", "")
 SEMAPHORE_PROJECT_ID = int(os.environ.get("SEMAPHORE_PROJECT_ID", "0"))
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# Gemini 3 is required for the assistant agentic loop (ADR-0011): only Gemini 3
+# can combine native google_search grounding with custom function tools in a
+# single request. Overridable via env.
+GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-3-flash")
 EXCEPTION_LLM_PROVIDER = os.environ.get(
     "EXCEPTION_LLM_PROVIDER",
     "exceptions.llm.gemini.GeminiFlashProvider",
@@ -272,6 +275,14 @@ GROUNDING_SAMPLE_CAP  = int(os.environ.get("GROUNDING_SAMPLE_CAP", "15"))
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "mistral")
 OLLAMA_API_KEY  = os.environ.get("OLLAMA_API_KEY", "")
+
+# Assistant agentic tool-calling loop (ADR-0011). Caps bound a single turn.
+ASSISTANT_LOOP_MAX_ITERATIONS = int(os.environ.get("ASSISTANT_LOOP_MAX_ITERATIONS", "5"))
+ASSISTANT_TOOL_TIMEOUT_S      = float(os.environ.get("ASSISTANT_TOOL_TIMEOUT_S", "10"))
+ASSISTANT_LOOP_DEADLINE_S     = float(os.environ.get("ASSISTANT_LOOP_DEADLINE_S", "45"))
+ASSISTANT_MAX_AUTO_ACTIONS    = int(os.environ.get("ASSISTANT_MAX_AUTO_ACTIONS", "8"))
+# Web search is available when an Ollama Cloud key is configured (or Gemini grounding).
+ASSISTANT_WEB_SEARCH_ENABLED  = os.environ.get("ASSISTANT_WEB_SEARCH_ENABLED", "1") == "1"
 
 INCIDENT_SLA_TARGETS = {
     "critical": {"response_seconds": 15 * 60,       "resolve_seconds": 4 * 3600},

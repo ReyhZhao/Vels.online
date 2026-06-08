@@ -1,6 +1,32 @@
 import { useState, useRef, useEffect } from 'react';
 import api from '../lib/axios';
 
+// Compact, collapsible trace of what the assistant looked up / searched this turn.
+function ToolTrace({ trace }) {
+  const [open, setOpen] = useState(false);
+  const reads = trace.filter(t => !t.is_write);
+  if (reads.length === 0) return null;
+  return (
+    <div className="mt-1 max-w-[85%] text-[11px] text-muted-foreground">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="hover:text-foreground transition-colors"
+      >
+        {open ? '▾' : '▸'} {reads.length} lookup{reads.length === 1 ? '' : 's'}
+      </button>
+      {open && (
+        <ul className="mt-0.5 space-y-0.5 pl-3">
+          {reads.map((t, i) => (
+            <li key={i} className={t.error ? 'text-amber-600 dark:text-amber-400' : ''}>
+              {t.error ? `${t.tool}: ${t.error}` : (t.summary || t.tool)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ProposedActionCard({ action, displayId, onConfirmed, onDismiss }) {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState(null);
@@ -129,8 +155,13 @@ export default function IncidentAssistantDrawer({ displayId, onClose, onActionCo
       const res = await api.post(`/api/incidents/${displayId}/assistant/`, {
         messages: nextMessages,
       });
-      const { assistant_reply, proposed_actions, warnings } = res.data;
-      setMessages(prev => [...prev, { role: 'assistant', content: assistant_reply }]);
+      const { assistant_reply, proposed_actions, warnings, tool_trace, auto_actions } = res.data;
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: assistant_reply,
+        tool_trace: tool_trace || [],
+        auto_actions: auto_actions || [],
+      }]);
       if (proposed_actions?.length) {
         setPendingActions(prev => [...prev, ...proposed_actions]);
       }
@@ -188,7 +219,7 @@ export default function IncidentAssistantDrawer({ displayId, onClose, onActionCo
             </p>
           )}
           {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div
                 className={`rounded-lg px-3 py-2 text-xs max-w-[85%] whitespace-pre-wrap ${
                   msg.role === 'user'
@@ -198,6 +229,18 @@ export default function IncidentAssistantDrawer({ displayId, onClose, onActionCo
               >
                 {msg.content}
               </div>
+              {msg.role === 'assistant' && msg.auto_actions?.length > 0 && (
+                <div className="mt-1 max-w-[85%] space-y-0.5">
+                  {msg.auto_actions.map((a, j) => (
+                    <p key={j} className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                      ✓ {a.summary || a.tool}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {msg.role === 'assistant' && msg.tool_trace?.length > 0 && (
+                <ToolTrace trace={msg.tool_trace} />
+              )}
             </div>
           ))}
           {loading && (

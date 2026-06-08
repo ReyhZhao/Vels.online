@@ -188,6 +188,9 @@ class Incident(models.Model):
     assets = models.ManyToManyField(
         "Asset", through="IncidentAsset", related_name="incidents", blank=True
     )
+    # Free-form labels. Low-risk, reversible — the incident assistant may add these
+    # autonomously (ADR-0012).
+    tags = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

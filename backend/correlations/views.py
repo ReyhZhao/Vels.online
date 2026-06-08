@@ -562,6 +562,33 @@ class SearchRuleDraftView(APIView):
 
         grounding = build_search_grounding(scope=scope, agent_ids=agent_ids)
 
+        # Phase 1 (research): let the model search the internet for threat
+        # intelligence before drafting (ADR-0011). Ollama runs web_search as a tool;
+        # Gemini does it via native grounding (handled in its own draft path).
+        tool_trace = []
+        try:
+            from assistants.orchestrator import run_research_phase, research_notes, LoopCaps
+            from assistants.web_search import build_web_search_tool, web_search_available
+
+            uses_native = getattr(provider, "uses_native_web_search", lambda: False)()
+            if web_search_available() and hasattr(provider, "chat") and not uses_native:
+                research_sys = {
+                    "role": "system",
+                    "content": (
+                        "You are helping author a detection rule. Use web_search to look up "
+                        "threat intelligence that will help you draft an accurate rule. Search "
+                        "only when it helps; stop once you have what you need."
+                    ),
+                }
+                research = run_research_phase(
+                    provider, [build_web_search_tool()], [research_sys] + messages,
+                    LoopCaps.from_settings(),
+                )
+                grounding["research_notes"] = research_notes(research)
+                tool_trace = research.tool_trace
+        except Exception as exc:  # research is best-effort; never block drafting
+            logger.warning("SearchRuleDraftView research phase error: %s", exc)
+
         try:
             # Pass 1: LLM selects relevant rule.ids from the catalog.
             selected_ids = provider.select_relevant_rule_ids(messages, grounding)
@@ -601,6 +628,7 @@ class SearchRuleDraftView(APIView):
             "updated_draft": sanitized,
             "assistant_reply": result.assistant_reply,
             "warnings": result.warnings + sanitizer_warnings,
+            "tool_trace": tool_trace,
         })
 
 

@@ -495,6 +495,24 @@ class GeminiTriageProvider(BaseTriageProvider):
 
         return _parse_task_summary_result(data, provider="gemini")
 
+    # ── agentic loop (ADR-0011) ──────────────────────────────────────────────
+    def uses_native_web_search(self) -> bool:
+        return True
+
+    def chat(self, messages: list, tools: list):
+        from assistants.providers import gemini_chat
+        system = ""
+        rest = []
+        for m in messages:
+            if m.get("role") == "system" and not system:
+                system = m.get("content", "")
+            else:
+                rest.append(m)
+        return gemini_chat(
+            self._client, self._types, settings.GEMINI_MODEL,
+            system, rest, tools, with_grounding=True,
+        )
+
     def assist_incident(self, messages: list, grounding: dict) -> AssistantResult:
         if not messages:
             raise AssistantError("No messages provided.")

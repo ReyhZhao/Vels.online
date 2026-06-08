@@ -226,8 +226,12 @@ export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved 
         current_draft: draft.name ? draft : null,
         scope,
       });
-      const { updated_draft, assistant_reply, warnings: w } = res.data;
-      setMessages(prev => [...prev, { role: 'assistant', content: assistant_reply }]);
+      const { updated_draft, assistant_reply, warnings: w, tool_trace } = res.data;
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: assistant_reply,
+        tool_trace: tool_trace || [],
+      }]);
       setDraft(updated_draft);
       setWarnings(w || []);
     } catch (err) {
@@ -349,7 +353,7 @@ export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved 
                 </p>
               )}
               {messages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div
                     className={`rounded-lg px-3 py-2 text-xs max-w-[85%] whitespace-pre-wrap ${
                       msg.role === 'user'
@@ -359,6 +363,15 @@ export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved 
                   >
                     {msg.content}
                   </div>
+                  {msg.role === 'assistant' && msg.tool_trace?.length > 0 && (
+                    <div className="mt-1 max-w-[85%] text-[11px] text-muted-foreground space-y-0.5">
+                      {msg.tool_trace.map((t, j) => (
+                        <p key={j} className={t.error ? 'text-amber-600 dark:text-amber-400' : ''}>
+                          🔎 {t.error ? `${t.tool}: ${t.error}` : (t.summary || t.tool)}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
               {loading && (

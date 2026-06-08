@@ -2256,6 +2256,39 @@ class IncidentAssistantView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        # Phase 1 (research + auto-execute): the assistant can look up app data and
+        # search the internet via tools, and auto-execute low-risk internal actions
+        # (ADR-0011/0012), before synthesising its reply. Best-effort: never blocks.
+        tool_trace = []
+        auto_actions = []
+        try:
+            from assistants.orchestrator import run_research_phase, research_notes, LoopCaps
+            from incidents.llm.assistant_tools import build_incident_tools
+
+            if hasattr(provider, "chat"):
+                uses_native = getattr(provider, "uses_native_web_search", lambda: False)()
+                tools = build_incident_tools(
+                    incident, request.user, grounding, include_web_search=not uses_native
+                )
+                research_sys = {
+                    "role": "system",
+                    "content": (
+                        "You are assisting a security analyst with this incident. Use the tools "
+                        "to look up related incidents, alerts, and assets, and to search the "
+                        "internet for threat intelligence. You may add an internal comment, "
+                        "self-assign, tag, or link a known asset directly when clearly helpful; "
+                        "do NOT attempt higher-risk changes here. Stop once you have what you need."
+                    ),
+                }
+                research = run_research_phase(
+                    provider, tools, [research_sys] + messages, LoopCaps.from_settings()
+                )
+                grounding["research_notes"] = research_notes(research)
+                tool_trace = research.tool_trace
+                auto_actions = research.auto_actions
+        except Exception as exc:  # research is best-effort; never block the reply
+            logger.warning("IncidentAssistantView research phase error for %s: %s", display_id, exc)
+
         try:
             result = provider.assist_incident(messages, grounding)
         except (AssistantConfigError, TriageConfigError) as exc:
@@ -2280,6 +2313,8 @@ class IncidentAssistantView(APIView):
             "assistant_reply": result.assistant_reply,
             "proposed_actions": proposed_actions,
             "warnings": result.warnings,
+            "tool_trace": tool_trace,
+            "auto_actions": auto_actions,
         })
 
 

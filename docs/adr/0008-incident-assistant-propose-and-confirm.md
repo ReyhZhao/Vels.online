@@ -1,5 +1,7 @@
 # The incident assistant proposes; a human confirms every mutation
 
+> **Superseded by [ADR-0012](0012-incident-assistant-relaxed-action-authority.md).** The blanket "never mutates on its own" rule is relaxed to a risk-graded one: the assistant auto-executes internal, reversible, non-lifecycle actions and proposes everything else. The propose-and-confirm contract below still governs the high-risk action set.
+
 The **incident assistant** is a staff-only, multi-turn conversational LLM interface grounded in a specific incident. It can answer questions about the incident using live server-side context (fields, linked alerts, IOCs, tasks, task templates) and propose a bounded set of actions the analyst can confirm with one click.
 
 ## Decision

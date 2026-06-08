@@ -191,6 +191,24 @@ class GeminiDraftProvider(BaseDraftProvider):
             warnings=[],
         )
 
+    # ── agentic loop (ADR-0011) ──────────────────────────────────────────────
+    def uses_native_web_search(self) -> bool:
+        return True
+
+    def chat(self, messages: list, tools: list):
+        from assistants.providers import gemini_chat
+        system = ""
+        rest = []
+        for m in messages:
+            if m.get("role") == "system" and not system:
+                system = m.get("content", "")
+            else:
+                rest.append(m)
+        return gemini_chat(
+            self._client, self._types, settings.GEMINI_MODEL,
+            system, rest, tools, with_grounding=True,
+        )
+
     def generate_sample_docs(self, grounding: dict, expect_fire: bool) -> list:
         from .search_prompt import build_sample_gen_prompt
         instruction = "Generate the sample documents now."
