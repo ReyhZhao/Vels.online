@@ -119,6 +119,7 @@ function OrgRow({ org }) {
   const [alertLookback, setAlertLookback] = useState(org.alert_match_lookback_days ?? 30);
   const [alertThreshold, setAlertThreshold] = useState(org.alert_auto_promote_threshold ?? 5);
   const [alertWindow, setAlertWindow] = useState(org.alert_auto_promote_window_minutes ?? 60);
+  const [timezone, setTimezone] = useState(org.timezone ?? 'UTC');
   const [savingAlerts, setSavingAlerts] = useState(false);
   const [alertSaveError, setAlertSaveError] = useState(null);
   const [alertSaved, setAlertSaved] = useState(false);
@@ -246,10 +247,11 @@ function OrgRow({ org }) {
         alert_match_lookback_days: Number(alertLookback),
         alert_auto_promote_threshold: Number(alertThreshold),
         alert_auto_promote_window_minutes: Number(alertWindow),
+        timezone: timezone.trim() || 'UTC',
       });
       setAlertSaved(true);
     } catch (err) {
-      setAlertSaveError('Failed to save alert settings.');
+      setAlertSaveError(err.response?.data?.timezone?.[0] ?? 'Failed to save alert settings.');
     } finally {
       setSavingAlerts(false);
     }
@@ -395,7 +397,24 @@ function OrgRow({ org }) {
                     className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
                   />
                 </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`org-timezone-${org.slug}`}>
+                    Timezone (IANA)
+                  </label>
+                  <input
+                    id={`org-timezone-${org.slug}`}
+                    type="text"
+                    value={timezone}
+                    onChange={e => { setTimezone(e.target.value); setAlertSaved(false); }}
+                    disabled={savingAlerts}
+                    placeholder="e.g. Europe/Amsterdam"
+                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+                  />
+                </div>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Used to evaluate Scheduled Search Rule time-of-day windows in this org's local time.
+              </p>
               {alertSaveError && <p className="text-xs text-destructive">{alertSaveError}</p>}
               {alertSaved && <p className="text-xs text-green-600 dark:text-green-400">Saved.</p>}
               <div className="flex justify-end">

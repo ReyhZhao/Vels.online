@@ -13,9 +13,17 @@ class OrganizationSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "slug", "wazuh_group", "triage_prompt_context",
             "alert_match_lookback_days", "alert_auto_promote_threshold",
-            "alert_auto_promote_window_minutes",
+            "alert_auto_promote_window_minutes", "timezone",
         ]
         read_only_fields = ["id", "slug", "wazuh_group"]
+
+    def validate_timezone(self, value):
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError, KeyError):
+            raise serializers.ValidationError("Unknown IANA timezone name.")
+        return value
 
 
 class AgentSerializer(serializers.Serializer):

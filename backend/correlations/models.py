@@ -25,6 +25,14 @@ SEVERITY_CHOICES = [
     ("info", "Info"),
 ]
 
+# Time-of-day window modes (#440): consider only documents inside, or only outside, the window.
+TIME_WINDOW_MODE_INSIDE = "inside"
+TIME_WINDOW_MODE_OUTSIDE = "outside"
+TIME_WINDOW_MODE_CHOICES = [
+    (TIME_WINDOW_MODE_INSIDE, "Inside window"),
+    (TIME_WINDOW_MODE_OUTSIDE, "Outside window"),
+]
+
 OPERATOR_EQUALS = "equals"
 OPERATOR_IN = "in"
 OPERATOR_CONTAINS = "contains"
@@ -232,6 +240,16 @@ class SearchRule(models.Model):
     max_findings_per_run = models.PositiveIntegerField(default=_MAX_FINDINGS_DEFAULT)
     include_agentless = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)
+    # Optional rule-level time-of-day window (#440). When all of start/end/days are set,
+    # the rule only considers documents whose org-local timestamp falls inside (or outside,
+    # per mode) the window on the selected days. Days are ISO weekdays (1=Mon … 7=Sun).
+    # Unset (any of start/end/days empty) = no constraint (current behaviour).
+    time_window_start = models.TimeField(null=True, blank=True)
+    time_window_end = models.TimeField(null=True, blank=True)
+    time_window_days = models.JSONField(default=list, blank=True)
+    time_window_mode = models.CharField(
+        max_length=10, choices=TIME_WINDOW_MODE_CHOICES, default=TIME_WINDOW_MODE_INSIDE, blank=True
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -240,6 +258,11 @@ class SearchRule(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def has_time_window(self) -> bool:
+        """True when this rule carries an active time-of-day window (#440)."""
+        return bool(self.time_window_start and self.time_window_end and self.time_window_days)
 
 
 class SearchRuleLeg(models.Model):

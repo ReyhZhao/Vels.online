@@ -106,7 +106,12 @@ def run_rule_test(rule, samples: list, expect_fire: bool) -> dict:
         window_start = now - timedelta(minutes=rule.window_minutes)
 
         # Scope-neutralised (agent_ids=None); decide-only (no materialisation).
-        decision = decide(rule, None, now, window_start, index=index, client=client)
+        # Honour the rule's time-of-day window (#440), evaluated in the owning org's
+        # timezone (UTC for system rules where organization is null).
+        from correlations.services.search_compiler import build_time_of_day_filter
+        tz_name = rule.organization.timezone if rule.organization_id else "UTC"
+        time_filter = build_time_of_day_filter(rule, tz_name)
+        decision = decide(rule, None, now, window_start, index=index, client=client, time_filter=time_filter)
         return build_verdict(expect_fire, decision)
     except OpenSearchError as exc:
         logger.warning("run_rule_test: OpenSearch error for rule %s: %s", rule.id, exc)

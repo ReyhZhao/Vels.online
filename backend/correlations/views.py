@@ -672,6 +672,12 @@ class _SearchRuleSerializer(_s.ModelSerializer):
     legs = _SearchRuleLegSerializer(many=True)
     test_summary = _s.SerializerMethodField()
     firing_summary = _s.SerializerMethodField()
+    # Time-of-day window (#440). Days are ISO weekdays 1=Mon … 7=Sun.
+    time_window_start = _s.TimeField(required=False, allow_null=True)
+    time_window_end = _s.TimeField(required=False, allow_null=True)
+    time_window_days = _s.ListField(
+        child=_s.IntegerField(min_value=1, max_value=7), required=False
+    )
 
     class Meta:
         model = SearchRule
@@ -679,6 +685,7 @@ class _SearchRuleSerializer(_s.ModelSerializer):
             "id", "organization", "name", "description",
             "severity", "correlation_key", "window_minutes", "interval_minutes",
             "max_findings_per_run", "include_agentless", "enabled", "created_at", "updated_at",
+            "time_window_start", "time_window_end", "time_window_days", "time_window_mode",
             "legs", "test_summary", "firing_summary",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
@@ -737,6 +744,34 @@ class _SearchRuleSerializer(_s.ModelSerializer):
         """
         from correlations.models import CORRELATION_KEY_NONE
         from correlations.services.search_compiler import validate_diversity_constraint
+
+        # Time-of-day window validation (#440). Runs before the legs early-return so it is
+        # enforced on PATCHes that touch only the window. On PATCH, fall back to saved values.
+        def _eff(field):
+            if field in data:
+                return data[field]
+            return getattr(self.instance, field, None) if self.instance else None
+
+        start = _eff("time_window_start")
+        end = _eff("time_window_end")
+        days = list(_eff("time_window_days") or [])
+        if bool(start) != bool(end):
+            raise _s.ValidationError(
+                {"time_window_start": "Provide both a start and end time, or neither."}
+            )
+        if start and end:
+            if start == end:
+                raise _s.ValidationError({"time_window_end": "Start and end times must differ."})
+            if not days:
+                raise _s.ValidationError(
+                    {"time_window_days": "Select at least one day for the time window."}
+                )
+        if days and not (start and end):
+            raise _s.ValidationError(
+                {"time_window_days": "A time window requires both a start and end time."}
+            )
+        if len(set(days)) != len(days):
+            raise _s.ValidationError({"time_window_days": "Duplicate days are not allowed."})
 
         legs = data.get("legs")
         if legs is None:
@@ -978,6 +1013,14 @@ def _build_inmemory_search_rule(validated):
     rule.window_minutes = getattr(rule, "window_minutes", 60)
     rule.max_findings_per_run = getattr(rule, "max_findings_per_run", _MAX_FINDINGS_DEFAULT)
     rule.correlation_key = getattr(rule, "correlation_key", CORRELATION_KEY_NONE)
+    # Time-of-day window (#440): ensure the attributes exist so the compiler can read them.
+    rule.time_window_start = getattr(rule, "time_window_start", None)
+    rule.time_window_end = getattr(rule, "time_window_end", None)
+    rule.time_window_days = getattr(rule, "time_window_days", None) or []
+    rule.time_window_mode = getattr(rule, "time_window_mode", "inside") or "inside"
+    rule.has_time_window = bool(
+        rule.time_window_start and rule.time_window_end and rule.time_window_days
+    )
     return rule
 
 

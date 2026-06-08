@@ -286,7 +286,7 @@ def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinc
     return incident
 
 
-def decide(rule, agent_ids, now, window_start, *, index=_ALERTS_INDEX, client=None) -> Decision:
+def decide(rule, agent_ids, now, window_start, *, index=_ALERTS_INDEX, client=None, time_filter=None) -> Decision:
     """Run the firing decision for *rule* against *index* WITHOUT materialising.
 
     Returns a Decision (would_fire + fire units + diagnostics). Performs **no DB writes**
@@ -311,11 +311,11 @@ def decide(rule, agent_ids, now, window_start, *, index=_ALERTS_INDEX, client=No
     has_diversity = any(leg.has_diversity for leg in legs)
     use_multi = rule.correlation_key != CORRELATION_KEY_NONE and (len(legs) > 1 or has_diversity)
     if use_multi:
-        return _decide_multi_leg(rule, agent_ids, legs, now, window_start, index=index, client=client)
-    return _decide_single_leg(rule, agent_ids, legs[0], now, window_start, index=index, client=client)
+        return _decide_multi_leg(rule, agent_ids, legs, now, window_start, index=index, client=client, time_filter=time_filter)
+    return _decide_single_leg(rule, agent_ids, legs[0], now, window_start, index=index, client=client, time_filter=time_filter)
 
 
-def _decide_single_leg(rule, agent_ids, leg, now, window_start, *, index, client) -> Decision:
+def _decide_single_leg(rule, agent_ids, leg, now, window_start, *, index, client, time_filter=None) -> Decision:
     """Degenerate path: one query; one fire unit (key 'none') for all matched docs."""
     body = compile_query(
         list(leg.conditions.all()),
@@ -323,6 +323,7 @@ def _decide_single_leg(rule, agent_ids, leg, now, window_start, *, index, client
         window_start,
         now,
         rule.max_findings_per_run,
+        extra_filters=[time_filter] if time_filter else None,
     )
     result = client._search(index, body)
 
@@ -345,7 +346,7 @@ def _decide_single_leg(rule, agent_ids, leg, now, window_start, *, index, client
     return Decision(bool(units), units, diagnostics)
 
 
-def _decide_multi_leg(rule, agent_ids, legs, now, window_start, *, index, client) -> Decision:
+def _decide_multi_leg(rule, agent_ids, legs, now, window_start, *, index, client, time_filter=None) -> Decision:
     """Multi-leg co-occurrence path via per-leg terms aggregations.
 
     1. Per leg: a terms agg on the correlation key field counts docs per key.
@@ -374,6 +375,7 @@ def _decide_multi_leg(rule, agent_ids, legs, now, window_start, *, index, client
             wazuh_field,
             field_mapping=mapping,
             distinct_field=leg.distinct_field or None,
+            extra_filters=[time_filter] if time_filter else None,
         )
         result = client._search(index, agg_body)
 
@@ -426,6 +428,7 @@ def _decide_multi_leg(rule, agent_ids, legs, now, window_start, *, index, client
                 key_field=wazuh_field,
                 key_value=key_value,
                 field_mapping=mapping,
+                extra_filters=[time_filter] if time_filter else None,
             )
             try:
                 result = client._search(index, body)
@@ -487,6 +490,10 @@ def debug_run(rule, org) -> dict:
     wazuh_field = CORRELATION_KEY_TO_WAZUH_FIELD.get(rule.correlation_key)
     mapping = _get_mapping_safe() if has_diversity else {}
 
+    from correlations.services.search_compiler import build_time_of_day_filter
+    time_filter = build_time_of_day_filter(rule, getattr(org, "timezone", None))
+    extra_filters = [time_filter] if time_filter else None
+
     client = OpenSearchClient()
     result = {
         "mode": "multi" if use_multi else "single",
@@ -505,6 +512,7 @@ def debug_run(rule, org) -> dict:
             agg_body = compile_agg_query(
                 conditions, effective_agent_ids, window_start, now, wazuh_field,
                 field_mapping=mapping, distinct_field=leg.distinct_field or None,
+                extra_filters=extra_filters,
             )
             leg_entry["agg_query"] = agg_body
             try:
@@ -514,7 +522,10 @@ def debug_run(rule, org) -> dict:
                 logger.warning("debug_run: agg query failed for leg %s: %s", leg.id, exc)
                 leg_entry["agg_error"] = f"Aggregation query failed ({type(exc).__name__}). See server logs for details."
 
-        hit_body = compile_query(conditions, effective_agent_ids, window_start, now, rule.max_findings_per_run)
+        hit_body = compile_query(
+            conditions, effective_agent_ids, window_start, now, rule.max_findings_per_run,
+            extra_filters=extra_filters,
+        )
         leg_entry["hit_query"] = hit_body
         try:
             hit_response = client._search(_ALERTS_INDEX, hit_body)
@@ -563,8 +574,11 @@ def run(rule, org):
 
     from security.opensearch import OpenSearchError
 
+    from correlations.services.search_compiler import build_time_of_day_filter
+    time_filter = build_time_of_day_filter(rule, getattr(org, "timezone", None))
+
     try:
-        decision = decide(rule, effective_agent_ids, now, window_start)
+        decision = decide(rule, effective_agent_ids, now, window_start, time_filter=time_filter)
     except OpenSearchError:
         logger.exception("search_evaluator.run: OpenSearch query failed for rule %s", rule.id)
         return None

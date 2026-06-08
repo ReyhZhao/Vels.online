@@ -168,6 +168,54 @@ def _condition_to_clause(condition, field_mapping: dict | None = None) -> dict |
     return None
 
 
+def build_time_of_day_filter(rule, tz_name: str | None) -> dict | None:
+    """Build an OpenSearch script filter for a rule's time-of-day window (#440).
+
+    Returns a painless `script` filter clause that keeps only documents whose
+    `@timestamp`, converted to *tz_name* (the owning org's timezone), falls inside
+    (or outside, per `time_window_mode`) the [start, end) window on the selected ISO
+    weekdays (1=Mon … 7=Sun). Windows that cross midnight (start > end) are supported.
+    Returns None when the rule has no active window (behaviour unchanged).
+    """
+    if not getattr(rule, "has_time_window", False):
+        return None
+
+    start = rule.time_window_start
+    end = rule.time_window_end
+    days = [int(d) for d in (rule.time_window_days or [])]
+    mode = getattr(rule, "time_window_mode", None) or "inside"
+    inside = mode != "outside"
+
+    start_min = start.hour * 60 + start.minute
+    end_min = end.hour * 60 + end.minute
+
+    source = (
+        "ZonedDateTime z = doc['@timestamp'].value.withZoneSameInstant(ZoneId.of(params.tz)); "
+        "int dow = z.getDayOfWeek().getValue(); "
+        "int m = z.getHour() * 60 + z.getMinute(); "
+        "boolean day = params.days.contains(dow); "
+        "boolean win; "
+        "if (params.start <= params.end) { win = day && m >= params.start && m < params.end; } "
+        "else { win = day && (m >= params.start || m < params.end); } "
+        "return params.inside ? win : !win;"
+    )
+    return {
+        "script": {
+            "script": {
+                "lang": "painless",
+                "source": source,
+                "params": {
+                    "tz": tz_name or "UTC",
+                    "days": days,
+                    "start": start_min,
+                    "end": end_min,
+                    "inside": inside,
+                },
+            }
+        }
+    }
+
+
 def compile_query(
     conditions,
     agent_ids,
@@ -177,6 +225,7 @@ def compile_query(
     key_field: str | None = None,
     key_value: str | None = None,
     field_mapping: dict | None = None,
+    extra_filters: list | None = None,
 ) -> dict:
     """Build an OpenSearch search body bounded to [window_start, window_end].
 
@@ -185,6 +234,8 @@ def compile_query(
     If key_field and key_value are supplied an additional term filter is added so results are
     restricted to documents matching that specific correlation key value.
     field_mapping is forwarded to _condition_to_clause for type-aware DSL generation.
+    extra_filters: additional bool-filter clauses appended verbatim (e.g. the time-of-day
+    window filter, #440), so leg counts/diversity are evaluated over the filtered set.
     """
     filters = []
     if agent_ids is not None:
@@ -206,6 +257,11 @@ def compile_query(
         if clause is not None:
             filters.append(clause)
 
+    if extra_filters:
+        for clause in extra_filters:
+            if clause is not None:
+                filters.append(clause)
+
     return {
         "query": {"bool": {"filter": filters}},
         "size": max_size,
@@ -223,6 +279,7 @@ def compile_agg_query(
     field_mapping: dict | None = None,
     distinct_field: str | None = None,
     distinct_size: int = _DISTINCT_SUBAGG_SIZE,
+    extra_filters: list | None = None,
 ) -> dict:
     """Build an OpenSearch body that returns a terms aggregation on key_field with no hits.
 
@@ -235,7 +292,8 @@ def compile_agg_query(
     .keyword subfield for text-typed fields.
     """
     base = compile_query(
-        conditions, agent_ids, window_start, window_end, max_size=0, field_mapping=field_mapping
+        conditions, agent_ids, window_start, window_end, max_size=0,
+        field_mapping=field_mapping, extra_filters=extra_filters,
     )
     key_agg: dict = {
         "terms": {

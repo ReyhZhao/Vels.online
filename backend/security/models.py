@@ -48,6 +48,9 @@ class Organization(models.Model):
     alert_auto_promote_threshold = models.PositiveIntegerField(default=5)
     alert_auto_promote_window_minutes = models.PositiveIntegerField(default=60)
     llm_residual_autocreate_threshold = models.FloatField(null=True, blank=True)
+    # IANA timezone name (e.g. "Europe/Amsterdam"). Used to interpret a Scheduled
+    # Search Rule's time-of-day window in the owning org's local time (#440).
+    timezone = models.CharField(max_length=64, default="UTC")
 
     def save(self, *args, **kwargs):
         if not self.wazuh_group:

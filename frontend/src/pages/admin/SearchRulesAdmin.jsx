@@ -184,6 +184,11 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   const [maxFindings, setMaxFindings] = useState(rule?.max_findings_per_run ?? 50);
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const [includeAgentless, setIncludeAgentless] = useState(rule?.include_agentless ?? false);
+  // Time-of-day window (#440). Times kept as "HH:MM" for <input type=time>; days are ISO 1=Mon…7=Sun.
+  const [twStart, setTwStart] = useState((rule?.time_window_start ?? '').slice(0, 5));
+  const [twEnd, setTwEnd] = useState((rule?.time_window_end ?? '').slice(0, 5));
+  const [twDays, setTwDays] = useState(rule?.time_window_days ?? []);
+  const [twMode, setTwMode] = useState(rule?.time_window_mode ?? 'inside');
   const [orgId, setOrgId] = useState(rule === undefined || rule === null ? (orgs[0]?.id ?? '') : (rule?.organization ?? ''));
   const [legs, setLegs] = useState(
     rule?.legs?.length
@@ -231,6 +236,9 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   }
 
   function buildPayload() {
+    // A time window is active only when start, end, and at least one day are set;
+    // otherwise send cleared (null/empty) values so the rule has no constraint.
+    const windowActive = twStart && twEnd && twDays.length > 0;
     return {
       name: name.trim(),
       description: description.trim(),
@@ -242,8 +250,23 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
       include_agentless: includeAgentless,
       enabled,
       organization: orgId === '' ? null : orgId,
+      time_window_start: windowActive ? `${twStart}:00` : null,
+      time_window_end: windowActive ? `${twEnd}:00` : null,
+      time_window_days: windowActive ? twDays : [],
+      time_window_mode: twMode,
       legs: legs.map((l, i) => ({ ...l, display_order: i })),
     };
+  }
+
+  function toggleDay(d) {
+    setTwDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d].sort((a, b) => a - b));
+  }
+
+  function clearTimeWindow() {
+    setTwStart('');
+    setTwEnd('');
+    setTwDays([]);
+    setTwMode('inside');
   }
 
   async function handleDebug() {
@@ -476,6 +499,75 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
                 showRemove={legs.length > 1}
               />
             ))}
+          </div>
+
+          {/* Time-of-day window (#440): optional rule-level working-hours constraint */}
+          <div className="space-y-3 border-t border-border pt-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Time-of-day window (optional)</p>
+              {(twStart || twEnd || twDays.length > 0) && (
+                <button type="button" onClick={clearTimeWindow} className="text-xs text-muted-foreground hover:text-red-600">
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Restrict matches to (or away from) hours of the day, evaluated in the organization's timezone.
+              Leave empty for no constraint.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Start</label>
+                <input
+                  type="time"
+                  value={twStart}
+                  onChange={e => setTwStart(e.target.value)}
+                  aria-label="Time window start"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">End</label>
+                <input
+                  type="time"
+                  value={twEnd}
+                  onChange={e => setTwEnd(e.target.value)}
+                  aria-label="Time window end"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">Days</label>
+              <div className="flex gap-1 flex-wrap">
+                {[[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [7, 'Sun']].map(([d, label]) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => toggleDay(d)}
+                    aria-pressed={twDays.includes(d)}
+                    className={`rounded-md px-2 py-1 text-xs font-medium border transition-colors ${twDays.includes(d) ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-muted-foreground border-border hover:bg-accent'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">Mode</label>
+              <select
+                value={twMode}
+                onChange={e => setTwMode(e.target.value)}
+                aria-label="Time window mode"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="inside">Inside window (only during these hours)</option>
+                <option value="outside">Outside window (only outside these hours)</option>
+              </select>
+            </div>
+            {twStart && twEnd && twDays.length === 0 && (
+              <p className="text-xs text-destructive">Select at least one day, or clear the window.</p>
+            )}
           </div>
 
           {/* Test / Debug run (#437): dry-run the current unsaved values against an org */}

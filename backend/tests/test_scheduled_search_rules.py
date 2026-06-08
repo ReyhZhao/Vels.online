@@ -2307,3 +2307,143 @@ class TestSpecDebug:
         del spec["org_slug"]
         resp = self._staff_client().post(self._URL, spec, format="json")
         assert resp.status_code == 400
+
+
+# ── Time-of-day window (#440) ───────────────────────────────────────────────────
+
+
+from datetime import time as _dtime
+
+
+@pytest.mark.django_db
+class TestTimeOfDayWindowCompiler:
+    def _rule(self, org, **kw):
+        defaults = dict(
+            organization=org, name="tw", window_minutes=60, interval_minutes=15,
+            time_window_start=_dtime(8, 0), time_window_end=_dtime(18, 0),
+            time_window_days=[1, 2, 3, 4, 5], time_window_mode="inside",
+        )
+        defaults.update(kw)
+        return SearchRule.objects.create(**defaults)
+
+    def test_no_window_returns_none(self, org):
+        from correlations.services.search_compiler import build_time_of_day_filter
+        rule = SearchRule.objects.create(organization=org, name="nw", window_minutes=60, interval_minutes=15)
+        assert build_time_of_day_filter(rule, org.timezone) is None
+
+    def test_inside_window_builds_script_filter(self, org):
+        from correlations.services.search_compiler import build_time_of_day_filter
+        rule = self._rule(org, time_window_mode="inside")
+        clause = build_time_of_day_filter(rule, "Europe/Amsterdam")
+        assert "script" in clause
+        params = clause["script"]["script"]["params"]
+        assert params["tz"] == "Europe/Amsterdam"
+        assert params["days"] == [1, 2, 3, 4, 5]
+        assert params["start"] == 8 * 60
+        assert params["end"] == 18 * 60
+        assert params["inside"] is True
+
+    def test_outside_mode_flips_inside_flag(self, org):
+        from correlations.services.search_compiler import build_time_of_day_filter
+        rule = self._rule(org, time_window_mode="outside")
+        clause = build_time_of_day_filter(rule, org.timezone)
+        assert clause["script"]["script"]["params"]["inside"] is False
+
+    def test_cross_midnight_window_uses_or_branch(self, org):
+        from correlations.services.search_compiler import build_time_of_day_filter
+        rule = self._rule(org, time_window_start=_dtime(22, 0), time_window_end=_dtime(6, 0))
+        clause = build_time_of_day_filter(rule, org.timezone)
+        params = clause["script"]["script"]["params"]
+        assert params["start"] == 22 * 60
+        assert params["end"] == 6 * 60
+        # the painless source must handle start > end (the OR branch)
+        assert "m >= params.start || m < params.end" in clause["script"]["script"]["source"]
+
+    def test_filter_is_appended_to_compiled_query(self, org):
+        from correlations.services.search_compiler import build_time_of_day_filter, compile_query
+        rule = self._rule(org)
+        clause = build_time_of_day_filter(rule, org.timezone)
+        body = compile_query([], ["001"], timezone.now(), timezone.now(), 10, extra_filters=[clause])
+        assert clause in body["query"]["bool"]["filter"]
+
+
+@pytest.mark.django_db
+class TestTimeOfDayWindowSerializer:
+    def _staff_client(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        User = get_user_model()
+        user = User.objects.create_user("staff_tw@test.com", password="x", is_staff=True)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def _payload(self, org, **overrides):
+        p = {
+            "name": "tw rule", "severity": "high", "correlation_key": "none",
+            "window_minutes": 60, "interval_minutes": 15, "max_findings_per_run": 50,
+            "organization": org.id,
+            "legs": [{"count": 1, "display_order": 0, "conditions": []}],
+        }
+        p.update(overrides)
+        return p
+
+    def test_valid_window_saves(self, org):
+        with patch("correlations.services.search_schedule.sync_rule_schedule"):
+            resp = self._staff_client().post(
+                "/api/correlations/search-rules/",
+                self._payload(
+                    org,
+                    time_window_start="08:00:00", time_window_end="18:00:00",
+                    time_window_days=[1, 2, 3, 4, 5], time_window_mode="outside",
+                ),
+                format="json",
+            )
+        assert resp.status_code == 201, resp.data
+        rule = SearchRule.objects.get(pk=resp.data["id"])
+        assert rule.has_time_window
+        assert rule.time_window_mode == "outside"
+
+    def test_start_without_end_rejected(self, org):
+        resp = self._staff_client().post(
+            "/api/correlations/search-rules/",
+            self._payload(org, time_window_start="08:00:00", time_window_days=[1]),
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "time_window_start" in resp.data
+
+    def test_window_without_days_rejected(self, org):
+        resp = self._staff_client().post(
+            "/api/correlations/search-rules/",
+            self._payload(org, time_window_start="08:00:00", time_window_end="18:00:00", time_window_days=[]),
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "time_window_days" in resp.data
+
+    def test_invalid_day_value_rejected(self, org):
+        resp = self._staff_client().post(
+            "/api/correlations/search-rules/",
+            self._payload(org, time_window_start="08:00:00", time_window_end="18:00:00", time_window_days=[9]),
+            format="json",
+        )
+        assert resp.status_code == 400
+
+    def test_equal_start_end_rejected(self, org):
+        resp = self._staff_client().post(
+            "/api/correlations/search-rules/",
+            self._payload(org, time_window_start="08:00:00", time_window_end="08:00:00", time_window_days=[1]),
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "time_window_end" in resp.data
+
+    def test_no_window_unaffected(self, org):
+        with patch("correlations.services.search_schedule.sync_rule_schedule"):
+            resp = self._staff_client().post(
+                "/api/correlations/search-rules/", self._payload(org), format="json",
+            )
+        assert resp.status_code == 201, resp.data
+        rule = SearchRule.objects.get(pk=resp.data["id"])
+        assert rule.has_time_window is False
