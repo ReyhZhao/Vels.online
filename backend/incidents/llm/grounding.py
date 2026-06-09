@@ -43,12 +43,22 @@ def build_incident_grounding(incident) -> dict:
 
     tasks = [
         {
+            "id": t.id,
             "title": t.title,
+            "description": t.description,
+            "task_type": t.task_type,
             "state": t.state,
             "assignee": t.assignee.username if t.assignee else None,
         }
         for t in incident.tasks.select_related("assignee").all()
     ]
+
+    applied_templates = sorted(
+        {
+            app.template.name
+            for app in incident.template_applications.select_related("template").all()
+        }
+    )
 
     available_templates = []
     if incident.subject_id:
@@ -90,6 +100,7 @@ def build_incident_grounding(incident) -> dict:
         "iocs": iocs,
         "linked_alerts": linked_alerts,
         "tasks": tasks,
+        "applied_templates": applied_templates,
         "available_templates": available_templates,
         "allowed_transitions": allowed_transitions,
         "field_allowlist": sorted(ASSISTANT_FIELD_ALLOWLIST),

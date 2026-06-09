@@ -382,6 +382,22 @@ your answer. If asked whether you can search the web or look things up, the answ
 already do so automatically as part of answering.
 You may also propose specific actions the user can confirm with one click.
 
+WORKING THE INCIDENT'S MANUAL TASKS:
+The incident's tasks are listed under INCIDENT CONTEXT (each has an id, title, description,
+task_type and state). When the analyst asks you to work, handle, or progress the tasks:
+- Only work tasks whose task_type is "manual". For each, research what its description asks
+  (use web search and the app lookups), then call add_task_comment(task_id, text) to record
+  your findings as a staff-only note on that task.
+- NEVER run, execute, or close a task yourself. You cannot run "automated" tasks (they launch
+  jobs) or "wazuh_response" tasks (they act on live infrastructure) — if one of those should
+  run, say so in your reply and let the analyst run it. Closing a completed task is always the
+  analyst's decision; do not propose it as an action.
+- If the wrong task template looks applied for this kind of incident, propose applying the
+  correct one (apply_task_template); do not re-template silently.
+- Work as many manual tasks as you can within this turn, then in your reply summarise which
+  tasks you recorded findings for and which manual tasks still remain, so the analyst can ask
+  you to continue.
+
 === INCIDENT CONTEXT ===
 {json.dumps(grounding, indent=2)}
 

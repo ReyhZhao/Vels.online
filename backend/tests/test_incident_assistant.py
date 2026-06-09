@@ -499,6 +499,34 @@ def test_grounding_includes_tasks(incident):
     assert any(t["title"] == "Investigate email" for t in g["tasks"])
 
 
+@pytest.mark.django_db
+def test_grounding_tasks_expose_id_description_and_type(incident):
+    t = Task.objects.create(
+        incident=incident, title="Check sender domain",
+        description="Look up the sending domain reputation",
+        task_type=Task.TYPE_MANUAL, display_order=1,
+    )
+    g = build_incident_grounding(incident)
+    row = next(r for r in g["tasks"] if r["title"] == "Check sender domain")
+    assert row["id"] == t.id
+    assert row["description"] == "Look up the sending domain reputation"
+    assert row["task_type"] == Task.TYPE_MANUAL
+
+
+@pytest.mark.django_db
+def test_grounding_includes_applied_template_names(incident, template, staff):
+    from incidents.services.templates import apply_template
+    apply_template(incident, template, actor=staff)
+    g = build_incident_grounding(incident)
+    assert g["applied_templates"] == ["Phishing Playbook"]
+
+
+@pytest.mark.django_db
+def test_grounding_applied_templates_empty_when_none(incident):
+    g = build_incident_grounding(incident)
+    assert g["applied_templates"] == []
+
+
 # ── grounding: contacts ────────────────────────────────────────────────────────
 
 @pytest.fixture

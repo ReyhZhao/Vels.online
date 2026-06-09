@@ -143,15 +143,78 @@ def test_link_known_asset_links_org_asset_only(staff, incident, org_a, org_b):
 def test_write_tools_marked_is_write_reads_not(staff, incident):
     tools = build_incident_tools(incident, staff, _grounding(incident))
     writes = {t.name for t in tools if t.is_write}
-    assert writes == {"add_internal_comment", "self_assign", "add_tag", "link_known_asset"}
+    assert writes == {"add_internal_comment", "add_task_comment", "self_assign", "add_tag", "link_known_asset"}
     reads = {t.name for t in tools if not t.is_write}
     assert {"lookup_incidents", "query_alerts", "lookup_assets"} <= reads
+
+
+# ── add_task_comment (works manual tasks, ADR-0013) ───────────────────────────
+
+def _manual_task(incident, **kw):
+    from incidents.models import Task
+    return Task.objects.create(incident=incident, title=kw.pop("title", "Check sender domain"),
+                               task_type=Task.TYPE_MANUAL, **kw)
+
+
+def test_add_task_comment_records_internal_task_scoped_comment_and_audits(staff, incident):
+    task = _manual_task(incident)
+    tools = build_incident_tools(incident, staff, _grounding(incident))
+    res = _tool(tools, "add_task_comment").executor({"task_id": task.id, "text": "domain is 3 days old"})
+    assert res.error is None
+    c = Comment.objects.get(task=task)
+    assert c.task_id == task.id and c.incident_id == incident.id
+    assert c.is_internal is True and c.body == "domain is 3 days old"
+    ev = IncidentEvent.objects.get(incident=incident, kind="assistant_action")
+    assert ev.payload["autonomous"] is True and ev.payload["action_type"] == "add_task_comment"
+    assert ev.payload["detail"]["task_id"] == task.id
+
+
+def test_add_task_comment_rejects_automated_task(staff, incident):
+    from incidents.models import Task
+    task = Task.objects.create(incident=incident, title="Run playbook", task_type=Task.TYPE_AUTOMATED)
+    tools = build_incident_tools(incident, staff, _grounding(incident))
+    res = _tool(tools, "add_task_comment").executor({"task_id": task.id, "text": "x"})
+    assert res.error is not None
+    assert not Comment.objects.filter(task=task).exists()
+
+
+def test_add_task_comment_rejects_wazuh_response_task(staff, incident):
+    from incidents.models import Task
+    task = Task.objects.create(incident=incident, title="Isolate host", task_type=Task.TYPE_WAZUH_RESPONSE)
+    tools = build_incident_tools(incident, staff, _grounding(incident))
+    res = _tool(tools, "add_task_comment").executor({"task_id": task.id, "text": "x"})
+    assert res.error is not None
+    assert not Comment.objects.filter(task=task).exists()
+
+
+def test_add_task_comment_rejects_task_from_another_incident(staff, incident, org_a):
+    other = Incident.objects.create(organization=org_a, title="Other", display_id="INC-9", state="new")
+    foreign_task = _manual_task(other, title="Foreign manual task")
+    tools = build_incident_tools(incident, staff, _grounding(incident))
+    res = _tool(tools, "add_task_comment").executor({"task_id": foreign_task.id, "text": "x"})
+    assert res.error is not None
+    assert not Comment.objects.filter(task=foreign_task).exists()
+
+
+def test_task_workable_by_assistant_predicate(staff, incident, org_a):
+    from incidents.models import Task
+    from incidents.llm.action_authority import task_workable_by_assistant
+    manual = _manual_task(incident)
+    automated = Task.objects.create(incident=incident, title="auto", task_type=Task.TYPE_AUTOMATED)
+    wazuh = Task.objects.create(incident=incident, title="wz", task_type=Task.TYPE_WAZUH_RESPONSE)
+    other = Incident.objects.create(organization=org_a, title="Other", display_id="INC-8", state="new")
+    foreign = _manual_task(other, title="foreign")
+    assert task_workable_by_assistant(manual, incident) is True
+    assert task_workable_by_assistant(automated, incident) is False
+    assert task_workable_by_assistant(wazuh, incident) is False
+    assert task_workable_by_assistant(foreign, incident) is False
+    assert task_workable_by_assistant(None, incident) is False
 
 
 # ── action authority split ──────────────────────────────────────────────────
 
 def test_action_authority_split():
-    for a in ("add_internal_comment", "self_assign", "add_tag", "link_known_asset"):
+    for a in ("add_internal_comment", "add_task_comment", "self_assign", "add_tag", "link_known_asset"):
         assert action_authority.is_auto_executable(a)
         assert not action_authority.is_proposable(a)
     for a in ("transition_state", "update_field", "apply_task_template",
