@@ -3,8 +3,11 @@
 Read tools (lookup_incidents, query_alerts, lookup_assets) reuse the same
 authorization as the REST endpoints and default-narrow to the incident's org; a
 staff caller may widen with scope="all". Write tools (add_internal_comment,
-self_assign, add_tag, link_known_asset) auto-execute through the existing models and
-record an assistant-initiated (autonomous) timeline event.
+add_task_comment, self_assign, add_tag, link_known_asset) auto-execute through the
+existing models and record an assistant-initiated (autonomous) timeline event.
+add_task_comment lets the assistant work a MANUAL task by recording its research
+findings as a task-scoped internal comment; it never runs or closes a task and rejects
+automated/wazuh_response tasks (ADR-0013).
 
 Every executor closes over the bound (incident, user) so the model can never widen
 beyond what the caller may see, regardless of the args it passes.
@@ -178,6 +181,50 @@ def _add_tag(incident, user):
     )
 
 
+def _add_task_comment(incident, user):
+    def executor(args):
+        from incidents.models import Comment, Task
+        from incidents.llm.action_authority import task_workable_by_assistant
+
+        task_id = (args or {}).get("task_id")
+        text = ((args or {}).get("text") or "").strip()
+        if task_id is None:
+            return ToolResult(error="task_id is required", summary="missing task_id")
+        if not text:
+            return ToolResult(error="empty comment text", summary="empty comment")
+        task = Task.objects.filter(pk=task_id).select_related("incident").first()
+        if not task_workable_by_assistant(task, incident):
+            return ToolResult(
+                error="task is not a manual task on this incident; the assistant only works "
+                      "manual tasks and never runs automated or wazuh_response tasks",
+                summary="task not workable",
+            )
+        comment = Comment.objects.create(
+            incident=incident, task=task, author=user, body=text,
+            kind=Comment.KIND_USER, is_internal=True,
+        )
+        record_event(
+            incident, "comment_added", actor=user,
+            payload={"target_type": "comment", "target_id": comment.id, "is_internal": True},
+        )
+        _record_autonomous(incident, user, "add_task_comment",
+                           {"task_id": task.id, "task_title": task.title, "preview": text[:80]})
+        return ToolResult(content={"ok": True, "task_id": task.id},
+                          summary=f"added findings to task '{task.title}'")
+    return ToolSpec(
+        name="add_task_comment", is_write=True,
+        description="Record your research findings as a staff-only internal comment on one of this "
+                    "incident's MANUAL tasks. Use this to work a manual task: after researching it, "
+                    "write up what you found here. Only works on manual tasks; it cannot run, close, "
+                    "or comment on automated/wazuh_response tasks.",
+        parameters={"type": "object", "properties": {
+            "task_id": {"type": "integer", "description": "Id of the manual task (from the task list in context)."},
+            "text": {"type": "string", "description": "The findings to record on the task."}},
+            "required": ["task_id", "text"]},
+        executor=executor,
+    )
+
+
 def _link_known_asset(incident, user):
     def executor(args):
         from incidents.models import Asset, IncidentAsset
@@ -222,6 +269,7 @@ def build_incident_tools(incident, user, grounding, include_web_search=True):
         _query_alerts(incident, user),
         _lookup_assets(incident, user),
         _add_internal_comment(incident, user),
+        _add_task_comment(incident, user),
         _self_assign(incident, user),
         _add_tag(incident, user),
         _link_known_asset(incident, user),

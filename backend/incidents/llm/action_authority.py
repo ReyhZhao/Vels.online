@@ -15,6 +15,7 @@ AUTO_EXECUTE_ACTIONS = frozenset({
     "self_assign",
     "add_tag",
     "link_known_asset",
+    "add_task_comment",
 })
 
 # Externally visible OR lifecycle/severity/disclosure-affecting — must be proposed.
@@ -34,3 +35,20 @@ def is_auto_executable(action_type: str) -> bool:
 
 def is_proposable(action_type: str) -> bool:
     return action_type in PROPOSE_ACTIONS
+
+
+def task_workable_by_assistant(task, incident) -> bool:
+    """May the incident assistant autonomously work this task?
+
+    Only `manual` tasks belonging to the bound incident — never `automated` or
+    `wazuh_response` tasks (those touch live infrastructure and must be proposed/
+    run by a human, ADR-0013). The single source of truth for the `add_task_comment`
+    tool's guard.
+    """
+    from incidents.models import Task
+
+    return (
+        task is not None
+        and task.incident_id == incident.id
+        and task.task_type == Task.TYPE_MANUAL
+    )
