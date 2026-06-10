@@ -30,9 +30,92 @@ The platform is built around a Wazuh-integrated SOC workflow: detections flow in
 |-------------------|----------------------|--------------------|
 | ![Correlation Rules placeholder](docs/screenshots/correlation-rules.png) | ![Detection Suggestions placeholder](docs/screenshots/detection-suggestions.png) | ![Incident Assistant placeholder](docs/screenshots/incident-assistant.png) |
 
-| Scheduled Search Rules | Search Rule Author | |
-|------------------------|-------------------|--|
-| ![Scheduled Search Rules placeholder](docs/screenshots/scheduled-search-rules.png) | ![Search Rule Author placeholder](docs/screenshots/search-rule-author.png) | |
+| Scheduled Search Rules | Search Rule Author | Rule Tests |
+|------------------------|-------------------|------------|
+| ![Scheduled Search Rules placeholder](docs/screenshots/scheduled-search-rules.png) | ![Search Rule Author placeholder](docs/screenshots/search-rule-author.png) | ![Rule Tests placeholder](docs/screenshots/rule-tests.png) |
+
+---
+
+## How It Works
+
+Everything in Vels.online flows through two stages: detections arrive as **Alerts** and are filtered in the **Alert Ingestion Pipeline**, and the ones that matter become **Incidents** that move through an automated **Incident Lifecycle** — IOC enrichment, AI triage, on-call routing, playbooks, and the Incident Assistant — with notifications firing at every meaningful step.
+
+```mermaid
+flowchart TD
+    %% ---- Entry points ----
+    WZ["Wazuh agents"]
+    SSR["Scheduled Search Rules<br/>OpenSearch pull"]
+    WH["Webhooks / N8N / external"]
+    PH["Phishing email<br/>soc@vels.online"]
+    VL["Vulnerability scans"]
+    MAN["Manual analyst entry"]
+
+    %% ---- Alert ingestion pipeline ----
+    subgraph PIPE["1 · Alert Ingestion Pipeline"]
+        direction TB
+        INBOX["Alert inbox · AL-NNN<br/>ECS entity envelope"]
+        DUP{"Matches an<br/>open incident?"}
+        ROUTE{"Severity routing"}
+        WAIT["Hold in inbox<br/>+ asset-threshold promotion"]
+        CORR["Correlation engine<br/>legs + rolling window"]
+        RESID["LLM residual safety-net"]
+        SUGG["Detection Suggestions<br/>analyst review"]
+        LINK["Link to existing incident"]
+
+        INBOX --> DUP
+        DUP -- "yes" --> LINK
+        DUP -- "no" --> ROUTE
+        ROUTE -- "low / medium" --> WAIT
+        INBOX --> CORR
+        INBOX --> RESID --> SUGG
+    end
+
+    WZ --> INBOX
+    SSR --> INBOX
+    WH --> INBOX
+
+    %% ---- Incident lifecycle ----
+    subgraph LIFE["2 · Incident Lifecycle"]
+        direction TB
+        INC["Incident created · INC-NNNN"]
+        IOC["IOC extraction + enrichment<br/>AbuseIPDB · VirusTotal"]
+        TRIAGE["AI triage · LLM<br/>severity · summary · actions · FP score"]
+        ONCALL["On-call routing<br/>assign analyst on duty"]
+        PLAY["Apply playbook<br/>task templates"]
+        WORK["Analyst + Incident Assistant<br/>agentic investigate & act"]
+        CLOSE["Resolve / close"]
+
+        INC --> IOC --> TRIAGE --> ONCALL --> PLAY --> WORK --> CLOSE
+    end
+
+    %% ---- Pipeline hands off to an incident ----
+    ROUTE -- "high / critical" --> INC
+    WAIT --> INC
+    CORR --> INC
+    SUGG -- "accepted" --> INC
+    PH --> INC
+    VL --> INC
+    MAN --> INC
+
+    %% ---- Notifications fire throughout ----
+    NOTIFY["Notifications<br/>in-app · web push · email"]
+    LINK -.-> NOTIFY
+    TRIAGE -.-> NOTIFY
+    ONCALL -.-> NOTIFY
+    WORK -.-> NOTIFY
+    CLOSE -.-> NOTIFY
+```
+
+_Solid arrows show how data moves; dotted arrows show where notifications are sent._
+
+**Walking through it:**
+
+1. **Detections arrive.** Wazuh agents, Scheduled Search Rules (pulled from OpenSearch), webhooks, forwarded phishing email, vulnerability scans, and manual entry all feed the platform. Push-based detections land in the **Alert inbox** as `AL-NNN` records, each carrying a normalised ECS entity envelope; phishing email, vulnerability scans, and manual reports open an incident directly.
+2. **The pipeline filters noise.** Each new alert is checked against open incidents — a match **links** in instead of creating a duplicate. Unmatched alerts are routed by severity: **high/critical auto-promote** to a new incident; **low/medium wait** in the inbox until an analyst acts or an asset-threshold promotion fires. In parallel, the **correlation engine** raises an incident when multiple alerts satisfy a rule's legs within its window, and an **LLM residual safety-net** groups leftover signals into **Detection Suggestions** for analyst review.
+3. **An incident is created.** However it was raised, the incident enters the same lifecycle: **IOC enrichment** scores indicators against AbuseIPDB and VirusTotal, then **AI triage** has the LLM recommend a severity, write a summary, suggest actions, and score false-positive likelihood.
+4. **It reaches the right analyst.** **On-call routing** assigns the triaged incident to whoever is on duty, and the matching **playbook** applies its task-template checklist automatically.
+5. **The analyst works it — with help.** The **Incident Assistant** runs an agentic loop alongside the analyst: it investigates (related incidents, alerts, assets, live web search), auto-executes safe internal actions, works manual tasks, and proposes anything consequential for one-click confirmation — until the incident is resolved or closed.
+6. **Notifications keep everyone informed.** In-app, web-push, and email notifications fire on assignment, triage results, state changes, and closure, so no one has to poll for updates.
 
 ---
 
@@ -66,6 +149,7 @@ A full lifecycle for security incidents, from detection to closure.
 - **Extended close flow** — close incidents as resolved or as a duplicate linked to a canonical incident; a searchable combobox makes finding the canonical incident fast even across large lists.
 - **Auto-closure** — incidents older than 7 days in `new`, `triaged`, or `resolved` state are automatically closed, keeping the active queue clean.
 - **Delegation and transfers** — analysts can temporarily hand off work to teammates and receive it back, maintaining a clear chain of responsibility.
+- **Move incident between organisations** — staff can reassign an incident to a different organisation when it lands in the wrong tenant's queue, correcting routing errors without recreating the incident.
 - **TLP/PAP-aware communications** — sensitive findings are gated by classification level so customers see exactly what they are entitled to see.
 - **Persistent filter & sort preferences** — each user's chosen filters and sort order are remembered across sessions.
 - **Tab counters** — incident detail tabs (Tasks, Contacts, IOCs, Assets, Attachments, Linked Alerts) show item counts at a glance.
@@ -105,6 +189,7 @@ Detect multi-step attack patterns from individually-unremarkable signals — wit
 - **Rule-author assistant** — describe a detection in plain language; the LLM drafts a Correlation Rule (legs, conditions, key, window, severity) grounded in the *actual* alert corpus for the chosen scope (a specific org or all orgs). The draft is pre-filled into the builder for review; the assistant never activates a rule.
 - **Alert-grounded drafting** — before drafting, the assistant samples the real alert corpus (source kinds present, entity types, rule IDs and titles, severity mix) so proposed fields and values genuinely exist in the data.
 - **Conversational refinement** — after the initial draft, analysts can iterate in a multi-turn chat to tighten conditions, change the correlation key, or adjust the window before saving.
+- **Web-search grounding** — the rule-author assistant shares the agentic tool-calling loop and can search the internet about a threat it is asked to detect, so the rule it drafts reflects how the threat actually manifests in the wild.
 - **Scope selection and ownership** — drafting for a specific org defaults the rule to an Org Rule; drafting against all orgs defaults to a System Rule.
 - **Codify as rule** — a Detection Suggestion has a "Codify as rule" action that opens the rule-author assistant pre-seeded with the suggestion's context, turning a recurring LLM-flagged pattern into a permanent durable rule.
 - **Create correlation rule from selected alerts** — select one or more alerts in the inbox and open the rule-author assistant pre-populated with those alerts as grounding context.
@@ -117,9 +202,13 @@ Pull-based detection over the full Wazuh OpenSearch data stream — without inge
 - **Same leg/condition builder** — Scheduled Search Rules use the identical leg, condition, correlation key, and window model as Correlation Rules, so analysts learn one mental model for both engines.
 - **Dynamic field catalog** — the platform pulls the live OpenSearch index mapping (TTL-cached) to populate field choices. Operators and values are validated against the real mapping so analysts cannot save a rule that references a non-existent or wrongly-typed field.
 - **Multi-leg co-occurrence** — multi-leg rules require all legs satisfied for the same correlation-key value within the window; the evaluator uses per-leg `terms` aggregations and a Python join, keeping query cost bounded.
+- **Diversity Constraint** — an optional `distinct_field` + `min_distinct` on a leg fires only when a correlation key spans *N or more distinct values* of a secondary field within the window (impossible-travel-lite — e.g. the same `user.name` seen from ≥2 distinct `GeoLocation.country_name` values). It uses a `terms` sub-aggregation so the raised incident can name the actual values and their counts, and it composes inside multi-leg rules. The builder enforces a real correlation key, `min_distinct ≥ 2`, and an aggregatable `distinct_field` distinct from the key.
+- **Time-of-day window** — a rule can restrict matching to a recurring time-of-day range (e.g. outside 08:00–18:00), so events that are normal during business hours — like an admin login to a firewall — only raise an incident when they occur off-hours.
 - **Schedule lifecycle** — each rule gets its own `django-celery-beat` `PeriodicTask` (minimum 5-minute cadence). The schedule is created, updated, or deleted automatically whenever the rule is saved or removed — no manual Celery configuration needed.
 - **Run state inline** — the rules admin table shows each rule's last-run time, next-run time, and total run count so operators know the rule is healthy at a glance.
+- **Per-rule firing summary** — the admin table tracks whether, when, and how many times each rule has actually raised an incident, so operators can see at a glance which rules are live and earning their keep versus sitting silent.
 - **Run now** — a per-rule "Run now" button dispatches the evaluator immediately for ad-hoc testing without waiting for the schedule.
+- **Debug unsaved rules** — the create/edit drawer can run the evaluator against the *current, unsaved* form values, so analysts can tweak legs and conditions and immediately see what would match before committing the rule — the same debug interface used for saved rules, applied to ad-hoc edits.
 - **Run history** — each rule's run history (status, duration, errors) is accessible from the admin UI for debugging failing rules.
 - **Dedup and idempotency** — `SearchFinding` records carry a unique `(rule, source_index, wazuh_doc_id)` key so re-runs over overlapping windows never materialise duplicate Alerts. A live-firing record per `(rule, entity_value)` ensures new Findings for the same key link into the open incident rather than spawning a new one.
 - **Flood cap** — at most 50 Findings are materialised per run; if more documents match, an overflow note is added to the incident so operators are aware of the capped set.
@@ -132,15 +221,31 @@ Pull-based detection over the full Wazuh OpenSearch data stream — without inge
 - **`scheduled_search` source kind** — incidents raised by this engine are tagged with a distinct `source_kind` so they are filterable in the inbox and clearly distinguishable from push-based incidents.
 - **IOC extraction and triage** — incidents created from Scheduled Search Rules pass through the same IOC enrichment and LLM triage pipeline as any other incident.
 
+### Rule Tests
+
+Detection-as-code testing for Scheduled Search Rules — pin a rule's behaviour with synthetic fixtures so a future edit can't silently break it.
+
+- **Sample-document fixtures** — a Rule Test bundles a set of synthetic **Sample Documents** (partial raw Wazuh JSON) with a whole-rule fire / no-fire **Expectation**. Each run produces a pass/fail **Test Result**.
+- **Real engine, not a simulator** — every run spins up an ephemeral, non-glob-matching OpenSearch index, clones the live alerts-index mapping onto it, pushes the sample documents straight in (bypassing Wazuh), and runs the *actual* compiler, join, and Diversity Constraint logic against them — then drops the index. What the test exercises is exactly what production runs.
+- **Zero side effects** — the evaluator has a decide/materialise split; the test path is decide-only, so a run creates no Incidents, Alerts, Findings, or firing records. The detection window is anchored to the latest sample timestamp, keeping tests time-stable.
+- **Tests drawer** — author and run tests from a dedicated drawer off each rule's list row, separate from the definition editor. The list row shows a health badge (e.g. "Tests 3/4") and a **Run all** action to re-check every test at once.
+- **LLM sample generator** — generate grounded true-positive / true-negative Sample Documents for a rule with the LLM, so analysts get a realistic starting fixture set instead of hand-writing raw Wazuh JSON.
+
 ### Incident Assistant
 
-An interactive AI panel embedded in the incident detail page for conversational investigation and action.
+An interactive AI panel embedded in the incident detail page for conversational investigation and action. It runs an **agentic tool-calling loop**: within a single turn the model can call tools to fetch what it needs, take a bounded set of safe actions, and then answer — keeping a human in the loop for anything consequential.
 
-- **Propose-and-confirm panel** — analysts open a chat drawer on any incident and ask the assistant questions or request actions. The assistant proposes responses or changes; the analyst confirms before anything is written.
-- **Create timeline comments** — the assistant can draft and post comments to the incident timeline, with the analyst reviewing the text before it is submitted.
-- **Send contact messages** — the assistant can draft outbound messages to linked incident contacts (employees, asset owners), with the analyst confirming the recipient and content before the email is sent.
-- **Incident context aware** — the assistant is grounded in the full incident context: title, description, severity, state, linked alerts, IOCs, assets, and timeline. Responses are relevant to the specific incident rather than generic.
-- **Ollama and Gemini support** — the incident assistant respects the same pluggable LLM provider configuration (`ASSISTANT_LLM_PROVIDER`) as the rest of the platform, so it works with locally-hosted Ollama models as well as Google Gemini.
+- **Investigate with read tools** — the assistant can look up related incidents, query other alerts in the org, and inspect assets on demand, so an analyst can spot a wider campaign or check whether an indicator appears elsewhere without leaving the drawer.
+- **Live web search** — the assistant can search the internet for threat intelligence on an IOC or CVE and cite where its findings came from. Web search uses each provider's native capability (Ollama Cloud's web-search API as the primary runtime, Gemini's Google Search grounding as backup); a self-hosted Ollama with no cloud key degrades gracefully to app-data-only rather than erroring.
+- **PAP-gated egress** — internet lookups obey the incident's PAP. At PAP white/green/amber the model may search incident-specific indicators; at PAP:RED an egress guard blocks any query containing the incident's own indicators (IOC values, asset/agent names, IPs, linked usernames) while still allowing generic research, so sensitive specifics never leave the boundary.
+- **Auto-execute safe actions** — internal, reversible, non-lifecycle actions run by themselves: add an internal comment, self-assign the incident, add a tag, or link a known asset. Each is performed through the same mutation service as a manual edit and recorded on the timeline as an assistant-initiated (autonomous) event.
+- **Propose-and-confirm for consequential changes** — anything externally visible or lifecycle/severity/disclosure-affecting — state transitions, severity/TLP/PAP/subject/assignee edits, applying a task template, messaging a contact, creating an exception, closing — is only ever *proposed*, with one-click human confirmation.
+- **Works manual tasks** — the assistant can see the incident's task list and applied task template, research each manual task (web search + app lookups), and record its findings as a task-scoped internal (staff-only) comment for the analyst to review. It works several tasks per turn within its time budget and reports which it completed and which remain, so the analyst can simply say "continue." It never closes a task, never runs `automated` (Semaphore) or `wazuh_response` tasks — recommending those in prose for the analyst to run through the existing controls — and proposes (never silently applies) a corrected task template.
+- **Tool trace** — each turn surfaces a trace of what the assistant searched and looked up, plus web citations, so analysts can trust and verify its reasoning. Auto-executed action notices are visually distinguished from proposed actions that still show confirm buttons.
+- **Bounded execution** — every turn is capped by max iterations, a per-tool timeout, an overall deadline, and a per-turn auto-action limit, so a runaway loop can never hang a request.
+- **Org-scoped lookups** — app lookups reuse the same permission predicates as the REST API and default to the incident's organisation; staff may deliberately widen a lookup across organisations to correlate a cross-tenant threat.
+- **Incident context aware** — the assistant is grounded in the full incident context: title, description, severity, state, linked alerts, IOCs, assets, tasks, and timeline. Responses are relevant to the specific incident rather than generic.
+- **Ollama and Gemini support** — the incident assistant respects the same pluggable LLM provider configuration (`ASSISTANT_LLM_PROVIDER`) as the rest of the platform, working with Ollama Cloud models as well as Google Gemini (Gemini 3, required for combining web-search grounding with function tools).
 - **Grouped residual alert analysis** — the Ollama triage provider can group residual (unlinked) alerts and return a structured analysis, surfacing clusters of related signals the static engine did not catch.
 
 ### Inbound Phishing Ingestion
@@ -255,6 +360,7 @@ Take direct remediation actions on endpoints from within the platform — no con
 Link employees and asset owners to incidents for structured communication.
 
 - **Contact directory** — per-organisation directory of natural persons (employees, contractors, asset owners) with name, email, job title, and department.
+- **Org-scoped contact list** — the contacts list filters to the currently selected organisation by default (matching the asset list), with a toggle to show contacts across all orgs; when showing all, each contact's organisation is displayed in the table.
 - **Asset ownership** — assign assets to contacts; when an incident is created and an asset is linked, the owner contact is automatically associated with the incident.
 - **In-platform Q&A** — analysts can message a contact directly from an incident (role: `notified` or `questioned`); the platform sends the email and ingests replies back into the incident timeline via IMAP polling.
 - **Threaded messaging** — outbound questions and inbound replies are displayed as a conversation thread within the incident detail.
@@ -293,7 +399,7 @@ Built-in blog for publishing security advisories, runbook documentation, or cust
 | Database | PostgreSQL 16 |
 | Cache / broker | Valkey (Redis-compatible) |
 | Frontend | React 18 · Vite · Tailwind CSS · shadcn/ui |
-| LLM providers | Google Gemini · Ollama (pluggable) |
+| LLM providers | Google Gemini 3 · Ollama / Ollama Cloud (pluggable, with native web search) |
 | Security monitoring | Wazuh |
 | Detection backend | Wazuh OpenSearch (Scheduled Search Rules pull engine) |
 | Threat intelligence | AbuseIPDB · VirusTotal |
@@ -337,7 +443,9 @@ Copy `backend/.env.example` to `backend/.env` and fill in the values:
 | `TRIAGE_LLM_PROVIDER` | Dotted path to triage provider class (e.g. `incidents.llm.ollama.OllamaTriageProvider`) |
 | `OLLAMA_BASE_URL` | Ollama server URL (if using Ollama provider) |
 | `OLLAMA_MODEL` | Model name (e.g. `gemma4:31b-cloud`) |
+| `OLLAMA_API_KEY` | Ollama Cloud API key — enables native web search for the agentic assistants (omit on self-hosted Ollama to run in degraded, app-data-only mode) |
 | `GOOGLE_API_KEY` | Google API key (if using Gemini provider) |
+| `GEMINI_MODEL` | Gemini model id — must be a Gemini 3 model to combine web-search grounding with function tools for the agentic assistants |
 | `AUTHENTIK_SERVER_URL` | Authentik OIDC server URL (leave blank to disable SSO) |
 | `BUNKERWEB_API_URL` | BunkerWeb API URL (for ingress route management) |
 | `SEMAPHORE_API_URL` | Semaphore API URL (for automation tasks) |
