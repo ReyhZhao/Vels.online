@@ -230,7 +230,9 @@ GROUNDING = {
 def test_collect_indicators_pulls_iocs_assets_users():
     inds = pap_guard.collect_incident_indicators(GROUNDING)
     assert "203.0.113.5" in inds                 # IOC value, annotation stripped
-    assert "evil.example.com" in inds
+    # Explicit element equality (not substring membership) so this stays a genuine
+    # list-membership check — see CodeQL py/incomplete-url-substring-sanitization.
+    assert any(ind == "evil.example.com" for ind in inds)
     assert "web-01" in inds
     assert "agent-web-01" in inds
     assert "10.0.0.5" in inds
