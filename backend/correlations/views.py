@@ -1238,13 +1238,21 @@ class SearchRuleTestGenerateView(APIView):
         try:
             result = generate_samples(rule, expect_fire, scope=scope)
         except DraftConfigError as exc:
+            logger.warning("SearchRuleTestGenerateView: sample generator config error for rule %s: %s", rule.id, exc)
             return Response(
-                {"detail": "Sample generator is unavailable.", "reason": str(exc)},
+                {
+                    "detail": "Sample generator is unavailable.",
+                    "reason": "The sample generator is not configured. Check the server logs for details.",
+                },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         except DraftError as exc:
+            logger.warning("SearchRuleTestGenerateView: sample generation failed for rule %s: %s", rule.id, exc)
             return Response(
-                {"detail": "Sample generation failed.", "reason": str(exc)},
+                {
+                    "detail": "Sample generation failed.",
+                    "reason": "The model returned an invalid response. Check the server logs for details.",
+                },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
         return Response(result)

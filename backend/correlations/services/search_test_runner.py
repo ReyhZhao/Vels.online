@@ -114,6 +114,8 @@ def run_rule_test(rule, samples: list, expect_fire: bool) -> dict:
         decision = decide(rule, None, now, window_start, index=index, client=client, time_filter=time_filter)
         return build_verdict(expect_fire, decision)
     except OpenSearchError as exc:
+        # Full detail goes to the server logs; the client only sees a sanitised summary
+        # so we never surface raw backend internals (CodeQL py/stack-trace-exposure).
         logger.warning("run_rule_test: OpenSearch error for rule %s: %s", rule.id, exc)
         return {
             "status": TEST_STATUS_ERROR,
@@ -121,9 +123,11 @@ def run_rule_test(rule, samples: list, expect_fire: bool) -> dict:
             "expect_fire": bool(expect_fire),
             "fired": False,
             "diagnostics": None,
-            "error": str(exc),
+            "error": "Search backend error while running the test. Check the server logs for details.",
         }
-    except Exception as exc:  # noqa: BLE001 — a test run must never raise to the caller
+    except Exception:  # noqa: BLE001 — a test run must never raise to the caller
+        # logger.exception captures the full traceback server-side; the client only
+        # sees a generic message (CodeQL py/stack-trace-exposure).
         logger.exception("run_rule_test: unexpected error for rule %s", rule.id)
         return {
             "status": TEST_STATUS_ERROR,
@@ -131,7 +135,7 @@ def run_rule_test(rule, samples: list, expect_fire: bool) -> dict:
             "expect_fire": bool(expect_fire),
             "fired": False,
             "diagnostics": None,
-            "error": str(exc),
+            "error": "Unexpected error while running the test. Check the server logs for details.",
         }
     finally:
         if created:
