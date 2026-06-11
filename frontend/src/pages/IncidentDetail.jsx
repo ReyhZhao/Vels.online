@@ -1437,6 +1437,7 @@ export default function IncidentDetail() {
             api.get(`/api/incidents/${displayId}/`).then(r => setIncident(r.data)).catch(() => {});
             setTasksRefreshKey(k => k + 1);
             setTimelineRefreshKey(k => k + 1);
+            setCommentsRefreshKey(k => k + 1);
           }}
         />
       )}
