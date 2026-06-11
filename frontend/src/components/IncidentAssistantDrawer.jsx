@@ -2,11 +2,6 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import api from '../lib/axios';
 import { parseSSEChunk } from '../lib/parseSSE';
 
-function getCookie(name) {
-  const match = document.cookie.match(new RegExp('(^|;\\s*)' + name + '=([^;]*)'));
-  return match ? decodeURIComponent(match[2]) : null;
-}
-
 // Live activity chip shown while a turn streams.
 function ActivityChip({ kind, text, isError }) {
   if (kind === 'phase') {
@@ -201,7 +196,7 @@ export default function IncidentAssistantDrawer({ displayId, onClose, onActionCo
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRFToken': getCookie('csrftoken') || '',
+          'X-CSRFToken': api.defaults?.headers?.common?.['X-CSRFToken'] || '',
         },
         body: JSON.stringify({ messages: nextMessages }),
         signal: controller.signal,

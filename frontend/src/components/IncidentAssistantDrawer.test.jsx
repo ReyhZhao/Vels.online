@@ -2,7 +2,10 @@ import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/axios', () => ({
-  default: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  default: {
+    get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn(),
+    defaults: { headers: { common: { 'X-CSRFToken': 'test-csrf-token' } } },
+  },
 }));
 
 import api from '@/lib/axios';
