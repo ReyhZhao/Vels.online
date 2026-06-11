@@ -42,6 +42,10 @@ function ProposedActionCard({ action, displayId, onConfirmed, onDismiss }) {
       } else if (action.type === 'transition_state') {
         await api.post(`/api/incidents/${displayId}/transition/`, {
           state: action.payload.state,
+          // Closing carries a structured closure_reason (and duplicate_of for a
+          // duplicate close); the transition endpoint rejects a close without one.
+          ...(action.payload.closure_reason ? { closure_reason: action.payload.closure_reason } : {}),
+          ...(action.payload.duplicate_of ? { duplicate_of: action.payload.duplicate_of } : {}),
         });
       } else if (action.type === 'apply_task_template') {
         await api.post(`/api/incidents/${displayId}/apply-template/`, {

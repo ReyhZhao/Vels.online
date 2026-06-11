@@ -14,7 +14,7 @@ def build_incident_grounding(incident) -> dict:
 
     Recomputed server-side every turn; never read from the client.
     """
-    from incidents.models import TaskTemplate
+    from incidents.models import Incident, TaskTemplate
 
     assets = [
         {
@@ -71,6 +71,7 @@ def build_incident_grounding(incident) -> dict:
             })
 
     allowed_transitions = sorted(ALLOWED_TRANSITIONS.get(incident.state, set()))
+    closure_reasons = [value for value, _ in Incident.CLOSURE_REASON_CHOICES]
 
     from contacts.models import IncidentContact
     contacts = [
@@ -103,6 +104,7 @@ def build_incident_grounding(incident) -> dict:
         "applied_templates": applied_templates,
         "available_templates": available_templates,
         "allowed_transitions": allowed_transitions,
+        "closure_reasons": closure_reasons,
         "field_allowlist": sorted(ASSISTANT_FIELD_ALLOWLIST),
         "contacts": contacts,
     }

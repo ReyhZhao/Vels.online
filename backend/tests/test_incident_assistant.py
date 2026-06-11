@@ -385,6 +385,144 @@ def test_assistant_illegal_transition_stripped(incident):
     assert len(result.warnings) >= 1
 
 
+# ── proposed action: closing an incident (#458) ───────────────────────────────
+# These exercise the shared envelope parser, so both the Gemini and Ollama paths
+# (which both delegate to _parse_assistant_result) inherit the behaviour.
+
+@pytest.mark.django_db
+def test_assistant_close_proposal_carries_closure_reason(incident):
+    from incidents.llm.gemini import _parse_assistant_result
+
+    grounding = build_incident_grounding(incident)
+    assert "closed" in grounding["allowed_transitions"]
+    data = {
+        "assistant_reply": "Closing as a false positive.",
+        "proposed_actions": [
+            {"type": "transition_state", "state": "closed",
+             "closure_reason": "false_positive", "label": "Close as false positive"},
+        ],
+    }
+    result = _parse_assistant_result(data, grounding)
+    assert len(result.proposed_actions) == 1
+    act = result.proposed_actions[0]
+    assert act.type == "transition_state"
+    assert act.payload == {"state": "closed", "closure_reason": "false_positive"}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("reason", ["resolved", "informational", "accepted_risk"])
+def test_assistant_close_proposal_accepts_every_non_duplicate_reason(incident, reason):
+    from incidents.llm.gemini import _parse_assistant_result
+
+    grounding = build_incident_grounding(incident)
+    data = {
+        "assistant_reply": "Closing.",
+        "proposed_actions": [
+            {"type": "transition_state", "state": "closed",
+             "closure_reason": reason, "label": "Close"},
+        ],
+    }
+    result = _parse_assistant_result(data, grounding)
+    assert len(result.proposed_actions) == 1
+    assert result.proposed_actions[0].payload == {"state": "closed", "closure_reason": reason}
+
+
+@pytest.mark.django_db
+def test_assistant_close_without_closure_reason_dropped(incident):
+    from incidents.llm.gemini import _parse_assistant_result
+
+    grounding = build_incident_grounding(incident)
+    data = {
+        "assistant_reply": "Closing.",
+        "proposed_actions": [
+            {"type": "transition_state", "state": "closed", "label": "Close"},
+        ],
+    }
+    result = _parse_assistant_result(data, grounding)
+    assert result.proposed_actions == []
+    assert any("closure_reason" in w for w in result.warnings)
+
+
+@pytest.mark.django_db
+def test_assistant_close_with_invalid_closure_reason_dropped(incident):
+    from incidents.llm.gemini import _parse_assistant_result
+
+    grounding = build_incident_grounding(incident)
+    data = {
+        "assistant_reply": "Closing.",
+        "proposed_actions": [
+            {"type": "transition_state", "state": "closed",
+             "closure_reason": "because_i_said_so", "label": "Close"},
+        ],
+    }
+    result = _parse_assistant_result(data, grounding)
+    assert result.proposed_actions == []
+    assert any("closure_reason" in w for w in result.warnings)
+
+
+@pytest.mark.django_db
+def test_assistant_close_as_duplicate_carries_canonical_reference(incident, acme, phishing):
+    from incidents.llm.gemini import _parse_assistant_result
+
+    canonical = Incident.objects.create(
+        organization=acme, title="Canonical", display_id="INC-2026-0001",
+        severity="medium", state="new", subject=phishing,
+    )
+    grounding = build_incident_grounding(incident)
+    data = {
+        "assistant_reply": "Duplicate of the canonical incident.",
+        "proposed_actions": [
+            {"type": "transition_state", "state": "closed",
+             "closure_reason": "duplicate", "duplicate_of": canonical.id,
+             "label": "Close as duplicate"},
+        ],
+    }
+    result = _parse_assistant_result(data, grounding)
+    assert len(result.proposed_actions) == 1
+    assert result.proposed_actions[0].payload == {
+        "state": "closed", "closure_reason": "duplicate", "duplicate_of": canonical.id,
+    }
+
+
+@pytest.mark.django_db
+def test_assistant_close_as_duplicate_without_reference_dropped(incident):
+    from incidents.llm.gemini import _parse_assistant_result
+
+    grounding = build_incident_grounding(incident)
+    data = {
+        "assistant_reply": "Duplicate.",
+        "proposed_actions": [
+            {"type": "transition_state", "state": "closed",
+             "closure_reason": "duplicate", "label": "Close as duplicate"},
+        ],
+    }
+    result = _parse_assistant_result(data, grounding)
+    assert result.proposed_actions == []
+    assert any("duplicate_of" in w for w in result.warnings)
+
+
+@pytest.mark.django_db
+def test_assistant_non_close_transition_carries_only_state(incident):
+    from incidents.llm.gemini import _parse_assistant_result
+
+    grounding = build_incident_grounding(incident)
+    data = {
+        "assistant_reply": "Moving to in progress.",
+        "proposed_actions": [
+            {"type": "transition_state", "state": "in_progress", "label": "Start work"},
+        ],
+    }
+    result = _parse_assistant_result(data, grounding)
+    assert len(result.proposed_actions) == 1
+    assert result.proposed_actions[0].payload == {"state": "in_progress"}
+
+
+@pytest.mark.django_db
+def test_grounding_includes_closure_reasons(incident):
+    g = build_incident_grounding(incident)
+    assert g["closure_reasons"] == [v for v, _ in Incident.CLOSURE_REASON_CHOICES]
+
+
 # ── proposed action: apply_task_template ──────────────────────────────────────
 
 @pytest.mark.django_db

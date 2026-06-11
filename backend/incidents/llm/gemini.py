@@ -292,10 +292,32 @@ def _parse_assistant_result(data: dict, grounding: dict) -> AssistantResult:
             if state not in allowed:
                 warnings.append(f"Proposed transition to '{state}' is not allowed from current state; skipped.")
                 continue
+            payload = {"state": state}
+            # Closing requires a structured closure reason (the transition service
+            # rejects a close without one); for a duplicate it also needs the
+            # canonical incident reference. Validate here so an invalid close is
+            # dropped with a warning rather than presented as a doomed action.
+            if state == "closed":
+                closure_reason = item.get("closure_reason")
+                valid_reasons = grounding.get("closure_reasons", [])
+                if closure_reason not in valid_reasons:
+                    warnings.append(
+                        f"Proposed close has missing/invalid closure_reason {closure_reason!r}; skipped."
+                    )
+                    continue
+                payload["closure_reason"] = closure_reason
+                if closure_reason == "duplicate":
+                    duplicate_of = item.get("duplicate_of")
+                    if not duplicate_of:
+                        warnings.append(
+                            "Proposed close-as-duplicate is missing the canonical incident reference (duplicate_of); skipped."
+                        )
+                        continue
+                    payload["duplicate_of"] = duplicate_of
             proposed_actions.append(ProposedAction(
                 type="transition_state",
                 label=item.get("label", f"Transition to {state}"),
-                payload={"state": state},
+                payload=payload,
             ))
         elif action_type == "apply_task_template":
             template_id = item.get("template_id")
@@ -361,6 +383,7 @@ def _build_assistant_system_prompt(grounding: dict) -> str:
     available_templates = grounding.get("available_templates", [])
     allowed_transitions = grounding.get("allowed_transitions", [])
     field_allowlist = grounding.get("field_allowlist", [])
+    closure_reasons = grounding.get("closure_reasons", [])
     contacts = grounding.get("contacts", [])
 
     template_lines = "\n".join(
@@ -418,6 +441,12 @@ Each proposed action must be one of these shapes:
   Transition the incident state:
     {{"type": "transition_state", "state": "<target_state>", "label": "<short human label>"}}
     Currently allowed target states: {', '.join(allowed_transitions) or '(none — incident is closed)'}
+    When the target state is "closed" you MUST also include a "closure_reason":
+    {{"type": "transition_state", "state": "closed", "closure_reason": "<reason>", "label": "<short human label>"}}
+    Valid closure_reason values: {', '.join(closure_reasons) or '(none)'}
+    Only use closure_reason "duplicate" when you can identify the canonical incident; in that
+    case also include "duplicate_of": <numeric incident id of the canonical incident>. If you
+    cannot identify the canonical incident, do not propose a duplicate close.
 
   Apply a task template:
     {{"type": "apply_task_template", "template_id": <integer id>, "label": "<short human label>"}}
