@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Play, Sparkles, Bug, FlaskConical } from 'lucide-react';
+import { Play, Sparkles, Bug, FlaskConical, Copy } from 'lucide-react';
 import api from '@/lib/axios';
 import SearchRuleAuthorDrawer from '@/components/SearchRuleAuthorDrawer';
 import SearchRuleTestsDrawer from '@/components/SearchRuleTestsDrawer';
@@ -929,7 +929,7 @@ function FiringBadge({ summary }) {
   );
 }
 
-function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug, onTests, onRunTests }) {
+function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, onDebug, onTests, onRunTests }) {
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [running, setRunning] = useState(false);
@@ -997,6 +997,14 @@ function RuleRow({ rule, orgs, onEdit, onToggle, onDelete, onRunNow, onDebug, on
       <td className="px-4 py-3">
         <div className="flex gap-2 flex-wrap items-center">
           <button onClick={() => onEdit(rule)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">Edit</button>
+          <button
+            onClick={() => onClone(rule)}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+            title="Clone this rule — opens the builder pre-filled as a new rule"
+          >
+            <Copy className="h-3 w-3" />
+            Clone
+          </button>
           <button onClick={handleToggle} disabled={toggling} className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50 transition-colors">
             {rule.enabled ? 'Disable' : 'Enable'}
           </button>
@@ -1076,6 +1084,15 @@ export default function SearchRulesAdmin() {
       return idx >= 0 ? prev.map(r => r.id === updated.id ? updated : r) : [...prev, updated];
     });
     setDrawerRule(undefined);
+  }
+
+  function handleClone(rule) {
+    // Seed the builder from an existing rule but strip the id so the drawer
+    // treats it as a create (POST), leaving the source rule untouched. The
+    // drawer's state initializer deep-copies legs/conditions, so edits to the
+    // clone never mutate the original.
+    const { id, ...rest } = rule;
+    setDrawerRule({ ...rest, name: `Copy of ${rule.name}` });
   }
 
   async function handleToggle(rule) {
@@ -1192,6 +1209,7 @@ export default function SearchRulesAdmin() {
                     rule={rule}
                     orgs={orgs}
                     onEdit={setDrawerRule}
+                    onClone={handleClone}
                     onToggle={handleToggle}
                     onDelete={handleDelete}
                     onRunNow={handleRunNow}
