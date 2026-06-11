@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Play, Sparkles, Bug, FlaskConical, Copy } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Play, Sparkles, Bug, FlaskConical, Copy, MoreVertical } from 'lucide-react';
 import api from '@/lib/axios';
 import SearchRuleAuthorDrawer from '@/components/SearchRuleAuthorDrawer';
 import SearchRuleTestsDrawer from '@/components/SearchRuleTestsDrawer';
@@ -935,8 +935,20 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
   const [running, setRunning] = useState(false);
   const [runFeedback, setRunFeedback] = useState(null);
   const [runningTests, setRunningTests] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleOutside(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [menuOpen]);
 
   async function handleRunTests() {
+    setMenuOpen(false);
     setRunningTests(true);
     try { await onRunTests(rule); } finally { setRunningTests(false); }
   }
@@ -945,17 +957,20 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
   const orgName = isSystem ? 'All orgs (system)' : (orgs.find(o => o.id === rule.organization)?.name ?? `#${rule.organization}`);
 
   async function handleToggle() {
+    setMenuOpen(false);
     setToggling(true);
     try { await onToggle(rule); } finally { setToggling(false); }
   }
 
   async function handleDelete() {
+    setMenuOpen(false);
     if (!window.confirm(`Delete rule "${rule.name}"?`)) return;
     setDeleting(true);
     try { await onDelete(rule); } finally { setDeleting(false); }
   }
 
   async function handleRunNow() {
+    setMenuOpen(false);
     setRunning(true);
     setRunFeedback(null);
     try {
@@ -995,54 +1010,79 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
         </span>
       </td>
       <td className="px-4 py-3">
-        <div className="flex gap-2 flex-wrap items-center">
-          <button onClick={() => onEdit(rule)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">Edit</button>
+        <div className="relative flex items-center gap-2" ref={menuRef}>
           <button
-            onClick={() => onClone(rule)}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
-            title="Clone this rule — opens the builder pre-filled as a new rule"
+            onClick={() => setMenuOpen(o => !o)}
+            aria-label="Actions"
+            aria-haspopup="true"
+            aria-expanded={menuOpen}
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           >
-            <Copy className="h-3 w-3" />
-            Clone
+            <MoreVertical className="h-4 w-4" />
           </button>
-          <button onClick={handleToggle} disabled={toggling} className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50 transition-colors">
-            {rule.enabled ? 'Disable' : 'Enable'}
-          </button>
-          <button
-            onClick={handleRunNow}
-            disabled={running}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-          >
-            <Play className="h-3 w-3" />
-            {running ? 'Queuing…' : 'Run now'}
-          </button>
-          <button
-            onClick={() => onDebug(rule)}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
-            title="Debug run — shows queries and OpenSearch responses without creating alerts"
-          >
-            <Bug className="h-3 w-3" />
-            Debug
-          </button>
-          <button
-            onClick={() => onTests(rule)}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
-            title="Manage and run detection tests for this rule"
-          >
-            <FlaskConical className="h-3 w-3" />
-            Tests
-          </button>
-          <button
-            onClick={handleRunTests}
-            disabled={runningTests}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-            title="Run all detection tests for this rule"
-          >
-            {runningTests ? 'Testing…' : 'Run tests'}
-          </button>
-          <button onClick={handleDelete} disabled={deleting} className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors">Delete</button>
           {runFeedback && (
             <span className={`text-xs ${runFeedback.startsWith('Queued') ? 'text-green-600' : 'text-destructive'}`}>{runFeedback}</span>
+          )}
+          {menuOpen && (
+            <div className="absolute right-0 top-7 z-20 min-w-36 rounded-md border border-border bg-card shadow-lg py-1">
+              <button
+                onClick={() => { setMenuOpen(false); onEdit(rule); }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => { setMenuOpen(false); onClone(rule); }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+              >
+                <Copy className="h-3 w-3" />
+                Clone
+              </button>
+              <button
+                onClick={handleToggle}
+                disabled={toggling}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+              >
+                {toggling ? 'Saving…' : rule.enabled ? 'Disable' : 'Enable'}
+              </button>
+              <button
+                onClick={handleRunNow}
+                disabled={running}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+              >
+                <Play className="h-3 w-3" />
+                {running ? 'Queuing…' : 'Run now'}
+              </button>
+              <button
+                onClick={() => { setMenuOpen(false); onDebug(rule); }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+              >
+                <Bug className="h-3 w-3" />
+                Debug
+              </button>
+              <button
+                onClick={() => { setMenuOpen(false); onTests(rule); }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+              >
+                <FlaskConical className="h-3 w-3" />
+                Tests
+              </button>
+              <button
+                onClick={handleRunTests}
+                disabled={runningTests}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+              >
+                {runningTests ? 'Testing…' : 'Run tests'}
+              </button>
+              <div className="my-1 border-t border-border" />
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
           )}
         </div>
       </td>

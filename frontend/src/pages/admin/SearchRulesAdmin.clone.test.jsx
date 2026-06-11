@@ -55,6 +55,7 @@ describe('SearchRulesAdmin — clone rule', () => {
     renderPage();
 
     await screen.findByText('Brute Force');
+    await user.click(screen.getByRole('button', { name: 'Actions' }));
     await user.click(screen.getByText('Clone'));
 
     // Create mode, not edit mode.
@@ -73,6 +74,7 @@ describe('SearchRulesAdmin — clone rule', () => {
     renderPage();
 
     await screen.findByText('Brute Force');
+    await user.click(screen.getByRole('button', { name: 'Actions' }));
     await user.click(screen.getByText('Clone'));
     await screen.findByText('Create rule');
     await user.click(screen.getByText('Create rule'));

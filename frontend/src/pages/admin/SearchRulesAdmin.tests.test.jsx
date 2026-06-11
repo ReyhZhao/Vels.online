@@ -47,6 +47,7 @@ describe('SearchRulesAdmin — test health badge + run all', () => {
     renderPage();
 
     await screen.findByText('Tests 3/4');
+    await user.click(screen.getByRole('button', { name: 'Actions' }));
     await user.click(screen.getByText('Run tests'));
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/correlations/search-rules/5/tests/run-all/'));
