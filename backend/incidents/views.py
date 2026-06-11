@@ -1,9 +1,13 @@
+import asyncio
 import logging
+import threading
 
+from adrf.views import APIView as AsyncAPIView
+from asgiref.sync import sync_to_async
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Case, F, IntegerField, Q, Value, When
-from django.http import QueryDict
+from django.http import QueryDict, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.text import slugify
 from django_filters.rest_framework import DjangoFilterBackend
@@ -2246,110 +2250,146 @@ class IncidentTriageDebugView(APIView):
 
 # ── Incident assistant ─────────────────────────────────────────────────────────
 
-class IncidentAssistantView(APIView):
-    """Staff-only: multi-turn conversational assistant grounded in a specific incident.
+_RESEARCH_SYS_PROMPT = (
+    "You are assisting a security analyst with this incident. Use the tools "
+    "to look up related incidents, alerts, and assets, and to search the "
+    "internet for threat intelligence. You may add an internal comment, "
+    "self-assign, tag, or link a known asset directly when clearly helpful; "
+    "do NOT attempt higher-risk changes here. Stop once you have what you need."
+)
 
-    Stateless endpoint: accepts messages[] and recomputes grounding server-side every turn.
-    Returns an assistant reply plus an allowlisted set of proposed actions for human confirmation.
+
+class IncidentAssistantView(AsyncAPIView):
+    """Staff-only: streaming conversational assistant grounded in a specific incident (ADR-0014).
+
+    Returns text/event-stream. Pre-stream failures return normal HTTP errors.
+    Once streaming starts, all outcomes arrive as in-stream events ending with 'done'.
+    Excluded from the drf-spectacular schema.
     """
 
-    def post(self, request, display_id):
+    schema = None  # excluded from OpenAPI schema
+
+    async def post(self, request, display_id):
+        from incidents.llm.base import AssistantConfigError, AssistantError, TriageConfigError
+        from incidents.llm.factory import get_assistant_provider
+        from incidents.llm.grounding import build_incident_grounding
+        from assistants.sse_emitter import emit_done, emit_error, emit_result, event_to_frame
+
         if not request.user.is_authenticated:
             return Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
         if not request.user.is_staff:
             return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            incident = Incident.objects.select_related(
-                "organization", "subject", "assignee"
-            ).prefetch_related(
-                "incident_assets__asset", "iocs", "tasks__assignee"
-            ).get(display_id=display_id)
+            incident = await sync_to_async(
+                lambda: Incident.objects.select_related(
+                    "organization", "subject", "assignee"
+                ).prefetch_related(
+                    "incident_assets__asset", "iocs", "tasks__assignee"
+                ).get(display_id=display_id)
+            )()
         except Incident.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if not can_view_incident(request.user, incident):
+        if not await sync_to_async(can_view_incident)(request.user, incident):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
         messages = request.data.get("messages") or []
         if not messages:
             return Response({"detail": "messages is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        from incidents.llm.grounding import build_incident_grounding
-        from incidents.llm.factory import get_assistant_provider
-        from incidents.llm.base import AssistantConfigError, AssistantError, TriageConfigError
-
-        grounding = build_incident_grounding(incident)
-
         try:
-            provider = get_assistant_provider()
-        except (AssistantConfigError, TriageConfigError) as exc:
+            provider = await sync_to_async(get_assistant_provider)()
+        except (AssistantConfigError, TriageConfigError):
             logger.exception("IncidentAssistantView: provider config error for %s", display_id)
             return Response(
                 {"detail": "Incident assistant is unavailable."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        # Phase 1 (research + auto-execute): the assistant can look up app data and
-        # search the internet via tools, and auto-execute low-risk internal actions
-        # (ADR-0011/0012), before synthesising its reply. Best-effort: never blocks.
-        tool_trace = []
-        auto_actions = []
-        try:
-            from assistants.orchestrator import run_research_phase, research_notes, LoopCaps
+        grounding = await sync_to_async(build_incident_grounding)(incident)
+
+        loop = asyncio.get_event_loop()
+        event_queue: asyncio.Queue = asyncio.Queue()
+        cancel_event = threading.Event()
+
+        def on_event(event_dict):
+            loop.call_soon_threadsafe(event_queue.put_nowait, event_dict)
+
+        def _run_sync_loop():
+            from assistants.orchestrator import LoopCaps, research_notes, run_research_phase
             from incidents.llm.assistant_tools import build_incident_tools
+            try:
+                if hasattr(provider, "chat"):
+                    uses_native = getattr(provider, "uses_native_web_search", lambda: False)()
+                    tools = build_incident_tools(
+                        incident, request.user, grounding, include_web_search=not uses_native
+                    )
+                    research = run_research_phase(
+                        provider, tools,
+                        [{"role": "system", "content": _RESEARCH_SYS_PROMPT}] + messages,
+                        LoopCaps.from_settings(),
+                        on_event=on_event,
+                        cancel_event=cancel_event,
+                    )
+                    grounding["research_notes"] = research_notes(research)
+                else:
+                    on_event({"type": "phase", "phase": "research"})
 
-            if hasattr(provider, "chat"):
-                uses_native = getattr(provider, "uses_native_web_search", lambda: False)()
-                tools = build_incident_tools(
-                    incident, request.user, grounding, include_web_search=not uses_native
+                on_event({"type": "phase", "phase": "synthesis"})
+                result = provider.assist_incident(messages, grounding)
+                proposed = [
+                    {"type": a.type, "label": a.label, "payload": a.payload}
+                    for a in result.proposed_actions
+                ]
+                loop.call_soon_threadsafe(event_queue.put_nowait, {
+                    "type": "result",
+                    "assistant_reply": result.assistant_reply,
+                    "proposed_actions": proposed,
+                    "warnings": result.warnings,
+                })
+            except Exception as exc:
+                logger.warning(
+                    "IncidentAssistantView stream error for %s: %s", display_id, exc
                 )
-                research_sys = {
-                    "role": "system",
-                    "content": (
-                        "You are assisting a security analyst with this incident. Use the tools "
-                        "to look up related incidents, alerts, and assets, and to search the "
-                        "internet for threat intelligence. You may add an internal comment, "
-                        "self-assign, tag, or link a known asset directly when clearly helpful; "
-                        "do NOT attempt higher-risk changes here. Stop once you have what you need."
-                    ),
-                }
-                research = run_research_phase(
-                    provider, tools, [research_sys] + messages, LoopCaps.from_settings()
-                )
-                grounding["research_notes"] = research_notes(research)
-                tool_trace = research.tool_trace
-                auto_actions = research.auto_actions
-        except Exception as exc:  # research is best-effort; never block the reply
-            logger.warning("IncidentAssistantView research phase error for %s: %s", display_id, exc)
+                loop.call_soon_threadsafe(event_queue.put_nowait, {
+                    "type": "error",
+                    "detail": str(exc),
+                })
+            finally:
+                loop.call_soon_threadsafe(event_queue.put_nowait, None)
 
-        try:
-            result = provider.assist_incident(messages, grounding)
-        except (AssistantConfigError, TriageConfigError) as exc:
-            logger.exception("IncidentAssistantView: provider config error during assist for %s", display_id)
-            return Response(
-                {"detail": "Incident assistant is unavailable."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        except AssistantError as exc:
-            logger.warning("IncidentAssistantView: provider error: %s", exc)
-            return Response(
-                {"detail": "Assistant failed to produce a valid response."},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+        thread = threading.Thread(target=_run_sync_loop, daemon=True)
+        thread.start()
 
-        proposed_actions = [
-            {"type": a.type, "label": a.label, "payload": a.payload}
-            for a in result.proposed_actions
-        ]
+        async def event_stream():
+            try:
+                while True:
+                    item = await event_queue.get()
+                    if item is None:
+                        break
+                    t = item.get("type")
+                    if t == "result":
+                        yield emit_result(
+                            item["assistant_reply"],
+                            item["proposed_actions"],
+                            item["warnings"],
+                        )
+                    elif t == "error":
+                        yield emit_error(item["detail"])
+                    else:
+                        frame = event_to_frame(item)
+                        if frame:
+                            yield frame
+                yield emit_done()
+            except GeneratorExit:
+                cancel_event.set()
+                raise
 
-        return Response({
-            "assistant_reply": result.assistant_reply,
-            "proposed_actions": proposed_actions,
-            "warnings": result.warnings,
-            "tool_trace": tool_trace,
-            "auto_actions": auto_actions,
-        })
+        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+        response["X-Accel-Buffering"] = "no"
+        response["Cache-Control"] = "no-cache"
+        return response
 
 
 class IncidentAssistantConfirmView(APIView):

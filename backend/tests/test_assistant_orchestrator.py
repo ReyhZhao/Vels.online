@@ -3,6 +3,8 @@
 These assert external behaviour through the public interface, driving the loop with a
 fake provider that emits scripted ChatTurns — never touching an LLM SDK.
 """
+import threading
+
 import pytest
 
 from assistants.orchestrator import LoopCaps, run_research_phase, research_notes
@@ -178,6 +180,87 @@ def test_tool_call_turn_echoed_before_result_in_transcript():
                     if m.get("role") == "assistant" and m.get("tool_calls"))
     tool_idx = next(i for i, m in enumerate(result.messages) if m.get("role") == "tool")
     assert asst_idx < tool_idx
+
+
+# ── orchestrator: on_event callback ──────────────────────────────────────────────
+
+def test_on_event_fires_for_phase_and_tool_calls():
+    calls = []
+    tool = _echo_tool(name="lookup")
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="lookup", arguments={"q": "x"}, id="c1")]),
+        ChatTurn(text="done"),
+    ])
+    result = run_research_phase(
+        provider, [tool], [{"role": "user", "content": "go"}], CAPS,
+        on_event=lambda e: calls.append(e),
+    )
+    # first event is phase boundary
+    assert calls[0] == {"type": "phase", "phase": "research"}
+    # next event is the tool call
+    tool_events = [e for e in calls if e.get("type") == "tool"]
+    assert len(tool_events) == 1
+    assert tool_events[0]["tool"] == "lookup"
+    assert result.stop_reason == "model_done"
+
+
+def test_on_event_fires_action_event_for_write_tools():
+    calls = []
+    tool = _echo_tool(name="add_tag", is_write=True)
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="add_tag", arguments={"tag": "spam"}, id="c1")]),
+        ChatTurn(text="done"),
+    ])
+    run_research_phase(
+        provider, [tool], [{"role": "user", "content": "go"}], CAPS,
+        on_event=lambda e: calls.append(e),
+    )
+    action_events = [e for e in calls if e.get("type") == "action"]
+    assert len(action_events) == 1
+    assert action_events[0]["tool"] == "add_tag"
+
+
+def test_on_event_omitted_behaviour_unchanged():
+    # Calling without on_event must produce identical results to the existing tests.
+    tool = _echo_tool(name="lookup")
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="lookup", arguments={"q": 1}, id="c1")]),
+        ChatTurn(text="done"),
+    ])
+    result = run_research_phase(provider, [tool], [{"role": "user", "content": "go"}], CAPS)
+    assert result.stop_reason == "model_done"
+    assert len(result.tool_trace) == 1
+
+
+# ── orchestrator: cooperative cancellation ────────────────────────────────────────
+
+def test_cancel_event_halts_loop_before_next_model_call():
+    cancel = threading.Event()
+    call_count = [0]
+
+    class CancellingProvider:
+        def chat(self, messages, tools):
+            call_count[0] += 1
+            cancel.set()  # set cancel after first call
+            return ChatTurn(tool_calls=[ToolCall(name="lookup", arguments={})])
+
+    result = run_research_phase(
+        CancellingProvider(), [_echo_tool()],
+        [{"role": "user", "content": "go"}], CAPS,
+        cancel_event=cancel,
+    )
+    assert result.stop_reason == "client_gone"
+    assert call_count[0] == 1  # loop stopped before the second model call
+
+
+def test_cancel_event_not_set_behaviour_unchanged():
+    cancel = threading.Event()  # never set
+    provider = FakeProvider([ChatTurn(text="done")])
+    result = run_research_phase(
+        provider, [_echo_tool()], [{"role": "user", "content": "go"}], CAPS,
+        cancel_event=cancel,
+    )
+    assert result.stop_reason == "model_done"
 
 
 def test_research_notes_render_tool_results():

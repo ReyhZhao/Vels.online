@@ -4,6 +4,9 @@ metadata:
   name: vels-online
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # SSE buffering: the streaming endpoint sets X-Accel-Buffering: no on its response,
+    # which nginx honours per-response without requiring a blanket proxy_buffering off.
+    # Non-streaming endpoints retain default buffering. See ADR-0014.
 spec:
   ingressClassName: bunkerweb
   tls:

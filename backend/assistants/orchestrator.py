@@ -11,6 +11,7 @@ emits scripted `ChatTurn`s. It never imports an LLM SDK.
 """
 import json
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
@@ -47,7 +48,7 @@ class ResearchResult:
     messages: List[dict]                       # full transcript incl tool results
     tool_trace: List[dict] = field(default_factory=list)
     auto_actions: List[dict] = field(default_factory=list)
-    stop_reason: str = "model_done"            # model_done | max_iterations | deadline
+    stop_reason: str = "model_done"            # model_done | max_iterations | deadline | client_gone
 
 
 def _summarize_args(args: dict) -> dict:
@@ -94,10 +95,17 @@ def run_research_phase(
     messages: List[dict],
     caps: Optional[LoopCaps] = None,
     clock: Callable[[], float] = time.monotonic,
+    on_event: Optional[Callable[[dict], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> ResearchResult:
     """Run the phase-1 research loop and return the enriched transcript + trace.
 
     `provider` must expose `chat(messages, tools) -> ChatTurn`.
+
+    Optional `on_event` is called at each tool call/result and phase boundary with
+    the same payload shape as tool_trace entries. Optional `cancel_event` (a
+    threading.Event) is checked at the top of each iteration; when set, the loop
+    stops before the next model call and sets stop_reason = 'client_gone'.
     """
     caps = caps or LoopCaps.from_settings()
     registry = {t.name: t for t in tools}
@@ -108,7 +116,13 @@ def run_research_phase(
     iterations = 0
     stop_reason = "model_done"
 
+    if on_event:
+        on_event({"type": "phase", "phase": "research"})
+
     while True:
+        if cancel_event is not None and cancel_event.is_set():
+            stop_reason = "client_gone"
+            break
         if iterations >= caps.max_iterations:
             stop_reason = "max_iterations"
             break
@@ -148,21 +162,28 @@ def run_research_phase(
             else:
                 result = _run_with_timeout(spec.executor, call.arguments, caps.per_tool_timeout_s)
 
-            trace.append({
+            entry = {
                 "tool": call.name,
                 "arguments": _summarize_args(call.arguments),
                 "summary": result.summary,
                 "count": result.count,
                 "error": result.error,
                 "is_write": is_write,
-            })
+            }
+            trace.append(entry)
+
+            if on_event:
+                on_event({"type": "tool", **entry})
 
             if is_write and result.error is None:
-                auto_actions.append({
+                action = {
                     "tool": call.name,
                     "arguments": call.arguments,
                     "summary": result.summary,
-                })
+                }
+                auto_actions.append(action)
+                if on_event:
+                    on_event({"type": "action", **action})
 
             transcript.append({
                 "role": "tool",

@@ -11,6 +11,28 @@ from incidents.llm.grounding import build_incident_grounding
 from incidents.services.transitions import ALLOWED_TRANSITIONS
 
 
+async def _collect_sse_result(response) -> dict:
+    """Consume a StreamingHttpResponse (SSE) and return the 'result' event data dict."""
+    sc = response.streaming_content
+    if hasattr(sc, "__aiter__"):
+        content = b"".join([chunk async for chunk in sc]).decode()
+    else:
+        content = b"".join(sc).decode()
+    event_type = None
+    data_lines = []
+    for line in content.splitlines():
+        if line.startswith("event: "):
+            event_type = line[len("event: "):]
+        elif line.startswith("data: "):
+            data_lines.append(line[len("data: "):])
+        elif line == "" and event_type is not None:
+            if event_type == "result":
+                return json.loads("".join(data_lines))
+            event_type = None
+            data_lines = []
+    return {}
+
+
 # ── fixtures ────────────────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -36,7 +58,8 @@ def member(regular_user, acme):
 
 @pytest.fixture
 def phishing(db):
-    return Subject.objects.get(slug="phishing")
+    subject, _ = Subject.objects.get_or_create(slug="phishing", defaults={"name": "Phishing"})
+    return subject
 
 
 @pytest.fixture
@@ -68,7 +91,7 @@ def _mock_provider(reply="Here is the severity.", actions=None):
         proposed_actions=actions or [],
         warnings=[],
     )
-    mock = MagicMock()
+    mock = MagicMock(spec=["assist_incident"])
     mock.assist_incident.return_value = result
     return mock
 
@@ -146,12 +169,12 @@ def test_assistant_grounding_not_trusted_from_client(client, staff, incident):
 
 # ── response shape ─────────────────────────────────────────────────────────────
 
-@pytest.mark.django_db
-def test_assistant_response_shape(client, staff, incident):
-    client.force_login(staff)
+@pytest.mark.django_db(transaction=True)
+async def test_assistant_response_shape(async_client, staff, incident):
+    await async_client.aforce_login(staff)
     with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider("Severity is medium.")):
-        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
-    data = resp.json()
+        resp = await async_client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = await _collect_sse_result(resp)
     assert "assistant_reply" in data
     assert "proposed_actions" in data
     assert "warnings" in data
@@ -161,17 +184,17 @@ def test_assistant_response_shape(client, staff, incident):
 
 # ── proposed action: update_field ─────────────────────────────────────────────
 
-@pytest.mark.django_db
-def test_assistant_proposes_update_field(client, staff, incident):
+@pytest.mark.django_db(transaction=True)
+async def test_assistant_proposes_update_field(async_client, staff, incident):
     action = ProposedAction(
         type="update_field",
         label="Upgrade severity to High",
         payload={"field": "severity", "value": "high"},
     )
-    client.force_login(staff)
+    await async_client.aforce_login(staff)
     with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider(actions=[action])):
-        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
-    data = resp.json()
+        resp = await async_client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = await _collect_sse_result(resp)
     assert len(data["proposed_actions"]) == 1
     act = data["proposed_actions"][0]
     assert act["type"] == "update_field"
@@ -337,17 +360,17 @@ def test_ollama_assist_incident_strips_code_fence(incident):
 
 # ── proposed action: transition_state ─────────────────────────────────────────
 
-@pytest.mark.django_db
-def test_assistant_proposes_transition_state(client, staff, incident):
+@pytest.mark.django_db(transaction=True)
+async def test_assistant_proposes_transition_state(async_client, staff, incident):
     action = ProposedAction(
         type="transition_state",
         label="Move to In Progress",
         payload={"state": "in_progress"},
     )
-    client.force_login(staff)
+    await async_client.aforce_login(staff)
     with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider(actions=[action])):
-        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
-    data = resp.json()
+        resp = await async_client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = await _collect_sse_result(resp)
     assert data["proposed_actions"][0]["type"] == "transition_state"
     assert data["proposed_actions"][0]["payload"]["state"] == "in_progress"
 
@@ -525,17 +548,17 @@ def test_grounding_includes_closure_reasons(incident):
 
 # ── proposed action: apply_task_template ──────────────────────────────────────
 
-@pytest.mark.django_db
-def test_assistant_proposes_apply_task_template(client, staff, incident, template):
+@pytest.mark.django_db(transaction=True)
+async def test_assistant_proposes_apply_task_template(async_client, staff, incident, template):
     action = ProposedAction(
         type="apply_task_template",
         label="Apply Phishing Playbook",
         payload={"template_id": template.id, "template_name": template.name},
     )
-    client.force_login(staff)
+    await async_client.aforce_login(staff)
     with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider(actions=[action])):
-        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
-    data = resp.json()
+        resp = await async_client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = await _collect_sse_result(resp)
     act = data["proposed_actions"][0]
     assert act["type"] == "apply_task_template"
     assert act["payload"]["template_id"] == template.id
@@ -694,17 +717,17 @@ def test_grounding_contacts_empty_when_none(incident):
 
 # ── proposed action: create_comment ───────────────────────────────────────────
 
-@pytest.mark.django_db
-def test_assistant_create_comment_action_proposed(client, staff, incident):
+@pytest.mark.django_db(transaction=True)
+async def test_assistant_create_comment_action_proposed(async_client, staff, incident):
     action = ProposedAction(
         type="create_comment",
         label="Add internal note",
         payload={"text": "Check the firewall logs.", "internal": True},
     )
-    client.force_login(staff)
+    await async_client.aforce_login(staff)
     with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider(actions=[action])):
-        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
-    data = resp.json()
+        resp = await async_client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = await _collect_sse_result(resp)
     assert len(data["proposed_actions"]) == 1
     act = data["proposed_actions"][0]
     assert act["type"] == "create_comment"
@@ -772,17 +795,17 @@ def test_gemini_create_comment_empty_text_stripped(incident):
 
 # ── proposed action: send_contact_message ─────────────────────────────────────
 
-@pytest.mark.django_db
-def test_assistant_send_contact_message_proposed(client, staff, incident, incident_contact, contact):
+@pytest.mark.django_db(transaction=True)
+async def test_assistant_send_contact_message_proposed(async_client, staff, incident, incident_contact, contact):
     action = ProposedAction(
         type="send_contact_message",
         label=f"Notify {contact.name}",
         payload={"contact_id": contact.id, "message": "Please investigate.", "contact_name": contact.name},
     )
-    client.force_login(staff)
+    await async_client.aforce_login(staff)
     with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider(actions=[action])):
-        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
-    data = resp.json()
+        resp = await async_client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = await _collect_sse_result(resp)
     assert len(data["proposed_actions"]) == 1
     act = data["proposed_actions"][0]
     assert act["type"] == "send_contact_message"
@@ -946,8 +969,8 @@ def test_ollama_prose_fallback_returns_result(incident):
     assert "plain text" in result.warnings[0]
 
 
-@pytest.mark.django_db
-def test_gemini_prose_fallback_returns_200_via_endpoint(client, staff, incident):
+@pytest.mark.django_db(transaction=True)
+async def test_gemini_prose_fallback_returns_200_via_endpoint(async_client, staff, incident):
     """Endpoint must return 200 when the provider falls back to prose (no 502)."""
     from incidents.llm.base import AssistantResult
     prose_result = AssistantResult(
@@ -958,12 +981,12 @@ def test_gemini_prose_fallback_returns_200_via_endpoint(client, staff, incident)
     mock = MagicMock()
     mock.assist_incident.return_value = prose_result
 
-    client.force_login(staff)
+    await async_client.aforce_login(staff)
     with patch("incidents.llm.factory.get_assistant_provider", return_value=mock):
-        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+        resp = await async_client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
 
     assert resp.status_code == 200
-    data = resp.json()
+    data = await _collect_sse_result(resp)
     assert data["assistant_reply"] == prose_result.assistant_reply
     assert data["proposed_actions"] == []
     assert len(data["warnings"]) == 1
@@ -971,16 +994,16 @@ def test_gemini_prose_fallback_returns_200_via_endpoint(client, staff, incident)
 
 # ── existing action types continue to work ────────────────────────────────────
 
-@pytest.mark.django_db
-def test_existing_action_types_unaffected(client, staff, incident):
+@pytest.mark.django_db(transaction=True)
+async def test_existing_action_types_unaffected(async_client, staff, incident):
     actions = [
         ProposedAction(type="update_field", label="Set severity", payload={"field": "severity", "value": "high"}),
         ProposedAction(type="transition_state", label="Move to in_progress", payload={"state": "in_progress"}),
     ]
-    client.force_login(staff)
+    await async_client.aforce_login(staff)
     with patch("incidents.llm.factory.get_assistant_provider", return_value=_mock_provider(actions=actions)):
-        resp = client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
-    data = resp.json()
+        resp = await async_client.post(_URL(incident), data=json.dumps({"messages": _MESSAGES}), content_type="application/json")
+    data = await _collect_sse_result(resp)
     types = [a["type"] for a in data["proposed_actions"]]
     assert "update_field" in types
     assert "transition_state" in types

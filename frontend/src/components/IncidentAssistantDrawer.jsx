@@ -1,5 +1,29 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import api from '../lib/axios';
+import { parseSSEChunk } from '../lib/parseSSE';
+
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp('(^|;\\s*)' + name + '=([^;]*)'));
+  return match ? decodeURIComponent(match[2]) : null;
+}
+
+// Live activity chip shown while a turn streams.
+function ActivityChip({ kind, text, isError }) {
+  if (kind === 'phase') {
+    return (
+      <p className="text-[11px] text-muted-foreground italic">{text}</p>
+    );
+  }
+  if (kind === 'action') {
+    return (
+      <p className="text-[11px] text-emerald-600 dark:text-emerald-400">✓ {text}</p>
+    );
+  }
+  if (isError) {
+    return <p className="text-[11px] text-amber-600 dark:text-amber-400">{text}</p>;
+  }
+  return <p className="text-[11px] text-muted-foreground">{text}</p>;
+}
 
 // Compact, collapsible trace of what the assistant looked up / searched this turn.
 function ToolTrace({ trace }) {
@@ -42,8 +66,6 @@ function ProposedActionCard({ action, displayId, onConfirmed, onDismiss }) {
       } else if (action.type === 'transition_state') {
         await api.post(`/api/incidents/${displayId}/transition/`, {
           state: action.payload.state,
-          // Closing carries a structured closure_reason (and duplicate_of for a
-          // duplicate close); the transition endpoint rejects a close without one.
           ...(action.payload.closure_reason ? { closure_reason: action.payload.closure_reason } : {}),
           ...(action.payload.duplicate_of ? { duplicate_of: action.payload.duplicate_of } : {}),
         });
@@ -63,7 +85,6 @@ function ProposedActionCard({ action, displayId, onConfirmed, onDismiss }) {
           body: action.payload.message,
         });
       }
-      // Record audit event (best-effort; don't block on failure)
       api.post(`/api/incidents/${displayId}/assistant-confirm/`, {
         action_type: action.type,
         action_label: action.label,
@@ -127,60 +148,144 @@ function ProposedActionCard({ action, displayId, onConfirmed, onDismiss }) {
 }
 
 /**
- * Conversational incident assistant drawer.
- * Stateless: replays message history each turn; grounding is recomputed server-side.
- * Proposed actions are presented as confirm/dismiss cards.
+ * Conversational incident assistant drawer — streaming variant (ADR-0014).
+ *
+ * Uses fetch + ReadableStream (not axios, not EventSource) so we can POST the
+ * messages[] body. Auth uses session cookies + manual X-CSRFToken header.
+ * Closing the drawer mid-turn aborts the request via AbortController.
+ * The incident is refetched once on 'done' to reflect auto-actions.
  */
 export default function IncidentAssistantDrawer({ displayId, onClose, onActionConfirmed }) {
   const [messages, setMessages] = useState([]);
   const [pendingActions, setPendingActions] = useState([]);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [liveActivity, setLiveActivity] = useState([]); // chips shown while streaming
   const [error, setError] = useState(null);
   const threadRef = useRef(null);
+  const abortRef = useRef(null);
 
   useEffect(() => {
     if (threadRef.current) {
       threadRef.current.scrollTop = threadRef.current.scrollHeight;
     }
-  }, [messages, loading, pendingActions]);
+  }, [messages, streaming, pendingActions, liveActivity]);
+
+  // Abort in-flight request when drawer is closed.
+  const handleClose = useCallback(() => {
+    abortRef.current?.abort();
+    onClose();
+  }, [onClose]);
 
   async function handleSend() {
     const content = input.trim();
-    if (!content || loading) return;
+    if (!content || streaming) return;
     const userMsg = { role: 'user', content };
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
     setInput('');
-    setLoading(true);
+    setStreaming(true);
+    setLiveActivity([]);
     setError(null);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // Collect per-turn trace for the completed assistant message.
+    const turnTrace = [];
+    const turnActions = [];
+
     try {
-      const res = await api.post(`/api/incidents/${displayId}/assistant/`, {
-        messages: nextMessages,
+      const response = await fetch(`/api/incidents/${displayId}/assistant/`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken') || '',
+        },
+        body: JSON.stringify({ messages: nextMessages }),
+        signal: controller.signal,
       });
-      const { assistant_reply, proposed_actions, warnings, tool_trace, auto_actions } = res.data;
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: assistant_reply,
-        tool_trace: tool_trace || [],
-        auto_actions: auto_actions || [],
-      }]);
-      if (proposed_actions?.length) {
-        setPendingActions(prev => [...prev, ...proposed_actions]);
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 503) {
+          setError('The incident assistant is unavailable. Check the LLM provider configuration.');
+        } else {
+          setError(body?.detail || `Error ${response.status}`);
+        }
+        return;
       }
-      if (warnings?.length) {
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const buf = { remainder: '' };
+
+      let assistantReply = '';
+      let proposedActions = [];
+      let warnings = [];
+      let streamDone = false;
+
+      while (!streamDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const events = parseSSEChunk(chunk, buf);
+
+        for (const ev of events) {
+          if (ev.event === 'phase') {
+            const label = ev.data.phase === 'research' ? 'Researching…' : 'Synthesising…';
+            setLiveActivity(prev => [...prev, { kind: 'phase', text: label }]);
+          } else if (ev.event === 'tool') {
+            turnTrace.push(ev.data);
+            if (!ev.data.is_write) {
+              const label = ev.data.error ? `${ev.data.tool}: ${ev.data.error}` : (ev.data.summary || ev.data.tool);
+              setLiveActivity(prev => [...prev, { kind: 'tool', text: label, isError: !!ev.data.error }]);
+            }
+          } else if (ev.event === 'action') {
+            turnActions.push(ev.data);
+            setLiveActivity(prev => [...prev, { kind: 'action', text: ev.data.summary || ev.data.tool }]);
+          } else if (ev.event === 'result') {
+            assistantReply = ev.data.assistant_reply || '';
+            proposedActions = ev.data.proposed_actions || [];
+            warnings = ev.data.warnings || [];
+          } else if (ev.event === 'error') {
+            setError(ev.data.detail || 'The assistant encountered an error.');
+          } else if (ev.event === 'done') {
+            streamDone = true;
+            break;
+          }
+        }
+      }
+
+      reader.releaseLock();
+
+      if (assistantReply) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: assistantReply,
+          tool_trace: turnTrace,
+          auto_actions: turnActions,
+        }]);
+      }
+      if (proposedActions.length) {
+        setPendingActions(prev => [...prev, ...proposedActions]);
+      }
+      if (warnings.length) {
         setError(warnings.join(' '));
       }
+      // Refetch incident once to reflect auto-actions without mid-stream thrash.
+      if (streamDone) {
+        onActionConfirmed?.();
+      }
     } catch (err) {
-      const d = err.response?.data;
-      if (err.response?.status === 503) {
-        setError('The incident assistant is unavailable. Check the LLM provider configuration.');
-      } else {
-        setError(d?.detail || d?.reason || 'Failed to get a response.');
+      if (err.name !== 'AbortError') {
+        setError('Failed to get a response.');
       }
     } finally {
-      setLoading(false);
+      setStreaming(false);
+      setLiveActivity([]);
+      abortRef.current = null;
     }
   }
 
@@ -195,7 +300,7 @@ export default function IncidentAssistantDrawer({ displayId, onClose, onActionCo
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40" onClick={handleClose} />
       <div className="relative flex h-full w-full max-w-lg flex-col border-l border-border bg-card shadow-2xl">
 
         {/* Header */}
@@ -207,7 +312,7 @@ export default function IncidentAssistantDrawer({ displayId, onClose, onActionCo
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             aria-label="Close assistant"
             className="text-lg text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -217,7 +322,7 @@ export default function IncidentAssistantDrawer({ displayId, onClose, onActionCo
 
         {/* Message thread */}
         <div ref={threadRef} className="flex-1 overflow-y-auto thin-scrollbar px-4 py-3 space-y-3 min-h-0">
-          {messages.length === 0 && !loading && (
+          {messages.length === 0 && !streaming && (
             <p className="text-xs text-muted-foreground text-center mt-8">
               Ask about this incident — severity, linked alerts, suggested next steps.
             </p>
@@ -247,11 +352,21 @@ export default function IncidentAssistantDrawer({ displayId, onClose, onActionCo
               )}
             </div>
           ))}
-          {loading && (
-            <div className="flex justify-start">
-              <div className="rounded-lg px-3 py-2 text-xs bg-muted text-muted-foreground animate-pulse">
-                Thinking…
-              </div>
+
+          {/* Live activity stream while streaming */}
+          {streaming && (
+            <div className="flex flex-col items-start space-y-0.5">
+              {liveActivity.length === 0 ? (
+                <div className="rounded-lg px-3 py-2 text-xs bg-muted text-muted-foreground animate-pulse">
+                  Connecting…
+                </div>
+              ) : (
+                <div className="space-y-0.5 pl-1">
+                  {liveActivity.map((chip, i) => (
+                    <ActivityChip key={i} {...chip} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -292,13 +407,13 @@ export default function IncidentAssistantDrawer({ displayId, onClose, onActionCo
               }}
               placeholder="Ask about the incident… (⌘Enter to send)"
               rows={2}
-              disabled={loading}
+              disabled={streaming}
               className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring resize-none disabled:opacity-50"
             />
             <button
               type="button"
               onClick={handleSend}
-              disabled={!input.trim() || loading}
+              disabled={!input.trim() || streaming}
               aria-label="Send message"
               className="self-end rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
