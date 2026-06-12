@@ -11,6 +11,7 @@ SOURCE_CHOICES = [
     ("workflow", "Workflow"),
     ("external", "External"),
     ("scheduled_search", "Scheduled Search Rule"),
+    ("threat_hunt", "Threat Hunt"),
 ]
 
 TLP_WHITE = "white"

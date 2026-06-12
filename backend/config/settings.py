@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "inbound_mail",
     "alerts",
     "correlations",
+    "hunts",
     "core",
     "django_celery_results",
     "django_celery_beat",
@@ -291,6 +292,13 @@ ASSISTANT_LOOP_DEADLINE_S     = float(os.environ.get("ASSISTANT_LOOP_DEADLINE_S"
 ASSISTANT_MAX_AUTO_ACTIONS    = int(os.environ.get("ASSISTANT_MAX_AUTO_ACTIONS", "8"))
 # Web search is available when an Ollama Cloud key is configured (or Gemini grounding).
 ASSISTANT_WEB_SEARCH_ENABLED  = os.environ.get("ASSISTANT_WEB_SEARCH_ENABLED", "1") == "1"
+
+# Threat Hunting loop caps (ADR-0016). Relaxed vs the incident assistant since a hunt
+# turn runs as a Celery background job (no proxy-timeout pressure).
+HUNT_LOOP_MAX_ITERATIONS = int(os.environ.get("HUNT_LOOP_MAX_ITERATIONS", "15"))
+HUNT_TOOL_TIMEOUT_S      = float(os.environ.get("HUNT_TOOL_TIMEOUT_S", "15"))
+HUNT_LOOP_DEADLINE_S     = float(os.environ.get("HUNT_LOOP_DEADLINE_S", "300"))
+HUNT_MAX_AUTO_ACTIONS    = int(os.environ.get("HUNT_MAX_AUTO_ACTIONS", "8"))
 
 INCIDENT_SLA_TARGETS = {
     "critical": {"response_seconds": 15 * 60,       "resolve_seconds": 4 * 3600},

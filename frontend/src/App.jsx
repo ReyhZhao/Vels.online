@@ -44,6 +44,8 @@ import AssetDetail from './pages/AssetDetail';
 import OnCallCalendarPage from './pages/admin/OnCallCalendarPage';
 import CorrelationRulesAdmin from './pages/admin/CorrelationRulesAdmin';
 import SearchRulesAdmin from './pages/admin/SearchRulesAdmin';
+import ThreatHuntingPage from './pages/ThreatHuntingPage';
+import HuntDetail from './pages/HuntDetail';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -77,6 +79,8 @@ function App() {
           <Route path="/admin/incidents/oncall" element={<OnCallCalendarPage />} />
           <Route path="/admin/correlations/rules" element={<CorrelationRulesAdmin />} />
           <Route path="/admin/correlations/search-rules" element={<SearchRulesAdmin />} />
+          <Route path="/hunting" element={<ThreatHuntingPage />} />
+          <Route path="/hunting/:huntId" element={<HuntDetail />} />
           <Route path="/admin/tasks/history" element={<TaskHistory />} />
           <Route path="/admin/tasks/scheduled" element={<ScheduledTasks />} />
           <Route path="/admin/email-templates" element={<EmailTemplates />} />

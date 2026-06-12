@@ -133,6 +133,22 @@ class WazuhClient:
         """Send PUT /manager/restart to reload Wazuh rules without rebooting."""
         self._put("/manager/restart", {})
 
+    def get_agent_processes(self, agent_id):
+        """Live running processes on an agent (syscollector). Used by Hunt lenses."""
+        data = self._get(
+            f"/syscollector/{agent_id}/processes",
+            params={"select": "pid,name,state,ppid,cmd,euser", "limit": 500},
+        )
+        return data["data"]["affected_items"]
+
+    def get_agent_ports(self, agent_id):
+        """Open ports / listening services on an agent (syscollector). Used by Hunt lenses."""
+        data = self._get(
+            f"/syscollector/{agent_id}/ports",
+            params={"select": "local.ip,local.port,protocol,state,process,pid", "limit": 500},
+        )
+        return data["data"]["affected_items"]
+
     def run_active_response(self, command, agent_ids, args="", timeout=0):
         """Send PUT /active-response to dispatch a command against agent_ids.
 

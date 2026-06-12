@@ -234,6 +234,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 </SidebarLink>
                 {isStaff && (
                   <>
+                    <SidebarLink to="/hunting" icon={Search} collapsed={collapsed}>
+                      Threat Hunting
+                    </SidebarLink>
                     <SidebarLink to="/admin/incidents/oncall" icon={CalendarClock} collapsed={collapsed}>
                       On-Call
                     </SidebarLink>
