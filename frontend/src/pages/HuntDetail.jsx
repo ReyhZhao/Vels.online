@@ -80,7 +80,7 @@ export default function HuntDetail() {
   const resultEvent = [...events].reverse().find((e) => e.event === 'result');
 
   return (
-    <div className="max-w-5xl mx-auto p-4 space-y-5 overflow-x-hidden">
+    <div className="w-full max-w-5xl min-w-0 mx-auto p-4 space-y-5 overflow-x-hidden">
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/hunting')} className="text-sm text-blue-600">← Hunts</button>
         <h1 className="text-xl font-semibold flex-1 truncate">{hunt.title}</h1>
@@ -99,7 +99,7 @@ export default function HuntDetail() {
       {error && <div className="text-sm text-red-600">{error}</div>}
 
       {/* Streamed transcript */}
-      <div className="border rounded-lg p-3 space-y-1 text-sm font-mono max-h-80 overflow-y-auto break-words dark:border-gray-700">
+      <div className="border rounded-lg p-3 space-y-1 text-sm font-mono max-h-80 overflow-auto break-words dark:border-gray-700">
         {events.length === 0 && <div className="text-gray-400">No activity yet.</div>}
         {events.map((e, i) => (
           <div key={i} className="text-gray-700 dark:text-gray-300 break-words">
@@ -116,7 +116,17 @@ export default function HuntDetail() {
       {resultEvent?.data?.narrative && (
         <div className="border rounded-lg p-3 dark:border-gray-700">
           <div className="prose prose-sm dark:prose-invert max-w-none break-words">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // Wide tables shouldn't widen the page on mobile — let them scroll on their own.
+                table: ({ node, ...props }) => (
+                  <div className="overflow-x-auto">
+                    <table {...props} />
+                  </div>
+                ),
+              }}
+            >
               {resultEvent.data.narrative}
             </ReactMarkdown>
           </div>
