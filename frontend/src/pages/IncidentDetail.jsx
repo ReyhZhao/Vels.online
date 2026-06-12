@@ -1781,10 +1781,81 @@ const ALERT_SOURCE_LABELS = {
   api:           'API',
 };
 
-function LinkedAlertsPanel({ displayId, linkedAlertCount }) {
+function formatAlertDt(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function AlertDetailModal({ alert, onClose }) {
+  if (!alert) return null;
+  const rows = [
+    ['ID', alert.display_id],
+    ['Severity', alert.severity],
+    ['State', alert.state],
+    ['Source', ALERT_SOURCE_LABELS[alert.source_kind] ?? alert.source_kind],
+    ['Agent', alert.agent_name ?? '—'],
+    ['PAP', alert.pap ?? '—'],
+    ['TLP', alert.tlp ?? '—'],
+    ['Acknowledged by', alert.acknowledged_by ?? '—'],
+    ['Acknowledged at', formatAlertDt(alert.acknowledged_at)],
+    ['Created', formatAlertDt(alert.created_at)],
+    ['Updated', formatAlertDt(alert.updated_at)],
+  ];
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-card p-5 shadow-xl"
+        onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Alert ${alert.display_id}`}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <h3 className="text-base font-semibold text-foreground">{alert.title}</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 rounded-md px-2 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            ✕
+          </button>
+        </div>
+        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
+          {rows.map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+              <dd className="truncate text-foreground" title={String(value ?? '')}>{value ?? '—'}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-4">
+          <p className="text-xs font-medium text-muted-foreground">Description</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{alert.description || '—'}</p>
+        </div>
+        <div className="mt-4">
+          <p className="text-xs font-medium text-muted-foreground">Source signal (source_ref)</p>
+          <pre className="mt-1 max-h-64 overflow-auto rounded-md bg-muted/50 p-3 text-xs text-foreground">
+            {JSON.stringify(alert.source_ref ?? {}, null, 2)}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function LinkedAlertsPanel({ displayId, linkedAlertCount }) {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [search, setSearch] = useState('');
+  const [fSeverity, setFSeverity] = useState('');
+  const [fState, setFState] = useState('');
+  const [fSource, setFSource] = useState('');
 
   useEffect(() => {
     api.get(`/api/incidents/${displayId}/alerts/`)
@@ -1792,10 +1863,21 @@ function LinkedAlertsPanel({ displayId, linkedAlertCount }) {
       .catch(() => setLoading(false));
   }, [displayId]);
 
-  const formatDt = (iso) => {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  };
+  const distinct = (key) => [...new Set(alerts.map(a => a[key]).filter(Boolean))];
+
+  const filtered = alerts.filter(a => {
+    if (search) {
+      const q = search.toLowerCase();
+      if (!`${a.display_id} ${a.title}`.toLowerCase().includes(q)) return false;
+    }
+    if (fSeverity && a.severity !== fSeverity) return false;
+    if (fState && a.state !== fState) return false;
+    if (fSource && a.source_kind !== fSource) return false;
+    return true;
+  });
+
+  const isFiltered = search || fSeverity || fState || fSource;
+  const selectCls = 'rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground';
 
   return (
     <div className="p-4">
@@ -1814,49 +1896,88 @@ function LinkedAlertsPanel({ displayId, linkedAlertCount }) {
           ) : alerts.length === 0 ? (
             <p className="text-sm text-muted-foreground px-2">No linked alerts.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">ID</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Title</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Severity</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Source</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Agent</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">State</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Created</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {alerts.map(a => (
-                    <tr key={a.display_id} className="hover:bg-muted/30">
-                      <td className="px-2 py-2 font-mono text-xs font-medium">{a.display_id}</td>
-                      <td className="px-2 py-2 text-foreground max-w-xs truncate">{a.title}</td>
-                      <td className="px-2 py-2">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${ALERT_SEVERITY_CLASSES[a.severity] ?? ''}`}>
-                          {a.severity}
-                        </span>
-                      </td>
-                      <td className="px-2 py-2">
-                        <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                          {ALERT_SOURCE_LABELS[a.source_kind] ?? a.source_kind}
-                        </span>
-                      </td>
-                      <td className="px-2 py-2 text-xs text-muted-foreground font-mono">{a.agent_name ?? '—'}</td>
-                      <td className="px-2 py-2">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${ALERT_STATE_CLASSES[a.state] ?? ''}`}>
-                          {a.state}
-                        </span>
-                      </td>
-                      <td className="px-2 py-2 text-xs text-muted-foreground whitespace-nowrap">{formatDt(a.created_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <input
+                  type="search"
+                  placeholder="Search alerts…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="min-w-[10rem] flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                />
+                <select value={fSeverity} onChange={e => setFSeverity(e.target.value)} className={selectCls} aria-label="Filter by severity">
+                  <option value="">All severities</option>
+                  {distinct('severity').map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+                <select value={fState} onChange={e => setFState(e.target.value)} className={selectCls} aria-label="Filter by state">
+                  <option value="">All states</option>
+                  {distinct('state').map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+                <select value={fSource} onChange={e => setFSource(e.target.value)} className={selectCls} aria-label="Filter by source">
+                  <option value="">All sources</option>
+                  {distinct('source_kind').map(v => <option key={v} value={v}>{ALERT_SOURCE_LABELS[v] ?? v}</option>)}
+                </select>
+                {isFiltered && (
+                  <span className="text-xs text-muted-foreground">
+                    Showing {filtered.length} of {alerts.length}
+                  </span>
+                )}
+              </div>
+
+              {filtered.length === 0 ? (
+                <p className="text-sm text-muted-foreground px-2">No alerts match the current filters.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">ID</th>
+                        <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Title</th>
+                        <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Severity</th>
+                        <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Source</th>
+                        <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Agent</th>
+                        <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">State</th>
+                        <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Created</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {filtered.map(a => (
+                        <tr
+                          key={a.display_id}
+                          onClick={() => setSelected(a)}
+                          className="cursor-pointer hover:bg-muted/30"
+                        >
+                          <td className="px-2 py-2 font-mono text-xs font-medium">{a.display_id}</td>
+                          <td className="px-2 py-2 text-foreground max-w-xs truncate">{a.title}</td>
+                          <td className="px-2 py-2">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${ALERT_SEVERITY_CLASSES[a.severity] ?? ''}`}>
+                              {a.severity}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2">
+                            <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                              {ALERT_SOURCE_LABELS[a.source_kind] ?? a.source_kind}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 text-xs text-muted-foreground font-mono">{a.agent_name ?? '—'}</td>
+                          <td className="px-2 py-2">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${ALERT_STATE_CLASSES[a.state] ?? ''}`}>
+                              {a.state}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 text-xs text-muted-foreground whitespace-nowrap">{formatAlertDt(a.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
+
+      <AlertDetailModal alert={selected} onClose={() => setSelected(null)} />
     </div>
   );
 }

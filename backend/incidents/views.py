@@ -1290,7 +1290,15 @@ class IncidentLinkedAlertsView(APIView):
                 "source_kind": a.source_kind,
                 "state": a.state,
                 "created_at": a.created_at.isoformat(),
+                "updated_at": a.updated_at.isoformat() if a.updated_at else None,
                 "agent_name": (a.source_ref or {}).get("agent_name"),
+                # Full detail for the row drill-down (issue #498)
+                "description": a.description,
+                "source_ref": a.source_ref or {},
+                "pap": a.pap,
+                "tlp": a.tlp,
+                "acknowledged_by": a.acknowledged_by.username if a.acknowledged_by_id else None,
+                "acknowledged_at": a.acknowledged_at.isoformat() if a.acknowledged_at else None,
             }
             for a in alerts
         ]
