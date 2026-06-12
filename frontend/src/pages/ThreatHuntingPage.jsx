@@ -44,7 +44,9 @@ export default function ThreatHuntingPage() {
 
   useEffect(() => {
     loadHunts();
-    api.get('/api/security/organizations/')
+    // include_infrastructure=1 surfaces the Infrastructure org as a selectable hunt
+    // scope target (ADR-0017) — it stays out of every other org picker.
+    api.get('/api/security/organizations/?include_infrastructure=1')
       .then(({ data }) => setOrgs(Array.isArray(data) ? data : (data.results || [])))
       .catch(() => {});
   }, [loadHunts]);
@@ -110,7 +112,8 @@ export default function ThreatHuntingPage() {
             <select
               multiple value={scopeOrgIds.map(String)}
               onChange={(e) => setScopeOrgIds(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
-              className="border rounded p-1 dark:bg-gray-800 dark:border-gray-700"
+              aria-label="Organisations to scope this hunt to"
+              className="min-w-[12rem] rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             >
               {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
