@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Globe, Siren } from 'lucide-react';
+import { Shield, Globe, Siren, CalendarClock, Telescope, Package } from 'lucide-react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
+import { useAuth } from '../context/AuthContext';
 
 function ServiceCard({ icon: Icon, title, description, to }) {
   return (
@@ -40,6 +41,8 @@ function SummaryWidget({ label, value, isLoading }) {
 export default function DashboardPage() {
   const orgContext = useOrganization();
   const selectedOrg = orgContext?.selectedOrg ?? null;
+  const { user } = useAuth();
+  const isStaff = !!user?.is_staff;
 
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -116,6 +119,28 @@ export default function DashboardPage() {
             title="Incidents"
             description="Security incident management"
             to="/incidents"
+          />
+          {isStaff && (
+            <ServiceCard
+              icon={CalendarClock}
+              title="On-Call"
+              description="On-call schedule and shifts"
+              to="/admin/incidents/oncall"
+            />
+          )}
+          {isStaff && (
+            <ServiceCard
+              icon={Telescope}
+              title="Threat Hunting"
+              description="LLM-assisted threat hunts"
+              to="/hunting"
+            />
+          )}
+          <ServiceCard
+            icon={Package}
+            title="Work Package"
+            description="Prioritised remediation work"
+            to="/security/work-package"
           />
         </div>
       </section>
