@@ -1468,7 +1468,9 @@ export default function IncidentDetail() {
             ))}
             {user?.is_staff && RESOLVE_DROPDOWN_STATES.has(incident.state) && (
               <ResolveDropdown
-                onResolve={() => handleActionClick('resolved')}
+                // "Mark resolved" closes the incident in one click with the implicit
+                // closure reason "resolved" (#489) — no separate close step or prompt.
+                onResolve={() => handleTransition('closed', 'resolved')}
                 onNeedsTuning={() => handleActionClick('needs_tuning')}
                 disabled={transitioning}
               />

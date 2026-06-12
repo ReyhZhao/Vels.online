@@ -219,16 +219,16 @@ describe('IncidentDetail', () => {
     expect(screen.getByRole('button', { name: 'More resolution options' })).toBeInTheDocument();
   });
 
-  it('clicking Mark resolved transitions to resolved', async () => {
+  it('clicking Mark resolved closes the incident with reason resolved in one click (#489)', async () => {
     mockGet({ ...INCIDENT, state: 'in_progress' });
-    api.post.mockResolvedValue({ data: { ...INCIDENT, state: 'resolved' } });
+    api.post.mockResolvedValue({ data: { ...INCIDENT, state: 'closed', closure_reason: 'resolved' } });
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => screen.getByRole('button', { name: 'Mark resolved' }));
     await user.click(screen.getByRole('button', { name: 'Mark resolved' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/incidents/INC-2026-0001/transition/',
-      { state: 'resolved' }
+      { state: 'closed', closure_reason: 'resolved' }
     ));
   });
 
