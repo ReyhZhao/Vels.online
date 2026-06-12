@@ -1,7 +1,10 @@
+from datetime import timedelta
+
 import pytest
+from django.utils import timezone
 from security.models import Organization, OrganizationMembership
 from incidents.models import Incident, IncidentEvent
-from incidents.services.events import record_event
+from incidents.services.events import collapse_alert_linked_events, record_event
 from incidents.services.visibility import filter_events_for_user
 
 
@@ -168,6 +171,82 @@ def test_timeline_pagination(client, acme, staff):
     data2 = response2.json()
     assert data2["page"] == 2
     assert len(data2["results"]) == 5
+
+
+# ── alert_linked burst collapsing (issue #499) ──────────────────────────────
+
+def _spread_created_at(incident, gaps_seconds):
+    """Pin events' created_at to a controlled sequence (ordered by id)."""
+    base = timezone.now()
+    events = list(IncidentEvent.objects.filter(incident=incident).order_by("id"))
+    t = base
+    for ev, gap in zip(events, gaps_seconds):
+        t = t + timedelta(seconds=gap)
+        IncidentEvent.objects.filter(id=ev.id).update(created_at=t)
+
+
+def _ordered(incident):
+    return IncidentEvent.objects.filter(incident=incident).select_related("actor").order_by("created_at", "id")
+
+
+@pytest.mark.django_db
+def test_collapse_folds_alert_linked_burst(acme):
+    incident = make_incident(acme)
+    for i in range(10):
+        record_event(incident, "alert_linked", payload={"alert_display_id": f"AL-{i}"})
+    _spread_created_at(incident, [1] * 10)  # 1s apart — all within the window
+
+    folded = collapse_alert_linked_events(_ordered(incident))
+
+    assert len(folded) == 1
+    assert folded[0]["payload"]["collapsed"] is True
+    assert folded[0]["payload"]["count"] == 10
+    assert len(folded[0]["payload"]["alert_display_ids"]) == 10
+
+
+@pytest.mark.django_db
+def test_collapse_keeps_lone_and_breaks_on_other_kind(acme):
+    incident = make_incident(acme)
+    record_event(incident, "alert_linked", payload={"alert_display_id": "A1"})
+    record_event(incident, "alert_linked", payload={"alert_display_id": "A2"})
+    record_event(incident, "incident_updated", payload={"changes": {}})
+    record_event(incident, "alert_linked", payload={"alert_display_id": "A3"})
+    _spread_created_at(incident, [1, 1, 1, 1])
+
+    folded = collapse_alert_linked_events(_ordered(incident))
+
+    assert len(folded) == 3
+    assert folded[0]["payload"]["collapsed"] and folded[0]["payload"]["count"] == 2
+    assert folded[1]["kind"] == "incident_updated"
+    assert folded[2]["kind"] == "alert_linked" and not folded[2]["payload"].get("collapsed")
+
+
+@pytest.mark.django_db
+def test_collapse_splits_when_gap_exceeds_window(acme):
+    incident = make_incident(acme)
+    record_event(incident, "alert_linked", payload={"alert_display_id": "A1"})
+    record_event(incident, "alert_linked", payload={"alert_display_id": "A2"})
+    _spread_created_at(incident, [1, 600])  # 10 minutes apart — beyond the 5m window
+
+    folded = collapse_alert_linked_events(_ordered(incident))
+
+    assert len(folded) == 2
+    assert all(not f["payload"].get("collapsed") for f in folded)
+
+
+@pytest.mark.django_db
+def test_timeline_collapses_burst_across_page_boundary(client, acme, staff):
+    incident = make_incident(acme, tlp="green")
+    for i in range(60):  # > PAGE_SIZE (50) — would straddle pages uncollapsed
+        record_event(incident, "alert_linked", payload={"alert_display_id": f"AL-{i}"})
+    _spread_created_at(incident, [1] * 60)
+    client.force_login(staff)
+
+    data = client.get(f"/api/incidents/{incident.display_id}/timeline/").json()
+
+    assert data["count"] == 1
+    assert len(data["results"]) == 1
+    assert data["results"][0]["payload"]["count"] == 60
 
 
 @pytest.mark.django_db

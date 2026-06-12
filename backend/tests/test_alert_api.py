@@ -358,7 +358,8 @@ def test_incident_linked_alerts_endpoint(client, member, acme):
     inc = Incident.objects.create(organization=acme, display_id="INC-2026-0001", title="I", severity="medium", state="new")
     Alert.objects.create(organization=acme, display_id="AL-0001", source_kind="wazuh_event",
                           source_ref={"agent_name": "web-01", "level": 9},
-                          title="A", severity="high", state="imported", incident=inc)
+                          title="A", severity="high", state="imported", incident=inc,
+                          description="brute force from 1.2.3.4", pap="amber", tlp="green")
     client.force_login(member)
     resp = client.get("/api/incidents/INC-2026-0001/alerts/")
     assert resp.status_code == 200
@@ -367,6 +368,13 @@ def test_incident_linked_alerts_endpoint(client, member, acme):
     assert data[0]["display_id"] == "AL-0001"
     assert data[0]["severity"] == "high"
     assert data[0]["agent_name"] == "web-01"
+    # full detail fields for the row drill-down (#498)
+    assert data[0]["description"] == "brute force from 1.2.3.4"
+    assert data[0]["source_ref"] == {"agent_name": "web-01", "level": 9}
+    assert data[0]["pap"] == "amber"
+    assert data[0]["tlp"] == "green"
+    assert "acknowledged_by" in data[0]
+    assert "updated_at" in data[0]
 
 
 # ── Workflow / external source kinds and enrichment fields (#325) ────────────

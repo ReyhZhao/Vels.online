@@ -21,6 +21,7 @@ import IncidentTimeline, {
   renderTaskStateChanged,
   renderTaskAutoCancelled,
   renderExceptionCreated,
+  renderAlertLinked,
 } from './IncidentTimeline';
 
 // ── renderer unit tests ───────────────────────────────────────────────────────
@@ -160,6 +161,24 @@ describe('renderExceptionCreated', () => {
   it('renderEvent dispatches exception_created', () => {
     const result = renderEvent('exception_created', { description: 'Block SSH' });
     expect(result).toContain('Block SSH');
+  });
+});
+
+describe('renderAlertLinked', () => {
+  it('renders a single linked alert with its id', () => {
+    expect(renderAlertLinked({ alert_display_id: 'AL-2026-0007' })).toBe('Alert AL-2026-0007 linked.');
+  });
+
+  it('collapses a burst into a count', () => {
+    expect(renderAlertLinked({ collapsed: true, count: 42 })).toBe('42 alerts were linked.');
+  });
+
+  it('falls back when no alert id is present', () => {
+    expect(renderAlertLinked({})).toBe('Alert linked.');
+  });
+
+  it('renderEvent dispatches alert_linked', () => {
+    expect(renderEvent('alert_linked', { collapsed: true, count: 3 })).toBe('3 alerts were linked.');
   });
 });
 

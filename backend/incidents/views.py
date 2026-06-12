@@ -51,7 +51,7 @@ from .serializers import (
 )
 from .services.assets import link_asset_from_source_ref
 from .services.ioc_extraction import extract_and_save_iocs
-from .services.events import record_event
+from .services.events import collapse_alert_linked_events, record_event
 from .services.identifiers import next_display_id
 from .services.notifications_wiring import notify_comment, notify_incident_alert_if_needed, notify_severity_bump_if_needed
 from .services.promote import build_promote_payload, find_open_incidents, link_source_assets
@@ -1290,7 +1290,15 @@ class IncidentLinkedAlertsView(APIView):
                 "source_kind": a.source_kind,
                 "state": a.state,
                 "created_at": a.created_at.isoformat(),
+                "updated_at": a.updated_at.isoformat() if a.updated_at else None,
                 "agent_name": (a.source_ref or {}).get("agent_name"),
+                # Full detail for the row drill-down (issue #498)
+                "description": a.description,
+                "source_ref": a.source_ref or {},
+                "pap": a.pap,
+                "tlp": a.tlp,
+                "acknowledged_by": a.acknowledged_by.username if a.acknowledged_by_id else None,
+                "acknowledged_at": a.acknowledged_at.isoformat() if a.acknowledged_at else None,
             }
             for a in alerts
         ]
@@ -1328,15 +1336,18 @@ class IncidentTimelineView(APIView):
         except (TypeError, ValueError):
             page = 1
 
-        total = qs.count()
+        # Fold alert_linked bursts before paginating so a burst that would straddle a
+        # page boundary still collapses (issue #499).
+        folded = collapse_alert_linked_events(qs)
+        total = len(folded)
         start = (page - 1) * self.PAGE_SIZE
-        events = qs[start: start + self.PAGE_SIZE]
+        results = folded[start: start + self.PAGE_SIZE]
 
         return Response({
             "count": total,
             "page": page,
             "page_size": self.PAGE_SIZE,
-            "results": IncidentEventSerializer(events, many=True).data,
+            "results": results,
         })
 
 
