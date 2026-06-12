@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Sparkles, Bug, FlaskConical, Copy, MoreVertical } from 'lucide-react';
+import { Play, Sparkles, Bug, FlaskConical, Copy, MoreVertical, Pencil, Power, TestTube, Trash2 } from 'lucide-react';
 import api from '@/lib/axios';
 import SearchRuleAuthorDrawer from '@/components/SearchRuleAuthorDrawer';
 import SearchRuleTestsDrawer from '@/components/SearchRuleTestsDrawer';
@@ -1029,6 +1029,7 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
                 onClick={() => { setMenuOpen(false); onEdit(rule); }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
               >
+                <Pencil className="h-3 w-3" />
                 Edit
               </button>
               <button
@@ -1043,6 +1044,7 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
                 disabled={toggling}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
               >
+                <Power className="h-3 w-3" />
                 {toggling ? 'Saving…' : rule.enabled ? 'Disable' : 'Enable'}
               </button>
               <button
@@ -1072,6 +1074,7 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
                 disabled={runningTests}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
               >
+                <TestTube className="h-3 w-3" />
                 {runningTests ? 'Testing…' : 'Run tests'}
               </button>
               <div className="my-1 border-t border-border" />
@@ -1080,6 +1083,7 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
                 disabled={deleting}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
               >
+                <Trash2 className="h-3 w-3" />
                 {deleting ? 'Deleting…' : 'Delete'}
               </button>
             </div>
