@@ -120,6 +120,56 @@ def test_confirm_infrastructure_findings_into_incident_in_infra_org(hunt):
     assert materialise_findings_for_org(hunt, infra) is None
 
 
+def test_promotion_populates_iocs_and_rich_description(hunt, orgs):
+    """Observables in the matched docs become IOCs and the description carries an
+    evidence digest (issue #497)."""
+    from incidents.models import IOC
+
+    a, _b = orgs
+    HuntFinding.objects.create(
+        hunt=hunt, organization=a, lens="ioc_search",
+        source_index="wazuh-alerts", wazuh_doc_id="d1",
+        raw_doc={
+            "agent": {"name": "web-01"},
+            "rule": {"description": "Connection to known-bad host"},
+            "data": {"srcip": "8.8.8.8", "url": "malicious-c2.com"},
+        },
+        summary="beaconing to malicious-c2.com",
+    )
+
+    incident = materialise_findings_for_org(hunt, a)
+
+    ioc_values = set(IOC.objects.filter(incident=incident).values_list("value", flat=True))
+    assert "8.8.8.8" in ioc_values
+    assert any("malicious-c2.com" in v for v in ioc_values)
+    # description digest carries the host, rule and summary
+    assert "web-01" in incident.description
+    assert "Connection to known-bad host" in incident.description
+    assert "beaconing to malicious-c2.com" in incident.description
+
+
+def test_promotion_iocs_are_idempotent(hunt, orgs):
+    """Re-running extraction over the same incident does not duplicate IOCs (#497)."""
+    from incidents.models import IOC
+
+    a, _b = orgs
+    HuntFinding.objects.create(
+        hunt=hunt, organization=a, lens="ioc_search",
+        source_index="wazuh-alerts", wazuh_doc_id="d1",
+        raw_doc={"agent": {"name": "web-01"}, "data": {"srcip": "9.9.9.9"}},
+        summary="hit",
+    )
+
+    incident = materialise_findings_for_org(hunt, a)
+    before = IOC.objects.filter(incident=incident).count()
+    # second confirm has nothing left to materialise, but extraction must stay idempotent
+    from incidents.services.ioc_extraction import extract_and_save_iocs
+    extract_and_save_iocs(incident)
+
+    assert before >= 1
+    assert IOC.objects.filter(incident=incident).count() == before
+
+
 def test_cross_org_hunt_yields_one_incident_per_org_never_joined(hunt, orgs):
     a, b = orgs
     _finding(hunt, a, "1")
