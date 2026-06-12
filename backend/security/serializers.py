@@ -11,11 +11,12 @@ class OrganizationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Organization
         fields = [
-            "id", "name", "slug", "wazuh_group", "triage_prompt_context",
+            "id", "name", "slug", "wazuh_group", "is_infrastructure",
+            "triage_prompt_context",
             "alert_match_lookback_days", "alert_auto_promote_threshold",
             "alert_auto_promote_window_minutes", "timezone",
         ]
-        read_only_fields = ["id", "slug", "wazuh_group"]
+        read_only_fields = ["id", "slug", "wazuh_group", "is_infrastructure"]
 
     def validate_timezone(self, value):
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError

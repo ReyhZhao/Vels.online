@@ -615,7 +615,7 @@ def sync_wazuh_agents():
     stale_days = int(os.environ.get("ASSET_STALE_DAYS", 30))
     now = timezone.now()
 
-    for org in Organization.objects.all():
+    for org in Organization.objects.tenants():
         try:
             raw_agents = WazuhClient().get_agents(org.wazuh_group)
         except (WazuhAuthError, WazuhAPIError) as exc:

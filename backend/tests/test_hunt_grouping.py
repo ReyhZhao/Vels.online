@@ -94,6 +94,32 @@ def test_confirm_is_idempotent(hunt, orgs):
     assert Incident.objects.filter(organization=a, source_kind=Incident.SOURCE_THREAT_HUNT).count() == 1
 
 
+def test_confirm_infrastructure_findings_into_incident_in_infra_org(hunt):
+    """Agent-less Shared Infrastructure findings confirm into an Incident in the infra
+    org, and a doc with no agent.name materialises without erroring (issue #495)."""
+    infra = Organization.get_infrastructure()
+    # An agent-less firewall doc: agent.id="000" present, but no agent.name.
+    HuntFinding.objects.create(
+        hunt=hunt, organization=infra, lens="ioc_search",
+        source_index="wazuh-alerts", wazuh_doc_id="fw-1",
+        raw_doc={"agent": {"id": "000"}, "rule": {"description": "fw drop"}},
+        summary="perimeter drop",
+    )
+
+    # the infra group is offered as its own proposed incident
+    assert any(p["organization_id"] == infra.id for p in proposed_incidents(hunt))
+
+    incident = materialise_findings_for_org(hunt, infra)
+
+    assert incident is not None
+    assert incident.organization == infra
+    alerts = Alert.objects.filter(incident=incident)
+    assert alerts.count() == 1
+    assert alerts.first().organization == infra
+    # re-confirming does not duplicate
+    assert materialise_findings_for_org(hunt, infra) is None
+
+
 def test_cross_org_hunt_yields_one_incident_per_org_never_joined(hunt, orgs):
     a, b = orgs
     _finding(hunt, a, "1")

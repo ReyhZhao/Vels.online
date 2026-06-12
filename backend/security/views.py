@@ -247,7 +247,12 @@ def _resolve_agent(request, org, agent_id):
 class OrganizationListView(APIView):
     def get(self, request):
         if request.user.is_staff:
-            orgs = Organization.objects.all().order_by("name")
+            # Tenants-only by default so the Infrastructure pseudo-org (ADR-0017) stays
+            # out of incident-assignment / tenant-management pickers. The Hunt scope
+            # picker opts in with ?include_infrastructure=1 to offer it as a target.
+            include_infra = request.query_params.get("include_infrastructure") in ("1", "true")
+            qs = Organization.objects.all() if include_infra else Organization.objects.tenants()
+            orgs = qs.order_by("name")
         else:
             orgs = Organization.objects.filter(
                 memberships__user=request.user

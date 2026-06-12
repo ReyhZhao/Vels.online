@@ -37,10 +37,31 @@ class Download(models.Model):
         return self.label
 
 
+# The single, dedicated home for Shared Infrastructure events (ADR-0017). Seeded
+# idempotently by the data migration; never represents a paying tenant.
+INFRASTRUCTURE_ORG_SLUG = "infrastructure"
+INFRASTRUCTURE_ORG_NAME = "Shared Infrastructure"
+
+
+class OrganizationQuerySet(models.QuerySet):
+    def tenants(self):
+        """Only real, agent-bound tenant orgs — excludes the Infrastructure org (ADR-0017)."""
+        return self.filter(is_infrastructure=False)
+
+
+class OrganizationManager(models.Manager.from_queryset(OrganizationQuerySet)):
+    pass
+
+
 class Organization(models.Model):
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True)
     wazuh_group = models.CharField(max_length=255)
+    # ADR-0017: the Infrastructure org is a non-tenant pseudo-org that owns Shared
+    # Infrastructure events (the firewall/reverse-proxy logged as the Wazuh manager,
+    # agent.id="000"). It is excluded from every "real tenant" code path via
+    # Organization.objects.tenants(); only Hunt scope resolution visits it.
+    is_infrastructure = models.BooleanField(default=False)
     max_routes = models.PositiveIntegerField(null=True, blank=True)
     triage_fp_threshold = models.FloatField(default=0.95)
     triage_prompt_context = models.TextField(null=True, blank=True)
@@ -52,6 +73,8 @@ class Organization(models.Model):
     # Search Rule's time-of-day window in the owning org's local time (#440).
     timezone = models.CharField(max_length=64, default="UTC")
 
+    objects = OrganizationManager()
+
     def save(self, *args, **kwargs):
         if not self.wazuh_group:
             self.wazuh_group = self.slug
@@ -59,6 +82,19 @@ class Organization(models.Model):
 
     def __str__(self):
         return self.name
+
+    @classmethod
+    def get_infrastructure(cls):
+        """Return the single Infrastructure org, creating it idempotently (ADR-0017)."""
+        org, _ = cls.objects.get_or_create(
+            is_infrastructure=True,
+            defaults={
+                "name": INFRASTRUCTURE_ORG_NAME,
+                "slug": INFRASTRUCTURE_ORG_SLUG,
+                "wazuh_group": "",
+            },
+        )
+        return org
 
 
 class OrganizationMembership(models.Model):

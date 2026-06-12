@@ -40,7 +40,7 @@ def run_scheduled_search_rule(rule_id: int):
     muted_org_ids = set(
         SearchRuleMute.objects.filter(rule=rule).values_list("organization_id", flat=True)
     )
-    for org in Organization.objects.all():
+    for org in Organization.objects.tenants():
         if org.id in muted_org_ids:
             logger.debug("run_scheduled_search_rule: org %s muted rule %s — skipping", org.id, rule_id)
             continue
@@ -89,7 +89,7 @@ def run_residual_safety_net():
     """
     from security.models import Organization
 
-    for org in Organization.objects.all():
+    for org in Organization.objects.tenants():
         try:
             _run_residual_for_org(org)
         except Exception:

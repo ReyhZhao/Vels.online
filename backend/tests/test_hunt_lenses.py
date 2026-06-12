@@ -69,6 +69,31 @@ def test_ioc_search_fans_out_one_query_per_tenant_never_mixing_agents():
     assert result.content["by_org"] == [{"organization": "Acme", "count": 1}]
 
 
+def test_ioc_search_queries_infrastructure_with_positive_000_filter():
+    """An all-orgs sweep reaches the Infrastructure scope via a positive agent.id="000"
+    term (never by dropping the agent filter), recording infra findings (issue #494)."""
+    infra = OrgScope(
+        org_id=7, org_name="Shared Infrastructure", wazuh_group="",
+        agent_ids=["000"], is_infrastructure=True,
+    )
+    os_client = FakeOS(hits_per_call=[
+        [],  # Acme
+        [],  # Beta
+        [{"_id": "fw", "_index": "wazuh-alerts", "_source": {"rule": {"description": "fw drop"}}}],  # infra
+    ])
+    recorded = []
+    ctx = _ctx(TWO_ORGS + [infra], os_client, sink=lambda s, lens, hits: recorded.append((s.org_id, hits)))
+    tool = _lens(build_hunt_lenses(ctx), "ioc_search")
+
+    result = tool.executor({"ioc_type": "ip", "value": "1.2.3.4"})
+
+    # the infra query carries a positive agent.id="000" terms filter
+    assert _agent_ids_in(os_client.calls[2][1]) == ["000"]
+    # the firewall match is recorded as a finding attributed to the infra org
+    assert (7, os_client._hits[2]) in recorded
+    assert {"organization": "Shared Infrastructure", "count": 1} in result.content["by_org"]
+
+
 def test_ioc_search_skips_orgs_with_no_agents():
     scope = [OrgScope(1, "Acme", "acme", ["1"]), OrgScope(2, "Empty", "empty", [])]
     os_client = FakeOS(hits_per_call=[[]])

@@ -88,7 +88,10 @@ def materialise_findings_for_org(hunt, organization, user=None):
 
     for finding in findings:
         source = finding.raw_doc or {}
-        agent_name = source.get("agent", {}).get("name", "unknown") if isinstance(source, dict) else "unknown"
+        # Agent-less Shared Infrastructure docs (agent.id="000") carry no agent.name —
+        # fall back to "unknown" rather than erroring (ADR-0017).
+        agent = source.get("agent") if isinstance(source, dict) else None
+        agent_name = (agent or {}).get("name", "unknown") if isinstance(agent, dict) else "unknown"
         alert = Alert.objects.create(
             organization=organization,
             display_id=next_alert_display_id(),

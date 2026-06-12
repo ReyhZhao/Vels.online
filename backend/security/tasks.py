@@ -57,7 +57,7 @@ def snapshot_vulnerabilities():
     today = date.today()
     os_client = OpenSearchClient()
 
-    for org in Organization.objects.all():
+    for org in Organization.objects.tenants():
         try:
             raw_agents = WazuhClient().get_agents(org.wazuh_group)
             agent_ids = [a["id"] for a in raw_agents if a.get("status") == "active"]
@@ -137,7 +137,7 @@ def generate_work_packages():
     from security.models import Organization
     from security.work_package_service import cleanup_old_packages, generate_work_package
 
-    for org in Organization.objects.all():
+    for org in Organization.objects.tenants():
         generate_work_package(org)
 
     cleanup_old_packages()
