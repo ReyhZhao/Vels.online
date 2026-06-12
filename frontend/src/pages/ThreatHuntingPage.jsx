@@ -70,7 +70,7 @@ export default function ThreatHuntingPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto p-4 space-y-6">
+    <div className="max-w-7xl mx-auto p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Threat Hunting</h1>
 
       <form onSubmit={submit} className="border rounded-lg p-4 space-y-3 dark:border-gray-700">
@@ -89,8 +89,8 @@ export default function ThreatHuntingPage() {
 
         {seedKind === 'question' ? (
           <textarea
-            className="w-full border rounded p-2 text-sm dark:bg-gray-800 dark:border-gray-700"
-            rows={3} placeholder="e.g. Are we exposed to the XYZ ransomware campaign?"
+            className="w-full border rounded p-2 text-sm min-h-[8rem] resize-y dark:bg-gray-800 dark:border-gray-700"
+            rows={6} placeholder="e.g. Are we exposed to the XYZ ransomware campaign?"
             value={seedText} onChange={(e) => setSeedText(e.target.value)}
           />
         ) : (
