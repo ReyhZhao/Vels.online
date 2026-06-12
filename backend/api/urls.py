@@ -36,5 +36,6 @@ urlpatterns = [
     path("correlations/", include("correlations.urls")),
     path("v2/alerts/", include("alerts.urls_v2")),
     path("oncall/", include("oncall.urls")),
+    path("hunts/", include("hunts.urls")),
     path("", include(blog_router.urls)),
 ]
