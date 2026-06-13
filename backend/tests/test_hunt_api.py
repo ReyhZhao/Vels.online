@@ -31,7 +31,10 @@ def regular_user(db, django_user_model):
 @pytest.fixture(autouse=True)
 def no_celery(monkeypatch):
     kicked = []
-    monkeypatch.setattr("hunts.views._kick_turn", lambda hunt, messages: kicked.append((hunt, messages)))
+    monkeypatch.setattr(
+        "hunts.views._kick_turn",
+        lambda hunt, messages, phase: kicked.append((hunt, messages, phase)),
+    )
     return kicked
 
 
@@ -46,6 +49,70 @@ def test_create_question_hunt(client, staff_user, no_celery):
     assert hunt.status == Hunt.STATUS_CREATED
     assert hunt.transcript == [{"role": "user", "content": "hunt for deadbeef"}]
     assert len(no_celery) == 1  # a turn was dispatched
+
+
+def test_create_dispatches_a_scoping_turn(client, staff_user, no_celery):
+    client.force_login(staff_user)
+    resp = client.post("/api/hunts/", {
+        "seed_kind": "question", "seed_text": "are we exposed to XYZ ransomware?",
+        "scope_all_orgs": True,
+    }, content_type="application/json")
+    assert resp.status_code == 201
+    # The first turn is a Scoping turn (the model grills the seed), not a search.
+    assert no_celery[0][2] == "scoping"
+
+
+def test_begin_transitions_scoping_to_searching(client, staff_user, no_celery):
+    hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_SCOPING,
+                               transcript=[{"role": "user", "content": "q"}])
+    client.force_login(staff_user)
+    resp = client.post(f"/api/hunts/{hunt.id}/begin/", {}, content_type="application/json")
+    assert resp.status_code == 202
+    # A searching turn was dispatched with an appended directive.
+    hunt.refresh_from_db()
+    assert no_celery[-1][2] == "searching"
+    assert hunt.transcript[-1]["role"] == "user"
+    assert "Begin the authoritative hunt" in hunt.transcript[-1]["content"]
+
+
+def test_begin_rejected_while_a_turn_is_in_flight(client, staff_user, no_celery):
+    hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_SCOPING_RUNNING)
+    client.force_login(staff_user)
+    resp = client.post(f"/api/hunts/{hunt.id}/begin/", {}, content_type="application/json")
+    assert resp.status_code == 409
+    assert len(no_celery) == 0
+
+
+def test_begin_applies_scope_and_lookback_edits(client, staff_user, org, no_celery):
+    hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_SCOPING,
+                               scope_all_orgs=True, lookback_days=30)
+    client.force_login(staff_user)
+    resp = client.post(f"/api/hunts/{hunt.id}/begin/", {
+        "scope_all_orgs": False, "scope_org_ids": [org.id], "lookback_days": 7,
+    }, content_type="application/json")
+    assert resp.status_code == 202
+    hunt.refresh_from_db()
+    assert hunt.scope_all_orgs is False
+    assert list(hunt.scope_orgs.all()) == [org]
+    assert hunt.lookback_days == 7
+
+
+def test_turn_during_scoping_dispatches_a_scoping_turn(client, staff_user, no_celery):
+    hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_SCOPING,
+                               transcript=[{"role": "user", "content": "q"}])
+    client.force_login(staff_user)
+    resp = client.post(f"/api/hunts/{hunt.id}/turn/", {"message": "only windows hosts"},
+                       content_type="application/json")
+    assert resp.status_code == 202
+    assert no_celery[-1][2] == "scoping"
+
+
+def test_turn_rejected_while_scoping_running(client, staff_user, no_celery):
+    hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_SCOPING_RUNNING)
+    client.force_login(staff_user)
+    resp = client.post(f"/api/hunts/{hunt.id}/turn/", {"message": "x"},
+                       content_type="application/json")
+    assert resp.status_code == 409
 
 
 def test_create_rejects_non_staff(client, regular_user):
@@ -66,6 +133,19 @@ def test_create_url_seed_fetches_report_behind_ssrf_guard(client, staff_user, mo
     hunt = Hunt.objects.get()
     assert "REPORT: ioc deadbeef" in hunt.seed_text
     assert hunt.seed_url == "https://intel.example.com/report"
+
+
+def test_url_seed_routes_through_scoping(client, staff_user, no_celery, monkeypatch):
+    # A URL seed goes through Scoping too (ADR-0018): the first turn grills off the
+    # fetched report, it is not a one-shot search, and no findings are committed.
+    monkeypatch.setattr("hunts.report_fetch.fetch_report", lambda url, **kw: "REPORT: ioc deadbeef")
+    client.force_login(staff_user)
+    resp = client.post("/api/hunts/", {
+        "seed_kind": "url", "seed_url": "https://intel.example.com/report",
+    }, content_type="application/json")
+    assert resp.status_code == 201
+    assert no_celery[0][2] == "scoping"
+    assert HuntFinding.objects.count() == 0
 
 
 def test_create_narrow_scope_requires_orgs(client, staff_user):

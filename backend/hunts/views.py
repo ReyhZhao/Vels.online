@@ -30,10 +30,14 @@ def _require_staff(request):
     return None
 
 
-def _kick_turn(hunt, messages):
-    """Dispatch a hunt turn to Celery (eager in tests via CELERY_TASK_ALWAYS_EAGER)."""
+def _kick_turn(hunt, messages, phase):
+    """Dispatch a hunt turn to Celery (eager in tests via CELERY_TASK_ALWAYS_EAGER).
+
+    `phase` is "scoping" (the refinement dialogue) or "searching" (the evidence-
+    committing sweep) per ADR-0018.
+    """
     from .tasks import run_hunt_turn_task
-    run_hunt_turn_task.delay(str(hunt.pk), messages)
+    run_hunt_turn_task.delay(str(hunt.pk), messages, phase)
 
 
 class HuntListCreateView(APIView):
@@ -83,10 +87,13 @@ class HuntListCreateView(APIView):
         if not data["scope_all_orgs"]:
             hunt.scope_orgs.set(Organization.objects.filter(id__in=data["scope_org_ids"]))
 
+        # Every hunt (question and URL seed) opens in the Scoping phase (ADR-0018):
+        # the model grills off the seed and commits nothing until the human's Begin gate.
+        from .orchestration import PHASE_SCOPING
         messages = [{"role": "user", "content": seed_text}]
         hunt.transcript = messages
         hunt.save(update_fields=["transcript"])
-        _kick_turn(hunt, messages)
+        _kick_turn(hunt, messages, PHASE_SCOPING)
 
         return Response(HuntDetailSerializer(hunt).data, status=status.HTTP_201_CREATED)
 
@@ -104,7 +111,11 @@ class HuntDetailView(APIView):
 
 
 class HuntTurnView(APIView):
-    """POST a follow-up turn to an existing hunt (resume / continue)."""
+    """POST a turn to an existing hunt.
+
+    During Scoping this is a refinement reply (continues the dialogue, phase=scoping);
+    after the search has run it is a follow-up "dig deeper" (phase=searching).
+    """
 
     def post(self, request, hunt_id):
         denied = _require_staff(request)
@@ -114,18 +125,84 @@ class HuntTurnView(APIView):
             hunt = Hunt.objects.get(pk=hunt_id)
         except (Hunt.DoesNotExist, ValueError):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-        if hunt.status == Hunt.STATUS_RUNNING:
+        if hunt.status in Hunt.IN_FLIGHT_STATUSES:
             return Response({"detail": "Hunt is already running."}, status=status.HTTP_409_CONFLICT)
 
         message = (request.data.get("message") or "").strip()
         if not message:
             return Response({"detail": "message is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        from .orchestration import PHASE_SCOPING, PHASE_SEARCHING
+        # A reply while the hunt is still being scoped continues the grilling dialogue;
+        # otherwise it is a post-search follow-up that runs the evidence-committing sweep.
+        phase = PHASE_SCOPING if hunt.status in (Hunt.STATUS_SCOPING, Hunt.STATUS_CREATED) else PHASE_SEARCHING
+
         messages = list(hunt.transcript or []) + [{"role": "user", "content": message}]
         hunt.transcript = messages
         hunt.save(update_fields=["transcript"])
-        _kick_turn(hunt, messages)
+        _kick_turn(hunt, messages, phase)
         return Response(HuntDetailSerializer(hunt).data, status=status.HTTP_202_ACCEPTED)
+
+
+class HuntBeginView(APIView):
+    """The human-only Begin-hunt gate (ADR-0018): transition Scoping → Searching.
+
+    Optionally applies human-confirmed scope/lookback edits (pre-filled from the plan's
+    suggested_scope) before kicking the authoritative, evidence-committing search turn.
+    The model never starts the search itself.
+    """
+
+    def post(self, request, hunt_id):
+        denied = _require_staff(request)
+        if denied:
+            return denied
+        try:
+            hunt = Hunt.objects.get(pk=hunt_id)
+        except (Hunt.DoesNotExist, ValueError):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if hunt.status in Hunt.IN_FLIGHT_STATUSES:
+            return Response({"detail": "A turn is already running."}, status=status.HTTP_409_CONFLICT)
+        if hunt.status not in (Hunt.STATUS_SCOPING, Hunt.STATUS_CREATED):
+            return Response({"detail": "Hunt is not in the scoping phase."},
+                            status=status.HTTP_409_CONFLICT)
+
+        _apply_scope_edits(hunt, request.data)
+
+        from .orchestration import PHASE_SEARCHING
+        directive = (
+            "The scope is agreed. Begin the authoritative hunt now: run the lenses to find "
+            "and commit findings across the in-scope organisations, then summarise what a "
+            "human should investigate."
+        )
+        messages = list(hunt.transcript or []) + [{"role": "user", "content": directive}]
+        hunt.transcript = messages
+        hunt.save(update_fields=["transcript"])
+        _kick_turn(hunt, messages, PHASE_SEARCHING)
+        return Response(HuntDetailSerializer(hunt).data, status=status.HTTP_202_ACCEPTED)
+
+
+def _apply_scope_edits(hunt, data):
+    """Apply optional human-confirmed scope/lookback edits at the Begin gate.
+
+    Absent keys are left untouched (the Hunt keeps its current scope). Scope refinement
+    only ever narrows from the recorded seed and the final scope is itself recorded.
+    """
+    update_fields = []
+    if "scope_all_orgs" in data:
+        hunt.scope_all_orgs = bool(data["scope_all_orgs"])
+        update_fields.append("scope_all_orgs")
+    if "lookback_days" in data:
+        try:
+            hunt.lookback_days = max(1, min(365, int(data["lookback_days"])))
+            update_fields.append("lookback_days")
+        except (TypeError, ValueError):
+            pass
+    if update_fields:
+        hunt.save(update_fields=update_fields)
+    if not hunt.scope_all_orgs and "scope_org_ids" in data:
+        ids = [i for i in (data.get("scope_org_ids") or []) if isinstance(i, int)]
+        hunt.scope_orgs.set(Organization.objects.filter(id__in=ids))
 
 
 class HuntCancelView(APIView):

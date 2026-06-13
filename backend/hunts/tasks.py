@@ -12,10 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task
-def run_hunt_turn_task(hunt_id, messages):
+def run_hunt_turn_task(hunt_id, messages, phase=None):
     from incidents.llm.factory import get_assistant_provider
     from .models import Hunt
-    from .orchestration import run_hunt_turn
+    from .orchestration import PHASE_SEARCHING, run_hunt_turn
 
     try:
         hunt = Hunt.objects.get(pk=hunt_id)
@@ -24,4 +24,4 @@ def run_hunt_turn_task(hunt_id, messages):
         return
 
     provider = get_assistant_provider()
-    return run_hunt_turn(hunt, messages, provider=provider)
+    return run_hunt_turn(hunt, messages, provider=provider, phase=phase or PHASE_SEARCHING)

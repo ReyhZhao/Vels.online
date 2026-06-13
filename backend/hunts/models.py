@@ -23,17 +23,27 @@ class Hunt(models.Model):
     ]
 
     STATUS_CREATED = "created"
+    # Scoping phase (ADR-0018): the pre-search refinement dialogue. `scoping` is idle
+    # (awaiting the human); `scoping_running` is a Scoping turn in flight. Neither
+    # commits Findings — that only happens in the `running` (Searching) phase.
+    STATUS_SCOPING = "scoping"
+    STATUS_SCOPING_RUNNING = "scoping_running"
     STATUS_RUNNING = "running"
     STATUS_COMPLETED = "completed"
     STATUS_CANCELLED = "cancelled"
     STATUS_ERROR = "error"
     STATUS_CHOICES = [
         (STATUS_CREATED, "Created"),
+        (STATUS_SCOPING, "Scoping"),
+        (STATUS_SCOPING_RUNNING, "Scoping (running)"),
         (STATUS_RUNNING, "Running"),
         (STATUS_COMPLETED, "Completed"),
         (STATUS_CANCELLED, "Cancelled"),
         (STATUS_ERROR, "Error"),
     ]
+
+    # In-flight statuses: a turn (scoping or searching) is currently executing.
+    IN_FLIGHT_STATUSES = (STATUS_RUNNING, STATUS_SCOPING_RUNNING)
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(
@@ -57,6 +67,12 @@ class Hunt(models.Model):
     # The running LLM message transcript (without the system prompt), persisted after
     # each turn so a Hunt is resumable — a follow-up turn continues from here.
     transcript = models.JSONField(default=list, blank=True)
+
+    # The structured, human-approved hunt plan produced during Scoping by the
+    # propose_hunt_plan tool (ADR-0018): refined_question, hypotheses, planned_lenses,
+    # suggested_scope. Empty until the model proposes one. It is the durable form of the
+    # "shared understanding" the staff member confirms at the Begin-hunt gate.
+    plan = models.JSONField(default=dict, blank=True)
 
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_CREATED)
     # Cooperative cancel flag the Celery turn checks at each iteration (ADR-0016).
