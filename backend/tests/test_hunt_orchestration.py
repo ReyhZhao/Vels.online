@@ -10,7 +10,7 @@ import pytest
 from assistants.orchestrator import LoopCaps
 from assistants.tools import ChatTurn, ToolCall
 from hunts.models import Hunt, HuntEvent, HuntFinding
-from hunts.orchestration import run_hunt_turn
+from hunts.orchestration import PHASE_SCOPING, run_hunt_turn
 from hunts.scope import OrgScope
 from security.models import Organization
 
@@ -156,6 +156,57 @@ def test_web_search_tool_is_wired_and_unrestricted(hunt, org):
     assert searched == ["deadbeef malware"]
     tool_events = HuntEvent.objects.filter(hunt=hunt, type="tool")
     assert any(e.data.get("tool") == "web_search" for e in tool_events)
+
+
+def test_scoping_turn_commits_no_findings_and_lands_idle(hunt, org):
+    # The same IOC sweep that commits a Finding in the searching phase must commit
+    # nothing in scoping — the phase boundary is evidence commitment (ADR-0018).
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="ioc_search",
+                                      arguments={"ioc_type": "hash", "value": "deadbeef"}, id="c1")]),
+        ChatTurn(text="Which orgs do you suspect, and over what window?"),
+    ])
+    os_client = FakeOS(hits_per_call=[
+        [{"_id": "d1", "_index": "wazuh-alerts", "_source": {"rule": {"description": "malware"}}}],
+    ])
+
+    status = run_hunt_turn(hunt, [{"role": "user", "content": "hunt deadbeef"}],
+                           provider=provider, phase=PHASE_SCOPING, scope=_scope(org),
+                           os_client=os_client, include_web_search=False)
+
+    assert status == Hunt.STATUS_SCOPING
+    assert HuntFinding.objects.filter(hunt=hunt).count() == 0
+    result = HuntEvent.objects.get(hunt=hunt, type="result")
+    assert result.data["phase"] == PHASE_SCOPING
+    assert result.data["findings_total"] == 0
+    hunt.refresh_from_db()
+    assert hunt.status == Hunt.STATUS_SCOPING
+
+
+def test_scoping_turn_can_propose_a_plan(hunt, org):
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="propose_hunt_plan", arguments={
+            "refined_question": "Sweep for FIN12 hashes on Windows hosts",
+            "hypotheses": ["lateral movement via SMB"],
+            "planned_lenses": ["ioc_search", "top_rules"],
+            "suggested_scope": {"all_orgs": True, "lookback_days": 14},
+        }, id="c1")]),
+        ChatTurn(text="Ready when you are."),
+    ])
+
+    status = run_hunt_turn(hunt, [{"role": "user", "content": "ransomware?"}],
+                           provider=provider, phase=PHASE_SCOPING, scope=_scope(org),
+                           os_client=FakeOS(), include_web_search=False)
+
+    assert status == Hunt.STATUS_SCOPING
+    hunt.refresh_from_db()
+    assert hunt.plan["refined_question"] == "Sweep for FIN12 hashes on Windows hosts"
+    assert hunt.plan["suggested_scope"]["lookback_days"] == 14
+    # the tool call surfaced on the event log so the UI can light up "Begin hunt"
+    assert any(
+        e.data.get("tool") == "propose_hunt_plan"
+        for e in HuntEvent.objects.filter(hunt=hunt, type="tool")
+    )
 
 
 def test_second_turn_appends_with_higher_turn_and_seq(hunt, org):

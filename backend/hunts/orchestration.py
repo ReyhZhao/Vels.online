@@ -25,6 +25,13 @@ from .scope import resolve_scope
 
 logger = logging.getLogger(__name__)
 
+# A Hunt turn runs in one of two phases (ADR-0018). The phase selects the system
+# prompt, the toolset, and — critically — whether lens matches are *committed* as
+# Findings. Scoping is read-only orientation; Searching is the authoritative,
+# evidence-committing sweep.
+PHASE_SCOPING = "scoping"
+PHASE_SEARCHING = "searching"
+
 HUNT_SYS_PROMPT = (
     "You are a threat-hunting assistant for a SOC. You are given a question or a "
     "malware/threat report. Identify the indicators of compromise (hashes, IPs, "
@@ -37,6 +44,25 @@ HUNT_SYS_PROMPT = (
     "found, which organisations are affected, and what a human should investigate. "
     "You never take action on infrastructure; if an active response is warranted, "
     "recommend it in prose."
+)
+
+# Scoping phase (ADR-0018): the model grills the staff member to sharpen the seed
+# *before* the authoritative search. It has the full toolset for orientation, but its
+# lens calls commit NO Findings — so it must understand it is refining, not hunting.
+HUNT_SCOPING_SYS_PROMPT = (
+    "You are a threat-hunting assistant for a SOC, in the SCOPING phase of a hunt. "
+    "A staff member has given you a free-text question or a threat report. Your job "
+    "right now is NOT to run the hunt, but to refine it together with the staff member "
+    "until you share a precise understanding of what to hunt for. Ask sharp, specific "
+    "clarifying questions (which indicators, which behaviours, which organisations, "
+    "which time window). You may search the public internet for threat intelligence "
+    "and you may use the Wazuh lenses to orient yourself against the real fleet — but "
+    "be aware these lens calls are READ-ONLY in this phase and commit no findings; the "
+    "authoritative search runs later. Use what you learn to ask better questions. "
+    "You CANNOT start the actual search yourself — only the staff member can, via an "
+    "explicit 'Begin hunt' action. When you believe you understand the hunt well "
+    "enough to start, say so clearly and hand back to the staff member. Keep each turn "
+    "focused: gather context, then ask your questions or confirm readiness."
 )
 
 
@@ -128,22 +154,32 @@ def _final_narrative(research):
 
 
 def run_hunt_turn(
-    hunt, messages, *, provider, scope=None, os_client=None, wazuh_client=None,
-    include_behavioral=True, include_web_search=None, web_search_fn=None, caps=None,
+    hunt, messages, *, provider, phase=PHASE_SEARCHING, scope=None, os_client=None,
+    wazuh_client=None, include_behavioral=True, include_web_search=None,
+    web_search_fn=None, caps=None,
 ):
     """Execute one hunt turn end to end, writing events to the Hunt's log.
+
+    `phase` selects Scoping (refinement dialogue) vs Searching (the evidence-committing
+    sweep) per ADR-0018. In Scoping the lenses run with a non-persisting sink (no Finding
+    is committed) and the model gets the grilling prompt plus the propose_hunt_plan tool;
+    the turn ends back in the `scoping` idle state awaiting the human. In Searching the
+    matched docs are persisted as Findings exactly as before and the turn completes.
 
     Returns the terminal status string. Safe to call from a Celery worker.
     """
     from security.opensearch import OpenSearchClient
     from security.wazuh import WazuhClient
 
+    is_scoping = phase == PHASE_SCOPING
+
     last_turn = HuntEvent.objects.filter(hunt=hunt).order_by("-turn").values_list("turn", flat=True).first()
     turn = (last_turn + 1) if last_turn is not None else 0
 
     on_event = _event_writer(hunt, turn)
 
-    Hunt.objects.filter(pk=hunt.pk).update(status=Hunt.STATUS_RUNNING)
+    running_status = Hunt.STATUS_SCOPING_RUNNING if is_scoping else Hunt.STATUS_RUNNING
+    Hunt.objects.filter(pk=hunt.pk).update(status=running_status)
 
     try:
         scope = scope if scope is not None else resolve_scope(hunt, wazuh_client=wazuh_client)
@@ -153,9 +189,17 @@ def run_hunt_turn(
             lookback_days=hunt.lookback_days,
             os_client=os_client or OpenSearchClient(),
             wazuh_client=wazuh_client or WazuhClient(),
-            record_findings=_collecting_sink(collected),
+            # The phase boundary is evidence commitment (ADR-0018): Scoping lens calls
+            # report counts to the model but persist nothing; only Searching commits.
+            record_findings=None if is_scoping else _collecting_sink(collected),
         )
         tools = build_hunt_lenses(ctx, include_behavioral=include_behavioral)
+        proposed_plan = {}
+        if is_scoping:
+            from .scoping import build_propose_hunt_plan_tool
+            tools.append(build_propose_hunt_plan_tool(
+                hunt, record_plan=lambda plan: proposed_plan.update({"plan": plan}),
+            ))
 
         want_web = web_search_available() if include_web_search is None else include_web_search
         if want_web and not getattr(provider, "uses_native_web_search", lambda: False)():
@@ -163,24 +207,33 @@ def run_hunt_turn(
             # injectable so tests never hit the network.
             tools.append(build_web_search_tool(search_fn=web_search_fn))
 
+        sys_prompt = HUNT_SCOPING_SYS_PROMPT if is_scoping else HUNT_SYS_PROMPT
         research = run_research_phase(
             provider, tools,
-            [{"role": "system", "content": HUNT_SYS_PROMPT}] + messages,
+            [{"role": "system", "content": sys_prompt}] + messages,
             caps or hunt_caps(),
             on_event=on_event,
             cancel_event=_DbCancel(hunt.pk),
         )
 
-        _persist_findings(hunt, collected)
+        if not is_scoping:
+            _persist_findings(hunt, collected)
+        elif proposed_plan.get("plan"):
+            # Persist the latest proposed plan on the main thread (last one wins).
+            Hunt.objects.filter(pk=hunt.pk).update(plan=proposed_plan["plan"])
 
         from .grouping import proposed_incidents
         if research.stop_reason == "client_gone":
             final_status = Hunt.STATUS_CANCELLED
+        elif is_scoping:
+            # A completed Scoping turn yields back to the human (idle), not terminal.
+            final_status = Hunt.STATUS_SCOPING
         else:
             final_status = Hunt.STATUS_COMPLETED
 
         on_event.append("result", {
             "narrative": _final_narrative(research),
+            "phase": phase,
             "proposed_incidents": proposed_incidents(hunt),
             "findings_total": HuntFinding.objects.filter(hunt=hunt).count(),
             "stop_reason": research.stop_reason,
