@@ -191,6 +191,20 @@ def test_detail_returns_findings_and_proposals(client, staff_user, org):
     assert body["proposed_incidents"][0]["organization_id"] == org.id
 
 
+def test_detail_returns_transcript(client, staff_user):
+    # The chat thread (issue #509) renders from the serialised transcript, so the
+    # detail endpoint must expose it.
+    transcript = [
+        {"role": "user", "content": "hunt for deadbeef"},
+        {"role": "assistant", "content": "Which orgs and time window?"},
+    ]
+    hunt = Hunt.objects.create(title="h", seed_text="q", transcript=transcript)
+    client.force_login(staff_user)
+    resp = client.get(f"/api/hunts/{hunt.id}/")
+    assert resp.status_code == 200
+    assert resp.json()["transcript"] == transcript
+
+
 def test_cancel_sets_flag(client, staff_user):
     hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_RUNNING)
     client.force_login(staff_user)

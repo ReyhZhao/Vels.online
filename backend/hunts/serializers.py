@@ -56,7 +56,7 @@ class HuntDetailSerializer(HuntListSerializer):
     class Meta(HuntListSerializer.Meta):
         fields = HuntListSerializer.Meta.fields + [
             "seed_text", "seed_url", "scope_org_ids", "cancel_requested", "plan",
-            "events", "findings", "proposed_incidents",
+            "transcript", "events", "findings", "proposed_incidents",
         ]
 
     def get_scope_org_ids(self, obj):
