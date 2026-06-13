@@ -162,6 +162,9 @@ export default function HuntDetail() {
   const isScoping = hunt.status === 'scoping' || hunt.status === 'scoping_running';
   const canBegin = hunt.status === 'scoping' || hunt.status === 'created';
   const canReply = !inFlight && (hunt.status === 'scoping' || hunt.status === 'completed');
+  // The docked chat input is hidden only once the hunt is closed (cancelled/error);
+  // otherwise it stays visible and is disabled while a turn is in flight.
+  const chatClosed = hunt.status === 'cancelled' || hunt.status === 'error';
   const plan = hunt.plan?.refined_question ? hunt.plan : null;
   // The most recent live activity line, shown under the "working" indicator.
   const liveActivity = [...events].reverse().find((e) => ['tool', 'action', 'phase'].includes(e.event));
@@ -190,8 +193,10 @@ export default function HuntDetail() {
 
       {error && <div className="text-sm text-red-600">{error}</div>}
 
-      {/* Chat thread — the persisted conversation, rendered as bubbles (issue #501). */}
-      <div className="border rounded-lg p-4 dark:border-gray-700 max-h-[60vh] overflow-y-auto flex flex-col gap-3">
+      {/* Chat thread — the persisted conversation as bubbles, with the input docked at
+          the bottom of the panel like a chat app (issue #501). */}
+      <div className="border rounded-lg dark:border-gray-700 flex flex-col max-h-[70vh]">
+        <div className="p-4 overflow-y-auto flex flex-col gap-3 flex-1">
         {conversation.length === 0 && !inFlight && (
           <div className="text-sm text-gray-400">No messages yet.</div>
         )}
@@ -237,6 +242,24 @@ export default function HuntDetail() {
           </div>
         )}
         <div ref={endRef} />
+        </div>
+
+        {/* Docked chat input — inline with the thread, like a chat app. Stays visible
+            (disabled) while a turn is in flight, hidden only once the hunt is closed. */}
+        {!chatClosed && (
+          <form onSubmit={sendFollowUp} className="flex gap-2 p-3 border-t dark:border-gray-700 shrink-0">
+            <input value={followUp} onChange={(e) => setFollowUp(e.target.value)}
+                   disabled={!canReply}
+                   placeholder={inFlight
+                     ? 'Assistant is working…'
+                     : (isScoping ? 'Answer or refine the question…' : 'Ask a follow-up / dig deeper…')}
+                   className="flex-1 border rounded p-2 text-sm dark:bg-gray-800 dark:border-gray-700 disabled:opacity-60" />
+            <button type="submit" disabled={!canReply || !followUp.trim()}
+                    className="bg-gray-800 text-white rounded px-4 disabled:opacity-50">
+              {isScoping ? 'Send' : 'Continue'}
+            </button>
+          </form>
+        )}
       </div>
 
       {/* Scoping gate (ADR-0018): during Scoping the model refines the question and
@@ -333,17 +356,6 @@ export default function HuntDetail() {
         </details>
       )}
 
-      {/* Turn input: a Scoping reply (continue the dialogue) or a post-search follow-up. */}
-      {canReply && (
-        <form onSubmit={sendFollowUp} className="flex gap-2">
-          <input value={followUp} onChange={(e) => setFollowUp(e.target.value)}
-                 placeholder={isScoping ? 'Answer or refine the question…' : 'Ask a follow-up / dig deeper…'}
-                 className="flex-1 border rounded p-2 text-sm dark:bg-gray-800 dark:border-gray-700" />
-          <button type="submit" className="bg-gray-800 text-white rounded px-4">
-            {isScoping ? 'Send' : 'Continue'}
-          </button>
-        </form>
-      )}
     </div>
   );
 }
