@@ -34,6 +34,10 @@ The platform is built around a Wazuh-integrated SOC workflow: detections flow in
 |------------------------|-------------------|------------|
 | ![Scheduled Search Rules placeholder](docs/screenshots/scheduled-search-rules.png) | ![Search Rule Author placeholder](docs/screenshots/search-rule-author.png) | ![Rule Tests placeholder](docs/screenshots/rule-tests.png) |
 
+| Threat Hunt Console | Hunt Scoping | Hunt Findings |
+|---------------------|--------------|---------------|
+| ![Threat Hunt console placeholder](docs/screenshots/threat-hunting.png) | ![Hunt scoping placeholder](docs/screenshots/hunt-scoping.png) | ![Hunt findings placeholder](docs/screenshots/hunt-findings.png) |
+
 ---
 
 ## How It Works
@@ -48,6 +52,7 @@ flowchart TD
     WH["Webhooks / N8N / external"]
     PH["Phishing email<br/>soc@vels.online"]
     VL["Vulnerability scans"]
+    HUNT["Threat Hunt<br/>staff cross-org LLM hunt"]
     MAN["Manual analyst entry"]
 
     %% ---- Alert ingestion pipeline ----
@@ -95,6 +100,7 @@ flowchart TD
     SUGG -- "accepted" --> INC
     PH --> INC
     VL --> INC
+    HUNT -- "confirmed finding<br/>(materialises alerts)" --> INC
     MAN --> INC
 
     %% ---- Notifications fire throughout ----
@@ -110,7 +116,7 @@ _Solid arrows show how data moves; dotted arrows show where notifications are se
 
 **Walking through it:**
 
-1. **Detections arrive.** Wazuh agents, Scheduled Search Rules (pulled from OpenSearch), webhooks, forwarded phishing email, vulnerability scans, and manual entry all feed the platform. Push-based detections land in the **Alert inbox** as `AL-NNN` records, each carrying a normalised ECS entity envelope; phishing email, vulnerability scans, and manual reports open an incident directly.
+1. **Detections arrive.** Wazuh agents, Scheduled Search Rules (pulled from OpenSearch), webhooks, forwarded phishing email, vulnerability scans, staff-driven Threat Hunts, and manual entry all feed the platform. Push-based detections land in the **Alert inbox** as `AL-NNN` records, each carrying a normalised ECS entity envelope; phishing email, vulnerability scans, confirmed Threat Hunt findings, and manual reports open an incident directly.
 2. **The pipeline filters noise.** Each new alert is checked against open incidents — a match **links** in instead of creating a duplicate. Unmatched alerts are routed by severity: **high/critical auto-promote** to a new incident; **low/medium wait** in the inbox until an analyst acts or an asset-threshold promotion fires. In parallel, the **correlation engine** raises an incident when multiple alerts satisfy a rule's legs within its window, and an **LLM residual safety-net** groups leftover signals into **Detection Suggestions** for analyst review.
 3. **An incident is created.** However it was raised, the incident enters the same lifecycle: **IOC enrichment** scores indicators against AbuseIPDB and VirusTotal, then **AI triage** has the LLM recommend a severity, write a summary, suggest actions, and score false-positive likelihood.
 4. **It reaches the right analyst.** **On-call routing** assigns the triaged incident to whoever is on duty, and the matching **playbook** applies its task-template checklist automatically.
@@ -132,7 +138,7 @@ A pre-incident layer that records every detection before it becomes an incident.
 - **Bulk promote** — select multiple alerts from the inbox and promote them to a single incident in one action; a preview modal shows the auto-derived incident fields before writing.
 - **Linked Alerts panel** — every incident shows a collapsible panel listing all `AL-NNN` records behind it, with state badges and timestamps.
 - **Alert enrichment passthrough** — third-party tools (N8N, webhooks) can pass `title`, `description`, `severity`, `pap`, and `tlp` at ingestion time; promoted incidents inherit these values instead of auto-derived placeholders.
-- **Source kinds** — alerts can be tagged as `wazuh`, `inbound_email`, `workflow`, `external_source`, or `scheduled_search` so the origin of every detection is visible and filterable.
+- **Source kinds** — alerts can be tagged as `wazuh`, `inbound_email`, `workflow`, `external_source`, `scheduled_search`, or `threat_hunt` so the origin of every detection is visible and filterable.
 - **Per-org thresholds** — configure the auto-promote count, time window, and match lookback window per organisation in settings.
 - **Delete alert** — individual alerts can be removed from the inbox when they are noise or duplicates that should not be promoted.
 - **Create correlation rule from selection** — select one or more alerts and open the rule-author assistant pre-seeded with those alerts as grounding context, turning a recurring signal into a permanent Correlation Rule in one step.
@@ -146,6 +152,9 @@ A full lifecycle for security incidents, from detection to closure.
 - **Structured playbooks** — subject-based task templates automatically apply the right checklist (phishing, malware, vulnerability, etc.) when an incident is created.
 - **Auto-assignment** — claiming an incident via "Start Work" automatically assigns it to you; the incident subject is also auto-populated from the LLM triage recommendation when one arrives.
 - **Immutable audit trail** — every state change, comment, delegation, attachment, and alert link is timestamped in a timeline for complete accountability.
+- **Collapsed bulk alert-link events** — when many alerts link to an incident at once (e.g. a Scheduled Search Rule or Threat Hunt materialising dozens of Findings), the timeline coalesces them into a single "*N* alerts linked" entry instead of one row per alert, keeping the timeline readable.
+- **Linked-alert drill-down** — click any alert in the Linked Alerts tab to open its full detail (raw event, ECS entity envelope, enrichment) in place, and filter the linked-alerts list with the same controls as the main `/alerts` inbox.
+- **One-click Mark Resolved** — resolving an incident closes it in a single action rather than a two-step state change.
 - **Extended close flow** — close incidents as resolved or as a duplicate linked to a canonical incident; a searchable combobox makes finding the canonical incident fast even across large lists.
 - **Auto-closure** — incidents older than 7 days in `new`, `triaged`, or `resolved` state are automatically closed, keeping the active queue clean.
 - **Delegation and transfers** — analysts can temporarily hand off work to teammates and receive it back, maintaining a clear chain of responsibility.
@@ -208,6 +217,7 @@ Pull-based detection over the full Wazuh OpenSearch data stream — without inge
 - **Run state inline** — the rules admin table shows each rule's last-run time, next-run time, and total run count so operators know the rule is healthy at a glance.
 - **Per-rule firing summary** — the admin table tracks whether, when, and how many times each rule has actually raised an incident, so operators can see at a glance which rules are live and earning their keep versus sitting silent.
 - **Run now** — a per-rule "Run now" button dispatches the evaluator immediately for ad-hoc testing without waiting for the schedule.
+- **Clone rule** — duplicate an existing rule (legs, conditions, key, window, schedule) into a new draft as a starting point for a variant, instead of rebuilding it by hand.
 - **Debug unsaved rules** — the create/edit drawer can run the evaluator against the *current, unsaved* form values, so analysts can tweak legs and conditions and immediately see what would match before committing the rule — the same debug interface used for saved rules, applied to ad-hoc edits.
 - **Run history** — each rule's run history (status, duration, errors) is accessible from the admin UI for debugging failing rules.
 - **Dedup and idempotency** — `SearchFinding` records carry a unique `(rule, source_index, wazuh_doc_id)` key so re-runs over overlapping windows never materialise duplicate Alerts. A live-firing record per `(rule, entity_value)` ensures new Findings for the same key link into the open incident rather than spawning a new one.
@@ -241,12 +251,32 @@ An interactive AI panel embedded in the incident detail page for conversational 
 - **Auto-execute safe actions** — internal, reversible, non-lifecycle actions run by themselves: add an internal comment, self-assign the incident, add a tag, or link a known asset. Each is performed through the same mutation service as a manual edit and recorded on the timeline as an assistant-initiated (autonomous) event.
 - **Propose-and-confirm for consequential changes** — anything externally visible or lifecycle/severity/disclosure-affecting — state transitions, severity/TLP/PAP/subject/assignee edits, applying a task template, messaging a contact, creating an exception, closing — is only ever *proposed*, with one-click human confirmation.
 - **Works manual tasks** — the assistant can see the incident's task list and applied task template, research each manual task (web search + app lookups), and record its findings as a task-scoped internal (staff-only) comment for the analyst to review. It works several tasks per turn within its time budget and reports which it completed and which remain, so the analyst can simply say "continue." It never closes a task, never runs `automated` (Semaphore) or `wazuh_response` tasks — recommending those in prose for the analyst to run through the existing controls — and proposes (never silently applies) a corrected task template.
+- **Live streaming over SSE** — each turn streams its progress to the drawer over Server-Sent Events (phase, tool, action, result events), so the analyst watches the assistant work step-by-step instead of waiting on a spinner, and a dropped connection can reconnect.
 - **Tool trace** — each turn surfaces a trace of what the assistant searched and looked up, plus web citations, so analysts can trust and verify its reasoning. Auto-executed action notices are visually distinguished from proposed actions that still show confirm buttons.
 - **Bounded execution** — every turn is capped by max iterations, a per-tool timeout, an overall deadline, and a per-turn auto-action limit, so a runaway loop can never hang a request.
 - **Org-scoped lookups** — app lookups reuse the same permission predicates as the REST API and default to the incident's organisation; staff may deliberately widen a lookup across organisations to correlate a cross-tenant threat.
 - **Incident context aware** — the assistant is grounded in the full incident context: title, description, severity, state, linked alerts, IOCs, assets, tasks, and timeline. Responses are relevant to the specific incident rather than generic.
 - **Ollama and Gemini support** — the incident assistant respects the same pluggable LLM provider configuration (`ASSISTANT_LLM_PROVIDER`) as the rest of the platform, working with Ollama Cloud models as well as Google Gemini (Gemini 3, required for combining web-search grounding with function tools).
 - **Grouped residual alert analysis** — the Ollama triage provider can group residual (unlinked) alerts and return a structured analysis, surfacing clusters of related signals the static engine did not catch.
+
+### Threat Hunting
+
+Drive an LLM-assisted, cross-org investigation *from a question or a report* — not bound to an existing incident. Where the Incident Assistant reacts to an incident we already have, a **Hunt** is **incident-producing**: a staff member asks "are we exposed to this campaign?" and the platform ranges over the whole Wazuh fleet to find out. Staff-only; every Hunt is the audit record for the cross-tenant access it performs.
+
+- **Seed from a question or a report URL** — start a Hunt from a free-text hunch or by pasting a link to a malware/threat writeup. URL seeds are fetched server-side and the IOCs and hunting intent are extracted for you.
+- **Interactive Scoping phase** — every Hunt opens in a **Scoping** dialogue: the model grills the staff member (and the staff member corrects it) to reach a shared understanding *before* any evidence-committing search runs. During Scoping the model has the full toolset (web search **and** every Wazuh lens) so its questions are grounded in current threat-intel and the real fleet — but its lens calls commit **no Findings**.
+- **Structured hunt plan + human "Begin hunt" gate** — when the model judges it has enough, it surfaces a plan card (refined question, hypotheses, planned lenses, suggested scope/lookback). The transition into the authoritative search is fired only by an explicit human **Begin hunt** action — never by the model — and the human can adjust scope/lookback at the gate. Begin is available from the first moment, so a known hunt can skip the dialogue and one-shot as before.
+- **IOC sweep + behavioral hunting** — composable, single-purpose Wazuh *lenses* let the Hunt sweep every managed agent for a hash/IP/domain/filename, or run open-ended pattern hunts (top rules, event histogram, top values, agent activity, processes/ports) for activity no one could name in advance.
+- **Cross-org by default, tenant-isolated by construction** — a Hunt reads across all tenants by default (configurable to selected orgs) over a staff-selectable lookback window. Every query is **fanned out per tenant and never joined across tenants**; Findings and any spawned incidents are always partitioned by org.
+- **Shared Infrastructure hunting** — a dedicated, non-tenant **Infrastructure organisation** lets an all-orgs hunt reach perimeter telemetry that belongs to no agent (the firewall / reverse proxy logging as the Wazuh manager, `agent.id = "000"`). Agent-less events surface as Infrastructure findings and confirm into an Incident that lives in the Infrastructure org, so a real tenant's queue never holds mis-attributed perimeter events. Infrastructure is selectable on its own in the scope picker and never leaks into other org dropdowns.
+- **Live web-search enrichment** — within the loop the Hunt can search the public internet for threat intelligence on an indicator or campaign and cite its sources.
+- **Propose-and-confirm incidents, per org** — when a Hunt finds something worth investigating it groups **Findings by affected org** and offers **one proposed Incident per org**. It never auto-creates incidents — a human always confirms what enters a customer's queue. Confirming **materialises** the matched raw Wazuh documents as Alerts (`source_kind = threat_hunt`) linked to the new Incident, so it carries its evidence through the normal IOC-enrichment and triage pipeline.
+- **Rich incident hand-off** — a confirmed Hunt finding produces a fully-formed incident: the indicators it matched on (IPs, hashes, domains, filenames) are extracted into linked IOCs rather than buried in prose, and the description carries a compact-but-complete summary of the Hunt's findings instead of a sparse placeholder.
+- **Streamed, resumable, audited** — each turn runs as a Celery background job that writes onto the Hunt's persisted event log; the SSE endpoint tails/replays that log, so progress streams live, survives a dropped connection, and can be reconnected. A Hunt is persisted and resumable: step away mid-Scoping or mid-run and come back. Follow-up turns let you dig deeper, and the questions you ask persist in the transcript as chat bubbles so you can track what has been done.
+- **Bounded execution** — every turn is capped by max iterations, per-tool timeout, an overall wall-clock deadline, and a per-lens fan-out cap (max orgs/agents per query), so one Hunt can never saturate workers or run forever. Cancel abandons the whole Hunt explicitly, independent of the transport.
+- **SSRF-guarded report fetcher** — the URL seed refuses private/link-local/loopback/metadata addresses and disallowed schemes, caps response size, and will not follow cross-host redirects into internal space; fetched content is treated as untrusted, prompt-injection-aware data rather than instructions.
+- **Recommend-only on live infra** — like the Incident Assistant, a Hunt auto-executes only its own internal, reversible artifacts (notes/findings). It never runs `automated` (Semaphore) or `wazuh_response` actions — it recommends them in prose for an analyst to run through the existing controls.
+- **Hunt console** — a staff-only **Threat Hunting** top-level view lists past and in-progress Hunts (owner, seed, scope, status, findings count, spawned incidents) with **search and filtering**; admins can **delete** completed or incomplete Hunts to clean up the list.
 
 ### Inbound Phishing Ingestion
 
@@ -474,13 +504,16 @@ A Helm chart is provided under `deployment/`. See `deployment/values.yaml` for t
 .
 ├── backend/              # Django application
 │   ├── alerts/           # Alert ingestion pipeline, inbox, auto-routing, ECS entity envelope
-│   ├── incidents/        # Incident lifecycle, tasks, LLM triage, incident assistant
+│   ├── incidents/        # Incident lifecycle, tasks, LLM triage
+│   ├── assistants/       # Agentic tool-calling loop, providers, web search (shared by incident assistant + hunts)
+│   ├── hunts/            # Threat Hunting module: Hunt aggregate, scoping, lenses, SSRF fetcher, finding→incident grouping
 │   ├── correlations/     # Correlation Rules, Scheduled Search Rules, Detection Suggestions, rule-author assistant
-│   ├── security/         # Organisations, assets, vulnerabilities, CVE advisories
+│   ├── security/         # Organisations (incl. Infrastructure pseudo-org), assets, vulnerabilities, CVE advisories
 │   ├── exceptions/       # Wazuh exception rule management
 │   ├── ingress/          # BunkerWeb-backed reverse proxy routes
 │   ├── automations/      # Semaphore automations + Wazuh active response catalog and executions
 │   ├── oncall/           # On-call scheduling, shift blocks, rotation templates, swap service, routing
+│   ├── contacts/         # Incident contact directory and threaded messaging
 │   ├── notifications/    # In-app, push, and email notifications
 │   ├── inbound_mail/     # IMAP polling, phishing ingestion, contact reply handling
 │   └── api/              # Cross-app API utilities
