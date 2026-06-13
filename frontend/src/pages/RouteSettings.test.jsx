@@ -50,6 +50,11 @@ function renderPage(fqdn = 'app.example.com') {
 
 async function waitForLoad() {
   await waitFor(() => expect(screen.queryByText('Loading settings…')).not.toBeInTheDocument());
+  // The default General sub-tab populates its fields one effect-cycle after the parent
+  // finishes loading (it renders null until its own effect commits `local`). Wait for
+  // that commit so the synchronous getByTestId queries that follow don't race the child
+  // effect — under CI timing that race intermittently missed `fqdn-display`.
+  await screen.findByTestId('fqdn-display');
 }
 
 describe('RouteSettings shell', () => {
