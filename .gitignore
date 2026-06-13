@@ -193,3 +193,4 @@ test.db
 *.swp
 /backend/db_dev.sqlite3
 /backend/dev.db
+.DS_Store
