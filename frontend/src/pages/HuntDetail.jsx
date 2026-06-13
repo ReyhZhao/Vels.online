@@ -80,7 +80,7 @@ export default function HuntDetail() {
   const resultEvent = [...events].reverse().find((e) => e.event === 'result');
 
   return (
-    <div className="w-full max-w-5xl min-w-0 mx-auto p-4 space-y-5 overflow-x-hidden">
+    <div className="w-full min-w-0 p-6 space-y-5 overflow-x-hidden">
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/hunting')} className="text-sm text-blue-600">← Hunts</button>
         <h1 className="text-xl font-semibold flex-1 truncate">{hunt.title}</h1>

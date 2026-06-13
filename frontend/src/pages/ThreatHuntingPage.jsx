@@ -72,7 +72,7 @@ export default function ThreatHuntingPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-4 space-y-6">
+    <div className="p-6 space-y-6">
       <h1 className="text-2xl font-semibold">Threat Hunting</h1>
 
       <form onSubmit={submit} className="border rounded-lg p-4 space-y-3 dark:border-gray-700">
