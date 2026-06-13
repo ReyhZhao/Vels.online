@@ -17,12 +17,23 @@ const STATUS_CLASSES = {
 
 const LOOKBACKS = [7, 30, 90, 180];
 
+// Statuses a hunt can be filtered by, and the in-flight ones that cannot be deleted
+// (the worker is still writing to them — cancel first). Mirrors hunts.models.Hunt.
+const STATUS_FILTERS = [
+  'created', 'scoping', 'scoping_running', 'running', 'completed', 'cancelled', 'error',
+];
+const IN_FLIGHT = ['running', 'scoping_running'];
+
 export default function ThreatHuntingPage() {
   const navigate = useNavigate();
   const [hunts, setHunts] = useState([]);
   const [orgs, setOrgs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // List search + status filter (issue #508).
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
 
   // composer state
   const [seedKind, setSeedKind] = useState('question');
@@ -35,23 +46,43 @@ export default function ThreatHuntingPage() {
 
   const loadHunts = useCallback(async () => {
     try {
-      const { data } = await api.get('/api/hunts/');
+      const params = {};
+      if (search.trim()) params.search = search.trim();
+      if (statusFilter) params.status = statusFilter;
+      const { data } = await api.get('/api/hunts/', { params });
       setHunts(data);
     } catch (e) {
       setError('Could not load hunts.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, statusFilter]);
+
+  // Debounce list reloads so typing in the search box doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(loadHunts, 250);
+    return () => clearTimeout(t);
+  }, [loadHunts]);
 
   useEffect(() => {
-    loadHunts();
     // include_infrastructure=1 surfaces the Infrastructure org as a selectable hunt
     // scope target (ADR-0017) — it stays out of every other org picker.
     api.get('/api/security/organizations/?include_infrastructure=1')
       .then(({ data }) => setOrgs(Array.isArray(data) ? data : (data.results || [])))
       .catch(() => {});
-  }, [loadHunts]);
+  }, []);
+
+  async function deleteHunt(e, hunt) {
+    e.stopPropagation(); // don't navigate into the row we're deleting
+    if (!window.confirm(`Delete this hunt permanently?\n\n${hunt.title}`)) return;
+    setError(null);
+    try {
+      await api.delete(`/api/hunts/${hunt.id}/`);
+      setHunts((prev) => prev.filter((h) => h.id !== hunt.id));
+    } catch (e2) {
+      setError(e2.response?.data?.detail || 'Could not delete hunt.');
+    }
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -136,6 +167,20 @@ export default function ThreatHuntingPage() {
 
       {error && <div className="text-sm text-red-600">{error}</div>}
 
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <input
+          type="search" value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search hunts…" aria-label="Search hunts"
+          className="flex-1 min-w-[12rem] border rounded p-2 dark:bg-gray-800 dark:border-gray-700"
+        />
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label="Filter by status"
+                className="border rounded p-2 dark:bg-gray-800 dark:border-gray-700">
+          <option value="">All statuses</option>
+          {STATUS_FILTERS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
       <div className="border rounded-lg dark:border-gray-700 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-left">
@@ -146,13 +191,16 @@ export default function ThreatHuntingPage() {
               <th className="p-2">Findings</th>
               <th className="p-2">Incidents</th>
               <th className="p-2">Owner</th>
+              <th className="p-2 w-0" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} className="p-4 text-center text-gray-500">Loading…</td></tr>
+              <tr><td colSpan={7} className="p-4 text-center text-gray-500">Loading…</td></tr>
             ) : hunts.length === 0 ? (
-              <tr><td colSpan={6} className="p-4 text-center text-gray-500">No hunts yet.</td></tr>
+              <tr><td colSpan={7} className="p-4 text-center text-gray-500">
+                {search.trim() || statusFilter ? 'No hunts match your filters.' : 'No hunts yet.'}
+              </td></tr>
             ) : hunts.map((h) => (
               <tr key={h.id} className="border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                   onClick={() => navigate(`/hunting/${h.id}`)}>
@@ -164,6 +212,15 @@ export default function ThreatHuntingPage() {
                 <td className="p-2">{h.finding_count}</td>
                 <td className="p-2">{h.spawned_incident_count}</td>
                 <td className="p-2">{h.owner_username || '—'}</td>
+                <td className="p-2 text-right">
+                  {!IN_FLIGHT.includes(h.status) && (
+                    <button onClick={(e) => deleteHunt(e, h)}
+                            aria-label="Delete hunt"
+                            className="text-red-600 hover:text-red-700 px-2">
+                      Delete
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

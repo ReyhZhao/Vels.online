@@ -48,6 +48,19 @@ class HuntListCreateView(APIView):
         if denied:
             return denied
         hunts = Hunt.objects.all().select_related("owner")
+
+        # Optional free-text search over title + seed text, and a status filter, so
+        # staff can find a hunt in a long list (issue #508). Absent params → all hunts.
+        search = (request.query_params.get("search") or "").strip()
+        if search:
+            from django.db.models import Q
+            hunts = hunts.filter(Q(title__icontains=search) | Q(seed_text__icontains=search))
+        status_filter = (request.query_params.get("status") or "").strip()
+        if status_filter:
+            valid = {choice for choice, _ in Hunt.STATUS_CHOICES}
+            if status_filter in valid:
+                hunts = hunts.filter(status=status_filter)
+
         return Response(HuntListSerializer(hunts, many=True).data)
 
     def post(self, request):
@@ -108,6 +121,29 @@ class HuntDetailView(APIView):
         except (Hunt.DoesNotExist, ValueError):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(HuntDetailSerializer(hunt).data)
+
+    def delete(self, request, hunt_id):
+        """Delete a hunt to clean up test/incomplete hunts (issue #508).
+
+        Staff-only. An in-flight hunt (a scoping or searching turn running) must be
+        cancelled first, never deleted out from under its worker. Deleting cascades to
+        the hunt's events and findings; any Incident a finding was materialised into is
+        independent and survives (the FK is finding→incident, so it is not cascaded).
+        """
+        denied = _require_staff(request)
+        if denied:
+            return denied
+        try:
+            hunt = Hunt.objects.get(pk=hunt_id)
+        except (Hunt.DoesNotExist, ValueError):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if hunt.status in Hunt.IN_FLIGHT_STATUSES:
+            return Response(
+                {"detail": "Cancel the hunt before deleting it."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        hunt.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class HuntTurnView(APIView):

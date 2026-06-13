@@ -227,6 +227,69 @@ def test_follow_up_turn_appends_message(client, staff_user, no_celery):
     assert len(no_celery) == 1
 
 
+def test_list_search_filters_by_title_and_seed(client, staff_user):
+    Hunt.objects.create(title="ransomware sweep", seed_text="check hosts")
+    Hunt.objects.create(title="phishing", seed_text="look for deadbeef hash")
+    client.force_login(staff_user)
+    # Matches the title of the first hunt only.
+    resp = client.get("/api/hunts/?search=ransomware")
+    assert resp.status_code == 200
+    assert [h["title"] for h in resp.json()] == ["ransomware sweep"]
+    # Matches the seed text of the second hunt only.
+    resp = client.get("/api/hunts/?search=deadbeef")
+    assert [h["title"] for h in resp.json()] == ["phishing"]
+
+
+def test_list_filters_by_status(client, staff_user):
+    Hunt.objects.create(title="done", seed_text="q", status=Hunt.STATUS_COMPLETED)
+    Hunt.objects.create(title="busy", seed_text="q", status=Hunt.STATUS_RUNNING)
+    client.force_login(staff_user)
+    resp = client.get("/api/hunts/?status=completed")
+    assert resp.status_code == 200
+    assert [h["title"] for h in resp.json()] == ["done"]
+
+
+def test_delete_removes_hunt_and_findings(client, staff_user, org):
+    hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_COMPLETED)
+    HuntFinding.objects.create(hunt=hunt, organization=org, source_index="i", wazuh_doc_id="1",
+                               raw_doc={}, summary="s")
+    client.force_login(staff_user)
+    resp = client.delete(f"/api/hunts/{hunt.id}/")
+    assert resp.status_code == 204
+    assert not Hunt.objects.filter(pk=hunt.id).exists()
+    assert not HuntFinding.objects.filter(hunt_id=hunt.id).exists()
+
+
+def test_delete_rejected_while_in_flight(client, staff_user):
+    hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_RUNNING)
+    client.force_login(staff_user)
+    resp = client.delete(f"/api/hunts/{hunt.id}/")
+    assert resp.status_code == 409
+    assert Hunt.objects.filter(pk=hunt.id).exists()
+
+
+def test_delete_rejected_for_non_staff(client, regular_user):
+    hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_COMPLETED)
+    client.force_login(regular_user)
+    resp = client.delete(f"/api/hunts/{hunt.id}/")
+    assert resp.status_code == 403
+    assert Hunt.objects.filter(pk=hunt.id).exists()
+
+
+def test_delete_preserves_materialised_incident(client, staff_user, org):
+    hunt = Hunt.objects.create(title="h", seed_text="q", status=Hunt.STATUS_COMPLETED)
+    HuntFinding.objects.create(hunt=hunt, organization=org, source_index="i", wazuh_doc_id="1",
+                               raw_doc={"agent": {"name": "host"}}, summary="s")
+    client.force_login(staff_user)
+    display_id = client.post(
+        f"/api/hunts/{hunt.id}/confirm-incident/", {"organization_id": org.id},
+        content_type="application/json",
+    ).json()["incident_display_id"]
+    # Deleting the hunt must not cascade into the incident it spawned.
+    assert client.delete(f"/api/hunts/{hunt.id}/").status_code == 204
+    assert Incident.objects.filter(display_id=display_id).exists()
+
+
 def test_confirm_incident_materialises_for_org(client, staff_user, org):
     hunt = Hunt.objects.create(title="h", seed_text="q")
     HuntFinding.objects.create(hunt=hunt, organization=org, source_index="i", wazuh_doc_id="1",
