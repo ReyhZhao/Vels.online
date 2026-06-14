@@ -169,6 +169,34 @@ def test_add_task_comment_records_internal_task_scoped_comment_and_audits(staff,
     assert ev.payload["detail"]["task_id"] == task.id
 
 
+def test_add_task_comment_advances_new_task_to_in_progress(staff, incident):
+    from incidents.models import Task
+    task = _manual_task(incident)
+    assert task.state == Task.STATE_NEW
+    tools = build_incident_tools(incident, staff, _grounding(incident))
+    res = _tool(tools, "add_task_comment").executor({"task_id": task.id, "text": "looked into it"})
+    assert res.error is None
+    task.refresh_from_db()
+    assert task.state == Task.STATE_IN_PROGRESS
+    assert task.closed_at is None
+    ev = IncidentEvent.objects.get(incident=incident, kind="task_state_changed")
+    assert ev.payload["task_id"] == task.id
+    assert ev.payload["old"] == Task.STATE_NEW and ev.payload["new"] == Task.STATE_IN_PROGRESS
+
+
+def test_add_task_comment_does_not_close_or_re_transition_worked_task(staff, incident):
+    from incidents.models import Task
+    for start in (Task.STATE_IN_PROGRESS, Task.STATE_DONE, Task.STATE_CANCELLED):
+        task = _manual_task(incident, title=f"t-{start}", state=start)
+        tools = build_incident_tools(incident, staff, _grounding(incident))
+        res = _tool(tools, "add_task_comment").executor({"task_id": task.id, "text": "more"})
+        assert res.error is None
+        task.refresh_from_db()
+        assert task.state == start  # never advanced, never closed/cancelled
+        assert not IncidentEvent.objects.filter(
+            incident=incident, kind="task_state_changed", payload__task_id=task.id).exists()
+
+
 def test_add_task_comment_rejects_automated_task(staff, incident):
     from incidents.models import Task
     task = Task.objects.create(incident=incident, title="Run playbook", task_type=Task.TYPE_AUTOMATED)

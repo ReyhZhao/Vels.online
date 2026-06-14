@@ -207,6 +207,20 @@ def _add_task_comment(incident, user):
             incident, "comment_added", actor=user,
             payload={"target_type": "comment", "target_id": comment.id, "is_internal": True},
         )
+        # Working a task is real progress: advance new -> in_progress so the task
+        # no longer looks untouched. The assistant never closes tasks (ADR-0013),
+        # so leave in_progress/done/cancelled alone and never set done/cancelled.
+        if task.state == Task.STATE_NEW:
+            old_state = task.state
+            task.state = Task.STATE_IN_PROGRESS
+            task.save(update_fields=["state"])
+            record_event(
+                incident, "task_state_changed", actor=user,
+                payload={"task_id": task.id, "title": task.title,
+                         "old": old_state, "new": task.state,
+                         "created_at": task.created_at.isoformat(),
+                         "closed_at": task.closed_at.isoformat() if task.closed_at else None},
+            )
         _record_autonomous(incident, user, "add_task_comment",
                            {"task_id": task.id, "task_title": task.title, "preview": text[:80]})
         return ToolResult(content={"ok": True, "task_id": task.id},
