@@ -1,14 +1,13 @@
 backend:
   image:
     repository: registry.vels.online/vels/backend
-    tag: 0.17.0
+    tag: 0.18.0
 frontend:
   image:
     repository: registry.vels.online/vels/frontend
-    tag: 0.17.0
+    tag: 0.18.0
 imagePullSecrets:
   - name: registry-credentials
-
 # Operational observability (ADR-0019). Plugs into the cluster's existing Prometheus
 # Operator (kube-prometheus-stack) — we ship only the CRDs/dashboards/alerts, never the
 # stack itself. Gated so the chart still installs cleanly with monitoring disabled.
@@ -26,7 +25,6 @@ monitoring:
   celeryExporter:
     image: danihodovic/celery-exporter:0.12.2
     port: 9808
-
 valkey:
   architecture: standalone
   auth:
