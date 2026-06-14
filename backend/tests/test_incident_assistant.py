@@ -1007,3 +1007,56 @@ async def test_existing_action_types_unaffected(async_client, staff, incident):
     types = [a["type"] for a in data["proposed_actions"]]
     assert "update_field" in types
     assert "transition_state" in types
+
+
+# ── research-phase prompt drives task-working via add_task_comment (#515) ──────
+# Regression: the instruction to work manual tasks (call add_task_comment) must live
+# in the tool-executing research prompt, not only the tool-less synthesis prompt —
+# otherwise the assistant narrates having recorded findings while no tool ever runs.
+
+def test_research_prompt_lists_manual_tasks_with_ids_and_tool_instruction(db, incident):
+    from incidents.views import _build_research_sys_prompt
+    manual = Task.objects.create(
+        incident=incident, title="Check sender domain reputation",
+        description="Look up the sender domain age and reputation",
+        task_type=Task.TYPE_MANUAL, state="new",
+    )
+    prompt = _build_research_sys_prompt(build_incident_grounding(incident))
+    assert "add_task_comment" in prompt
+    assert f"task_id={manual.id}" in prompt
+    assert "Check sender domain reputation" in prompt
+
+
+def test_research_prompt_excludes_non_manual_tasks_from_workable_list(db, incident):
+    from incidents.views import _build_research_sys_prompt
+    manual = Task.objects.create(incident=incident, title="Manual step",
+                                 task_type=Task.TYPE_MANUAL, state="new")
+    automated = Task.objects.create(incident=incident, title="Run playbook",
+                                    task_type=Task.TYPE_AUTOMATED, state="new")
+    wazuh = Task.objects.create(incident=incident, title="Isolate host",
+                                task_type=Task.TYPE_WAZUH_RESPONSE, state="new")
+    prompt = _build_research_sys_prompt(build_incident_grounding(incident))
+    assert f"task_id={manual.id}" in prompt
+    assert f"task_id={automated.id}" not in prompt
+    assert f"task_id={wazuh.id}" not in prompt
+
+
+def test_research_prompt_without_manual_tasks_omits_task_instruction(db, incident):
+    from incidents.views import _build_research_sys_prompt
+    Task.objects.create(incident=incident, title="Run playbook",
+                        task_type=Task.TYPE_AUTOMATED, state="new")
+    prompt = _build_research_sys_prompt(build_incident_grounding(incident))
+    assert "add_task_comment" not in prompt
+    assert "Stop once you have what you need." in prompt
+
+
+def test_synthesis_prompt_does_not_instruct_calling_task_tool(db, incident):
+    """Synthesis is tool-less; it must report on findings, not instruct a tool call."""
+    from incidents.llm.gemini import _build_assistant_system_prompt
+    Task.objects.create(incident=incident, title="Manual step",
+                        task_type=Task.TYPE_MANUAL, state="new")
+    prompt = _build_assistant_system_prompt(build_incident_grounding(incident))
+    # It must not tell the model to call the tool here (no tools in synthesis),
+    # and must anchor reporting to research_notes.
+    assert "call add_task_comment" not in prompt
+    assert "research_notes" in prompt

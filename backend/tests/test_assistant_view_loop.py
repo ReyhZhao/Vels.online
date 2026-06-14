@@ -88,3 +88,50 @@ async def test_incident_assistant_runs_web_search_tool(async_client, staff, inci
     tool_events = _parse_sse_tool_events(content)
     assert ws.called, "web_search backend was never invoked by the loop"
     assert any(t["tool"] == "web_search" for t in tool_events), f"no web_search tool event in: {content}"
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_incident_assistant_records_findings_on_manual_task(async_client, staff, incident, settings):
+    """Asking the assistant to work tasks must actually call add_task_comment and
+    create a real task-scoped comment — not merely narrate it (#515)."""
+    from asgiref.sync import sync_to_async
+    from incidents.models import Task, Comment
+
+    task = await sync_to_async(Task.objects.create)(
+        incident=incident, title="Check sender domain", task_type=Task.TYPE_MANUAL, state="new",
+    )
+
+    provider = OllamaTriageProvider()
+    turn_call = SimpleNamespace(message=SimpleNamespace(
+        content="",
+        tool_calls=[SimpleNamespace(
+            function=SimpleNamespace(
+                name="add_task_comment",
+                arguments={"task_id": task.id, "text": "Domain registered 2 days ago; suspicious."}),
+            id="c1")],
+    ))
+    turn_done = SimpleNamespace(message=SimpleNamespace(content="recorded findings", tool_calls=[]))
+    provider._client = MagicMock()
+    provider._client.chat.side_effect = [turn_call, turn_done]
+    provider.assist_incident = MagicMock(
+        return_value=AssistantResult(
+            assistant_reply="Recorded findings on the manual task.", proposed_actions=[], warnings=[]))
+
+    await async_client.aforce_login(staff)
+    with patch("incidents.llm.factory.get_assistant_provider", return_value=provider):
+        res = await async_client.post(
+            f"/api/incidents/{incident.display_id}/assistant/",
+            {"messages": [{"role": "user", "content": "research the open tasks and update them"}]},
+            content_type="application/json",
+        )
+
+    assert res.status_code == 200, res.content
+    content = await _collect_stream(res)
+    tool_events = _parse_sse_tool_events(content)
+    assert any(t["tool"] == "add_task_comment" and t["error"] is None for t in tool_events), \
+        f"add_task_comment not executed by the loop in: {content}"
+
+    comment = await sync_to_async(
+        lambda: Comment.objects.filter(task=task, is_internal=True).first())()
+    assert comment is not None, "no task-scoped findings comment was persisted"
+    assert "Domain registered 2 days ago" in comment.body

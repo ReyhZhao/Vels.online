@@ -2261,13 +2261,49 @@ class IncidentTriageDebugView(APIView):
 
 # ── Incident assistant ─────────────────────────────────────────────────────────
 
-_RESEARCH_SYS_PROMPT = (
+_RESEARCH_SYS_PROMPT_BASE = (
     "You are assisting a security analyst with this incident. Use the tools "
     "to look up related incidents, alerts, and assets, and to search the "
     "internet for threat intelligence. You may add an internal comment, "
     "self-assign, tag, or link a known asset directly when clearly helpful; "
-    "do NOT attempt higher-risk changes here. Stop once you have what you need."
+    "do NOT attempt higher-risk changes here."
 )
+
+
+def _build_research_sys_prompt(grounding: dict) -> str:
+    """System prompt for the tool-executing research phase (ADR-0011/0013).
+
+    This is the only phase where tools actually run, so the instruction to work
+    the incident's manual tasks lives here (not in the tool-less synthesis prompt).
+    The manual tasks are listed with their ids because add_task_comment needs a
+    task_id and the research phase does not otherwise receive the grounding.
+    """
+    manual = [
+        t for t in (grounding.get("tasks") or [])
+        if t.get("task_type") == "manual"
+    ]
+    if not manual:
+        return _RESEARCH_SYS_PROMPT_BASE + " Stop once you have what you need."
+
+    task_lines = "\n".join(
+        f'  - task_id={t["id"]} [{t.get("state")}]: {t.get("title")}'
+        + (f' — {t["description"]}' if t.get("description") else "")
+        for t in manual
+    )
+    return (
+        _RESEARCH_SYS_PROMPT_BASE
+        + "\n\nThis incident has the following MANUAL tasks you can work:\n"
+        + task_lines
+        + "\n\nWhen the analyst asks you to work, handle, research, update, or progress "
+        "the tasks, work the MANUAL tasks listed above. For each, research what its "
+        "description asks (use web search and the app lookups), then call "
+        "add_task_comment(task_id, text) to record your findings as a staff-only note "
+        "on that task. Recording findings ONLY happens when you actually call "
+        "add_task_comment — you must call it for every task you intend to work; do not "
+        "just describe what you would write. Never run or close a task, and you cannot "
+        "run automated or wazuh_response tasks. Work as many manual tasks as the budget "
+        "allows. Stop once you have what you need."
+    )
 
 
 class IncidentAssistantView(AsyncAPIView):
@@ -2338,7 +2374,7 @@ class IncidentAssistantView(AsyncAPIView):
                     )
                     research = run_research_phase(
                         provider, tools,
-                        [{"role": "system", "content": _RESEARCH_SYS_PROMPT}] + messages,
+                        [{"role": "system", "content": _build_research_sys_prompt(grounding)}] + messages,
                         LoopCaps.from_settings(),
                         on_event=on_event,
                         cancel_event=cancel_event,
