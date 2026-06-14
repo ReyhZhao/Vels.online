@@ -20,6 +20,9 @@ spec:
           image: {{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}
           imagePullPolicy: Always
           command: ["celery", "-A", "config", "worker", "-l", "INFO"]
+          resources:
+            requests:
+              memory: "1024Mi"
           envFrom:
             - secretRef:
                 name: backend-secret
