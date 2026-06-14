@@ -3,6 +3,11 @@
 # label below. Covers API RED metrics, Celery task health/backlog and pod availability,
 # plus a dedicated Django (django-prometheus) section: request/response, latency,
 # exceptions, busiest/slowest views and body sizes.
+#
+# Every query is scoped to the release namespace via the hidden `$namespace` constant
+# so other Django apps elsewhere in the cluster never bleed into these panels. The
+# Prometheus Operator stamps a `namespace` label onto every ServiceMonitor/PodMonitor
+# target, which is what these matchers filter on.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -24,6 +29,13 @@ data:
             "type": "datasource",
             "query": "prometheus",
             "current": {}
+          },
+          {
+            "name": "namespace",
+            "type": "constant",
+            "query": "{{ .Release.Namespace }}",
+            "current": { "value": "{{ .Release.Namespace }}", "text": "{{ .Release.Namespace }}" },
+            "hide": 2
           }
         ]
       },
@@ -35,7 +47,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
           "targets": [
             {
-              "expr": "sum(rate(django_http_responses_total_by_status_total[5m])) by (status)",
+              "expr": "sum(rate(django_http_responses_total_by_status_total{namespace=\"$namespace\"}[5m])) by (status)",
               "legendFormat": "{{`{{status}}`}}"
             }
           ]
@@ -47,7 +59,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
           "targets": [
             {
-              "expr": "sum(rate(django_http_responses_total_by_status_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(django_http_responses_total_by_status_total[5m])), 1)"
+              "expr": "sum(rate(django_http_responses_total_by_status_total{namespace=\"$namespace\", status=~\"5..\"}[5m])) / clamp_min(sum(rate(django_http_responses_total_by_status_total{namespace=\"$namespace\"}[5m])), 1)"
             }
           ]
         },
@@ -58,7 +70,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
           "targets": [
             {
-              "expr": "histogram_quantile(0.95, sum(rate(django_http_requests_latency_seconds_by_view_method_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(django_http_requests_latency_seconds_by_view_method_bucket{namespace=\"$namespace\"}[5m])) by (le))",
               "legendFormat": "p95"
             }
           ]
@@ -70,15 +82,15 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
           "targets": [
             {
-              "expr": "sum(rate(celery_task_succeeded_total[5m]))",
+              "expr": "sum(rate(celery_task_succeeded_total{namespace=\"$namespace\"}[5m]))",
               "legendFormat": "succeeded"
             },
             {
-              "expr": "sum(rate(celery_task_failed_total[5m]))",
+              "expr": "sum(rate(celery_task_failed_total{namespace=\"$namespace\"}[5m]))",
               "legendFormat": "failed"
             },
             {
-              "expr": "sum(rate(celery_task_retried_total[5m]))",
+              "expr": "sum(rate(celery_task_retried_total{namespace=\"$namespace\"}[5m]))",
               "legendFormat": "retried"
             }
           ]
@@ -90,7 +102,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
           "targets": [
             {
-              "expr": "sum(celery_queue_length) by (queue_name)",
+              "expr": "sum(celery_queue_length{namespace=\"$namespace\"}) by (queue_name)",
               "legendFormat": "{{`{{queue_name}}`}}"
             }
           ]
@@ -102,7 +114,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
           "targets": [
             {
-              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"{{ .Release.Namespace }}\"}[15m])) by (pod)",
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\"}[15m])) by (pod)",
               "legendFormat": "{{`{{pod}}`}}"
             }
           ]
@@ -121,7 +133,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
           "targets": [
             {
-              "expr": "sum(rate(django_http_requests_total_by_method_total[5m])) by (method)",
+              "expr": "sum(rate(django_http_requests_total_by_method_total{namespace=\"$namespace\"}[5m])) by (method)",
               "legendFormat": "{{`{{method}}`}}"
             }
           ]
@@ -133,7 +145,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
           "targets": [
             {
-              "expr": "sum(rate(django_http_responses_total_by_status_total[5m])) by (status)",
+              "expr": "sum(rate(django_http_responses_total_by_status_total{namespace=\"$namespace\"}[5m])) by (status)",
               "legendFormat": "{{`{{status}}`}}"
             }
           ]
@@ -145,15 +157,15 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
           "targets": [
             {
-              "expr": "histogram_quantile(0.50, sum(rate(django_http_requests_latency_including_middlewares_seconds_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.50, sum(rate(django_http_requests_latency_including_middlewares_seconds_bucket{namespace=\"$namespace\"}[5m])) by (le))",
               "legendFormat": "p50"
             },
             {
-              "expr": "histogram_quantile(0.95, sum(rate(django_http_requests_latency_including_middlewares_seconds_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(django_http_requests_latency_including_middlewares_seconds_bucket{namespace=\"$namespace\"}[5m])) by (le))",
               "legendFormat": "p95"
             },
             {
-              "expr": "histogram_quantile(0.99, sum(rate(django_http_requests_latency_including_middlewares_seconds_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.99, sum(rate(django_http_requests_latency_including_middlewares_seconds_bucket{namespace=\"$namespace\"}[5m])) by (le))",
               "legendFormat": "p99"
             }
           ]
@@ -165,7 +177,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
           "targets": [
             {
-              "expr": "topk(10, histogram_quantile(0.95, sum(rate(django_http_requests_latency_seconds_by_view_method_bucket[5m])) by (le, view)))",
+              "expr": "topk(10, histogram_quantile(0.95, sum(rate(django_http_requests_latency_seconds_by_view_method_bucket{namespace=\"$namespace\"}[5m])) by (le, view)))",
               "legendFormat": "{{`{{view}}`}}"
             }
           ]
@@ -177,7 +189,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 41 },
           "targets": [
             {
-              "expr": "topk(10, sum(rate(django_http_requests_total_by_view_transport_method_total[5m])) by (view))",
+              "expr": "topk(10, sum(rate(django_http_requests_total_by_view_transport_method_total{namespace=\"$namespace\"}[5m])) by (view))",
               "legendFormat": "{{`{{view}}`}}"
             }
           ]
@@ -189,7 +201,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 41 },
           "targets": [
             {
-              "expr": "sum(rate(django_http_exceptions_total_by_type_total[5m])) by (type)",
+              "expr": "sum(rate(django_http_exceptions_total_by_type_total{namespace=\"$namespace\"}[5m])) by (type)",
               "legendFormat": "{{`{{type}}`}}"
             }
           ]
@@ -201,7 +213,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 49 },
           "targets": [
             {
-              "expr": "topk(10, sum(rate(django_http_exceptions_total_by_view_total[5m])) by (view))",
+              "expr": "topk(10, sum(rate(django_http_exceptions_total_by_view_total{namespace=\"$namespace\"}[5m])) by (view))",
               "legendFormat": "{{`{{view}}`}}"
             }
           ]
@@ -214,11 +226,11 @@ data:
           "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
           "targets": [
             {
-              "expr": "histogram_quantile(0.95, sum(rate(django_http_requests_body_total_bytes_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(django_http_requests_body_total_bytes_bucket{namespace=\"$namespace\"}[5m])) by (le))",
               "legendFormat": "request"
             },
             {
-              "expr": "histogram_quantile(0.95, sum(rate(django_http_responses_body_total_bytes_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(django_http_responses_body_total_bytes_bucket{namespace=\"$namespace\"}[5m])) by (le))",
               "legendFormat": "response"
             }
           ]
@@ -230,11 +242,11 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 57 },
           "targets": [
             {
-              "expr": "sum(rate(django_http_responses_streaming_total[5m]))",
+              "expr": "sum(rate(django_http_responses_streaming_total{namespace=\"$namespace\"}[5m]))",
               "legendFormat": "streaming"
             },
             {
-              "expr": "sum(rate(django_http_ajax_requests_total[5m]))",
+              "expr": "sum(rate(django_http_ajax_requests_total{namespace=\"$namespace\"}[5m]))",
               "legendFormat": "ajax"
             }
           ]
