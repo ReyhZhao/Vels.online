@@ -62,6 +62,26 @@ def test_narrowed_hunt_without_infrastructure_has_no_000(acme, fake_wazuh):
     assert all(INFRASTRUCTURE_AGENT_ID not in s.agent_ids for s in scopes)
 
 
+def test_resolve_scope_retains_agent_assets(acme):
+    # #512: the name/ip/os fetched for agent_ids is kept for the LLM asset inventory.
+    wc = MagicMock()
+    wc.get_agents.return_value = [
+        {"id": "001", "name": "web01", "ip": "10.0.0.5", "os": {"name": "Ubuntu 22.04"}},
+        {"id": "002", "name": "db01", "ip": "10.0.0.6", "os": {"name": "Debian 12"}},
+    ]
+    hunt = Hunt.objects.create(title="t", seed_text="q", scope_all_orgs=False)
+    hunt.scope_orgs.set([acme])
+
+    scopes = resolve_scope(hunt, wazuh_client=wc)
+
+    acme_scope = next(s for s in scopes if s.org_id == acme.id)
+    assert acme_scope.agent_ids == ["001", "002"]
+    assert acme_scope.agents == [
+        {"id": "001", "name": "web01", "ip": "10.0.0.5", "os": "Ubuntu 22.04"},
+        {"id": "002", "name": "db01", "ip": "10.0.0.6", "os": "Debian 12"},
+    ]
+
+
 def test_narrowed_hunt_infrastructure_only_resolves_to_000(fake_wazuh):
     infra = Organization.get_infrastructure()
     hunt = Hunt.objects.create(title="t", seed_text="q", scope_all_orgs=False)

@@ -208,6 +208,15 @@ def run_hunt_turn(
             tools.append(build_web_search_tool(search_fn=web_search_fn))
 
         sys_prompt = HUNT_SCOPING_SYS_PROMPT if is_scoping else HUNT_SYS_PROMPT
+        # Brief the model on the in-scope orgs' own assets so it doesn't flag the
+        # customer's own hosts/IPs/domains as attacker infrastructure (ADR-0018, #512).
+        # Appended to the single system prompt (not a second system message): providers
+        # only honour the first system message, and this keeps it out of the persisted
+        # transcript via the same role=="system" strip below.
+        from .assets import build_asset_inventory
+        inventory = build_asset_inventory(scope)
+        if inventory:
+            sys_prompt = f"{sys_prompt}\n\n{inventory}"
         research = run_research_phase(
             provider, tools,
             [{"role": "system", "content": sys_prompt}] + messages,

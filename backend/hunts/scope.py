@@ -26,6 +26,10 @@ class OrgScope:
     wazuh_group: str
     agent_ids: List[str] = field(default_factory=list)
     is_infrastructure: bool = False
+    # The customer's own assets for this org (name / ip / os), kept from the same
+    # get_agents call that yields agent_ids. Used to brief the model on known-good
+    # infrastructure so it doesn't flag our own hosts as attackers (#512).
+    agents: List[dict] = field(default_factory=list)
 
 
 def resolve_scope(hunt, wazuh_client=None) -> List[OrgScope]:
@@ -62,9 +66,21 @@ def resolve_scope(hunt, wazuh_client=None) -> List[OrgScope]:
             ))
             continue
         agent_ids: List[str] = []
+        asset_rows: List[dict] = []
         try:
             agents = wc.get_agents(org.wazuh_group)
-            agent_ids = [str(a["id"]) for a in agents if a.get("id")]
+            for a in agents:
+                if not a.get("id"):
+                    continue
+                agent_ids.append(str(a["id"]))
+                os_field = a.get("os") or {}
+                os_name = os_field.get("name") if isinstance(os_field, dict) else os_field
+                asset_rows.append({
+                    "id": str(a["id"]),
+                    "name": a.get("name") or "",
+                    "ip": a.get("ip") or "",
+                    "os": os_name or "",
+                })
         except Exception as exc:  # one org failing must not abort the whole hunt
             logger.warning("resolve_scope: could not fetch agents for org %s: %s", org.id, exc)
         out.append(OrgScope(
@@ -72,5 +88,6 @@ def resolve_scope(hunt, wazuh_client=None) -> List[OrgScope]:
             org_name=org.name,
             wazuh_group=org.wazuh_group,
             agent_ids=agent_ids,
+            agents=asset_rows,
         ))
     return out

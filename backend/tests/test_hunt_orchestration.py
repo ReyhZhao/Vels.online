@@ -209,6 +209,37 @@ def test_scoping_turn_can_propose_a_plan(hunt, org):
     )
 
 
+class CapturingProvider:
+    """Records the messages handed to the model so we can assert on the system prompt."""
+    def __init__(self):
+        self.seen_messages = None
+
+    def chat(self, messages, tools):
+        if self.seen_messages is None:
+            self.seen_messages = list(messages)
+        return ChatTurn(text="done")
+
+
+@pytest.mark.parametrize("phase", [None, PHASE_SCOPING])
+def test_in_scope_asset_inventory_reaches_the_model(hunt, org, phase):
+    # #512: the model must be briefed on the customer's own assets in both phases so it
+    # doesn't flag our own hosts/IPs as attacker infrastructure.
+    scope = [OrgScope(org.id, org.name, org.wazuh_group, ["1"],
+                      agents=[{"id": "1", "name": "web01", "ip": "10.0.0.5", "os": "Ubuntu"}])]
+    provider = CapturingProvider()
+
+    kwargs = {"phase": phase} if phase else {}
+    run_hunt_turn(hunt, [{"role": "user", "content": "q"}], provider=provider,
+                  scope=scope, os_client=FakeOS(), include_web_search=False, **kwargs)
+
+    system = next(m for m in provider.seen_messages if m["role"] == "system")
+    assert "IN-SCOPE ASSET INVENTORY" in system["content"]
+    assert "web01 — 10.0.0.5 — Ubuntu" in system["content"]
+    # never persisted into the transcript (system messages are stripped)
+    hunt.refresh_from_db()
+    assert all(m.get("role") != "system" for m in hunt.transcript)
+
+
 def test_second_turn_appends_with_higher_turn_and_seq(hunt, org):
     provider1 = FakeProvider([ChatTurn(text="first")])
     run_hunt_turn(hunt, [{"role": "user", "content": "q1"}], provider=provider1,
