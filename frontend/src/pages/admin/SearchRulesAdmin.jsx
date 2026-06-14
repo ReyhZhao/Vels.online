@@ -986,7 +986,13 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
   return (
     <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
       <td className="px-4 py-3 font-medium text-foreground">
-        {rule.name}
+        <button
+          type="button"
+          onClick={() => onEdit(rule)}
+          className="text-left text-foreground hover:text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm cursor-pointer"
+        >
+          {rule.name}
+        </button>
         {isSystem && (
           <span className="ml-2 inline-flex items-center rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 text-xs font-medium">system</span>
         )}
