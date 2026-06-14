@@ -27,6 +27,9 @@ CSP_FORM_ACTION = (
 )
 
 INSTALLED_APPS = [
+    # Operational observability (ADR-0019). Tenant-agnostic platform metrics,
+    # scraped on a dedicated port that is not routed by the public Ingress.
+    "django_prometheus",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -69,6 +72,9 @@ INSTALLED_APPS = [
 SITE_ID = 1
 
 MIDDLEWARE = [
+    # PrometheusBeforeMiddleware must be first and PrometheusAfterMiddleware last
+    # so request latency/count metrics span the whole middleware stack (ADR-0019).
+    "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "config.middleware.ForceHttpsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -78,6 +84,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",
+    "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -150,6 +157,11 @@ CELERY_BROKER_URL = _REDIS_URL or "memory://"
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_RESULT_EXTENDED = True
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+# Emit task-sent/-received events so the off-the-shelf celery-exporter can report
+# throughput, failures, retries and queue depth without instrumenting worker code
+# (ADR-0019). The exporter consumes these events from the Valkey broker.
+CELERY_WORKER_SEND_TASK_EVENTS = True
+CELERY_TASK_SEND_SENT_EVENT = True
 
 # ── Email ──────────────────────────────────────────────────────────────────────
 _email_ssl_no_verify = os.environ.get("EMAIL_SSL_NO_VERIFY", "False") == "True"

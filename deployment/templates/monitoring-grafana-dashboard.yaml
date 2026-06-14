@@ -1,0 +1,110 @@
+{{- if .Values.monitoring.enabled }}
+# Starter Grafana dashboard (ADR-0019) auto-discovered by the Grafana sidecar via the
+# label below. Covers API RED metrics, Celery task health/backlog and pod availability.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vels-online-dashboard
+  labels:
+    {{- toYaml .Values.monitoring.grafanaDashboardLabel | nindent 4 }}
+data:
+  vels-online.json: |
+    {
+      "title": "Vels Online — Platform Operations",
+      "uid": "vels-online-ops",
+      "schemaVersion": 39,
+      "editable": true,
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "title": "API request rate (RED)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(rate(django_http_responses_total_by_status_total[5m])) by (status)",
+              "legendFormat": "{{`{{status}}`}}"
+            }
+          ]
+        },
+        {
+          "title": "API error ratio (5xx)",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(rate(django_http_responses_total_by_status_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(django_http_responses_total_by_status_total[5m])), 1)"
+            }
+          ]
+        },
+        {
+          "title": "API latency p95 (s)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(django_http_requests_latency_seconds_by_view_method_bucket[5m])) by (le))",
+              "legendFormat": "p95"
+            }
+          ]
+        },
+        {
+          "title": "Celery task throughput",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            {
+              "expr": "sum(rate(celery_task_succeeded_total[5m]))",
+              "legendFormat": "succeeded"
+            },
+            {
+              "expr": "sum(rate(celery_task_failed_total[5m]))",
+              "legendFormat": "failed"
+            },
+            {
+              "expr": "sum(rate(celery_task_retried_total[5m]))",
+              "legendFormat": "retried"
+            }
+          ]
+        },
+        {
+          "title": "Celery queue backlog",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "targets": [
+            {
+              "expr": "sum(celery_queue_length) by (queue_name)",
+              "legendFormat": "{{`{{queue_name}}`}}"
+            }
+          ]
+        },
+        {
+          "title": "Pod restarts (15m)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "targets": [
+            {
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"{{ .Release.Namespace }}\"}[15m])) by (pod)",
+              "legendFormat": "{{`{{pod}}`}}"
+            }
+          ]
+        }
+      ]
+    }
+{{- end }}

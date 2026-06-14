@@ -65,16 +65,33 @@ spec:
               value: "https://vels.online"
             - name: DEBUG
               value: "True"
-
-#          readinessProbe:
-#            httpGet:
-#              path: /api/health/
-#              port: 8000
-#            initialDelaySeconds: 5
-#            periodSeconds: 10
-#          livenessProbe:
-#            httpGet:
-#              path: /api/health/
-#              port: 8000
-#            initialDelaySeconds: 15
-#            periodSeconds: 20
+            {{- if .Values.monitoring.enabled }}
+            # gunicorn runs multiple workers; prometheus_client multiprocess mode
+            # writes per-process samples here for the metrics sidecar to aggregate
+            # (ADR-0019). Deliberately not exposed on the Ingress-routed port 8000.
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: /tmp/prometheus-multiproc
+          volumeMounts:
+            - name: prometheus-multiproc
+              mountPath: /tmp/prometheus-multiproc
+        # Aggregating metrics endpoint on a dedicated port the public Ingress never
+        # routes to; only the in-cluster Prometheus scraper reaches it.
+        - name: metrics-exporter
+          image: {{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}
+          imagePullPolicy: Always
+          command: ["python", "metrics_exporter.py"]
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.monitoring.metricsPort }}
+          env:
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: /tmp/prometheus-multiproc
+            - name: METRICS_PORT
+              value: {{ .Values.monitoring.metricsPort | quote }}
+          volumeMounts:
+            - name: prometheus-multiproc
+              mountPath: /tmp/prometheus-multiproc
+      volumes:
+        - name: prometheus-multiproc
+          emptyDir: {}
+            {{- end }}

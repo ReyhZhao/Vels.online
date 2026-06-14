@@ -8,6 +8,25 @@ frontend:
     tag: 0.17.0
 imagePullSecrets:
   - name: registry-credentials
+
+# Operational observability (ADR-0019). Plugs into the cluster's existing Prometheus
+# Operator (kube-prometheus-stack) — we ship only the CRDs/dashboards/alerts, never the
+# stack itself. Gated so the chart still installs cleanly with monitoring disabled.
+monitoring:
+  enabled: true
+  # Dedicated metrics-aggregation port for the backend sidecar. Not routed by the Ingress.
+  metricsPort: 9808
+  # Labels the operator's Prometheus uses to discover our ServiceMonitor/PodMonitor and
+  # PrometheusRule. Matches the existing CNPG PodMonitor (prometheus: "true").
+  selectorLabels:
+    prometheus: "true"
+  # Label the Grafana sidecar watches to auto-load dashboard ConfigMaps.
+  grafanaDashboardLabel:
+    grafana_dashboard: "1"
+  celeryExporter:
+    image: ghcr.io/danihodovic/celery-exporter:0.10.10
+    port: 9808
+
 valkey:
   architecture: standalone
   auth:
@@ -17,3 +36,11 @@ valkey:
   primary:
     persistence:
       enabled: false
+  # Reuse the off-the-shelf Valkey metrics exporter and let the operator scrape it
+  # (ADR-0019). The ServiceMonitor carries the operator's discovery label.
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      labels:
+        prometheus: "true"
