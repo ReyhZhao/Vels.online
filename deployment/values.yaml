@@ -24,7 +24,7 @@ monitoring:
   grafanaDashboardLabel:
     grafana_dashboard: "1"
   celeryExporter:
-    image: ghcr.io/danihodovic/celery-exporter:0.10.10
+    image: ghcr.io/danihodovic/celery-exporter:0.12.2
     port: 9808
 
 valkey:
