@@ -11,8 +11,10 @@ from correlations.models import CORRELATION_KEY_NONE
 from correlations.services.leg_threshold import count_satisfies
 from correlations.services.search_compiler import (
     _ALERTS_INDEX,
+    _agg_target,
     CORRELATION_KEY_TO_WAZUH_FIELD,
     compile_agg_query,
+    compile_novelty_agg_query,
     compile_query,
 )
 
@@ -39,6 +41,9 @@ class FireUnit:
     distinct_info: dict | None = None
     is_absence: bool = False
     matched_count: int = 0
+    # Novelty Constraint (#521, ADR-0021): {novelty_field: [new values]} when this unit fired
+    # because the key saw a value new to history; the hits are *only* the novel-value docs.
+    novelty_info: dict | None = None
 
 
 @dataclass
@@ -76,13 +81,31 @@ def _format_distinct_title(distinct_info) -> str:
     return "; ".join(parts)
 
 
-def _compose_description(rule, alerts, key_value=None, distinct_info=None) -> str:
+def _format_novelty_title(novelty_info) -> str:
+    """One-line first-seen summary for the incident title, e.g. 'first-seen agent.name (db-prod-1)'."""
+    parts = []
+    for field, values in novelty_info.items():
+        vals = [str(v) for v in values]
+        shown = ", ".join(vals[:10]) + ("…" if len(vals) > 10 else "")
+        parts.append(f"first-seen {field} ({shown})")
+    return "; ".join(parts)
+
+
+def _compose_description(rule, alerts, key_value=None, distinct_info=None, novelty_info=None) -> str:
     key_label = f" (key: {key_value})" if key_value and key_value != "none" else ""
     lines = [
         f"Scheduled search rule **{rule.name}** fired{key_label}.",
         f"Description: {rule.description}" if rule.description else "",
         "",
     ]
+    if novelty_info:
+        lines.append("## Novelty (first seen)")
+        lines.append("")
+        for field, values in novelty_info.items():
+            lines.append(f"- **{field}** never seen before for this key:")
+            for value in values:
+                lines.append(f"  - {value}")
+        lines.append("")
     if distinct_info:
         lines.append("## Diversity")
         lines.append("")
@@ -129,7 +152,7 @@ def compose_absence_description(rule, leg, window_start, now, matched_count) -> 
     return "\n".join(line for line in lines if line is not None).rstrip() + "\n"
 
 
-def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinct_info=None):
+def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinct_info=None, novelty_info=None):
     """Persist alerts for *hits* and create/update an Incident for the given key_value.
 
     - Idempotent: docs already in SearchFinding are skipped.
@@ -241,13 +264,15 @@ def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinc
             return incident
 
         # No live incident — create a fresh one.
-        description = _compose_description(rule, new_alerts, key_value, distinct_info)
+        description = _compose_description(rule, new_alerts, key_value, distinct_info, novelty_info)
         if overflow > 0:
             description += f"\n+{overflow} more matched (truncated)\n"
 
         key_label = f" [{key_value}]" if key_value and key_value != "none" else ""
 
-        if distinct_info:
+        if novelty_info:
+            title = f"{rule.name}{key_label}: {_format_novelty_title(novelty_info)}"
+        elif distinct_info:
             title = f"{rule.name}{key_label}: {_format_distinct_title(distinct_info)}"
         else:
             title = f"{rule.name}{key_label}: {len(new_alerts)} matching document(s)"
@@ -426,6 +451,12 @@ def decide(rule, agent_ids, now, window_start, *, index=_ALERTS_INDEX, client=No
     if not legs:
         return Decision(False, [], {"mode": "empty", "satisfied_keys": [], "legs": []})
 
+    novelty_leg = next((leg for leg in legs if leg.has_novelty), None)
+    if novelty_leg is not None:
+        return _decide_novelty(
+            rule, agent_ids, novelty_leg, now, index=index, client=client, time_filter=time_filter
+        )
+
     has_diversity = any(leg.has_diversity for leg in legs)
     use_multi = rule.correlation_key != CORRELATION_KEY_NONE and (len(legs) > 1 or has_diversity)
     if use_multi:
@@ -582,6 +613,81 @@ def _decide_multi_leg(rule, agent_ids, legs, now, window_start, *, index, client
     return Decision(bool(units), units, diagnostics)
 
 
+def _decide_novelty(rule, agent_ids, leg, now, *, index, client, time_filter=None) -> Decision:
+    """Novelty Constraint path (#521, ADR-0021): fire on a value new to history.
+
+    1. One terms-of-terms aggregation (correlation key → novelty value) with a
+       min(@timestamp) sub-agg over the baseline window [now − baseline_lookback, now].
+    2. A (key, novelty value) is *new* iff its earliest sighting lands inside the detection
+       boundary [now − interval_minutes, now] — "first seen since the last run", which is
+       gap-free and overlap-free regardless of window_minutes.
+    3. Per key with ≥1 new value: fetch ONLY the novel-value documents from the detection
+       window into one fire unit (known/familiar logons are excluded).
+    """
+    from datetime import timedelta
+
+    wazuh_field = CORRELATION_KEY_TO_WAZUH_FIELD[rule.correlation_key]
+    mapping = _get_mapping_safe()
+    novelty_target = _agg_target(leg.novelty_field, mapping)
+
+    detection_start = now - timedelta(minutes=rule.interval_minutes)
+    baseline_start = now - timedelta(days=rule.baseline_lookback_days)
+    detection_start_ms = detection_start.timestamp() * 1000.0
+
+    extra_filters = [time_filter] if time_filter else None
+    agg_body = compile_novelty_agg_query(
+        list(leg.conditions.all()), agent_ids, baseline_start, now,
+        wazuh_field, leg.novelty_field, field_mapping=mapping, extra_filters=extra_filters,
+    )
+    result = client._search(index, agg_body)
+    buckets = result.get("aggregations", {}).get("key_agg", {}).get("buckets", [])
+
+    # Determine, per key, which novelty values are first-seen inside the detection boundary.
+    new_by_key: dict = {}
+    for b in buckets:
+        new_values = []
+        for nb in b.get("novelty_agg", {}).get("buckets", []):
+            first_seen = nb.get("first_seen", {}).get("value")
+            if first_seen is not None and first_seen >= detection_start_ms:
+                new_values.append(nb["key"])
+        if new_values:
+            new_by_key[b["key"]] = new_values
+
+    diagnostics = {
+        "mode": "novelty",
+        "satisfied_keys": sorted(new_by_key),
+        "legs": [{
+            "display_order": leg.display_order,
+            "novelty_field": leg.novelty_field,
+            "satisfied_key_count": len(new_by_key),
+        }],
+        "detection_start": detection_start.isoformat(),
+        "baseline_start": baseline_start.isoformat(),
+    }
+
+    # Fetch only the novel-value docs from the detection window for each satisfied key.
+    units = []
+    for key_value in sorted(new_by_key):
+        new_values = new_by_key[key_value]
+        hit_filters = list(extra_filters or [])
+        hit_filters.append({"terms": {novelty_target: new_values}})
+        body = compile_query(
+            list(leg.conditions.all()), agent_ids, detection_start, now,
+            rule.max_findings_per_run, key_field=wazuh_field, key_value=key_value,
+            field_mapping=mapping, extra_filters=hit_filters,
+        )
+        hits_block = client._search(index, body).get("hits", {})
+        hits = hits_block.get("hits", [])
+        total = hits_block.get("total", {}).get("value", 0)
+        if hits:
+            units.append(FireUnit(
+                key_value, hits, max(0, total - len(hits)),
+                novelty_info={leg.novelty_field: new_values},
+            ))
+
+    return Decision(bool(units), units, diagnostics)
+
+
 def debug_run(rule, org) -> dict:
     """Execute rule queries against OpenSearch for org WITHOUT materialising any results.
 
@@ -722,6 +828,7 @@ def run(rule, org):
             incident = _materialise_and_fire(
                 rule, org, unit.hits,
                 key_value=unit.key_value, overflow=unit.overflow, distinct_info=unit.distinct_info,
+                novelty_info=unit.novelty_info,
             )
         if incident:
             last_incident = incident
