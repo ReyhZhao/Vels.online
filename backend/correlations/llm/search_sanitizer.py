@@ -8,6 +8,7 @@ from correlations.models import CORRELATION_KEY_CHOICES
 from correlations.services.search_compiler import (
     _operators_for_type,
     validate_diversity_constraint,
+    validate_novelty_constraint,
 )
 
 _VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
@@ -116,6 +117,7 @@ def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
 
     window = _coerce_int(draft.get("window_minutes"), 60)
     interval = _coerce_int(draft.get("interval_minutes"), 60, minimum=5)
+    baseline_lookback_days = _coerce_int(draft.get("baseline_lookback_days"), 30)
     max_findings = _coerce_int(draft.get("max_findings_per_run"), 50)
     enabled = bool(draft.get("enabled", True))
 
@@ -191,6 +193,21 @@ def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
                     f"Re-add the diversity constraint in the builder before saving."
                 )
 
+        # Novelty Constraint (ADR-0021): preserve when valid, else strip with a load-bearing
+        # warning (a silent strip would leave a "first-seen" rule that no longer checks novelty).
+        novelty_field = str(leg.get("novelty_field", "")).strip()
+        if novelty_field:
+            count_operator = str(leg.get("count_operator", "gte")).strip() or "gte"
+            ok, reason = validate_novelty_constraint(novelty_field, corr_key, count_operator, mapping)
+            if ok:
+                sanitized_leg["novelty_field"] = novelty_field
+            else:
+                warnings.append(
+                    f"⚠ Leg {leg_i + 1}: novelty constraint on '{novelty_field}' was REMOVED — "
+                    f"this rule no longer detects first-seen values. {reason} "
+                    f"Re-add the novelty constraint in the builder before saving."
+                )
+
         sanitized_legs.append(sanitized_leg)
 
     time_window = _sanitize_time_window(draft, warnings)
@@ -202,6 +219,7 @@ def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
         "severity": severity,
         "window_minutes": window,
         "interval_minutes": interval,
+        "baseline_lookback_days": baseline_lookback_days,
         "max_findings_per_run": max_findings,
         "enabled": enabled,
         **time_window,

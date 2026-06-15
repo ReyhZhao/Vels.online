@@ -8,6 +8,7 @@ const EMPTY_DRAFT = {
   correlation_key: 'none',
   window_minutes: 60,
   interval_minutes: 60,
+  baseline_lookback_days: 30,
   max_findings_per_run: 50,
   severity: 'medium',
   include_agentless: false,
@@ -74,6 +75,9 @@ function LegEditor({ leg, legIndex, correlationKey, onChange, onRemove }) {
   const diversityNeedsKey = hasDiversity && correlationKey === 'none';
   const countOperator = leg.count_operator ?? 'gte';
   const isAbsence = countOperator === 'lte';
+  const hasNovelty = !!(leg.novelty_field && leg.novelty_field.trim());
+  const noveltyNeedsKey = hasNovelty && correlationKey === 'none';
+  const noveltyConflictsAbsence = hasNovelty && isAbsence;
   const absenceNeedsNoneKey = isAbsence && correlationKey !== 'none';
 
   function updateCondition(condIdx, updates) {
@@ -193,6 +197,38 @@ function LegEditor({ leg, legIndex, correlationKey, onChange, onRemove }) {
           </p>
         )}
       </div>
+
+      {/* Novelty Constraint (ADR-0021): fire on a value never seen before in the baseline */}
+      <div className="border-t border-border/60 pt-2 space-y-1">
+        <div className="flex items-center gap-2 flex-wrap text-xs text-foreground">
+          <span className="text-muted-foreground">Novelty (optional):</span>
+          <span>first-seen value of</span>
+          <input
+            value={leg.novelty_field ?? ''}
+            onChange={e => onChange(legIndex, { ...leg, novelty_field: e.target.value })}
+            placeholder="e.g. agent.name"
+            aria-label={`Leg ${legIndex + 1} novelty field`}
+            className="flex-1 min-w-40 rounded border border-border bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        {hasNovelty && (
+          <p className="text-xs text-muted-foreground">
+            Fires when <code>{leg.novelty_field}</code> takes a value <strong>never seen before</strong>{' '}
+            for the correlation key, judged against the rule’s baseline lookback (distinct from
+            Diversity, which counts distinct values <em>within</em> the window).
+          </p>
+        )}
+        {noveltyNeedsKey && (
+          <p className="text-xs text-destructive">
+            A novelty constraint requires a correlation key (not “None”) to group by.
+          </p>
+        )}
+        {noveltyConflictsAbsence && (
+          <p className="text-xs text-destructive">
+            A novelty constraint cannot be combined with the “at most (≤)” operator (an absence firing).
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -287,7 +323,7 @@ export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved 
   function addLeg() {
     setDraft(prev => ({
       ...prev,
-      legs: [...prev.legs, { count: 1, count_operator: 'gte', display_order: prev.legs.length, conditions: [{ ...EMPTY_CONDITION }] }],
+      legs: [...prev.legs, { count: 1, count_operator: 'gte', display_order: prev.legs.length, novelty_field: '', conditions: [{ ...EMPTY_CONDITION }] }],
     }));
   }
 
@@ -534,6 +570,20 @@ export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved 
                     aria-label="Interval minutes"
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">Baseline lookback (days)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={draft.baseline_lookback_days ?? 30}
+                    onChange={e => updateDraft({ baseline_lookback_days: Number(e.target.value) })}
+                    aria-label="Baseline lookback days"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    History depth for Novelty legs (first-seen). Larger ≈ “ever”.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-foreground mb-1">Max findings / run</label>

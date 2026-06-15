@@ -37,6 +37,7 @@ draft_rule schema:
   "correlation_key": "string — one of: {corr_keys}",
   "window_minutes": integer (min 1) — lookback window for each run,
   "interval_minutes": integer (min 5) — how often the rule runs,
+  "baseline_lookback_days": integer (min 1, default 30) — Novelty Constraint history depth: how far back to look when deciding a value is "new". Larger values approach "first time ever". Only relevant when a leg sets novelty_field,
   "max_findings_per_run": integer (min 1, default 50),
   "severity": "string — one of: {severities}",
   "enabled": true,
@@ -50,6 +51,7 @@ draft_rule schema:
       "display_order": integer — 0-indexed position,
       "distinct_field": "string (optional) — Diversity Constraint: an aggregatable Wazuh field. The leg fires only when its matches span at least min_distinct DISTINCT values of this field for the same correlation key. Leave empty for no constraint.",
       "min_distinct": integer (min 2, default 2) — required when distinct_field is set,
+      "novelty_field": "string (optional) — Novelty Constraint: an aggregatable Wazuh field. The leg fires only when this field takes a value NEVER SEEN BEFORE for the correlation key within baseline_lookback_days (first-seen detection, e.g. a user logging onto a host new for them). Leave empty for no constraint.",
       "conditions": [
         {{
           "field_name": "Wazuh document field path (e.g. rule.id, agent.name, data.srcip)",
@@ -88,6 +90,14 @@ two or more different countries, or one host contacting many distinct destinatio
 distinct_field (e.g. GeoLocation.country_name) and min_distinct (>= 2) on the leg, and pick a \
 matching correlation_key (e.g. user.name). distinct_field must be aggregatable (not a free-text \
 field) and must differ from the correlation key's field. Diversity requires a non-'none' correlation_key.
+- For "first time X" / first-seen detections (e.g. a user logging onto a host they have NEVER \
+used before, a new process on a host), set novelty_field (e.g. agent.name) on the leg and pick a \
+matching correlation_key (e.g. user.name), then set baseline_lookback_days for the history depth \
+(e.g. 30–90 days). A value is "new" when its earliest sighting within the baseline falls in the \
+most recent run interval. novelty_field must be aggregatable, must differ from the correlation \
+key's field, requires a non-'none' correlation_key, and CANNOT be combined with the absence \
+(count ≤) operator. Novelty is distinct from Diversity: Diversity counts distinct values WITHIN \
+one window; Novelty fires on a value not seen in the baseline history at all.
 - Time-of-day window (OPTIONAL): only set time_window_start, time_window_end, and a non-empty \
 time_window_days when the user asks to restrict detection to (or away from) particular hours/days — \
 e.g. "only outside working hours", "only at night", "only on weekends", "during business hours". \

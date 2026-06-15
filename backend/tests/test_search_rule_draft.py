@@ -325,6 +325,82 @@ def test_sanitizer_strips_diversity_when_key_is_none():
     assert any("removed" in w.lower() and "diversity" in w.lower() for w in warnings)
 
 
+# ── sanitize_search_draft: Novelty Constraint (ADR-0021) ───────────────────────
+
+def _novelty_draft(novelty_field="agent.name", correlation_key="user.name",
+                   baseline_lookback_days=30):
+    return {
+        "name": "First logon",
+        "description": "",
+        "correlation_key": correlation_key,
+        "severity": "high",
+        "window_minutes": 60,
+        "interval_minutes": 15,
+        "baseline_lookback_days": baseline_lookback_days,
+        "max_findings_per_run": 50,
+        "enabled": True,
+        "legs": [{
+            "count": 1,
+            "display_order": 0,
+            "novelty_field": novelty_field,
+            "conditions": [
+                {"field_name": "rule.groups", "operator": "equals", "value": "authentication_success"},
+            ],
+        }],
+    }
+
+
+def _novelty_mapping():
+    return {
+        "rule.groups": "keyword",
+        "agent.name": "keyword",
+        "data.dstuser": "keyword",
+        "rule.description": "text",
+    }
+
+
+def test_sanitizer_preserves_valid_novelty():
+    sanitized, warnings = sanitize_search_draft(_novelty_draft(), _novelty_mapping())
+    assert sanitized["legs"][0]["novelty_field"] == "agent.name"
+    assert warnings == []
+
+
+def test_sanitizer_strips_novelty_when_key_is_none():
+    sanitized, warnings = sanitize_search_draft(
+        _novelty_draft(correlation_key="none"), _novelty_mapping()
+    )
+    assert "novelty_field" not in sanitized["legs"][0]
+    assert any("removed" in w.lower() and "novelty" in w.lower() for w in warnings)
+
+
+def test_sanitizer_preserves_baseline_lookback_days():
+    sanitized, _ = sanitize_search_draft(
+        _novelty_draft(baseline_lookback_days=90), _novelty_mapping()
+    )
+    assert sanitized["baseline_lookback_days"] == 90
+
+
+def test_sanitizer_defaults_baseline_lookback_days_when_absent():
+    draft = _valid_search_draft()  # no baseline_lookback_days key
+    sanitized, _ = sanitize_search_draft(draft, _stub_mapping())
+    assert sanitized["baseline_lookback_days"] == 30
+
+
+# ── build_search_draft_prompt: schema awareness ────────────────────────────────
+
+def test_draft_prompt_describes_novelty_and_baseline():
+    from correlations.llm.search_prompt import build_search_draft_prompt
+    grounding = {
+        "correlation_keys": [{"value": "user.name"}, {"value": "none"}],
+        "severities": ["high", "medium"],
+        "core_fields": [{"value": "agent.name", "type": "keyword"}],
+    }
+    prompt = build_search_draft_prompt(grounding)
+    assert "novelty_field" in prompt
+    assert "baseline_lookback_days" in prompt
+    assert "first-seen" in prompt.lower() or "never seen before" in prompt.lower()
+
+
 def test_sanitizer_strips_diversity_on_non_aggregatable_field():
     sanitized, warnings = sanitize_search_draft(
         _diversity_draft(distinct_field="rule.description"), _diversity_mapping()
