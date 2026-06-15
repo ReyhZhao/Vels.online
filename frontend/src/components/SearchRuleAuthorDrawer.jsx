@@ -16,7 +16,7 @@ const EMPTY_DRAFT = {
   time_window_end: null,
   time_window_days: [],
   time_window_mode: 'inside',
-  legs: [{ count: 1, display_order: 0, conditions: [{ ...EMPTY_CONDITION }] }],
+  legs: [{ count: 1, count_operator: 'gte', display_order: 0, conditions: [{ ...EMPTY_CONDITION }] }],
   organization: undefined,
 };
 
@@ -72,6 +72,9 @@ function ConditionRow({ cond, index, onChange, onRemove }) {
 function LegEditor({ leg, legIndex, correlationKey, onChange, onRemove }) {
   const hasDiversity = !!(leg.distinct_field && leg.distinct_field.trim());
   const diversityNeedsKey = hasDiversity && correlationKey === 'none';
+  const countOperator = leg.count_operator ?? 'gte';
+  const isAbsence = countOperator === 'lte';
+  const absenceNeedsNoneKey = isAbsence && correlationKey !== 'none';
 
   function updateCondition(condIdx, updates) {
     const conds = leg.conditions.map((c, i) => i === condIdx ? { ...c, ...updates } : c);
@@ -95,10 +98,19 @@ function LegEditor({ leg, legIndex, correlationKey, onChange, onRemove }) {
             Leg {legIndex + 1}
           </span>
           <label className="flex items-center gap-1 text-xs text-foreground">
-            Count ≥
+            Count
+            <select
+              value={countOperator}
+              onChange={e => onChange(legIndex, { ...leg, count_operator: e.target.value })}
+              aria-label={`Leg ${legIndex + 1} count operator`}
+              className="rounded border border-border bg-background px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="gte">≥</option>
+              <option value="lte">≤</option>
+            </select>
             <input
               type="number"
-              min={1}
+              min={isAbsence ? 0 : 1}
               value={leg.count}
               onChange={e => onChange(legIndex, { ...leg, count: Number(e.target.value) })}
               aria-label={`Leg ${legIndex + 1} count`}
@@ -115,6 +127,18 @@ function LegEditor({ leg, legIndex, correlationKey, onChange, onRemove }) {
           Remove leg
         </button>
       </div>
+
+      {isAbsence && (
+        <p className="text-xs text-muted-foreground">
+          Absence firing: this leg triggers when <em>at most</em> {leg.count} document(s) match in the
+          window (e.g. ≤ 0 = “no matching documents”). It produces an incident with no evidence alerts.
+        </p>
+      )}
+      {absenceNeedsNoneKey && (
+        <p className="text-xs text-destructive">
+          The “at most (≤)” operator is only supported when the correlation key is “None”.
+        </p>
+      )}
 
       <div className="space-y-1.5">
         {leg.conditions.map((cond, ci) => (
@@ -263,7 +287,7 @@ export default function SearchRuleAuthorDrawer({ initialScope, onClose, onSaved 
   function addLeg() {
     setDraft(prev => ({
       ...prev,
-      legs: [...prev.legs, { count: 1, display_order: prev.legs.length, conditions: [{ ...EMPTY_CONDITION }] }],
+      legs: [...prev.legs, { count: 1, count_operator: 'gte', display_order: prev.legs.length, conditions: [{ ...EMPTY_CONDITION }] }],
     }));
   }
 

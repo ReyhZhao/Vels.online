@@ -13,7 +13,7 @@ const SEVERITY_COLORS = {
 };
 
 const EMPTY_CONDITION = { field_name: '', operator: 'equals', value: '' };
-const EMPTY_LEG = { count: 1, display_order: 0, distinct_field: '', min_distinct: 2, conditions: [{ ...EMPTY_CONDITION }] };
+const EMPTY_LEG = { count: 1, count_operator: 'gte', display_order: 0, distinct_field: '', min_distinct: 2, conditions: [{ ...EMPTY_CONDITION }] };
 
 // ── ConditionRow ───────────────────────────────────────────────────────────
 
@@ -61,6 +61,9 @@ function ConditionRow({ cond, index, operators, onChange, onRemove }) {
 function LegEditor({ leg, legIndex, operators, correlationKey, onChange, onRemove, showRemove }) {
   const hasDiversity = !!(leg.distinct_field && leg.distinct_field.trim());
   const diversityNeedsKey = hasDiversity && correlationKey === 'none';
+  const countOperator = leg.count_operator ?? 'gte';
+  const isAbsence = countOperator === 'lte';
+  const absenceNeedsNoneKey = isAbsence && correlationKey !== 'none';
   function updateCondition(condIdx, updates) {
     const conds = leg.conditions.map((c, i) => i === condIdx ? { ...c, ...updates } : c);
     onChange(legIndex, { ...leg, conditions: conds });
@@ -83,10 +86,19 @@ function LegEditor({ leg, legIndex, operators, correlationKey, onChange, onRemov
             Leg {legIndex + 1}
           </span>
           <label className="flex items-center gap-1 text-xs text-foreground">
-            Count ≥
+            Count
+            <select
+              value={countOperator}
+              onChange={e => onChange(legIndex, { ...leg, count_operator: e.target.value })}
+              aria-label={`Leg ${legIndex + 1} count operator`}
+              className="rounded border border-border bg-background px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="gte">≥</option>
+              <option value="lte">≤</option>
+            </select>
             <input
               type="number"
-              min={1}
+              min={isAbsence ? 0 : 1}
               value={leg.count}
               onChange={e => onChange(legIndex, { ...leg, count: Number(e.target.value) })}
               aria-label={`Leg ${legIndex + 1} count`}
@@ -165,6 +177,17 @@ function LegEditor({ leg, legIndex, operators, correlationKey, onChange, onRemov
             A diversity constraint requires a correlation key (not “None”) to group by.
           </p>
         )}
+        {isAbsence && (
+          <p className="text-xs text-muted-foreground">
+            Absence firing: this leg triggers when <em>at most</em> {leg.count} document(s) match in
+            the window (e.g. ≤ 0 = “no matching documents”). It produces an incident with no evidence alerts.
+          </p>
+        )}
+        {absenceNeedsNoneKey && (
+          <p className="text-xs text-destructive">
+            The “at most (≤)” operator is only supported when the correlation key is “None”.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -194,6 +217,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
     rule?.legs?.length
       ? rule.legs.map(l => ({
           count: l.count ?? 1,
+          count_operator: l.count_operator ?? 'gte',
           display_order: l.display_order,
           distinct_field: l.distinct_field ?? '',
           min_distinct: l.min_distinct ?? 2,
@@ -231,7 +255,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   function addLeg() {
     setLegs(prev => [
       ...prev,
-      { count: 1, display_order: prev.length, distinct_field: '', min_distinct: 2, conditions: [{ ...EMPTY_CONDITION }] },
+      { count: 1, count_operator: 'gte', display_order: prev.length, distinct_field: '', min_distinct: 2, conditions: [{ ...EMPTY_CONDITION }] },
     ]);
   }
 
