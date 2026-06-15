@@ -120,6 +120,65 @@ class TestGenerateSamples:
         assert provider.generate_sample_docs.call_args[0][1] is True
 
 
+# ── Novelty / absence-aware prompt (#521, ADR-0021) ──────────────────────────
+
+class TestSampleGenPromptNovelty:
+    def _novelty_rule(self, org):
+        r = SearchRule.objects.create(
+            organization=org, name="first logon", severity="high", correlation_key="user.name",
+            window_minutes=60, interval_minutes=15, baseline_lookback_days=90, max_findings_per_run=50,
+        )
+        leg = SearchRuleLeg.objects.create(rule=r, display_order=0, count=1, novelty_field="agent.name")
+        SearchLegCondition.objects.create(
+            leg=leg, field_name="rule.id", operator=SEARCH_OPERATOR_EQUALS, value="5715",
+        )
+        return r
+
+    @pytest.mark.django_db
+    def test_summarize_includes_novelty_and_baseline(self, org):
+        from correlations.llm.sample_generator import _summarize_rule
+        summary = _summarize_rule(self._novelty_rule(org))
+        assert summary["baseline_lookback_days"] == 90
+        assert summary["interval_minutes"] == 15
+        assert summary["legs"][0]["novelty_field"] == "agent.name"
+
+    @pytest.mark.django_db
+    def test_should_fire_prompt_stages_baseline_and_new_value(self, org):
+        from correlations.llm.sample_generator import _summarize_rule
+        from correlations.llm.search_prompt import build_sample_gen_prompt
+        grounding = {"rule": _summarize_rule(self._novelty_rule(org)), "core_fields": [], "sample_docs": []}
+        prompt = build_sample_gen_prompt(grounding, expect_fire=True)
+        assert "agent.name" in prompt
+        assert "now-" in prompt  # relative offsets
+        assert "BRAND NEW" in prompt
+        assert "BASELINE" in prompt
+
+    @pytest.mark.django_db
+    def test_should_not_fire_prompt_uses_known_value(self, org):
+        from correlations.llm.sample_generator import _summarize_rule
+        from correlations.llm.search_prompt import build_sample_gen_prompt
+        grounding = {"rule": _summarize_rule(self._novelty_rule(org)), "core_fields": [], "sample_docs": []}
+        prompt = build_sample_gen_prompt(grounding, expect_fire=False)
+        assert "KNOWN" in prompt
+        assert "now-" in prompt
+
+    def test_absence_should_fire_prompt_asks_for_no_matches(self):
+        from correlations.llm.search_prompt import build_sample_gen_prompt
+        rule = {"window_minutes": 60, "interval_minutes": 15, "baseline_lookback_days": 30,
+                "legs": [{"count": 0, "count_operator": "lte", "novelty_field": None}]}
+        prompt = build_sample_gen_prompt({"rule": rule, "core_fields": [], "sample_docs": []}, expect_fire=True)
+        assert "ABSENCE" in prompt
+        assert "NO documents" in prompt
+
+    def test_plain_count_rule_keeps_single_window_guidance(self):
+        from correlations.llm.search_prompt import build_sample_gen_prompt
+        rule = {"window_minutes": 30, "interval_minutes": 15, "baseline_lookback_days": 30,
+                "legs": [{"count": 3, "count_operator": "gte", "novelty_field": None}]}
+        prompt = build_sample_gen_prompt({"rule": rule, "core_fields": [], "sample_docs": []}, expect_fire=True)
+        assert "30 minutes of each other" in prompt
+        assert "BASELINE" not in prompt
+
+
 # ── Endpoint ─────────────────────────────────────────────────────────────────
 
 class TestGenerateEndpoint:

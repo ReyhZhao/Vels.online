@@ -123,12 +123,13 @@ Return a JSON object with exactly these fields:
 
 Rules for the documents:
 - Each document is a partial raw Wazuh alert (a JSON object), shaped like the real samples below.
-- Every document MUST include an "@timestamp" field (ISO-8601). For a should-fire test, put all \
-documents within {window_minutes} minutes of each other.
+- Every document MUST include an "@timestamp" field. Use either ISO-8601 (e.g. \
+2026-06-15T10:00:00Z) or a relative offset resolved at run time: now, now-40d, now-2m, now+1h \
+(units s/m/h/d/w). Relative offsets are the reliable way to place a document in a specific era.
+- {goal_detail}
 - Only use field paths that exist in the field reference below; do not invent fields.
 - Make the documents realistic — resemble genuine attack or benign logs, not just the rule's \
 conditions echoed back.
-- {goal_detail}
 - Return only valid JSON. No markdown, no code fences, no explanation outside the JSON.
 
 Rule under test:
@@ -142,23 +143,71 @@ Real example documents from this environment (for shape/realism):
 """
 
 
+def _sample_goal_detail(rule: dict, expect_fire: bool) -> str:
+    """Per-mode 'how to shape the docs' instruction, aware of the novelty/absence axes.
+
+    The default (count/diversity) keeps all docs inside one window; a Novelty Constraint
+    instead needs two *eras* (a baseline that establishes known values + a recent doc with a
+    new value), and an Absence Firing needs the matching set to be empty (fire) or full (no-fire).
+    """
+    legs = rule.get("legs", []) or []
+    window = rule.get("window_minutes", 60)
+    interval = rule.get("interval_minutes", 60)
+    baseline = rule.get("baseline_lookback_days", 30)
+    novelty_field = next((l.get("novelty_field") for l in legs if (l.get("novelty_field") or "")), None)
+    has_absence = any(l.get("count_operator") == "lte" for l in legs)
+    baseline_offset = max(1, baseline // 2)
+
+    if novelty_field:
+        if expect_fire:
+            return (
+                f"This rule has a NOVELTY (first-seen) constraint on '{novelty_field}'. Stage TWO eras "
+                f"using relative @timestamp offsets: (1) one or more BASELINE docs older than the last "
+                f"{interval} minutes but within {baseline} days (e.g. @timestamp now-{baseline_offset}d) that "
+                f"establish KNOWN values of '{novelty_field}' for the correlation key; and (2) at least one "
+                f"DETECTION doc within the last {interval} minutes (e.g. @timestamp now-2m) whose "
+                f"'{novelty_field}' value is BRAND NEW for that correlation key (it must NOT appear in any "
+                f"baseline doc). Every doc must still satisfy the leg's conditions."
+            )
+        return (
+            f"This rule has a NOVELTY (first-seen) constraint on '{novelty_field}'. To NOT fire, the recent "
+            f"document's '{novelty_field}' value must already be KNOWN: include a BASELINE doc (e.g. @timestamp "
+            f"now-{baseline_offset}d) carrying the SAME '{novelty_field}' value (for the same correlation key) as a "
+            f"recent doc (e.g. @timestamp now-2m), so nothing is new within the last {interval} minutes."
+        )
+
+    if has_absence:
+        if expect_fire:
+            return (
+                f"This is an ABSENCE firing (count ≤ threshold). To fire, the window must contain NO documents "
+                f"matching the leg's conditions — generate only NON-matching docs within the last {window} minutes "
+                f"(e.g. @timestamp now-5m), or return an empty list."
+            )
+        return (
+            f"This is an ABSENCE rule. To NOT fire, generate enough MATCHING documents within the last {window} "
+            f"minutes (e.g. @timestamp now-5m) to exceed the leg's threshold."
+        )
+
+    if expect_fire:
+        return (
+            f"Together, the documents must satisfy every leg of the rule for the same correlation key within "
+            f"{window} minutes of each other (e.g. @timestamp now-5m), including any diversity constraint."
+        )
+    return (
+        "The documents must fall just short — e.g. miss a leg, fall under a count threshold, sit outside "
+        "the window, or lack the required diversity."
+    )
+
+
 def build_sample_gen_prompt(grounding: dict, expect_fire: bool) -> str:
     """System prompt for generating should-fire / should-not-fire Sample Documents."""
     rule = grounding.get("rule", {})
-    window_minutes = rule.get("window_minutes", 60)
 
     if expect_fire:
         goal_text = "documents that SHOULD make the rule fire (a true-positive test)"
-        goal_detail = (
-            "Together, the documents must satisfy every leg of the rule for the same "
-            "correlation key within the window (including any diversity constraint)."
-        )
     else:
         goal_text = "documents that should NOT make the rule fire (a true-negative test)"
-        goal_detail = (
-            "The documents must fall just short — e.g. miss a leg, fall under a count "
-            "threshold, sit outside the window, or lack the required diversity."
-        )
+    goal_detail = _sample_goal_detail(rule, expect_fire)
 
     core = grounding.get("core_fields", [])
     expanded = grounding.get("expanded_fields", {})
@@ -173,7 +222,6 @@ def build_sample_gen_prompt(grounding: dict, expect_fire: bool) -> str:
     return _SAMPLE_GEN_TEMPLATE.format(
         goal_text=goal_text,
         goal_detail=goal_detail,
-        window_minutes=window_minutes,
         rule_text=rule_text,
         fields_text=fields_text,
         samples_text=samples_text,

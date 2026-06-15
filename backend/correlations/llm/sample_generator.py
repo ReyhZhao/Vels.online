@@ -89,11 +89,15 @@ def _summarize_rule(rule) -> dict:
         "description": rule.description,
         "correlation_key": rule.correlation_key,
         "window_minutes": rule.window_minutes,
+        "interval_minutes": rule.interval_minutes,
+        "baseline_lookback_days": rule.baseline_lookback_days,
         "legs": [
             {
                 "count": leg.count,
+                "count_operator": leg.count_operator,
                 "distinct_field": leg.distinct_field or None,
                 "min_distinct": leg.min_distinct if leg.has_diversity else None,
+                "novelty_field": leg.novelty_field or None,
                 "conditions": [
                     {"field_name": c.field_name, "operator": c.operator, "value": c.value}
                     for c in leg.conditions.all()
