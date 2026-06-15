@@ -141,7 +141,7 @@ def test_promotion_populates_iocs_and_rich_description(hunt, orgs):
 
     ioc_values = set(IOC.objects.filter(incident=incident).values_list("value", flat=True))
     assert "8.8.8.8" in ioc_values
-    assert any("malicious-c2.com" in v for v in ioc_values)
+    assert "malicious-c2.com" in ioc_values
     # description digest carries the host, rule and summary
     assert "web-01" in incident.description
     assert "Connection to known-bad host" in incident.description
