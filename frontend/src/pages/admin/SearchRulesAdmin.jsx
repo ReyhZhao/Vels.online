@@ -13,7 +13,7 @@ const SEVERITY_COLORS = {
 };
 
 const EMPTY_CONDITION = { field_name: '', operator: 'equals', value: '' };
-const EMPTY_LEG = { count: 1, count_operator: 'gte', display_order: 0, distinct_field: '', min_distinct: 2, conditions: [{ ...EMPTY_CONDITION }] };
+const EMPTY_LEG = { count: 1, count_operator: 'gte', display_order: 0, distinct_field: '', min_distinct: 2, novelty_field: '', conditions: [{ ...EMPTY_CONDITION }] };
 
 // ── ConditionRow ───────────────────────────────────────────────────────────
 
@@ -64,6 +64,9 @@ function LegEditor({ leg, legIndex, operators, correlationKey, onChange, onRemov
   const countOperator = leg.count_operator ?? 'gte';
   const isAbsence = countOperator === 'lte';
   const absenceNeedsNoneKey = isAbsence && correlationKey !== 'none';
+  const hasNovelty = !!(leg.novelty_field && leg.novelty_field.trim());
+  const noveltyNeedsKey = hasNovelty && correlationKey === 'none';
+  const noveltyConflictsAbsence = hasNovelty && isAbsence;
   function updateCondition(condIdx, updates) {
     const conds = leg.conditions.map((c, i) => i === condIdx ? { ...c, ...updates } : c);
     onChange(legIndex, { ...leg, conditions: conds });
@@ -189,6 +192,38 @@ function LegEditor({ leg, legIndex, operators, correlationKey, onChange, onRemov
           </p>
         )}
       </div>
+
+      {/* Novelty Constraint (ADR-0021): fire on a value never seen before in the baseline */}
+      <div className="border-t border-border/60 pt-2 space-y-1">
+        <div className="flex items-center gap-2 flex-wrap text-xs text-foreground">
+          <span className="text-muted-foreground">Novelty (optional):</span>
+          <span>first-seen value of</span>
+          <input
+            value={leg.novelty_field ?? ''}
+            onChange={e => onChange(legIndex, { ...leg, novelty_field: e.target.value })}
+            placeholder="e.g. agent.name"
+            aria-label={`Leg ${legIndex + 1} novelty field`}
+            className="flex-1 min-w-40 rounded border border-border bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        {hasNovelty && (
+          <p className="text-xs text-muted-foreground">
+            Unlike Diversity (distinct values <em>within</em> the window), this leg fires when{' '}
+            <code>{leg.novelty_field}</code> takes a value <strong>never seen before</strong> for the
+            correlation key, judged against the rule’s baseline lookback.
+          </p>
+        )}
+        {noveltyNeedsKey && (
+          <p className="text-xs text-destructive">
+            A novelty constraint requires a correlation key (not “None”) to group by.
+          </p>
+        )}
+        {noveltyConflictsAbsence && (
+          <p className="text-xs text-destructive">
+            A novelty constraint cannot be combined with the “at most (≤)” operator (an absence firing).
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -204,6 +239,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   const [correlationKey, setCorrelationKey] = useState(rule?.correlation_key ?? 'none');
   const [windowMinutes, setWindowMinutes] = useState(rule?.window_minutes ?? 60);
   const [intervalMinutes, setIntervalMinutes] = useState(rule?.interval_minutes ?? 60);
+  const [baselineLookbackDays, setBaselineLookbackDays] = useState(rule?.baseline_lookback_days ?? 30);
   const [maxFindings, setMaxFindings] = useState(rule?.max_findings_per_run ?? 50);
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const [includeAgentless, setIncludeAgentless] = useState(rule?.include_agentless ?? false);
@@ -221,6 +257,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
           display_order: l.display_order,
           distinct_field: l.distinct_field ?? '',
           min_distinct: l.min_distinct ?? 2,
+          novelty_field: l.novelty_field ?? '',
           conditions: l.conditions.map(c => ({
             field_name: c.field_name,
             operator: c.operator,
@@ -255,7 +292,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
   function addLeg() {
     setLegs(prev => [
       ...prev,
-      { count: 1, count_operator: 'gte', display_order: prev.length, distinct_field: '', min_distinct: 2, conditions: [{ ...EMPTY_CONDITION }] },
+      { count: 1, count_operator: 'gte', display_order: prev.length, distinct_field: '', min_distinct: 2, novelty_field: '', conditions: [{ ...EMPTY_CONDITION }] },
     ]);
   }
 
@@ -270,6 +307,7 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
       correlation_key: correlationKey,
       window_minutes: Number(windowMinutes),
       interval_minutes: Number(intervalMinutes),
+      baseline_lookback_days: Number(baselineLookbackDays),
       max_findings_per_run: Number(maxFindings),
       include_agentless: includeAgentless,
       enabled,
@@ -451,6 +489,20 @@ function RuleDrawer({ rule, catalog, orgs, onClose, onSaved }) {
                   aria-label="Interval minutes"
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Baseline lookback (days)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={baselineLookbackDays}
+                  onChange={e => setBaselineLookbackDays(e.target.value)}
+                  aria-label="Baseline lookback days"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  History depth for Novelty legs (first-seen). Larger = closer to “ever”.
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-foreground mb-1">Max findings / run</label>
