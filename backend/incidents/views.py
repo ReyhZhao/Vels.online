@@ -1718,7 +1718,7 @@ def _run_wazuh_response_task(request, task):
         )
     except WazuhAPIError as exc:
         logger.exception("WazuhAPIError running active response task=%s", task.pk)
-        error_msg = str(exc)
+        error_msg = "Active response failed; see server logs for details."
 
     with transaction.atomic():
         Task.objects.filter(pk=task.pk).update(
@@ -2401,7 +2401,7 @@ class IncidentAssistantView(AsyncAPIView):
                 )
                 loop.call_soon_threadsafe(event_queue.put_nowait, {
                     "type": "error",
-                    "detail": str(exc),
+                    "detail": "The incident assistant encountered an error.",
                 })
             finally:
                 loop.call_soon_threadsafe(event_queue.put_nowait, None)
