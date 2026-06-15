@@ -13,6 +13,7 @@ Key invariants:
   - The ephemeral index is always dropped, even on error (`finally`).
 """
 import logging
+import re
 import uuid
 from datetime import timedelta
 
@@ -36,6 +37,46 @@ TEST_INDEX_PREFIX = "vels-ruletest-"
 MAX_SAMPLES_PER_TEST = 200
 
 _TIMESTAMP_FIELD = "@timestamp"
+
+
+# Relative `@timestamp` offset on a Sample Document (#525, ADR-0021): `now`, `now-40d`,
+# `now+5m`, etc. Lets a Novelty Constraint Rule Test stage a baseline era (older than the
+# detection boundary) and a detection era (within the last interval) without hard-coding
+# wall-clock dates that rot. A literal absolute timestamp does not match and passes through.
+_REL_OFFSET_RE = re.compile(r"^\s*now\s*(?:([+-])\s*(\d+)\s*([smhdw]))?\s*$", re.IGNORECASE)
+_OFFSET_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+
+
+def _resolve_offset(value, base_now):
+    """Resolve a single relative `@timestamp` offset to an ISO string; pass others through."""
+    if not isinstance(value, str):
+        return value
+    match = _REL_OFFSET_RE.match(value)
+    if not match:
+        return value
+    sign, num, unit = match.groups()
+    if sign is None:
+        return base_now.isoformat()
+    delta = timedelta(**{_OFFSET_UNITS[unit.lower()]: int(num)})
+    resolved = base_now - delta if sign == "-" else base_now + delta
+    return resolved.isoformat()
+
+
+def resolve_sample_timestamps(samples: list, base_now=None) -> list:
+    """Return *samples* with any relative `@timestamp` offsets resolved against base_now.
+
+    Pure (apart from the default `base_now=timezone.now()`): each sample is shallow-copied,
+    so the input is not mutated. Samples without a relative `@timestamp` are returned as-is.
+    """
+    base_now = base_now or timezone.now()
+    out = []
+    for doc in samples:
+        if isinstance(doc, dict) and isinstance(doc.get(_TIMESTAMP_FIELD), str):
+            resolved = _resolve_offset(doc[_TIMESTAMP_FIELD], base_now)
+            if resolved is not doc[_TIMESTAMP_FIELD]:
+                doc = {**doc, _TIMESTAMP_FIELD: resolved}
+        out.append(doc)
+    return out
 
 
 def build_verdict(expect_fire: bool, decision) -> dict:
@@ -90,6 +131,10 @@ def run_rule_test(rule, samples: list, expect_fire: bool) -> dict:
             "diagnostics": None,
             "error": f"Too many sample documents (max {MAX_SAMPLES_PER_TEST}).",
         }
+
+    # Resolve relative @timestamp offsets (now-40d, now+5m, …) once, against a single base
+    # 'now', so the staged eras are internally consistent and the test is time-stable (#525).
+    samples = resolve_sample_timestamps(samples)
 
     index = f"{TEST_INDEX_PREFIX}{uuid.uuid4().hex}"
     client = OpenSearchClient()
