@@ -202,6 +202,18 @@ SEARCH_OPERATOR_CHOICES = [
     (SEARCH_OPERATOR_CIDR, "IP in CIDR"),
 ]
 
+# Leg-level document-count threshold operator (#519, ADR-0020). Distinct from the
+# field-level SEARCH_OPERATOR_* condition operators above: this governs how a Leg's
+# matched-document count is compared with its `count` threshold. `lte` expresses an
+# Absence Firing ("at most N matched", e.g. ≤ 0 = "no documents at all").
+SEARCH_COUNT_OP_GTE = "gte"
+SEARCH_COUNT_OP_LTE = "lte"
+
+SEARCH_COUNT_OP_CHOICES = [
+    (SEARCH_COUNT_OP_GTE, "At least (≥)"),
+    (SEARCH_COUNT_OP_LTE, "At most (≤)"),
+]
+
 _MAX_FINDINGS_DEFAULT = 50
 _MIN_INTERVAL_MINUTES = 5
 
@@ -268,6 +280,12 @@ class SearchRule(models.Model):
 class SearchRuleLeg(models.Model):
     rule = models.ForeignKey(SearchRule, on_delete=models.CASCADE, related_name="legs")
     count = models.PositiveIntegerField(default=1)
+    # Count Operator (#519, ADR-0020): how `count` is compared with the matched-document
+    # count. `gte` (default) is the ordinary "at least N matched"; `lte` is an Absence
+    # Firing ("at most N matched", e.g. ≤ 0 = "no documents in the window").
+    count_operator = models.CharField(
+        max_length=3, choices=SEARCH_COUNT_OP_CHOICES, default=SEARCH_COUNT_OP_GTE
+    )
     display_order = models.PositiveIntegerField(default=0)
     # Diversity Constraint (ADR-0009): when distinct_field is set, this leg is satisfied
     # for a correlation key only when its matching docs span at least min_distinct distinct
@@ -285,6 +303,11 @@ class SearchRuleLeg(models.Model):
     def has_diversity(self) -> bool:
         """True when this leg carries an active Diversity Constraint."""
         return bool(self.distinct_field)
+
+    @property
+    def is_absence(self) -> bool:
+        """True when this leg triggers an Absence Firing (count_operator = lte)."""
+        return self.count_operator == SEARCH_COUNT_OP_LTE
 
 
 class SearchLegCondition(models.Model):

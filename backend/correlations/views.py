@@ -22,6 +22,8 @@ from .models import (
     OPERATOR_CIDR,
     OPERATOR_GTE,
     OPERATOR_LTE,
+    SEARCH_COUNT_OP_CHOICES,
+    SEARCH_COUNT_OP_LTE,
     SEARCH_OPERATOR_CHOICES,
     SOURCE_REF_CATALOG,
     CorrelationRule,
@@ -219,6 +221,9 @@ class CorrelationCatalogView(APIView):
             "severities": ["critical", "high", "medium", "low", "info"],
             "search_operators": [
                 {"value": v, "label": l} for v, l in SEARCH_OPERATOR_CHOICES
+            ],
+            "count_operators": [
+                {"value": v, "label": l} for v, l in SEARCH_COUNT_OP_CHOICES
             ],
         })
 
@@ -681,7 +686,10 @@ class _SearchRuleLegSerializer(_s.ModelSerializer):
 
     class Meta:
         model = SearchRuleLeg
-        fields = ["id", "count", "display_order", "distinct_field", "min_distinct", "conditions"]
+        fields = [
+            "id", "count", "count_operator", "display_order",
+            "distinct_field", "min_distinct", "conditions",
+        ]
 
 
 def _compute_test_summary(tests) -> dict:
@@ -808,6 +816,19 @@ class _SearchRuleSerializer(_s.ModelSerializer):
         corr_key = data.get("correlation_key")
         if corr_key is None:
             corr_key = self.instance.correlation_key if self.instance else CORRELATION_KEY_NONE
+
+        # Absence Firing (#519, ADR-0020): an `lte` leg is only supported for
+        # correlation_key = none — a terms aggregation cannot enumerate which keys went
+        # silent, so there is no key universe for per-key absence.
+        if corr_key != CORRELATION_KEY_NONE:
+            for i, leg in enumerate(legs):
+                if leg.get("count_operator") == SEARCH_COUNT_OP_LTE:
+                    raise _s.ValidationError(
+                        {"legs": (
+                            f"Leg {i + 1}: the 'at most' (≤) count operator is only "
+                            "supported when the correlation key is 'none'."
+                        )}
+                    )
 
         mapping = None
         for i, leg in enumerate(legs):

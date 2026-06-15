@@ -8,6 +8,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from correlations.models import CORRELATION_KEY_NONE
+from correlations.services.leg_threshold import count_satisfies
 from correlations.services.search_compiler import (
     _ALERTS_INDEX,
     CORRELATION_KEY_TO_WAZUH_FIELD,
@@ -26,11 +27,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FireUnit:
-    """One thing the rule would fire for: a correlation key and the docs behind it."""
+    """One thing the rule would fire for: a correlation key and the docs behind it.
+
+    An Absence Firing (#519, ADR-0020) sets ``is_absence=True`` and carries no hits —
+    the shortfall itself is the evidence, so ``matched_count`` records how many
+    documents were actually seen (typically 0) for the Incident description.
+    """
     key_value: str
     hits: list
     overflow: int = 0
     distinct_info: dict | None = None
+    is_absence: bool = False
+    matched_count: int = 0
 
 
 @dataclass
@@ -92,6 +100,33 @@ def _compose_description(rule, alerts, key_value=None, distinct_info=None) -> st
         lines.append(f"- Raw source data: {raw}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def absence_title(rule) -> str:
+    """Incident title for an Absence Firing (#519, ADR-0020)."""
+    return f"{rule.name}: expected activity absent"[:255]
+
+
+def compose_absence_description(rule, leg, window_start, now, matched_count) -> str:
+    """Description for an Absence Firing — the shortfall *is* the evidence.
+
+    Pure: no DB or network access. States the window, the threshold that was met by
+    *too few* documents, and the actual matched count. An Absence Firing materialises
+    no Alerts, so there are no per-document sections.
+    """
+    lines = [
+        f"Scheduled search rule **{rule.name}** fired on the **absence** of matching documents.",
+        f"Description: {rule.description}" if rule.description else "",
+        "",
+        "## Absence",
+        "",
+        f"- Expected: at most **{leg.count}** matching document(s) in the window",
+        f"- Observed: **{matched_count}** matching document(s)",
+        f"- Window: {window_start.isoformat()} → {now.isoformat()}",
+        "",
+        "No documents were materialised — the shortfall itself is the evidence.",
+    ]
+    return "\n".join(line for line in lines if line is not None).rstrip() + "\n"
 
 
 def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinct_info=None):
@@ -286,6 +321,89 @@ def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinc
     return incident
 
 
+def _fire_absence(rule, org, leg, window_start, now, matched_count, key_value="none"):
+    """Create (or fold into) a zero-Alert Incident for an Absence Firing (#519, ADR-0020).
+
+    Reuses the one-live-incident-per-(rule, key_value) invariant: while an open Absence
+    Incident exists for this (rule, key_value), a re-observed absence is a no-op (the
+    silence folds into the open Incident); a new Incident is created only after the
+    prior one closes. Unlike _materialise_and_fire there are no Alerts to absorb — the
+    shortfall itself is the evidence, carried in the description + a SearchFiring row.
+
+    Returns the Incident, or None when an open one already exists (no-op).
+    """
+    from correlations.models import SearchFiring
+    from incidents.serializers import IncidentCreateSerializer
+    from incidents.services.events import record_event
+    from incidents.services.identifiers import next_display_id
+    from incidents.services.ioc_extraction import extract_and_save_iocs
+    from incidents.tasks import acquire_triage_lock, enrich_iocs_then_triage
+
+    with transaction.atomic():
+        live_firing = (
+            SearchFiring.objects
+            .filter(rule=rule, organization=org, key_value=key_value, incident__isnull=False)
+            .exclude(incident__state="closed")
+            .select_related("incident")
+            .first()
+        )
+        if live_firing:
+            # Absence persists across runs — fold into the open Incident, create nothing.
+            record_event(
+                live_firing.incident,
+                "search_rule_absence_persists",
+                payload={
+                    "rule_id": rule.id,
+                    "rule_name": rule.name,
+                    "key_value": key_value,
+                    "matched_count": matched_count,
+                },
+            )
+            return None
+
+        description = compose_absence_description(rule, leg, window_start, now, matched_count)
+        ser = IncidentCreateSerializer(
+            data={
+                "title": absence_title(rule),
+                "severity": rule.severity,
+                "source_kind": "scheduled_search",
+                "description": description,
+                "tlp": "amber",
+                "pap": "amber",
+            }
+        )
+        ser.is_valid(raise_exception=True)
+        display_id = next_display_id()
+        incident = ser.save(organization=org, display_id=display_id, created_by=None)
+
+        record_event(
+            incident,
+            "incident_created",
+            payload={
+                "source": "scheduled_search_rule",
+                "rule_id": rule.id,
+                "rule_name": rule.name,
+                "key_value": key_value,
+                "absence": True,
+            },
+        )
+
+        SearchFiring.objects.create(
+            rule=rule,
+            organization=org,
+            incident=incident,
+            key_value=key_value,
+            finding_count=0,
+        )
+
+        extract_and_save_iocs(incident)
+        if acquire_triage_lock(incident.id):
+            incident_id = incident.id
+            transaction.on_commit(lambda: enrich_iocs_then_triage.delay(incident_id))
+
+    return incident
+
+
 def decide(rule, agent_ids, now, window_start, *, index=_ALERTS_INDEX, client=None, time_filter=None) -> Decision:
     """Run the firing decision for *rule* against *index* WITHOUT materialising.
 
@@ -332,13 +450,21 @@ def _decide_single_leg(rule, agent_ids, leg, now, window_start, *, index, client
     total_count = hits_block.get("total", {}).get("value", 0)
     overflow = max(0, total_count - len(hits))
 
-    units = [FireUnit("none", hits, overflow, None)] if hits else []
+    satisfied = count_satisfies(total_count, leg.count_operator, leg.count)
+    if not satisfied:
+        units = []
+    elif leg.is_absence:
+        # Absence Firing (#519): no documents to materialise — carry the shortfall.
+        units = [FireUnit("none", [], 0, None, is_absence=True, matched_count=total_count)]
+    else:
+        units = [FireUnit("none", hits, overflow, None)]
     diagnostics = {
         "mode": "single",
-        "satisfied_keys": ["none"] if hits else [],
+        "satisfied_keys": ["none"] if satisfied else [],
         "legs": [{
             "display_order": leg.display_order,
             "count": leg.count,
+            "operator": leg.count_operator,
             "matched": len(hits),
             "total": total_count,
         }],
@@ -382,7 +508,7 @@ def _decide_multi_leg(rule, agent_ids, legs, now, window_start, *, index, client
         buckets = result.get("aggregations", {}).get("key_agg", {}).get("buckets", [])
         leg_satisfied = set()
         for b in buckets:
-            if b["doc_count"] < leg.count:
+            if not count_satisfies(b["doc_count"], leg.count_operator, leg.count):
                 continue
             if leg.has_diversity:
                 d_buckets = b.get("distinct_agg", {}).get("buckets", [])
@@ -585,10 +711,18 @@ def run(rule, org):
 
     last_incident = None
     for unit in decision.units:
-        incident = _materialise_and_fire(
-            rule, org, unit.hits,
-            key_value=unit.key_value, overflow=unit.overflow, distinct_info=unit.distinct_info,
-        )
+        if unit.is_absence:
+            # Absence Firing (#519, ADR-0020): no documents to materialise — create a
+            # zero-Alert Incident (or fold into an open one) for the shortfall.
+            incident = _fire_absence(
+                rule, org, legs[0], window_start, now, unit.matched_count,
+                key_value=unit.key_value,
+            )
+        else:
+            incident = _materialise_and_fire(
+                rule, org, unit.hits,
+                key_value=unit.key_value, overflow=unit.overflow, distinct_info=unit.distinct_info,
+            )
         if incident:
             last_incident = incident
 
