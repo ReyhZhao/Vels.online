@@ -139,6 +139,58 @@ def validate_diversity_constraint(
     return True, ""
 
 
+def validate_novelty_constraint(
+    novelty_field: str, correlation_key: str, count_operator: str, mapping: dict
+) -> tuple[bool, str]:
+    """Validate a leg's Novelty Constraint (ADR-0021).
+
+    Returns (True, "") when there is no constraint (empty novelty_field) or it is valid;
+    otherwise (False, reason). The invariants:
+      1. requires a non-'none' correlation key to group by ("new for whom?"),
+      2. incoherent with an Absence Firing leg (count_operator = 'lte') — a value cannot be
+         simultaneously absent and newly-seen,
+      3. novelty_field must be aggregatable (text resolved via .keyword) and present,
+      4. novelty_field must not resolve to the same Wazuh field as the correlation key
+         (a key is never novel against itself — the rule could never fire).
+    An empty mapping bypasses the existence/type checks (consistent with validate_search_field).
+    """
+    from correlations.models import CORRELATION_KEY_NONE, SEARCH_COUNT_OP_LTE
+
+    if not novelty_field:
+        return True, ""
+
+    if correlation_key == CORRELATION_KEY_NONE:
+        return False, (
+            "A novelty constraint requires a correlation key to group by "
+            "(correlation_key cannot be 'none')."
+        )
+
+    if count_operator == SEARCH_COUNT_OP_LTE:
+        return False, (
+            "A novelty constraint is incoherent with the 'at most' (≤) count operator "
+            "(an Absence Firing) — a value cannot be both absent and newly-seen."
+        )
+
+    base = novelty_field[: -len(".keyword")] if novelty_field.endswith(".keyword") else novelty_field
+    key_field = CORRELATION_KEY_TO_WAZUH_FIELD.get(correlation_key)
+    if key_field and base == key_field:
+        return False, (
+            f"novelty_field '{novelty_field}' must differ from the correlation key field "
+            f"'{key_field}' — a key cannot be novel against itself (the rule could never fire)."
+        )
+
+    if mapping:
+        if novelty_field not in mapping and base not in mapping:
+            return False, f"novelty_field '{novelty_field}' does not exist in the index mapping."
+        if not is_aggregatable_field(base, mapping):
+            return False, (
+                f"novelty_field '{novelty_field}' is a non-aggregatable text field "
+                f"and cannot be used for a novelty constraint."
+            )
+
+    return True, ""
+
+
 def _condition_to_clause(condition, field_mapping: dict | None = None) -> dict | None:
     """Convert a SearchLegCondition to an OpenSearch filter clause.
 
@@ -311,4 +363,52 @@ def compile_agg_query(
             }
         }
     base["aggregations"] = {"key_agg": key_agg}
+    return base
+
+
+# Size cap for the Novelty Constraint per-key value sub-aggregation (ADR-0021). Bounds the
+# cost of enumerating a key's distinct novelty values over the baseline lookback.
+_NOVELTY_SUBAGG_SIZE = 500
+
+
+def compile_novelty_agg_query(
+    conditions,
+    agent_ids,
+    baseline_start,
+    now,
+    key_field: str,
+    novelty_field: str,
+    max_buckets: int = _DEFAULT_AGG_MAX_BUCKETS,
+    field_mapping: dict | None = None,
+    novelty_size: int = _NOVELTY_SUBAGG_SIZE,
+    extra_filters: list | None = None,
+) -> dict:
+    """Build the Novelty Constraint baseline aggregation (ADR-0021).
+
+    Over the baseline window [baseline_start, now], returns a terms-of-terms aggregation:
+    per correlation key (key_field) → per novelty value (novelty_field) → the earliest
+    `@timestamp` seen for that pair (`first_seen`, a `min` aggregation). The caller marks a
+    (key, value) as *new* iff its first_seen lands inside the detection boundary. The novelty
+    sub-agg target is resolved to its .keyword subfield for text-typed fields.
+    """
+    base = compile_query(
+        conditions, agent_ids, baseline_start, now, max_size=0,
+        field_mapping=field_mapping, extra_filters=extra_filters,
+    )
+    base["aggregations"] = {
+        "key_agg": {
+            "terms": {"field": key_field, "size": max_buckets},
+            "aggregations": {
+                "novelty_agg": {
+                    "terms": {
+                        "field": _agg_target(novelty_field, field_mapping),
+                        "size": novelty_size,
+                    },
+                    "aggregations": {
+                        "first_seen": {"min": {"field": "@timestamp"}},
+                    },
+                }
+            },
+        }
+    }
     return base

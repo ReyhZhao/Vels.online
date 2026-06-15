@@ -262,6 +262,12 @@ class SearchRule(models.Model):
     time_window_mode = models.CharField(
         max_length=10, choices=TIME_WINDOW_MODE_CHOICES, default=TIME_WINDOW_MODE_INSIDE, blank=True
     )
+    # Novelty Constraint baseline depth (ADR-0021): how far back history is consulted to
+    # decide whether a leg's novelty_field value is "new". Sibling of window_minutes — the
+    # rule owns *time*, the leg owns *what* is watched. Days, because baselines are
+    # intrinsically days/weeks. Setting this to the index retention ceiling yields the
+    # "first time ever" variant.
+    baseline_lookback_days = models.PositiveIntegerField(default=30)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -292,6 +298,12 @@ class SearchRuleLeg(models.Model):
     # values of distinct_field (in addition to doc_count >= count). Empty = no constraint.
     distinct_field = models.CharField(max_length=200, blank=True, default="")
     min_distinct = models.PositiveIntegerField(default=1)
+    # Novelty Constraint (ADR-0021): when novelty_field is set, this leg fires for a
+    # correlation key only when a matching document carries a value of novelty_field whose
+    # *earliest* occurrence within the rule's baseline lookback lands inside the detection
+    # boundary (the run interval). The baseline-comparing sibling of distinct_field. A raw
+    # Wazuh field path (resolved via .keyword), e.g. agent.name. Empty = no constraint.
+    novelty_field = models.CharField(max_length=200, blank=True, default="")
 
     class Meta:
         ordering = ["display_order", "id"]
@@ -303,6 +315,11 @@ class SearchRuleLeg(models.Model):
     def has_diversity(self) -> bool:
         """True when this leg carries an active Diversity Constraint."""
         return bool(self.distinct_field)
+
+    @property
+    def has_novelty(self) -> bool:
+        """True when this leg carries an active Novelty Constraint (ADR-0021)."""
+        return bool(self.novelty_field)
 
     @property
     def is_absence(self) -> bool:

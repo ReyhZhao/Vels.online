@@ -688,7 +688,7 @@ class _SearchRuleLegSerializer(_s.ModelSerializer):
         model = SearchRuleLeg
         fields = [
             "id", "count", "count_operator", "display_order",
-            "distinct_field", "min_distinct", "conditions",
+            "distinct_field", "min_distinct", "novelty_field", "conditions",
         ]
 
 
@@ -722,6 +722,7 @@ class _SearchRuleSerializer(_s.ModelSerializer):
             "severity", "correlation_key", "window_minutes", "interval_minutes",
             "max_findings_per_run", "include_agentless", "enabled", "created_at", "updated_at",
             "time_window_start", "time_window_end", "time_window_days", "time_window_mode",
+            "baseline_lookback_days",
             "legs", "test_summary", "firing_summary",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
@@ -779,7 +780,10 @@ class _SearchRuleSerializer(_s.ModelSerializer):
         object-level (cross-field) check. On PATCH, fall back to the saved correlation_key.
         """
         from correlations.models import CORRELATION_KEY_NONE
-        from correlations.services.search_compiler import validate_diversity_constraint
+        from correlations.services.search_compiler import (
+            validate_diversity_constraint,
+            validate_novelty_constraint,
+        )
 
         # Time-of-day window validation (#440). Runs before the legs early-return so it is
         # enforced on PATCHes that touch only the window. On PATCH, fall back to saved values.
@@ -833,15 +837,23 @@ class _SearchRuleSerializer(_s.ModelSerializer):
         mapping = None
         for i, leg in enumerate(legs):
             distinct_field = (leg.get("distinct_field") or "").strip()
-            if not distinct_field:
+            novelty_field = (leg.get("novelty_field") or "").strip()
+            if not distinct_field and not novelty_field:
                 continue
             if mapping is None:
                 mapping = _get_mapping_safe()
-            ok, reason = validate_diversity_constraint(
-                distinct_field, leg.get("min_distinct", 1), corr_key, mapping
-            )
-            if not ok:
-                raise _s.ValidationError({"legs": f"Leg {i + 1}: {reason}"})
+            if distinct_field:
+                ok, reason = validate_diversity_constraint(
+                    distinct_field, leg.get("min_distinct", 1), corr_key, mapping
+                )
+                if not ok:
+                    raise _s.ValidationError({"legs": f"Leg {i + 1}: {reason}"})
+            if novelty_field:
+                ok, reason = validate_novelty_constraint(
+                    novelty_field, corr_key, leg.get("count_operator", "gte"), mapping
+                )
+                if not ok:
+                    raise _s.ValidationError({"legs": f"Leg {i + 1}: {reason}"})
         return data
 
     def _create_legs(self, rule, legs_data):
@@ -1042,6 +1054,7 @@ def _build_inmemory_search_rule(validated):
             for c in (leg_data.get("conditions") or [])
         ]
         distinct_field = leg_data.get("distinct_field") or ""
+        novelty_field = leg_data.get("novelty_field") or ""
         leg = _InMemorySpec({
             "id": None,
             "count": leg_data.get("count", 1),
@@ -1049,6 +1062,8 @@ def _build_inmemory_search_rule(validated):
             "distinct_field": distinct_field,
             "min_distinct": leg_data.get("min_distinct", 1),
             "has_diversity": bool(distinct_field.strip()),
+            "novelty_field": novelty_field,
+            "has_novelty": bool(novelty_field.strip()),
         })
         leg.conditions = _InMemoryRelatedManager(conds)
         legs.append(leg)
@@ -1062,6 +1077,8 @@ def _build_inmemory_search_rule(validated):
     rule.window_minutes = getattr(rule, "window_minutes", 60)
     rule.max_findings_per_run = getattr(rule, "max_findings_per_run", _MAX_FINDINGS_DEFAULT)
     rule.correlation_key = getattr(rule, "correlation_key", CORRELATION_KEY_NONE)
+    rule.interval_minutes = getattr(rule, "interval_minutes", 60)
+    rule.baseline_lookback_days = getattr(rule, "baseline_lookback_days", 30)
     # Time-of-day window (#440): ensure the attributes exist so the compiler can read them.
     rule.time_window_start = getattr(rule, "time_window_start", None)
     rule.time_window_end = getattr(rule, "time_window_end", None)
