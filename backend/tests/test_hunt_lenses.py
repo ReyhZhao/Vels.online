@@ -153,6 +153,114 @@ def test_top_values_rejects_non_allowlisted_field():
     assert os_client.calls == []
 
 
+# ── IT Hygiene Inventory lenses (ADR-0022) ──────────────────────────────────────
+
+def _inv_hit(agent_id, agent_name, name):
+    return {"_id": f"{agent_id}-{name}", "_index": "wazuh-states-inventory-packages-wazuh",
+            "_source": {"agent": {"id": agent_id, "name": agent_name},
+                        "package": {"name": name, "version": "1.0"}}}
+
+
+def test_inventory_search_fans_out_per_tenant_and_records_no_findings():
+    os_client = FakeOS(hits_per_call=[
+        [_inv_hit("1", "WEB-01", "evilpkg"), _inv_hit("2", "WEB-02", "evilpkg")],  # Acme
+        [],  # Beta
+    ])
+    recorded = []
+    ctx = _ctx(TWO_ORGS, os_client, sink=lambda *a, **k: recorded.append(a))
+    tool = _lens(build_hunt_lenses(ctx), "inventory_search")
+
+    result = tool.executor({"kind": "software", "query": "evilpkg"})
+
+    # one query per org, each scoped only to that org's agents, against the packages index
+    assert len(os_client.calls) == 2
+    assert os_client.calls[0][0] == "wazuh-states-inventory-packages-*"
+    assert _agent_ids_in(os_client.calls[0][1]) == ["1", "2"]
+    assert _agent_ids_in(os_client.calls[1][1]) == ["9"]
+    # summary-only: NOTHING is ever recorded
+    assert recorded == []
+    # matching hosts + counts surfaced per org
+    assert result.content["total_matches"] == 2
+    assert result.content["by_org"] == [
+        {"organization": "Acme", "count": 2, "hosts": ["WEB-01", "WEB-02"]},
+    ]
+
+
+def test_inventory_search_rejects_bad_kind_and_empty_query_without_querying():
+    os_client = FakeOS()
+    ctx = _ctx(TWO_ORGS, os_client, sink=lambda *a, **k: None)
+    tool = _lens(build_hunt_lenses(ctx), "inventory_search")
+
+    assert tool.executor({"kind": "packages", "query": "x"}).error is not None
+    assert tool.executor({"kind": "software", "query": "  "}).error is not None
+    assert os_client.calls == []
+
+
+def test_record_inventory_finding_resolves_host_and_records_with_model_summary():
+    scope = [
+        OrgScope(org_id=1, org_name="Acme", wazuh_group="acme", agent_ids=["1", "2"],
+                 agents=[{"id": "1", "name": "WEB-01"}, {"id": "2", "name": "WEB-02"}]),
+        OrgScope(org_id=2, org_name="Beta", wazuh_group="beta", agent_ids=["9"],
+                 agents=[{"id": "9", "name": "BETA-1"}]),
+    ]
+    os_client = FakeOS(hits_per_call=[[_inv_hit("1", "WEB-01", "evilpkg")]])
+    recorded = []
+    ctx = _ctx(scope, os_client,
+               sink=lambda s, lens, hits, summary=None: recorded.append((s.org_id, lens, hits, summary)))
+    tool = _lens(build_hunt_lenses(ctx), "record_inventory_finding")
+
+    result = tool.executor({"agent_name": "WEB-01", "kind": "software",
+                            "name": "evilpkg", "summary": "compromised evilpkg 1.0 on WEB-01"})
+
+    # the precise doc is re-queried, scoped to the resolved host only
+    assert _agent_ids_in(os_client.calls[0][1]) == ["1"]
+    # recorded to the owning org, carrying the model-supplied summary
+    assert len(recorded) == 1
+    org_id, lens, hits, summary = recorded[0]
+    assert org_id == 1 and lens == "record_inventory_finding"
+    assert summary == "compromised evilpkg 1.0 on WEB-01"
+    assert result.content["recorded"] == 1
+
+
+def test_record_inventory_finding_rejects_out_of_scope_host():
+    scope = [OrgScope(org_id=1, org_name="Acme", wazuh_group="acme", agent_ids=["1"],
+                      agents=[{"id": "1", "name": "WEB-01"}])]
+    os_client = FakeOS()
+    ctx = _ctx(scope, os_client, sink=lambda *a, **k: None)
+    tool = _lens(build_hunt_lenses(ctx), "record_inventory_finding")
+
+    result = tool.executor({"agent_name": "GHOST-9", "kind": "software",
+                            "name": "x", "summary": "y"})
+
+    assert result.error is not None
+    assert os_client.calls == []  # never queried for an out-of-scope host
+
+
+def test_record_inventory_finding_requires_a_summary():
+    scope = [OrgScope(org_id=1, org_name="Acme", wazuh_group="acme", agent_ids=["1"],
+                      agents=[{"id": "1", "name": "WEB-01"}])]
+    ctx = _ctx(scope, FakeOS(), sink=lambda *a, **k: None)
+    tool = _lens(build_hunt_lenses(ctx), "record_inventory_finding")
+    assert tool.executor({"agent_name": "WEB-01", "kind": "software", "name": "x"}).error is not None
+
+
+def test_record_inventory_finding_commits_nothing_under_the_scoping_sink():
+    scope = [OrgScope(org_id=1, org_name="Acme", wazuh_group="acme", agent_ids=["1"],
+                      agents=[{"id": "1", "name": "WEB-01"}])]
+    os_client = FakeOS(hits_per_call=[[_inv_hit("1", "WEB-01", "evilpkg")]])
+    # Scoping phase: record_findings is None (non-persisting sink, ADR-0018)
+    ctx = HuntContext(scope=scope, lookback_days=30, os_client=os_client, record_findings=None)
+    tool = _lens(build_hunt_lenses(ctx), "record_inventory_finding")
+
+    result = tool.executor({"agent_name": "WEB-01", "kind": "software",
+                            "name": "evilpkg", "summary": "bad"})
+
+    assert result.error is None
+    assert result.content["recorded"] == 0
+    assert result.content["scoping"] is True
+    assert os_client.calls == []  # nothing even queried in scoping
+
+
 def test_top_rules_fans_out_and_aggregates_per_org():
     os_client = FakeOS(aggs_per_call=[
         {"by_rule": {"buckets": [{"key": "brute force", "doc_count": 5}]}},

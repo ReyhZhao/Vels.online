@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 from assistants.tools import ToolResult, ToolSpec
+from security.inventory import INVENTORY_KINDS
 from .scope import OrgScope
 
 logger = logging.getLogger(__name__)
@@ -322,6 +323,124 @@ def _agent_ports(ctx: HuntContext):
     )
 
 
+# ── IT Hygiene Inventory lenses (ADR-0022) ──────────────────────────────────────────
+
+def _inventory_search(ctx: HuntContext):
+    def executor(args):
+        from security.inventory import (
+            INVENTORY_KINDS, build_inventory_query, index_for, is_valid_kind, project_hits,
+        )
+        kind = (args or {}).get("kind")
+        query = ((args or {}).get("query") or "").strip()
+        if not is_valid_kind(kind):
+            return ToolResult(error=f"kind must be one of {', '.join(INVENTORY_KINDS)}",
+                              summary="bad kind")
+        if not query:
+            return ToolResult(error="query (a name to search for) is required", summary="bad args")
+        index = index_for(kind)
+        by_org, total = [], 0
+        for s in ctx.scope:
+            if not s.agent_ids:
+                continue
+            body = build_inventory_query(kind, s.agent_ids, name=query, size=ctx.max_findings_per_org)
+            data = ctx.os_client._search(index, body)
+            hits = _hits(data)
+            if not hits:
+                continue
+            rows = project_hits(kind, hits)
+            hosts = list(dict.fromkeys(r.get("agent_name") for r in rows if r.get("agent_name")))
+            by_org.append({"organization": s.org_name, "count": len(hits),
+                           "hosts": hosts[:ctx.max_buckets]})
+            total += len(hits)
+        return ToolResult(
+            content={"kind": kind, "query": query, "by_org": by_org, "total_matches": total},
+            summary=f"{total} {kind} match(es) across {len(by_org)} org(s)",
+            count=total,
+        )
+
+    return ToolSpec(
+        name="inventory_search",
+        description="Behavioral lens: search the IT Hygiene Inventory — installed software, "
+                    "running processes, or services — across the in-scope fleet for a name "
+                    "('which hosts run X?'). Fans out per org and returns matching hosts + counts. "
+                    "Summary-only: it records NO Findings. Once you judge a specific host's item "
+                    "compromised, call record_inventory_finding to commit it as evidence. "
+                    "kind is one of software/service/process.",
+        parameters={"type": "object", "properties": {
+            "kind": {"type": "string", "enum": list(INVENTORY_KINDS)},
+            "query": {"type": "string", "description": "Name (or substring) to search for."},
+        }, "required": ["kind", "query"]},
+        executor=executor,
+    )
+
+
+def _record_inventory_finding(ctx: HuntContext):
+    def executor(args):
+        from security.inventory import (
+            INVENTORY_KINDS, build_inventory_query, index_for, is_valid_kind,
+        )
+        kind = (args or {}).get("kind")
+        agent_name = ((args or {}).get("agent_name") or "").strip()
+        name = ((args or {}).get("name") or "").strip()
+        summary = ((args or {}).get("summary") or "").strip()
+        if not is_valid_kind(kind):
+            return ToolResult(error=f"kind must be one of {', '.join(INVENTORY_KINDS)}",
+                              summary="bad kind")
+        if not agent_name or not name:
+            return ToolResult(error="agent_name and name are required", summary="bad args")
+        if not summary:
+            return ToolResult(error="summary is required (what is compromised and why)",
+                              summary="bad args")
+        # Scoping phase runs with a non-persisting sink (ADR-0018): commit nothing.
+        if not ctx.record_findings:
+            return ToolResult(
+                content={"recorded": 0, "scoping": True},
+                summary="scoping phase — nothing recorded; begin the hunt to commit evidence",
+            )
+        # Resolve the host to its owning org scope (tenant isolation): match by agent name
+        # within each scope's own agent roster, never across tenants.
+        owner, agent_ids = None, []
+        for s in ctx.scope:
+            ids = [a["id"] for a in (s.agents or [])
+                   if (a.get("name") or "").strip().lower() == agent_name.lower()]
+            if not ids and agent_name in s.agent_ids:  # infra scope carries no agents list
+                ids = [agent_name]
+            if ids:
+                owner, agent_ids = s, ids
+                break
+        if owner is None:
+            return ToolResult(error="agent not in hunt scope", summary="out of scope")
+        body = build_inventory_query(kind, agent_ids, name=name, size=ctx.max_findings_per_org)
+        data = ctx.os_client._search(index_for(kind), body)
+        hits = _hits(data)
+        if not hits:
+            return ToolResult(content={"recorded": 0},
+                              summary=f"no {kind} '{name}' found on {agent_name}")
+        ctx.record_findings(owner, "record_inventory_finding", hits, summary=summary)
+        return ToolResult(
+            content={"recorded": len(hits), "agent_name": agent_name, "kind": kind, "name": name},
+            summary=f"recorded {len(hits)} {kind} finding(s) on {agent_name}: {summary[:80]}",
+            count=len(hits),
+        )
+
+    return ToolSpec(
+        name="record_inventory_finding",
+        description="Record a specific IT Hygiene Inventory item — an installed package, process, "
+                    "or service — on a specific host as a Finding. This is the deliberate evidence "
+                    "step taken AFTER you have judged the item compromised: it re-queries the precise "
+                    "doc(s) on that host and commits them with your summary, which becomes the "
+                    "materialised Alert's title. Only commits during the Searching phase. "
+                    "kind is one of software/service/process.",
+        parameters={"type": "object", "properties": {
+            "agent_name": {"type": "string", "description": "Host (Wazuh agent name) the item is on."},
+            "kind": {"type": "string", "enum": list(INVENTORY_KINDS)},
+            "name": {"type": "string", "description": "The software/process/service name to record."},
+            "summary": {"type": "string", "description": "What is compromised and why (becomes the Alert title)."},
+        }, "required": ["agent_name", "kind", "name", "summary"]},
+        executor=executor,
+    )
+
+
 def build_ioc_tools(ctx: HuntContext) -> List[ToolSpec]:
     """The minimal spine lens set (#476): IOC sweep only."""
     return [_ioc_search(ctx)]
@@ -332,6 +451,7 @@ def build_behavioral_tools(ctx: HuntContext) -> List[ToolSpec]:
     return [
         _top_rules(ctx), _event_histogram(ctx), _top_values(ctx),
         _agent_activity(ctx), _agent_processes(ctx), _agent_ports(ctx),
+        _inventory_search(ctx), _record_inventory_finding(ctx),
     ]
 
 
