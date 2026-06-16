@@ -11,6 +11,7 @@ const CATEGORIES = [
   { key: 'state_change', label: 'State changes', description: "When an incident's state changes" },
   { key: 'incident_alert', label: 'Incident alerts', description: 'High/critical severity incidents affecting your organisation' },
   { key: 'task_complete', label: 'Task completed', description: 'When an automated task assigned to your incident finishes' },
+  { key: 'hunt_complete', label: 'Hunt completed', description: 'When a threat hunt you started finishes or ends with an error' },
   { key: 'shift_swap', label: 'Shift swaps', description: 'When a shift swap or cover offer is sent to you' },
 ];
 

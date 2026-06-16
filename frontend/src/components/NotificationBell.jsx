@@ -36,6 +36,8 @@ function NotificationItem({ notification, onRead, onDismiss }) {
     }
     if (notification.incident_id) {
       navigate(`/incidents/${notification.incident_display_id}`);
+    } else if (notification.payload?.link) {
+      navigate(notification.payload.link);
     }
   }
 

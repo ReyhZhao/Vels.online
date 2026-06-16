@@ -253,3 +253,76 @@ def test_second_turn_appends_with_higher_turn_and_seq(hunt, org):
     later = HuntEvent.objects.filter(hunt=hunt, seq__gt=first_max_seq)
     assert later.exists()
     assert later.first().turn == 1  # second turn
+
+
+# ── owner notifications on terminal status (#527) ──────────────────────────────
+
+from notifications.models import Notification, NotificationPreferences  # noqa: E402
+
+
+class RaisingProvider:
+    """A provider whose model call blows up, driving the turn to STATUS_ERROR."""
+    def chat(self, messages, tools):
+        raise RuntimeError("boom")
+
+
+@pytest.fixture
+def owner(django_user_model):
+    return django_user_model.objects.create_user(username="hunter", password="p")
+
+
+@pytest.fixture
+def owned_hunt(org, owner):
+    return Hunt.objects.create(
+        title="My hunt", owner=owner, seed_kind="question", seed_text="hunt deadbeef"
+    )
+
+
+def test_completed_hunt_notifies_owner(owned_hunt, owner, org):
+    status = run_hunt_turn(owned_hunt, [{"role": "user", "content": "q"}],
+                           provider=FakeProvider([ChatTurn(text="done")]),
+                           scope=_scope(org), os_client=FakeOS(), include_web_search=False)
+    assert status == Hunt.STATUS_COMPLETED
+    n = Notification.objects.get(recipient=owner, kind="hunt_complete")
+    assert n.payload["link"] == f"/hunting/{owned_hunt.id}"
+    assert n.incident_id is None
+
+
+def test_errored_hunt_notifies_owner(owned_hunt, owner, org):
+    status = run_hunt_turn(owned_hunt, [{"role": "user", "content": "q"}],
+                           provider=RaisingProvider(),
+                           scope=_scope(org), os_client=FakeOS(), include_web_search=False)
+    assert status == Hunt.STATUS_ERROR
+    n = Notification.objects.get(recipient=owner, kind="hunt_complete")
+    assert "error" in n.payload["body"].lower()
+
+
+def test_completed_hunt_respects_disabled_preference(owned_hunt, owner, org):
+    prefs = NotificationPreferences.objects.get_or_create(user=owner)[0]
+    prefs.inapp_hunt_complete = False
+    prefs.email_hunt_complete = False
+    prefs.push_hunt_complete = False
+    prefs.save()
+    run_hunt_turn(owned_hunt, [{"role": "user", "content": "q"}],
+                  provider=FakeProvider([ChatTurn(text="done")]),
+                  scope=_scope(org), os_client=FakeOS(), include_web_search=False)
+    assert not Notification.objects.filter(recipient=owner, kind="hunt_complete").exists()
+
+
+def test_ownerless_hunt_completes_without_notification(hunt, org):
+    # The default fixture hunt has no owner — completion must neither crash nor notify.
+    status = run_hunt_turn(hunt, [{"role": "user", "content": "q"}],
+                           provider=FakeProvider([ChatTurn(text="done")]),
+                           scope=_scope(org), os_client=FakeOS(), include_web_search=False)
+    assert status == Hunt.STATUS_COMPLETED
+    assert not Notification.objects.filter(kind="hunt_complete").exists()
+
+
+def test_scoping_completion_does_not_notify(owned_hunt, owner, org):
+    # A scoping turn lands idle (not terminal), so it is not a "hunt finished" event.
+    status = run_hunt_turn(owned_hunt, [{"role": "user", "content": "q"}],
+                           provider=FakeProvider([ChatTurn(text="let's refine")]),
+                           phase=PHASE_SCOPING, scope=_scope(org), os_client=FakeOS(),
+                           include_web_search=False)
+    assert status == Hunt.STATUS_SCOPING
+    assert not Notification.objects.filter(recipient=owner, kind="hunt_complete").exists()

@@ -40,6 +40,8 @@ class NotificationPreferences(models.Model):
     inapp_system_alert = models.BooleanField(default=True)
     email_task_complete = models.BooleanField(default=False)
     inapp_task_complete = models.BooleanField(default=True)
+    email_hunt_complete = models.BooleanField(default=False)
+    inapp_hunt_complete = models.BooleanField(default=True)
     email_shift_swap = models.BooleanField(default=True)
     inapp_shift_swap = models.BooleanField(default=True)
     push_shift_swap = models.BooleanField(default=False)
@@ -49,6 +51,7 @@ class NotificationPreferences(models.Model):
     push_state_change = models.BooleanField(default=False)
     push_incident_alert = models.BooleanField(default=False)
     push_task_complete = models.BooleanField(default=False)
+    push_hunt_complete = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -74,6 +77,7 @@ class Notification(models.Model):
     KIND_INCIDENT_ALERT = "incident_alert"
     KIND_SYSTEM_ALERT = "system_alert"
     KIND_TASK_COMPLETE = "task_complete"
+    KIND_HUNT_COMPLETE = "hunt_complete"
     KIND_SHIFT_SWAP = "shift_swap"
     KIND_CHOICES = [
         (KIND_ASSIGNMENT, "Assignment"),
@@ -83,6 +87,7 @@ class Notification(models.Model):
         (KIND_INCIDENT_ALERT, "Incident Alert"),
         (KIND_SYSTEM_ALERT, "System Alert"),
         (KIND_TASK_COMPLETE, "Task Complete"),
+        (KIND_HUNT_COMPLETE, "Hunt Complete"),
         (KIND_SHIFT_SWAP, "Shift Swap"),
     ]
 

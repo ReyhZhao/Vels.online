@@ -121,6 +121,36 @@ def _collecting_sink(collected):
     return record
 
 
+def _notify_hunt_terminal(hunt, status):
+    """Notify the hunt owner that a hunt reached a terminal status (#527).
+
+    Fired only for genuinely terminal outcomes — completed (the research is done) and
+    error. Scoping-idle and client-gone cancellations are not "the hunt finished" events.
+    Routed through the generic notification service, so per-channel delivery honours the
+    owner's `hunt_complete` preferences. Best-effort: a notification failure must never
+    mask or break the hunt result.
+    """
+    owner = hunt.owner
+    if owner is None:
+        return
+    title = hunt.title.strip() if hunt.title else "Threat hunt"
+    if status == Hunt.STATUS_COMPLETED:
+        findings = HuntFinding.objects.filter(hunt=hunt).count()
+        body = f"Your threat hunt finished with {findings} finding{'' if findings == 1 else 's'}."
+    else:
+        body = "Your threat hunt ended with an error."
+    try:
+        from notifications.models import Notification
+        from notifications.services.notifications import notify
+        notify(
+            Notification.KIND_HUNT_COMPLETE,
+            [owner],
+            payload={"title": title, "body": body, "link": f"/hunting/{hunt.id}"},
+        )
+    except Exception as exc:  # never let notification delivery break the turn
+        logger.warning("hunt-complete notification failed for hunt %s: %s", hunt.pk, exc)
+
+
 def _persist_findings(hunt, collected):
     """Persist collected hits as HuntFindings on the main thread. Idempotent per doc."""
     from security.models import Organization
@@ -252,6 +282,8 @@ def run_hunt_turn(
         Hunt.objects.filter(pk=hunt.pk).update(
             status=final_status, cancel_requested=False, transcript=clean_transcript,
         )
+        if final_status == Hunt.STATUS_COMPLETED:
+            _notify_hunt_terminal(hunt, final_status)
         on_event.append("done", {})
         return final_status
 
@@ -259,5 +291,6 @@ def run_hunt_turn(
         logger.warning("run_hunt_turn failed for hunt %s: %s", hunt.pk, exc)
         on_event.append("error", {"detail": str(exc)})
         Hunt.objects.filter(pk=hunt.pk).update(status=Hunt.STATUS_ERROR)
+        _notify_hunt_terminal(hunt, Hunt.STATUS_ERROR)
         on_event.append("done", {})
         return Hunt.STATUS_ERROR

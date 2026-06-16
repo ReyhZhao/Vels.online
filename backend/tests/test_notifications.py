@@ -146,6 +146,59 @@ def test_both_channels_enabled_creates_inapp_and_sends_email(acme, django_user_m
     assert mailoutbox[0].to == ["b@example.com"]
 
 
+# ── hunt_complete category: routed through notify() without an incident (#527) ──
+
+@pytest.mark.django_db
+def test_notify_hunt_complete_creates_inapp(staff):
+    # A hunt notification has neither incident nor task; default inapp_hunt_complete is True.
+    notify(
+        Notification.KIND_HUNT_COMPLETE, [staff],
+        payload={"title": "Threat hunt", "body": "finished", "link": "/hunting/abc"},
+    )
+    n = Notification.objects.get(recipient=staff, kind="hunt_complete")
+    assert n.shown_inapp is True
+    assert n.incident_id is None and n.task_id is None
+    assert n.payload["link"] == "/hunting/abc"
+
+
+@pytest.mark.django_db
+def test_hunt_complete_email_digest_works_without_incident(django_user_model, mailoutbox):
+    user = django_user_model.objects.create_user(username="hunter", password="p", email="h@example.com")
+    prefs = NotificationPreferences.objects.get_or_create(user=user)[0]
+    prefs.inapp_hunt_complete = False
+    prefs.email_hunt_complete = True
+    prefs.save()
+
+    notify(
+        Notification.KIND_HUNT_COMPLETE, [user],
+        payload={"title": "Threat hunt", "body": "finished", "link": "/hunting/abc"},
+    )
+
+    # The incident-less digest path must batch and send without error.
+    from notifications.tasks import send_digest_email
+    send_digest_email(user.id, None)
+
+    assert len(mailoutbox) == 1
+    assert mailoutbox[0].to == ["h@example.com"]
+
+
+@pytest.mark.django_db
+def test_notify_hunt_complete_silent_when_all_channels_disabled(staff, mailoutbox):
+    prefs = NotificationPreferences.objects.get_or_create(user=staff)[0]
+    prefs.inapp_hunt_complete = False
+    prefs.email_hunt_complete = False
+    prefs.push_hunt_complete = False
+    prefs.save()
+
+    notify(
+        Notification.KIND_HUNT_COMPLETE, [staff],
+        payload={"title": "Threat hunt", "body": "finished", "link": "/hunting/abc"},
+    )
+
+    assert not Notification.objects.filter(recipient=staff, kind="hunt_complete").exists()
+    assert len(mailoutbox) == 0
+
+
 @pytest.mark.django_db
 def test_digest_skips_user_with_no_email_address(acme, django_user_model, mailoutbox):
     user = django_user_model.objects.create_user(username="noemail", password="p", email="")
@@ -193,6 +246,24 @@ def test_prefs_patch_task_complete_persists(client, staff):
     response = client.get("/api/me/notification-prefs/")
     assert response.json()["email_task_complete"] is False
     assert response.json()["inapp_task_complete"] is False
+
+
+@pytest.mark.django_db
+def test_prefs_patch_hunt_complete_persists(client, staff):
+    client.force_login(staff)
+    response = client.patch(
+        "/api/me/notification-prefs/",
+        {"email_hunt_complete": True, "inapp_hunt_complete": False},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email_hunt_complete"] is True
+    assert data["inapp_hunt_complete"] is False
+
+    response = client.get("/api/me/notification-prefs/")
+    assert response.json()["email_hunt_complete"] is True
+    assert response.json()["inapp_hunt_complete"] is False
 
 
 # ── assignment / delegation guardrail ─────────────────────────────────────────
