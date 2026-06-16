@@ -122,6 +122,61 @@ def _lookup_assets(incident, user):
     )
 
 
+def _host_inventory(incident, user, os_client=None, wazuh_client=None):
+    def executor(args):
+        from security.inventory import (
+            INVENTORY_KINDS, build_inventory_query, index_for, is_valid_kind,
+            project_hits, resolve_host_agent_ids,
+        )
+        kind = (args or {}).get("kind")
+        agent_name = ((args or {}).get("agent_name") or "").strip()
+        query = ((args or {}).get("query") or "").strip() or None
+        if not is_valid_kind(kind):
+            return ToolResult(error=f"kind must be one of {', '.join(INVENTORY_KINDS)}",
+                              summary="bad kind")
+        if not agent_name:
+            return ToolResult(error="agent_name is required", summary="missing agent_name")
+
+        from security.opensearch import OpenSearchClient
+        from security.wazuh import WazuhClient
+        wc = wazuh_client or WazuhClient()
+        oc = os_client or OpenSearchClient()
+
+        # Tenant isolation: resolve the host only within the incident's org group, so a
+        # same-named host in another org is never reachable (ADR-0022). No scope="all".
+        try:
+            agent_ids = resolve_host_agent_ids(wc, incident.organization.wazuh_group, agent_name)
+        except Exception as exc:
+            return ToolResult(error=f"could not resolve host: {exc}", summary="error")
+        if not agent_ids:
+            return ToolResult(error=f"no host named '{agent_name}' in this organisation",
+                              summary="no such host")
+
+        body = build_inventory_query(kind, agent_ids, name=query, size=_LIMIT)
+        try:
+            data = oc._search(index_for(kind), body)
+        except Exception as exc:
+            return ToolResult(error=f"inventory query failed: {exc}", summary="error")
+        hits = (data or {}).get("hits", {}).get("hits", [])
+        rows = project_hits(kind, hits)
+        return ToolResult(content={"agent_name": agent_name, "kind": kind, "items": rows},
+                          summary=f"{len(rows)} {kind} item(s) on {agent_name}", count=len(rows))
+
+    return ToolSpec(
+        name="host_inventory",
+        description="Look up a host's IT Hygiene Inventory — its installed software, running "
+                    "processes, or services — for a host in THIS incident's organisation. Pass the "
+                    "host's agent_name (e.g. from the incident's assets) and kind "
+                    "(software/service/process); optionally narrow with a name query. Read-only.",
+        parameters={"type": "object", "properties": {
+            "agent_name": {"type": "string", "description": "Host (Wazuh agent name), e.g. from the incident's assets."},
+            "kind": {"type": "string", "enum": ["software", "service", "process"]},
+            "query": {"type": "string", "description": "Optional name/substring to narrow the listing."},
+        }, "required": ["agent_name", "kind"]},
+        executor=executor,
+    )
+
+
 # ── write (auto-execute) tools — ADR-0012 ─────────────────────────────────────────
 
 def _add_internal_comment(incident, user):
@@ -270,11 +325,13 @@ def _link_known_asset(incident, user):
 
 # ── assembly ──────────────────────────────────────────────────────────────────
 
-def build_incident_tools(incident, user, grounding, include_web_search=True):
+def build_incident_tools(incident, user, grounding, include_web_search=True,
+                         os_client=None, wazuh_client=None):
     """Build the incident assistant's tool set, bound to (incident, user).
 
     Read tools + auto-execute write tools, plus web_search (PAP-guarded) when
-    enabled and available.
+    enabled and available. os_client/wazuh_client are injectable for host_inventory
+    so tests never hit infrastructure.
     """
     from assistants.web_search import web_search_available
 
@@ -282,6 +339,7 @@ def build_incident_tools(incident, user, grounding, include_web_search=True):
         _lookup_incidents(incident, user),
         _query_alerts(incident, user),
         _lookup_assets(incident, user),
+        _host_inventory(incident, user, os_client=os_client, wazuh_client=wazuh_client),
         _add_internal_comment(incident, user),
         _add_task_comment(incident, user),
         _self_assign(incident, user),

@@ -93,6 +93,86 @@ def test_lookup_assets_scoped_to_org(staff, incident, org_a, org_b):
     assert names == {"WEB-01"}
 
 
+# ── host_inventory read tool (IT Hygiene Inventory, ADR-0022) ─────────────────
+
+class _FakeWazuh:
+    def __init__(self, by_group):
+        self.by_group = by_group
+
+    def get_agents(self, group):
+        return self.by_group.get(group, [])
+
+
+class _FakeOS:
+    def __init__(self, hits=None):
+        self.calls = []
+        self._hits = hits or []
+
+    def _search(self, index, body):
+        self.calls.append((index, body))
+        return {"hits": {"hits": self._hits}}
+
+
+def _inv_hit(agent_name, pkg):
+    return {"_source": {"agent": {"id": "5", "name": agent_name},
+                        "package": {"name": pkg, "version": "1.0"}}}
+
+
+def test_host_inventory_is_org_scoped_and_projects_items(staff, incident, org_a):
+    wc = _FakeWazuh({"acme": [{"id": "5", "name": "WEB-01"}]})
+    oc = _FakeOS(hits=[_inv_hit("WEB-01", "openssl")])
+    tools = build_incident_tools(incident, staff, _grounding(incident), os_client=oc, wazuh_client=wc)
+
+    res = _tool(tools, "host_inventory").executor({"agent_name": "WEB-01", "kind": "software"})
+
+    assert res.error is None
+    # queried the packages index, scoped to the resolved host's agent id only
+    assert oc.calls[0][0] == "wazuh-states-inventory-packages-*"
+    assert oc.calls[0][1]["query"]["bool"]["filter"][0]["terms"]["agent.id"] == ["5"]
+    assert res.content["items"] == [{"agent_id": "5", "agent_name": "WEB-01",
+                                     "name": "openssl", "version": "1.0",
+                                     "vendor": None, "architecture": None}]
+
+
+def test_host_inventory_cannot_reach_a_host_in_another_org(staff, incident, org_a, org_b):
+    # WEB-99 lives in beta; the incident is in acme -> the tool only ever queries acme
+    wc = _FakeWazuh({"acme": [{"id": "5", "name": "WEB-01"}],
+                     "beta": [{"id": "99", "name": "WEB-99"}]})
+    oc = _FakeOS()
+    tools = build_incident_tools(incident, staff, _grounding(incident), os_client=oc, wazuh_client=wc)
+
+    res = _tool(tools, "host_inventory").executor({"agent_name": "WEB-99", "kind": "software"})
+
+    assert res.error is not None          # not resolvable within the incident's org
+    assert oc.calls == []                 # the inventory index is never queried
+
+
+def test_host_inventory_unknown_host_returns_clean_error(staff, incident, org_a):
+    wc = _FakeWazuh({"acme": [{"id": "5", "name": "WEB-01"}]})
+    oc = _FakeOS()
+    tools = build_incident_tools(incident, staff, _grounding(incident), os_client=oc, wazuh_client=wc)
+
+    res = _tool(tools, "host_inventory").executor({"agent_name": "GHOST", "kind": "software"})
+
+    assert res.error is not None and "this organisation" in res.error
+    assert oc.calls == []
+
+
+def test_host_inventory_rejects_bad_kind(staff, incident, org_a):
+    tools = build_incident_tools(incident, staff, _grounding(incident),
+                                 os_client=_FakeOS(), wazuh_client=_FakeWazuh({}))
+    res = _tool(tools, "host_inventory").executor({"agent_name": "WEB-01", "kind": "packages"})
+    assert res.error is not None
+
+
+def test_host_inventory_is_a_read_tool_no_scope_all_widen(staff, incident, org_a):
+    tools = build_incident_tools(incident, staff, _grounding(incident),
+                                 os_client=_FakeOS(), wazuh_client=_FakeWazuh({}))
+    inv = _tool(tools, "host_inventory")
+    assert inv.is_write is False
+    assert "scope" not in inv.parameters["properties"]   # no staff fleet-wide widen
+
+
 # ── auto-execute write tools (ADR-0012) ───────────────────────────────────────
 
 def test_add_internal_comment_creates_internal_comment_and_audits(staff, incident):
