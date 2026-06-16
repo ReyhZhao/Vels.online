@@ -170,6 +170,43 @@ def test_promotion_iocs_are_idempotent(hunt, orgs):
     assert IOC.objects.filter(incident=incident).count() == before
 
 
+def test_inventory_finding_summary_survives_persist_into_materialised_alert_title(hunt, orgs):
+    """An inventory Finding's model-supplied summary (ADR-0022) is preferred by
+    _persist_findings over rule.description/lens-name, and becomes the Alert title."""
+    from hunts.orchestration import _persist_findings
+
+    a, _b = orgs
+    inv_hit = {
+        "_index": "wazuh-states-inventory-packages-wazuh",
+        "_id": "WEB-01-evilpkg",
+        "_source": {"agent": {"name": "WEB-01"}, "package": {"name": "evilpkg", "version": "1.0"}},
+    }
+    # the 4-tuple the inventory record tool produces: (org_id, lens, hit, summary)
+    collected = [(a.id, "record_inventory_finding", inv_hit, "compromised evilpkg 1.0 on WEB-01")]
+    _persist_findings(hunt, collected)
+
+    finding = hunt.findings.get(wazuh_doc_id="WEB-01-evilpkg")
+    assert finding.summary == "compromised evilpkg 1.0 on WEB-01"  # model summary wins (no rule.description)
+
+    incident = materialise_findings_for_org(hunt, a)
+    alert = Alert.objects.get(incident=incident)
+    assert alert.title == "compromised evilpkg 1.0 on WEB-01"
+
+
+def test_persist_falls_back_to_rule_description_for_alert_doc_findings(hunt, orgs):
+    """No regression: an alert-doc finding with no model summary still uses rule.description."""
+    from hunts.orchestration import _persist_findings
+
+    a, _b = orgs
+    alert_hit = {
+        "_index": "wazuh-alerts", "_id": "d9",
+        "_source": {"agent": {"name": "web-01"}, "rule": {"description": "brute force"}},
+    }
+    _persist_findings(hunt, [(a.id, "ioc_search", alert_hit, None)])
+
+    assert hunt.findings.get(wazuh_doc_id="d9").summary == "brute force"
+
+
 def test_cross_org_hunt_yields_one_incident_per_org_never_joined(hunt, orgs):
     a, b = orgs
     _finding(hunt, a, "1")

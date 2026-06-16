@@ -115,9 +115,11 @@ def _collecting_sink(collected):
     can deadlock SQLite and is needless cross-thread work. So we collect during the loop
     and persist on the main thread afterwards (see _persist_findings).
     """
-    def record(org_scope, lens_name, hits):
+    def record(org_scope, lens_name, hits, summary=None):
+        # `summary` is the model-supplied per-call summary for inventory evidence
+        # (ADR-0022); alert-doc lenses pass none and fall back in _persist_findings.
         for hit in hits:
-            collected.append((org_scope.org_id, lens_name, hit))
+            collected.append((org_scope.org_id, lens_name, hit, summary))
     return record
 
 
@@ -156,12 +158,14 @@ def _persist_findings(hunt, collected):
     from security.models import Organization
 
     org_cache = {}
-    for org_id, lens_name, hit in collected:
+    for org_id, lens_name, hit, summary in collected:
         org = org_cache.get(org_id)
         if org is None:
             org = org_cache[org_id] = Organization.objects.get(pk=org_id)
         source = hit.get("_source", {}) or {}
         rule_desc = source.get("rule", {}).get("description", "") if isinstance(source, dict) else ""
+        # A model-supplied summary (inventory evidence, ADR-0022) wins; otherwise fall
+        # back to the alert doc's rule description, then the lens name.
         HuntFinding.objects.get_or_create(
             hunt=hunt,
             source_index=hit.get("_index", ""),
@@ -170,7 +174,7 @@ def _persist_findings(hunt, collected):
                 "organization": org,
                 "lens": lens_name,
                 "raw_doc": source,
-                "summary": (rule_desc or lens_name)[:500],
+                "summary": (summary or rule_desc or lens_name)[:500],
             },
         )
 
