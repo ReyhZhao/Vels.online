@@ -47,7 +47,8 @@ draft_rule schema:
   "time_window_mode": "string — 'inside' (consider only docs INSIDE the window) or 'outside' (consider only docs OUTSIDE the window)",
   "legs": [
     {{
-      "count": integer (min 1) — minimum matching docs required in this leg,
+      "count": integer (min 1) — the matched-document threshold this leg compares against,
+      "count_operator": "string (optional, default 'gte') — how count is compared with the matched-doc count: 'gte' (at least N, the normal case) or 'lte' (Absence Firing: AT MOST N matched, e.g. count 0 + lte = 'no matching documents in the window'). Only 'gte' or 'lte'.",
       "display_order": integer — 0-indexed position,
       "distinct_field": "string (optional) — Diversity Constraint: an aggregatable Wazuh field. The leg fires only when its matches span at least min_distinct DISTINCT values of this field for the same correlation key. Leave empty for no constraint.",
       "min_distinct": integer (min 2, default 2) — required when distinct_field is set,
@@ -98,6 +99,12 @@ most recent run interval. novelty_field must be aggregatable, must differ from t
 key's field, requires a non-'none' correlation_key, and CANNOT be combined with the absence \
 (count ≤) operator. Novelty is distinct from Diversity: Diversity counts distinct values WITHIN \
 one window; Novelty fires on a value not seen in the baseline history at all.
+- For "absence" / "nothing happened" detections (e.g. a heartbeat or expected event that did NOT \
+arrive — "no successful backup in the last 24h", "agent stopped reporting", "no logins from the \
+service account"), set count_operator='lte' on the leg and use count to express the ceiling (count=0 \
+for "no matching documents at all"). The absence (lte) operator requires correlation_key='none' \
+(org-wide) and CANNOT be combined with a novelty_field. Leave count_operator at 'gte' for every \
+ordinary "this happened N times" rule.
 - Time-of-day window (OPTIONAL): only set time_window_start, time_window_end, and a non-empty \
 time_window_days when the user asks to restrict detection to (or away from) particular hours/days — \
 e.g. "only outside working hours", "only at night", "only on weekends", "during business hours". \

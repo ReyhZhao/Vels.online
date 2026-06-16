@@ -4,7 +4,12 @@ Unlike the correlation-rule sanitiser (which validates against a curated catalog
 this validates field_name + operator against the live index mapping per ADR-0007.
 An empty mapping bypasses field validation (same behaviour as validate_search_field).
 """
-from correlations.models import CORRELATION_KEY_CHOICES
+from correlations.models import (
+    CORRELATION_KEY_CHOICES,
+    CORRELATION_KEY_NONE,
+    SEARCH_COUNT_OP_GTE,
+    SEARCH_COUNT_OP_LTE,
+)
 from correlations.services.search_compiler import (
     _operators_for_type,
     validate_diversity_constraint,
@@ -13,6 +18,7 @@ from correlations.services.search_compiler import (
 
 _VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
 _VALID_CORR_KEYS = frozenset(k for k, _ in CORRELATION_KEY_CHOICES)
+_VALID_COUNT_OPERATORS = frozenset({SEARCH_COUNT_OP_GTE, SEARCH_COUNT_OP_LTE})
 _VALID_TIME_WINDOW_MODES = frozenset({"inside", "outside"})
 
 
@@ -170,8 +176,33 @@ def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
 
         count = _coerce_int(leg.get("count"), 1)
 
+        # Count Operator (ADR-0020): `lte` marks an Absence Firing ("at most N matched").
+        # It is load-bearing in the same way the constraints below are — dropping it silently
+        # turns a drafted absence rule back into an ordinary `gte` rule that looks correct but
+        # no longer fires on absence. Carry a validated operator through; anything unrecognised
+        # falls back to the `gte` default (no behaviour change for ordinary rules).
+        count_operator = str(leg.get("count_operator", SEARCH_COUNT_OP_GTE)).strip() or SEARCH_COUNT_OP_GTE
+        if count_operator not in _VALID_COUNT_OPERATORS:
+            warnings.append(
+                f"Leg {leg_i + 1}: unknown count operator '{count_operator}'; "
+                f"defaulting to '{SEARCH_COUNT_OP_GTE}' (at least)."
+            )
+            count_operator = SEARCH_COUNT_OP_GTE
+        # Absence Firings are only valid org-wide (correlation_key = none); a terms aggregation
+        # cannot enumerate which keys went silent (mirrors the serializer's save-time guard).
+        # Coerce + warn here so we never hand the author a draft that 400s on save.
+        if count_operator == SEARCH_COUNT_OP_LTE and corr_key != CORRELATION_KEY_NONE:
+            warnings.append(
+                f"⚠ Leg {leg_i + 1}: the 'at most' (≤) absence operator was changed back to "
+                f"'at least' (≥) — it is only supported when the correlation key is 'none', but "
+                f"this rule groups by '{corr_key}'. Set the correlation key to 'none' in the "
+                f"builder if you intended an absence rule."
+            )
+            count_operator = SEARCH_COUNT_OP_GTE
+
         sanitized_leg = {
             "count": count,
+            "count_operator": count_operator,
             "display_order": leg_i,
             "conditions": sanitized_conditions,
         }
@@ -197,7 +228,6 @@ def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
         # warning (a silent strip would leave a "first-seen" rule that no longer checks novelty).
         novelty_field = str(leg.get("novelty_field", "")).strip()
         if novelty_field:
-            count_operator = str(leg.get("count_operator", "gte")).strip() or "gte"
             ok, reason = validate_novelty_constraint(novelty_field, corr_key, count_operator, mapping)
             if ok:
                 sanitized_leg["novelty_field"] = novelty_field

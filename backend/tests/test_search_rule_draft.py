@@ -386,6 +386,76 @@ def test_sanitizer_defaults_baseline_lookback_days_when_absent():
     assert sanitized["baseline_lookback_days"] == 30
 
 
+# ── sanitize_search_draft: Count Operator / Absence Firing (ADR-0020) ───────────
+
+def _absence_draft(correlation_key="none", count_operator="lte", count=0):
+    """An Absence Firing draft: count_operator='lte' (org-wide by default)."""
+    return {
+        "name": "No successful backup",
+        "description": "Backup job stopped reporting",
+        "correlation_key": correlation_key,
+        "severity": "high",
+        "window_minutes": 1440,
+        "interval_minutes": 60,
+        "max_findings_per_run": 50,
+        "enabled": True,
+        "legs": [
+            {
+                "count": count,
+                "count_operator": count_operator,
+                "display_order": 0,
+                "conditions": [
+                    {"field_name": "rule.id", "operator": "equals", "value": "530"},
+                ],
+            }
+        ],
+    }
+
+
+def test_sanitizer_preserves_lte_with_none_key():
+    """An absence draft (lte + correlation_key=none) must round-trip with the operator intact."""
+    sanitized, warnings = sanitize_search_draft(_absence_draft(), _stub_mapping())
+    assert sanitized["legs"][0]["count_operator"] == "lte"
+    assert warnings == []
+
+
+def test_sanitizer_coerces_lte_with_grouping_key_and_warns():
+    """lte is only valid org-wide; with a grouping key it must coerce to gte and warn loudly."""
+    sanitized, warnings = sanitize_search_draft(
+        _absence_draft(correlation_key="host.name"), _stub_mapping()
+    )
+    assert sanitized["legs"][0]["count_operator"] == "gte"
+    assert any("at most" in w.lower() or "absence" in w.lower() for w in warnings)
+
+
+def test_sanitizer_defaults_count_operator_to_gte_when_absent():
+    """An ordinary draft with no count_operator key sanitizes to gte without any warning."""
+    sanitized, warnings = sanitize_search_draft(_valid_search_draft(), _stub_mapping())
+    assert sanitized["legs"][0]["count_operator"] == "gte"
+    assert not any("count operator" in w.lower() for w in warnings)
+
+
+def test_sanitizer_unknown_count_operator_defaults_to_gte_with_warning():
+    sanitized, warnings = sanitize_search_draft(
+        _absence_draft(correlation_key="none", count_operator="between"), _stub_mapping()
+    )
+    assert sanitized["legs"][0]["count_operator"] == "gte"
+    assert any("count operator" in w.lower() for w in warnings)
+
+
+def test_draft_prompt_documents_count_operator_absence():
+    from correlations.llm.search_prompt import build_search_draft_prompt
+    grounding = {
+        "correlation_keys": [{"value": "none"}, {"value": "host.name"}],
+        "severities": ["high", "medium"],
+        "core_fields": [{"value": "rule.id", "type": "keyword"}],
+    }
+    prompt = build_search_draft_prompt(grounding)
+    assert "count_operator" in prompt
+    assert "lte" in prompt
+    assert "absence" in prompt.lower()
+
+
 # ── build_search_draft_prompt: schema awareness ────────────────────────────────
 
 def test_draft_prompt_describes_novelty_and_baseline():
