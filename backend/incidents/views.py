@@ -25,9 +25,10 @@ from security.models import Organization, OrganizationMembership
 from django.contrib.auth.models import User
 
 from .filters import AssetFilterSet, IncidentFilterSet, TaskFilterSet, TaskTemplateFilterSet
-from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem, WazuhResponseExecution
+from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, NatExposure, Subject, Task, TaskTemplate, TaskTemplateItem, WazuhResponseExecution
 from .serializers import (
     AssetSerializer,
+    NatExposureSerializer,
     AttachmentSerializer,
     CommentCreateSerializer,
     CommentPatchSerializer,
@@ -462,13 +463,14 @@ class AssetListView(ListAPIView):
     serializer_class = AssetSerializer
 
     def get_queryset(self):
+        from incidents.services.exposures import annotate_internet_facing
         qs = Asset.objects.select_related("route", "organization")
         if not self.request.user.is_staff:
             member_org_ids = OrganizationMembership.objects.filter(
                 user=self.request.user
             ).values_list("organization_id", flat=True)
             qs = qs.filter(organization__in=member_org_ids)
-        return qs
+        return annotate_internet_facing(qs)
 
     def post(self, request):
         err = _require_auth(request)
@@ -2345,3 +2347,61 @@ class IncidentAssistantConfirmView(APIView):
             payload={"action_type": action_type, "label": action_label},
         )
         return Response({"recorded": True})
+
+
+class NatExposureListView(APIView):
+    def get(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+        asset, err = _get_asset_for_user(request.user, pk)
+        if err:
+            return err
+        if asset.kind != Asset.KIND_HOST:
+            return Response({"detail": "NAT exposures only apply to host assets."}, status=status.HTTP_400_BAD_REQUEST)
+        nats = NatExposure.objects.filter(asset=asset)
+        return Response(NatExposureSerializer(nats, many=True).data)
+
+    def post(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+        asset, err = _get_asset_for_user(request.user, pk)
+        if err:
+            return err
+        if asset.kind != Asset.KIND_HOST:
+            return Response({"detail": "NAT exposures only apply to host assets."}, status=status.HTTP_400_BAD_REQUEST)
+        ser = NatExposureSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        nat = ser.save(asset=asset)
+        return Response(NatExposureSerializer(nat).data, status=status.HTTP_201_CREATED)
+
+
+class NatExposureDetailView(APIView):
+    def _get_nat(self, request, pk, nat_pk):
+        if not request.user.is_authenticated:
+            return None, None, Response(status=status.HTTP_401_UNAUTHORIZED)
+        asset, err = _get_asset_for_user(request.user, pk)
+        if err:
+            return None, None, err
+        try:
+            nat = NatExposure.objects.get(pk=nat_pk, asset=asset)
+        except NatExposure.DoesNotExist:
+            return None, None, Response(status=status.HTTP_404_NOT_FOUND)
+        return asset, nat, None
+
+    def patch(self, request, pk, nat_pk):
+        asset, nat, err = self._get_nat(request, pk, nat_pk)
+        if err:
+            return err
+        ser = NatExposureSerializer(nat, data=request.data, partial=True)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        nat = ser.save()
+        return Response(NatExposureSerializer(nat).data)
+
+    def delete(self, request, pk, nat_pk):
+        asset, nat, err = self._get_nat(request, pk, nat_pk)
+        if err:
+            return err
+        nat.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

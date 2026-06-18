@@ -454,6 +454,28 @@ class Asset(models.Model):
         return f"{self.name} ({self.kind})"
 
 
+class NatExposure(models.Model):
+    PROTOCOL_TCP = "tcp"
+    PROTOCOL_UDP = "udp"
+    PROTOCOL_CHOICES = [
+        (PROTOCOL_TCP, "TCP"),
+        (PROTOCOL_UDP, "UDP"),
+    ]
+
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="nat_exposures")
+    protocol = models.CharField(max_length=3, choices=PROTOCOL_CHOICES)
+    port = models.PositiveIntegerField()
+    public_ip = models.GenericIPAddressField(null=True, blank=True)
+    description = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["protocol", "port"]
+
+    def __str__(self):
+        return f"{self.protocol.upper()}/{self.port} on {self.asset}"
+
+
 class IncidentAsset(models.Model):
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="incident_assets")
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="incident_assets")

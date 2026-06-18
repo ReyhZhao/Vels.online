@@ -113,10 +113,16 @@ class TaskTemplateFilterSet(django_filters.FilterSet):
 class AssetFilterSet(django_filters.FilterSet):
     org = django_filters.CharFilter(field_name="organization__slug", lookup_expr="exact")
     q = django_filters.CharFilter(field_name="name", lookup_expr="icontains")
+    internet_facing = django_filters.BooleanFilter(method="filter_internet_facing")
 
     class Meta:
         model = Asset
         fields = []
+
+    def filter_internet_facing(self, qs, name, value):
+        from incidents.services.exposures import annotate_internet_facing
+        qs = annotate_internet_facing(qs)
+        return qs.filter(internet_facing=value)
 
 
 class TaskFilterSet(django_filters.FilterSet):

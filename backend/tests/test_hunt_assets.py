@@ -21,7 +21,7 @@ def test_empty_scope_renders_nothing():
 def test_lists_agents_with_name_ip_and_os():
     scope = [OrgScope(1, "Acme", "acme", ["1"], agents=_agents(1))]
 
-    out = build_asset_inventory(scope, routes_by_org={})
+    out = build_asset_inventory(scope, routes_by_org={}, exposures_by_org_agent={})
 
     assert "## Acme" in out
     assert "host1 — 10.0.0.1 — Ubuntu 22.04" in out
@@ -33,7 +33,7 @@ def test_includes_ingress_routes_when_provided():
     scope = [OrgScope(1, "Acme", "acme", ["1"], agents=_agents(1))]
     routes = {1: [{"fqdn": "app.acme.com", "backend_host": "10.0.0.1", "backend_port": 443}]}
 
-    out = build_asset_inventory(scope, routes_by_org=routes)
+    out = build_asset_inventory(scope, routes_by_org=routes, exposures_by_org_agent={})
 
     assert "Ingress routes (1):" in out
     assert "app.acme.com -> 10.0.0.1:443" in out
@@ -49,7 +49,7 @@ def test_tenant_isolation_each_org_sees_only_its_own_assets():
         2: [{"fqdn": "app.globex.com", "backend_host": "10.1.0.1", "backend_port": 443}],
     }
 
-    out = build_asset_inventory(scope, routes_by_org=routes)
+    out = build_asset_inventory(scope, routes_by_org=routes, exposures_by_org_agent={})
     acme_section, globex_section = out.split("## Globex")
 
     assert "acme1" in acme_section and "globex1" not in acme_section
@@ -62,7 +62,7 @@ def test_tenant_isolation_each_org_sees_only_its_own_assets():
 def test_agent_list_is_truncated_with_a_remainder_summary():
     scope = [OrgScope(1, "Acme", "acme", [], agents=_agents(50))]
 
-    out = build_asset_inventory(scope, routes_by_org={}, max_agents_per_org=5)
+    out = build_asset_inventory(scope, routes_by_org={}, exposures_by_org_agent={}, max_agents_per_org=5)
 
     assert "Agents (50):" in out
     assert "host5 — 10.0.0.5" in out
@@ -86,7 +86,7 @@ def test_infrastructure_org_section_has_no_agent_list_and_does_not_error():
 def test_org_with_no_agents_available_renders_a_placeholder():
     scope = [OrgScope(1, "Acme", "acme", [], agents=[])]
 
-    out = build_asset_inventory(scope, routes_by_org={})
+    out = build_asset_inventory(scope, routes_by_org={}, exposures_by_org_agent={})
 
     assert "## Acme" in out
     assert "Agents: none available." in out

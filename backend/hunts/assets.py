@@ -40,6 +40,23 @@ def _fetch_routes_by_org(org_ids) -> Dict[int, list]:
     return out
 
 
+def _fetch_exposures_by_org_agent(org_ids) -> Dict[int, Dict[str, list]]:
+    """For each org, map agent_name → Exposure list for internet-facing host assets."""
+    from incidents.models import Asset
+    from incidents.services.exposures import annotate_internet_facing, host_exposures
+
+    out: Dict[int, Dict[str, list]] = {}
+    if not org_ids:
+        return out
+    qs = annotate_internet_facing(
+        Asset.objects.filter(organization_id__in=list(org_ids), kind="host")
+    ).filter(internet_facing=True)
+    for asset in qs:
+        if asset.agent_name:
+            out.setdefault(asset.organization_id, {})[asset.agent_name] = host_exposures(asset)
+    return out
+
+
 def _field(obj, key):
     """Read ``key`` from a Route model instance or a plain dict (test-friendly)."""
     if isinstance(obj, dict):
@@ -47,7 +64,24 @@ def _field(obj, key):
     return getattr(obj, key, None)
 
 
-def _format_org_section(scope: OrgScope, routes: list, max_agents: int) -> str:
+def _exposure_summary(exposures) -> str:
+    parts = []
+    for e in exposures:
+        if e.kind == "ingress_route":
+            parts.append(f"protected via {e.specifics['fqdn']}")
+        else:
+            proto = e.specifics["protocol"].upper()
+            port = e.specifics["port"]
+            parts.append(f"RAW {proto}/{port}")
+    return ", ".join(parts)
+
+
+def _format_org_section(
+    scope: OrgScope,
+    routes: list,
+    max_agents: int,
+    exposures_by_agent: Optional[Dict[str, list]] = None,
+) -> str:
     lines = [f"## {scope.org_name}"]
     if scope.is_infrastructure:
         lines.append(
@@ -63,7 +97,12 @@ def _format_org_section(scope: OrgScope, routes: list, max_agents: int) -> str:
                 name = a.get("name") or a.get("id") or "?"
                 ip = a.get("ip") or "?"
                 osn = a.get("os") or "?"
-                lines.append(f"- {name} — {ip} — {osn}")
+                agent_exps = (exposures_by_agent or {}).get(name, [])
+                if agent_exps:
+                    suffix = f" [internet-facing: {_exposure_summary(agent_exps)}]"
+                else:
+                    suffix = ""
+                lines.append(f"- {name} — {ip} — {osn}{suffix}")
             extra = len(agents) - len(shown)
             if extra > 0:
                 lines.append(f"- … and {extra} more agent(s)")
@@ -84,6 +123,7 @@ def build_asset_inventory(
     scope: List[OrgScope],
     *,
     routes_by_org: Optional[Dict[int, list]] = None,
+    exposures_by_org_agent: Optional[Dict[int, Dict[str, list]]] = None,
     max_agents_per_org: int = DEFAULT_MAX_AGENTS_PER_ORG,
 ) -> str:
     """Render the known-good asset inventory for the orgs in ``scope``.
@@ -94,11 +134,18 @@ def build_asset_inventory(
     """
     if not scope:
         return ""
+    real_ids = [s.org_id for s in scope if not s.is_infrastructure]
     if routes_by_org is None:
-        real_ids = [s.org_id for s in scope if not s.is_infrastructure]
         routes_by_org = _fetch_routes_by_org(real_ids)
+    if exposures_by_org_agent is None:
+        exposures_by_org_agent = _fetch_exposures_by_org_agent(real_ids)
     sections = [
-        _format_org_section(s, routes_by_org.get(s.org_id, []), max_agents_per_org)
+        _format_org_section(
+            s,
+            routes_by_org.get(s.org_id, []),
+            max_agents_per_org,
+            exposures_by_agent=exposures_by_org_agent.get(s.org_id, {}),
+        )
         for s in scope
     ]
     return _HEADER + "\n\n" + "\n\n".join(sections)

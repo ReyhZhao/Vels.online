@@ -36,6 +36,14 @@ class Route(models.Model):
     )
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
     dns_ok = models.BooleanField(null=True, blank=True)
+    backend_asset = models.ForeignKey(
+        "incidents.Asset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="route_exposures",
+        limit_choices_to={"kind": "host"},
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

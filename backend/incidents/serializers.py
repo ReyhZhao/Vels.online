@@ -2,7 +2,7 @@ from django.conf import settings
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, Subject, Task, TaskTemplate, TaskTemplateItem
+from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, NatExposure, Subject, Task, TaskTemplate, TaskTemplateItem
 from .tasks import get_triage_lock_started_at
 
 
@@ -75,17 +75,47 @@ def _compute_sla(incident, kind):
     }
 
 
+class NatExposureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NatExposure
+        fields = ["id", "protocol", "port", "public_ip", "description", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+
 class AssetSerializer(serializers.ModelSerializer):
     route_fqdn = serializers.SerializerMethodField()
     org_slug = serializers.CharField(source="organization.slug", read_only=True)
+    internet_facing = serializers.SerializerMethodField()
+    exposures = serializers.SerializerMethodField()
 
     class Meta:
         model = Asset
-        fields = ["id", "kind", "name", "agent_name", "ip_address", "role", "route", "route_fqdn", "org_slug", "is_active", "is_permanent", "last_seen_at", "created_at"]
+        fields = [
+            "id", "kind", "name", "agent_name", "ip_address", "role",
+            "route", "route_fqdn", "org_slug", "is_active", "is_permanent",
+            "last_seen_at", "created_at", "internet_facing", "exposures",
+        ]
         read_only_fields = ["id", "created_at"]
 
     def get_route_fqdn(self, obj):
         return obj.route.fqdn if obj.route else None
+
+    def get_internet_facing(self, obj):
+        if obj.kind != Asset.KIND_HOST:
+            return False
+        if hasattr(obj, "internet_facing"):
+            return bool(obj.internet_facing)
+        from incidents.services.exposures import host_exposures
+        return bool(host_exposures(obj))
+
+    def get_exposures(self, obj):
+        if obj.kind != Asset.KIND_HOST:
+            return []
+        from incidents.services.exposures import host_exposures
+        return [
+            {"kind": e.kind, "protection": e.protection, "specifics": e.specifics}
+            for e in host_exposures(obj)
+        ]
 
 
 class IncidentAssetSerializer(serializers.ModelSerializer):

@@ -106,9 +106,23 @@ def _lookup_assets(incident, user):
         qs = _scope_to_org(qs, incident, user, args)
         if q:
             qs = qs.filter(Q(name__icontains=q) | Q(agent_name__icontains=q) | Q(ip_address__icontains=q))
-        rows = list(qs.values("id", "name", "kind", "agent_name", "ip_address", "role")[:_LIMIT])
+        from incidents.services.exposures import annotate_internet_facing, host_exposures
+        qs = annotate_internet_facing(qs)
+        rows = list(qs.values("id", "name", "kind", "agent_name", "ip_address", "role", "internet_facing")[:_LIMIT])
         for r in rows:
             r["ip_address"] = str(r["ip_address"]) if r["ip_address"] else None
+        # Attach full exposure list per host asset
+        asset_pks = [r["id"] for r in rows if r["kind"] == "host"]
+        if asset_pks:
+            asset_map = {a.pk: a for a in Asset.objects.filter(pk__in=asset_pks)}
+            for r in rows:
+                if r["kind"] == "host" and r["id"] in asset_map:
+                    r["exposures"] = [
+                        {"kind": e.kind, "protection": e.protection, "specifics": e.specifics}
+                        for e in host_exposures(asset_map[r["id"]])
+                    ]
+                else:
+                    r["exposures"] = []
         return ToolResult(content=rows, summary=f"{len(rows)} assets", count=len(rows))
     return ToolSpec(
         name="lookup_assets",

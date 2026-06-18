@@ -126,7 +126,7 @@ class RouteListView(ListAPIView):
 
 
 class RouteDetailView(APIView):
-    _PATCH_FIELDS = {"name", "backend_host", "backend_port", "backend_protocol"}
+    _PATCH_FIELDS = {"name", "backend_host", "backend_port", "backend_protocol", "backend_asset"}
 
     def get(self, request, fqdn):
         route, err = _get_route(request, fqdn)
