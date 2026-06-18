@@ -56,6 +56,7 @@ const STATE_CLASSES = {
   in_progress:  'text-yellow-600 dark:text-yellow-400',
   on_hold:      'text-orange-600 dark:text-orange-400',
   needs_tuning: 'text-amber-600 dark:text-amber-400',
+  pending_closure: 'text-teal-600 dark:text-teal-400',
   resolved:     'text-green-600 dark:text-green-400',
   closed:       'text-muted-foreground',
 };

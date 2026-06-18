@@ -56,6 +56,10 @@ def make_incident(acme, state="new", closure_reason=None):
     ("on_hold", "closed"),
     ("needs_tuning", "in_progress"),
     ("needs_tuning", "closed"),
+    ("in_progress", "pending_closure"),
+    ("on_hold", "pending_closure"),
+    ("pending_closure", "in_progress"),
+    ("pending_closure", "closed"),
     ("resolved", "in_progress"),
     ("resolved", "closed"),
     ("closed", "in_progress"),
@@ -96,6 +100,13 @@ def test_legal_transition(from_state, to_state, acme, actor):
     ("closed", "on_hold"),
     ("closed", "needs_tuning"),
     ("closed", "resolved"),
+    ("new", "pending_closure"),
+    ("triaged", "pending_closure"),
+    ("pending_closure", "new"),
+    ("pending_closure", "triaged"),
+    ("pending_closure", "on_hold"),
+    ("pending_closure", "resolved"),
+    ("pending_closure", "needs_tuning"),
 ])
 def test_illegal_transition_raises(from_state, to_state, acme, actor):
     incident = make_incident(acme, state=from_state)
@@ -161,6 +172,28 @@ def test_reopen_from_resolved_clears_closure_reason(acme, actor):
     transition_incident(incident, "in_progress", actor=actor)
     incident.refresh_from_db()
     assert incident.state == "in_progress"
+    assert incident.closure_reason is None
+
+
+@pytest.mark.django_db
+def test_pending_closure_reopen_to_in_progress(acme, actor):
+    incident = make_incident(acme, state="pending_closure")
+    transition_incident(incident, "in_progress", actor=actor)
+    incident.refresh_from_db()
+    assert incident.state == "in_progress"
+
+
+@pytest.mark.django_db
+def test_pending_closure_in_reopen_states(acme, actor):
+    from incidents.services.transitions import REOPEN_STATES
+    assert "pending_closure" in REOPEN_STATES
+    # A pending_closure incident closed with a reason, then reopened, clears the reason.
+    incident = make_incident(acme, state="pending_closure")
+    transition_incident(incident, "closed", actor=actor, closure_reason="resolved")
+    incident.refresh_from_db()
+    assert incident.state == "closed"
+    transition_incident(incident, "in_progress", actor=actor)
+    incident.refresh_from_db()
     assert incident.closure_reason is None
 
 

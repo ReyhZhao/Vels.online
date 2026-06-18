@@ -5,7 +5,9 @@ from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
-_ACTIVE_WORK_STATES = frozenset({"in_progress", "on_hold"})
+# pending_closure means the Triage Agent contained the threat and a human is
+# ratifying it (ADR-0025) — never silently absorb it as a duplicate.
+_ACTIVE_WORK_STATES = frozenset({"in_progress", "on_hold", "pending_closure"})
 
 
 def supersede_simpler_incidents(chain_incident, prior_incidents, rule):

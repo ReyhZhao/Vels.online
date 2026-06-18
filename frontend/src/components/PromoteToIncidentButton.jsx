@@ -10,6 +10,7 @@ const STATE_CLASSES = {
   triaged:     'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
   in_progress: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
   on_hold:     'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+  pending_closure: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',
   resolved:    'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
 };
 

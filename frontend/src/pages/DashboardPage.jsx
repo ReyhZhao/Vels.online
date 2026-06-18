@@ -79,7 +79,7 @@ export default function DashboardPage() {
     if (!selectedOrg) return;
     setIncidentsLoading(true);
     api
-      .get('/api/incidents/', { params: { org: selectedOrg.slug, page_size: 1, state: 'new,triaged,in_progress,on_hold,needs_tuning' } })
+      .get('/api/incidents/', { params: { org: selectedOrg.slug, page_size: 1, state: 'new,triaged,in_progress,on_hold,needs_tuning,pending_closure' } })
       .then((res) => setIncidentCount(res.data.count))
       .catch(() => setIncidentCount(null))
       .finally(() => setIncidentsLoading(false));

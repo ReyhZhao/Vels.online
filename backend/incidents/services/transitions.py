@@ -5,16 +5,19 @@ from django.db import transaction
 from incidents.services.events import record_event
 
 ALLOWED_TRANSITIONS = {
-    "new":          {"triaged", "in_progress", "closed"},
-    "triaged":      {"in_progress", "on_hold"},
-    "in_progress":  {"on_hold", "resolved", "needs_tuning", "closed"},
-    "on_hold":      {"in_progress", "resolved", "needs_tuning", "closed"},
-    "needs_tuning": {"in_progress", "closed"},
-    "resolved":     {"in_progress", "closed"},
-    "closed":       {"in_progress"},
+    "new":             {"triaged", "in_progress", "closed"},
+    "triaged":         {"in_progress", "on_hold"},
+    "in_progress":     {"on_hold", "resolved", "needs_tuning", "pending_closure", "closed"},
+    "on_hold":         {"in_progress", "resolved", "needs_tuning", "pending_closure", "closed"},
+    "needs_tuning":    {"in_progress", "closed"},
+    # ADR-0025: the Triage Agent's "threat contained" hand-off. Reopenable to
+    # in_progress if more work is needed, or closed once a human ratifies.
+    "pending_closure": {"in_progress", "closed"},
+    "resolved":        {"in_progress", "closed"},
+    "closed":          {"in_progress"},
 }
 
-REOPEN_STATES = {"closed", "resolved", "needs_tuning"}
+REOPEN_STATES = {"closed", "resolved", "needs_tuning", "pending_closure"}
 
 
 def transition_incident(incident, target_state, actor, closure_reason=None, duplicate_of_id=None, assignee_id=None):

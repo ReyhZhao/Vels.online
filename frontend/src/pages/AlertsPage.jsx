@@ -73,7 +73,7 @@ function AlertDetailPanel({ alert, onClose, onStateChange, onDelete, orgSlug }) 
   const openRelink = () => {
     setRelinkOpen(true);
     setIncidentQuery('');
-    api.get('/api/incidents/', { params: { per_page: 50, state: 'new,triaged,in_progress,on_hold' } })
+    api.get('/api/incidents/', { params: { per_page: 50, state: 'new,triaged,in_progress,on_hold,pending_closure' } })
       .then(r => setIncidents(r.data.results ?? []))
       .catch(() => {});
   };

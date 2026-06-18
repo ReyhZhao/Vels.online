@@ -135,6 +135,9 @@ class Incident(models.Model):
     STATE_IN_PROGRESS = "in_progress"
     STATE_ON_HOLD = "on_hold"
     STATE_NEEDS_TUNING = "needs_tuning"
+    # ADR-0025: the Triage Agent's "threat contained, awaiting human ratification"
+    # hand-off — distinct from human-driven resolved.
+    STATE_PENDING_CLOSURE = "pending_closure"
     STATE_RESOLVED = "resolved"
     STATE_CLOSED = "closed"
     STATE_CHOICES = [
@@ -143,6 +146,7 @@ class Incident(models.Model):
         (STATE_IN_PROGRESS, "In Progress"),
         (STATE_ON_HOLD, "On Hold"),
         (STATE_NEEDS_TUNING, "Needs Tuning"),
+        (STATE_PENDING_CLOSURE, "Pending Closure"),
         (STATE_RESOLVED, "Resolved"),
         (STATE_CLOSED, "Closed"),
     ]

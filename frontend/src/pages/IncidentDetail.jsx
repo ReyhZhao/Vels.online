@@ -38,6 +38,7 @@ const STATE_CLASSES = {
   in_progress:  'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
   on_hold:      'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
   needs_tuning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+  pending_closure: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',
   resolved:     'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
   closed:       'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
 };
@@ -48,9 +49,10 @@ const RESOLVE_DROPDOWN_STATES = new Set(['in_progress', 'on_hold']);
 const ALLOWED_TRANSITIONS = {
   new:          [{ state: 'triaged', label: 'Triage' }, { state: 'in_progress', label: 'Start work' }],
   triaged:      [{ state: 'in_progress', label: 'Start work' }, { state: 'on_hold', label: 'Put on hold' }],
-  in_progress:  [{ state: 'on_hold', label: 'Put on hold' }, { state: 'closed', label: 'Close' }],
-  on_hold:      [{ state: 'in_progress', label: 'Resume' }, { state: 'closed', label: 'Close' }],
+  in_progress:  [{ state: 'on_hold', label: 'Put on hold' }, { state: 'pending_closure', label: 'Mark pending closure' }, { state: 'closed', label: 'Close' }],
+  on_hold:      [{ state: 'in_progress', label: 'Resume' }, { state: 'pending_closure', label: 'Mark pending closure' }, { state: 'closed', label: 'Close' }],
   needs_tuning: [{ state: 'in_progress', label: 'Reopen' }, { state: 'closed', label: 'Close' }],
+  pending_closure: [{ state: 'in_progress', label: 'Reopen' }, { state: 'closed', label: 'Close' }],
   resolved:     [{ state: 'in_progress', label: 'Reopen' }, { state: 'closed', label: 'Close' }],
   closed:       [{ state: 'in_progress', label: 'Reopen' }],
 };
@@ -60,6 +62,7 @@ const TRANSITION_BTN_CLASSES = {
   in_progress:  'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600',
   on_hold:      'bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500',
   needs_tuning: 'bg-amber-600 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600',
+  pending_closure: 'bg-teal-600 text-white hover:bg-teal-700 dark:bg-teal-700 dark:hover:bg-teal-600',
   resolved:     'bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600',
   closed:       'bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600',
 };

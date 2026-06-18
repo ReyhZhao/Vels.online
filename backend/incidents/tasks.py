@@ -517,6 +517,9 @@ def send_assigned_incidents_digest():
         Incident.STATE_IN_PROGRESS,
         Incident.STATE_ON_HOLD,
         Incident.STATE_NEEDS_TUNING,
+        # pending_closure still needs the assignee's ratification, so it stays in the
+        # assigned-incidents digest (ADR-0025).
+        Incident.STATE_PENDING_CLOSURE,
     ]
     SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
