@@ -345,6 +345,47 @@ def test_agent_has_no_exception_or_close_tool(acme, phishing):
     assert TRIAGE_AGENT_NEVER_EXECUTE == {"create_exception", "close"}
 
 
+# ── hand-off: in_progress vs pending_closure (ADR-0025) ───────────────────────
+
+
+@pytest.mark.django_db(transaction=True)
+def test_work_phase_lands_pending_closure_when_contained(acme, phishing):
+    inc = make_incident(acme, subject=phishing, state="triaged")
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="mark_threat_contained",
+                                      arguments={"reason": "host isolated, IOC blocked"}, id="c1")]),
+        ChatTurn(text="Threat contained; ready for review."),
+    ])
+    triage_agent.run_triage_work(inc.id, provider=provider)
+    inc.refresh_from_db()
+    assert inc.state == Incident.STATE_PENDING_CLOSURE
+
+
+@pytest.mark.django_db
+def test_work_phase_lands_in_progress_when_not_contained(acme, phishing):
+    inc = make_incident(acme, subject=phishing, state="triaged")
+    provider = FakeProvider([ChatTurn(text="Investigated; needs human follow-up.")])
+    triage_agent.run_triage_work(inc.id, provider=provider)
+    inc.refresh_from_db()
+    assert inc.state == Incident.STATE_IN_PROGRESS
+
+
+@pytest.mark.django_db(transaction=True)
+def test_pending_closure_incident_is_reopenable(acme, phishing):
+    from incidents.services.transitions import transition_incident
+    inc = make_incident(acme, subject=phishing, state="triaged")
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="mark_threat_contained", arguments={}, id="c1")]),
+        ChatTurn(text="Contained."),
+    ])
+    triage_agent.run_triage_work(inc.id, provider=provider)
+    inc.refresh_from_db()
+    assert inc.state == Incident.STATE_PENDING_CLOSURE
+    transition_incident(inc, "in_progress", actor=None)
+    inc.refresh_from_db()
+    assert inc.state == Incident.STATE_IN_PROGRESS
+
+
 # ── the gate is wired into Classify ──────────────────────────────────────────
 
 

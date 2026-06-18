@@ -20,6 +20,7 @@ TRIAGE_AGENT_WRITE_ACTIONS = frozenset({
     "run_task",
     "send_contact_message",
     "escalate",
+    "mark_threat_contained",
 })
 
 # Never executed by the agent — closing a real worked incident and silencing future

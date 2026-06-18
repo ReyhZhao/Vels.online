@@ -241,6 +241,25 @@ def _escalate(incident):
     )
 
 
+def _mark_threat_contained(incident, on_contained):
+    def executor(args):
+        reason = ((args or {}).get("reason") or "").strip()
+        on_contained()
+        _record_autonomous(incident, None, "mark_threat_contained", {"reason": reason[:120]})
+        return ToolResult(content={"contained": True}, summary="marked threat contained")
+    return ToolSpec(
+        name="mark_threat_contained", is_write=True,
+        description="Call this ONLY when you judge the threat CONTAINED — the playbook's "
+                    "automated/response actions have run and your research is recorded — so the "
+                    "incident is handed to a human only to verify and close (it lands in "
+                    "'pending closure'). If meaningful work still remains, do NOT call this; the "
+                    "incident will be handed off as in-progress for a human to continue.",
+        parameters={"type": "object", "properties": {
+            "reason": {"type": "string", "description": "Why you consider the threat contained."}}},
+        executor=executor,
+    )
+
+
 def build_triage_read_tools(incident, grounding, *, include_web_search=True,
                             os_client=None, wazuh_client=None):
     """Read-only tool set for the Triage Agent, scoped to the incident's org.
@@ -268,7 +287,7 @@ def build_triage_read_tools(incident, grounding, *, include_web_search=True,
 
 
 def build_triage_tools(incident, grounding, *, include_web_search=True, read_only=False,
-                       os_client=None, wazuh_client=None):
+                       os_client=None, wazuh_client=None, on_contained=None):
     """Full Triage Agent tool set: read tools (+ web search) plus the executed write tools.
 
     `read_only=True` returns only the read tools (the slice-4 research-only behaviour).
@@ -288,6 +307,7 @@ def build_triage_tools(incident, grounding, *, include_web_search=True, read_onl
         _run_task(incident),
         _send_contact_message(incident),
         _escalate(incident),
+        _mark_threat_contained(incident, on_contained or (lambda: None)),
     ]
     for t in write_tools:
         assert t.name in TRIAGE_AGENT_WRITE_ACTIONS, f"unauthorised triage write tool: {t.name}"

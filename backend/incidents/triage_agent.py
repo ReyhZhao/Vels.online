@@ -43,6 +43,10 @@ TRIAGE_AGENT_SYS_PROMPT = (
     "classified, escalate to raise its severity. If the customer should be informed, "
     "send_contact_message with a clear non-technical update. You do NOT create detection "
     "exceptions and you do NOT close the incident — a human ratifies completion.\n"
+    "6. CONCLUDE — if you judge the threat CONTAINED (the playbook's automated/response "
+    "actions have run and your research is recorded, so only human verification remains), "
+    "call mark_threat_contained so the incident lands in 'pending closure'. If meaningful "
+    "work still remains for a human, do NOT call it; the incident hands off as in-progress.\n"
     "When you have made what progress you can, STOP calling tools and write a concise "
     "summary of what you did, what you found, and what a human analyst should do next. Do "
     "not fabricate; if a lookup returns nothing, say so."
@@ -139,11 +143,18 @@ def _handoff(incident, *, target_state, narrative, tool_trace, stop_reason, erro
         },
     )
 
-    if target_state != incident.state and target_state in ALLOWED_TRANSITIONS.get(incident.state, set()):
-        try:
+    if target_state == incident.state:
+        return
+    try:
+        if target_state in ALLOWED_TRANSITIONS.get(incident.state, set()):
             transition_incident(incident, target_state, actor=None)
-        except ValidationError as exc:
-            logger.warning("triage_agent: hand-off transition failed for %s: %s", incident.pk, exc)
+        elif "in_progress" in ALLOWED_TRANSITIONS.get(incident.state, set()):
+            # pending_closure is not directly reachable from triaged; go via in_progress.
+            transition_incident(incident, "in_progress", actor=None)
+            if target_state != "in_progress" and target_state in ALLOWED_TRANSITIONS.get(incident.state, set()):
+                transition_incident(incident, target_state, actor=None)
+    except ValidationError as exc:
+        logger.warning("triage_agent: hand-off transition failed for %s: %s", incident.pk, exc)
 
 
 def run_triage_work(incident_id, *, provider=None, os_client=None, wazuh_client=None, caps=None):
@@ -187,9 +198,11 @@ def run_triage_work(incident_id, *, provider=None, os_client=None, wazuh_client=
 
     try:
         from incidents.llm.triage_tools import build_triage_tools
+        contained = {"flag": False}
         tools = build_triage_tools(
             incident, grounding, include_web_search=not uses_native,
             os_client=os_client, wazuh_client=wazuh_client,
+            on_contained=lambda: contained.update(flag=True),
         )
         research = run_research_phase(
             provider, tools,
@@ -197,9 +210,14 @@ def run_triage_work(incident_id, *, provider=None, os_client=None, wazuh_client=
              {"role": "user", "content": _user_brief(grounding)}],
             caps or triage_agent_caps(),
         )
+        # The agent lands the incident in pending_closure when it judged the threat
+        # contained, otherwise in_progress for a human to continue (ADR-0025).
+        target_state = (
+            Incident.STATE_PENDING_CLOSURE if contained["flag"] else Incident.STATE_IN_PROGRESS
+        )
         _handoff(
             incident,
-            target_state=Incident.STATE_IN_PROGRESS,
+            target_state=target_state,
             narrative=_final_narrative(research),
             tool_trace=research.tool_trace,
             stop_reason=research.stop_reason,
