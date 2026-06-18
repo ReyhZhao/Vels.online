@@ -39,6 +39,10 @@ Return a JSON object with exactly these fields:
 close_as_false_positive, monitor, close_as_informational
   secondary_action         (string, optional) — same choices as primary_action, or omit
   false_positive_confidence (float, required) — probability 0.0-1.0 that this is a false positive
+  disposition_confidence   (float, required) — probability 0.0-1.0 that this is a REAL incident AND \
+you have classified it correctly (right subject, right severity). This is NOT the inverse of \
+false_positive_confidence: an incident can be clearly-not-junk yet still ambiguous to classify, so a \
+low false_positive_confidence does not by itself imply a high disposition_confidence.
   subject_recommendation   (string, optional) — best-matching incident subject slug, or omit if unclear. \
 Choose from: phishing, malware, account_compromise, data_exfiltration, policy_violation
 
@@ -784,6 +788,8 @@ def _parse_result(data: dict, provider: str) -> TriageResult:
     confidence = float(data.get("false_positive_confidence", 0.0))
     confidence = max(0.0, min(1.0, confidence))
 
+    disposition = _clamp_unit(data.get("disposition_confidence", 0.0))
+
     subject_recommendation = data.get("subject_recommendation")
     if subject_recommendation and subject_recommendation not in VALID_SUBJECT_SLUGS:
         subject_recommendation = None
@@ -796,4 +802,13 @@ def _parse_result(data: dict, provider: str) -> TriageResult:
         false_positive_confidence=confidence,
         provider=provider,
         subject_recommendation=subject_recommendation,
+        disposition_confidence=disposition,
     )
+
+
+def _clamp_unit(value) -> float:
+    """Coerce a model-supplied value to a float in [0.0, 1.0], defaulting to 0.0."""
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0

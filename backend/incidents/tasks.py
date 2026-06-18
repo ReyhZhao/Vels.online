@@ -232,6 +232,7 @@ def run_incident_triage(self, incident_id: int):
             "primary_action": result.primary_action,
             "secondary_action": result.secondary_action,
             "false_positive_confidence": result.false_positive_confidence,
+            "disposition_confidence": result.disposition_confidence,
             "provider": result.provider,
             "incident_severity_at_triage": payload["severity"],
             "auto_closed": auto_closed,

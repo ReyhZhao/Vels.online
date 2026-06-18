@@ -7,12 +7,18 @@ class OrganizationSerializer(serializers.ModelSerializer):
     triage_prompt_context = serializers.CharField(
         allow_null=True, allow_blank=True, required=False, max_length=4000
     )
+    triage_fp_threshold = serializers.FloatField(
+        required=False, min_value=0.0, max_value=1.0
+    )
+    triage_work_threshold = serializers.FloatField(
+        required=False, min_value=0.0, max_value=1.0
+    )
 
     class Meta:
         model = Organization
         fields = [
             "id", "name", "slug", "wazuh_group", "is_infrastructure",
-            "triage_prompt_context",
+            "triage_prompt_context", "triage_fp_threshold", "triage_work_threshold",
             "alert_match_lookback_days", "alert_auto_promote_threshold",
             "alert_auto_promote_window_minutes", "timezone",
         ]

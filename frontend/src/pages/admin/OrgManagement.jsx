@@ -112,6 +112,8 @@ function OrgRow({ org }) {
   const [loadingInvites, setLoadingInvites] = useState(false);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [triageContext, setTriageContext] = useState(org.triage_prompt_context ?? '');
+  const [fpThreshold, setFpThreshold] = useState(org.triage_fp_threshold ?? 0.95);
+  const [workThreshold, setWorkThreshold] = useState(org.triage_work_threshold ?? 0.95);
   const [savingTriage, setSavingTriage] = useState(false);
   const [triageSaveError, setTriageSaveError] = useState(null);
   const [triageSaved, setTriageSaved] = useState(false);
@@ -228,6 +230,8 @@ function OrgRow({ org }) {
     try {
       await api.patch(`/api/security/organizations/${org.slug}/`, {
         triage_prompt_context: triageContext || null,
+        triage_fp_threshold: Number(fpThreshold),
+        triage_work_threshold: Number(workThreshold),
       });
       setTriageSaved(true);
     } catch (err) {
@@ -339,6 +343,37 @@ function OrgRow({ org }) {
                 disabled={savingTriage}
                 className="text-xs resize-y"
               />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`triage-fp-${org.slug}`}>
+                    False-positive auto-close threshold
+                  </label>
+                  <input
+                    id={`triage-fp-${org.slug}`}
+                    type="number" min="0" max="1" step="0.01"
+                    value={fpThreshold}
+                    onChange={e => { setFpThreshold(e.target.value); setTriageSaved(false); }}
+                    disabled={savingTriage}
+                    className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`triage-work-${org.slug}`}>
+                    Agentic work-confidence threshold
+                  </label>
+                  <input
+                    id={`triage-work-${org.slug}`}
+                    type="number" min="0" max="1" step="0.01"
+                    value={workThreshold}
+                    onChange={e => { setWorkThreshold(e.target.value); setTriageSaved(false); }}
+                    disabled={savingTriage}
+                    className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Minimum confidence before the Triage Agent works the incident unattended.
+                  </p>
+                </div>
+              </div>
               {triageSaveError && <p className="text-xs text-destructive">{triageSaveError}</p>}
               {triageSaved && <p className="text-xs text-green-600 dark:text-green-400">Saved.</p>}
               <div className="flex justify-end">

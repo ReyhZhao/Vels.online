@@ -119,6 +119,38 @@ def test_parse_result_confidence_clamped():
     assert result.false_positive_confidence == 1.0
 
 
+def test_parse_result_disposition_confidence_valid():
+    data = {
+        "severity_recommendation": "high",
+        "summary": "Real phishing.",
+        "primary_action": "assign_to_analyst",
+        "false_positive_confidence": 0.05,
+        "disposition_confidence": 0.9,
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.disposition_confidence == 0.9
+
+
+def test_parse_result_disposition_confidence_defaults_to_zero_when_missing():
+    data = {
+        "severity_recommendation": "high",
+        "summary": ".",
+        "primary_action": "assign_to_analyst",
+        "false_positive_confidence": 0.05,
+    }
+    result = _parse_result(data, provider="gemini")
+    assert result.disposition_confidence == 0.0
+
+
+def test_parse_result_disposition_confidence_clamped_and_coerced():
+    assert _parse_result(
+        {"primary_action": "monitor", "disposition_confidence": 1.5}, provider="gemini"
+    ).disposition_confidence == 1.0
+    assert _parse_result(
+        {"primary_action": "monitor", "disposition_confidence": "not-a-number"}, provider="gemini"
+    ).disposition_confidence == 0.0
+
+
 # ── run_incident_triage task ──────────────────────────────────────────────────
 
 
@@ -129,6 +161,7 @@ def _make_triage_result(**kwargs):
         primary_action="assign_to_analyst",
         secondary_action=None,
         false_positive_confidence=0.1,
+        disposition_confidence=0.5,
         provider="gemini",
     )
     defaults.update(kwargs)
@@ -160,6 +193,7 @@ def test_triage_task_creates_ai_comment(acme):
     assert comment.author is None
     assert comment.metadata["primary_action"] == "assign_to_analyst"
     assert comment.metadata["auto_closed"] is False
+    assert comment.metadata["disposition_confidence"] == 0.5
 
 
 @pytest.mark.django_db

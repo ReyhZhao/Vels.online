@@ -64,6 +64,10 @@ class Organization(models.Model):
     is_infrastructure = models.BooleanField(default=False)
     max_routes = models.PositiveIntegerField(null=True, blank=True)
     triage_fp_threshold = models.FloatField(default=0.95)
+    # Minimum disposition_confidence (ADR-0024) the Classify phase must report before
+    # the agentic Triage Work phase is allowed to run unattended. Conservative default
+    # (high bar) so autonomy stays off until an operator deliberately tunes it down.
+    triage_work_threshold = models.FloatField(default=0.95)
     triage_prompt_context = models.TextField(null=True, blank=True)
     alert_match_lookback_days = models.PositiveIntegerField(default=30)
     alert_auto_promote_threshold = models.PositiveIntegerField(default=5)

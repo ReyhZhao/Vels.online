@@ -252,3 +252,36 @@ def test_patch_triage_prompt_context_too_long_returns_400(admin_client, acme):
         content_type="application/json",
     )
     assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_org_detail_returns_triage_thresholds(admin_client, acme):
+    response = admin_client.get(f"/api/security/organizations/{acme.slug}/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["triage_fp_threshold"] == 0.95
+    assert data["triage_work_threshold"] == 0.95
+
+
+@pytest.mark.django_db
+def test_patch_triage_work_threshold_as_staff(admin_client, acme):
+    response = admin_client.patch(
+        f"/api/security/organizations/{acme.slug}/",
+        {"triage_work_threshold": 0.8},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    acme.refresh_from_db()
+    assert acme.triage_work_threshold == 0.8
+
+
+@pytest.mark.django_db
+def test_patch_triage_work_threshold_rejects_out_of_range(admin_client, acme):
+    response = admin_client.patch(
+        f"/api/security/organizations/{acme.slug}/",
+        {"triage_work_threshold": 1.5},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    acme.refresh_from_db()
+    assert acme.triage_work_threshold == 0.95

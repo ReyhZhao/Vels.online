@@ -37,6 +37,11 @@ class TriageResult:
     false_positive_confidence: float = 0.0
     provider: str = ""
     subject_recommendation: Optional[str] = None
+    # Positive "this incident is real AND correctly classified" confidence — the
+    # signal the agentic Triage Work phase gates on (ADR-0024). Distinct from, and
+    # not the inverse of, false_positive_confidence: an incident can be low-FP
+    # (clearly not junk) yet low-disposition (ambiguous which subject/severity).
+    disposition_confidence: float = 0.0
 
 
 @dataclass
