@@ -172,6 +172,75 @@ def _run_task(incident):
     )
 
 
+def _send_contact_message(incident):
+    def executor(args):
+        from contacts.models import IncidentContact
+        from contacts.services import send_contact_message
+
+        message = ((args or {}).get("message") or "").strip()
+        if not message:
+            return ToolResult(error="message is required", summary="empty message")
+        recipients = list(
+            IncidentContact.objects.filter(incident=incident).select_related("contact")
+        )
+        if not recipients:
+            return ToolResult(error="this incident has no contacts to notify", summary="no contacts")
+        sent = 0
+        for ic in recipients:
+            try:
+                send_contact_message(incident, ic.contact, role="notified", body=message)
+                sent += 1
+            except Exception:
+                pass
+        _record_autonomous(incident, None, "send_contact_message",
+                           {"recipients": sent, "preview": message[:80]})
+        return ToolResult(content={"sent": sent}, summary=f"notified {sent} contact(s)")
+    return ToolSpec(
+        name="send_contact_message", is_write=True,
+        description="Notify this incident's contacts with a clear, non-technical message about the "
+                    "incident (what happened, what is being done). Use sparingly and only when the "
+                    "customer should be informed.",
+        parameters={"type": "object", "properties": {
+            "message": {"type": "string", "description": "The message body to send to the contacts."}},
+            "required": ["message"]},
+        executor=executor,
+    )
+
+
+def _escalate(incident):
+    def executor(args):
+        from incidents.llm.base import SEVERITY_RANK
+        from incidents.services.notifications_wiring import notify_severity_bump_if_needed
+
+        target = ((args or {}).get("severity") or "high").strip()
+        reason = ((args or {}).get("reason") or "").strip()
+        if target not in SEVERITY_RANK:
+            return ToolResult(error=f"severity must be one of {', '.join(SEVERITY_RANK)}",
+                              summary="bad severity")
+        old = incident.severity
+        if SEVERITY_RANK[target] <= SEVERITY_RANK.get(old, 0):
+            return ToolResult(
+                error=f"target severity '{target}' is not higher than current '{old}'",
+                summary="no escalation needed",
+            )
+        incident.severity = target
+        incident.save(update_fields=["severity", "updated_at"])
+        notify_severity_bump_if_needed(incident, old)
+        _record_autonomous(incident, None, "escalate",
+                           {"old": old, "new": target, "reason": reason[:120]})
+        return ToolResult(content={"severity": target}, summary=f"escalated {old} -> {target}")
+    return ToolSpec(
+        name="escalate", is_write=True,
+        description="Raise this incident's severity (and page the org) when your research shows it is "
+                    "more serious than first classified. Errs toward MORE human attention.",
+        parameters={"type": "object", "properties": {
+            "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+            "reason": {"type": "string", "description": "Why you are escalating."}},
+            "required": ["severity"]},
+        executor=executor,
+    )
+
+
 def build_triage_read_tools(incident, grounding, *, include_web_search=True,
                             os_client=None, wazuh_client=None):
     """Read-only tool set for the Triage Agent, scoped to the incident's org.
@@ -217,6 +286,8 @@ def build_triage_tools(incident, grounding, *, include_web_search=True, read_onl
         _apply_task_template(incident),
         _add_task_comment(incident, None),
         _run_task(incident),
+        _send_contact_message(incident),
+        _escalate(incident),
     ]
     for t in write_tools:
         assert t.name in TRIAGE_AGENT_WRITE_ACTIONS, f"unauthorised triage write tool: {t.name}"

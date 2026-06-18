@@ -302,6 +302,49 @@ def test_work_phase_skips_already_executed_task(acme, phishing):
     assert not mock_client.run_active_response.called  # no double-fire
 
 
+# ── notify contacts + escalate; never create exceptions or close (ADR-0025) ────
+
+
+@pytest.mark.django_db(transaction=True)
+def test_work_phase_notifies_contacts(acme, phishing, settings):
+    settings.FRONTEND_URL = "https://app.example.com"
+    from contacts.models import Contact, ContactMessage, IncidentContact
+    inc = make_incident(acme, subject=phishing)
+    contact = Contact.objects.create(organisation=acme, name="Jane", email="jane@acme.test")
+    IncidentContact.objects.create(incident=inc, contact=contact)
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="send_contact_message",
+                                      arguments={"message": "We detected and are handling an issue."}, id="c1")]),
+        ChatTurn(text="Notified the contact."),
+    ])
+    with patch("contacts.services.send_html_email"):
+        triage_agent.run_triage_work(inc.id, provider=provider)
+    assert ContactMessage.objects.filter(incident=inc, contact=contact).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_work_phase_escalates_severity(acme, phishing):
+    inc = make_incident(acme, subject=phishing, severity="medium")
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="escalate",
+                                      arguments={"severity": "critical", "reason": "active C2"}, id="c1")]),
+        ChatTurn(text="Escalated."),
+    ])
+    triage_agent.run_triage_work(inc.id, provider=provider)
+    inc.refresh_from_db()
+    assert inc.severity == "critical"
+
+
+@pytest.mark.django_db
+def test_agent_has_no_exception_or_close_tool(acme, phishing):
+    from incidents.llm import triage_tools
+    from incidents.llm.triage_action_authority import TRIAGE_AGENT_NEVER_EXECUTE
+    inc = make_incident(acme, subject=phishing)
+    names = {t.name for t in triage_tools.build_triage_tools(inc, {"incident": {}}, include_web_search=False)}
+    assert not (names & {"create_exception", "close"})
+    assert TRIAGE_AGENT_NEVER_EXECUTE == {"create_exception", "close"}
+
+
 # ── the gate is wired into Classify ──────────────────────────────────────────
 
 
