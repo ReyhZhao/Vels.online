@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
+from incidents.models import Asset
 from ingress.bunkerweb import BunkerWebError
 from ingress.models import Route
 from security.models import Organization, OrganizationMembership
@@ -438,3 +439,121 @@ def test_settings_returns_bunkerweb_fqdn(client, acme_member, settings):
     res = client.get("/api/ingress/settings/")
     assert res.status_code == 200
     assert res.json()["bunkerweb_public_fqdn"] == "bw.example.com"
+
+
+# ── backend_asset link + suggestion ─────────────────────────────────────────
+
+
+def make_host(org, name="srv-01", ip="10.0.0.1"):
+    return Asset.objects.create(
+        organization=org,
+        kind=Asset.KIND_HOST,
+        name=name,
+        agent_name=name,
+        ip_address=ip,
+    )
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_backend_asset_links_route_to_host(mock_task, client, acme_member, acme):
+    host = make_host(acme)
+    route = make_route(acme)
+    client.force_login(acme_member)
+    res = client.patch(
+        f"/api/ingress/routes/{route.fqdn}/",
+        {"backend_asset": host.pk},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+    assert res.json()["backend_asset"] == host.pk
+    route.refresh_from_db()
+    assert route.backend_asset_id == host.pk
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_patch_backend_asset_null_clears_link(mock_task, client, acme_member, acme):
+    # Use a backend_host that won't match any asset IP so the auto-link signal
+    # doesn't immediately re-link after we clear.
+    host = make_host(acme, ip="10.0.0.99")
+    route = Route.objects.create(
+        fqdn="clear-test.example.com",
+        backend_host="no-match.internal",
+        backend_port=8080,
+        organization=acme,
+        status=Route.STATUS_ACTIVE,
+        backend_asset=host,
+    )
+    client.force_login(acme_member)
+    res = client.patch(
+        f"/api/ingress/routes/{route.fqdn}/",
+        {"backend_asset": None},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+    assert res.json()["backend_asset"] is None
+    route.refresh_from_db()
+    assert route.backend_asset_id is None
+
+
+@pytest.mark.django_db
+def test_route_detail_includes_suggestion_when_unlinked(client, acme_member, acme):
+    host = make_host(acme, name="app-server", ip="10.0.0.50")
+    route = Route.objects.create(
+        fqdn="sug-test.example.com",
+        backend_host="app-server",
+        backend_port=8080,
+        organization=acme,
+        status=Route.STATUS_ACTIVE,
+    )
+    client.force_login(acme_member)
+    res = client.get(f"/api/ingress/routes/{route.fqdn}/")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["backend_asset"] is None
+    sug = data["backend_asset_suggestion"]
+    assert sug is not None
+    assert sug["id"] == host.pk
+
+
+@pytest.mark.django_db
+def test_route_detail_suggestion_none_when_already_linked(client, acme_member, acme):
+    host = make_host(acme)
+    route = make_route(acme, backend_asset_id=host.pk)
+    client.force_login(acme_member)
+    res = client.get(f"/api/ingress/routes/{route.fqdn}/")
+    assert res.status_code == 200
+    assert res.json()["backend_asset_suggestion"] is None
+
+
+@pytest.mark.django_db
+@patch("ingress.views.push_route_settings")
+def test_netbird_route_manually_linkable_yields_protected_exposure(mock_task, client, acme_member, acme):
+    from incidents.services.exposures import host_exposures
+
+    host = make_host(acme, ip="10.0.0.1")
+    route = Route.objects.create(
+        fqdn="nb.acme.com",
+        backend_host="10.0.0.1",
+        backend_port=443,
+        organization=acme,
+        status=Route.STATUS_ACTIVE,
+        backend_type=Route.TYPE_NETBIRD,
+    )
+    route.refresh_from_db()
+    assert route.backend_asset_id is None
+
+    client.force_login(acme_member)
+    res = client.patch(
+        "/api/ingress/routes/nb.acme.com/",
+        {"backend_asset": host.pk},
+        content_type="application/json",
+    )
+    assert res.status_code == 200
+    assert res.json()["backend_asset"] == host.pk
+
+    exposures = host_exposures(host)
+    assert len(exposures) == 1
+    assert exposures[0].kind == "ingress_route"
+    assert exposures[0].protection == "protected"
