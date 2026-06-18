@@ -136,6 +136,42 @@ def _apply_task_template(incident):
     )
 
 
+def _run_task(incident):
+    def executor(args):
+        from incidents.models import Task
+        from incidents.services import task_execution
+
+        task_id = (args or {}).get("task_id")
+        if task_id is None:
+            return ToolResult(error="task_id is required", summary="missing task_id")
+        task = (
+            Task.objects.filter(pk=task_id, incident=incident)
+            .select_related("incident", "automation", "wazuh_response").first()
+        )
+        if task is None:
+            return ToolResult(error="no such task on this incident", summary="task not found")
+        try:
+            task = task_execution.run_task(task, actor=None, by_agent=True)
+        except task_execution.TaskExecutionError as exc:
+            return ToolResult(error=exc.message, summary=exc.code)
+        _record_autonomous(incident, None, "run_task",
+                           {"task_id": task.id, "task_title": task.title, "task_type": task.task_type})
+        return ToolResult(content={"task_id": task.id, "state": task.state},
+                          summary=f"ran task '{task.title}'")
+    return ToolSpec(
+        name="run_task", is_write=True,
+        description="Run an AUTOMATED (Semaphore) or WAZUH_RESPONSE task on this incident. Automated "
+                    "tasks run on your confidence; a wazuh_response (e.g. isolate a host, block an IP) "
+                    "runs only if it has been pre-approved for autonomous execution — otherwise it is "
+                    "refused and you should recommend it in your summary for a human to run. Only runs "
+                    "a task that has not already been executed.",
+        parameters={"type": "object", "properties": {
+            "task_id": {"type": "integer", "description": "Id of the automated/wazuh_response task."}},
+            "required": ["task_id"]},
+        executor=executor,
+    )
+
+
 def build_triage_read_tools(incident, grounding, *, include_web_search=True,
                             os_client=None, wazuh_client=None):
     """Read-only tool set for the Triage Agent, scoped to the incident's org.
@@ -180,6 +216,7 @@ def build_triage_tools(incident, grounding, *, include_web_search=True, read_onl
     write_tools = [
         _apply_task_template(incident),
         _add_task_comment(incident, None),
+        _run_task(incident),
     ]
     for t in write_tools:
         assert t.name in TRIAGE_AGENT_WRITE_ACTIONS, f"unauthorised triage write tool: {t.name}"

@@ -218,6 +218,90 @@ def test_triage_write_tools_are_all_authorised():
     assert write_names == set(TRIAGE_AGENT_WRITE_ACTIONS)
 
 
+# ── run executable tasks (automated + approved wazuh_response) — ADR-0025 ──────
+
+
+@pytest.mark.django_db(transaction=True)
+def test_work_phase_runs_automated_task(acme, phishing, settings):
+    settings.SEMAPHORE_URL = "https://semaphore.example.com"
+    settings.SEMAPHORE_API_TOKEN = "t"
+    settings.SEMAPHORE_PROJECT_ID = 1
+    from automations.models import Automation
+    inc = make_incident(acme, subject=phishing)
+    automation = Automation.objects.create(name="Scan", semaphore_template_id=7)
+    task = Task.objects.create(incident=inc, title="Scan host", task_type=Task.TYPE_AUTOMATED,
+                               automation=automation)
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="run_task", arguments={"task_id": task.id}, id="c1")]),
+        ChatTurn(text="Ran the scan."),
+    ])
+    mock_client = MagicMock()
+    mock_client.launch_job.return_value = 555
+    with patch("automations.semaphore.SemaphoreClient", return_value=mock_client):
+        triage_agent.run_triage_work(inc.id, provider=provider)
+    task.refresh_from_db()
+    assert task.state == Task.STATE_IN_PROGRESS
+    assert task.semaphore_task_id == 555
+
+
+def _wazuh_task(inc, approved):
+    from automations.models import WazuhActiveResponse
+    wr = WazuhActiveResponse.objects.create(
+        name="Isolate", command="firewall-drop", autonomous_triage_approved=approved)
+    return Task.objects.create(incident=inc, title="Isolate", task_type=Task.TYPE_WAZUH_RESPONSE,
+                               wazuh_response=wr)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_work_phase_refuses_unapproved_wazuh_response(acme, phishing):
+    from incidents.models import WazuhResponseExecution
+    inc = make_incident(acme, subject=phishing)
+    task = _wazuh_task(inc, approved=False)
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="run_task", arguments={"task_id": task.id}, id="c1")]),
+        ChatTurn(text="Recommended isolation for a human."),
+    ])
+    triage_agent.run_triage_work(inc.id, provider=provider)
+    task.refresh_from_db()
+    assert task.state == Task.STATE_NEW  # never ran
+    assert not WazuhResponseExecution.objects.exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_work_phase_runs_approved_wazuh_response(acme, phishing):
+    from incidents.models import WazuhResponseExecution
+    inc = make_incident(acme, subject=phishing)
+    task = _wazuh_task(inc, approved=True)
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="run_task", arguments={"task_id": task.id}, id="c1")]),
+        ChatTurn(text="Isolated the host."),
+    ])
+    mock_client = MagicMock()
+    mock_client.run_active_response.return_value = (200, {"ok": True})
+    with patch("security.wazuh.WazuhClient", return_value=mock_client):
+        triage_agent.run_triage_work(inc.id, provider=provider)
+    task.refresh_from_db()
+    assert task.state == Task.STATE_DONE
+    execution = WazuhResponseExecution.objects.get()
+    assert execution.executed_by is None  # autonomous
+
+
+@pytest.mark.django_db(transaction=True)
+def test_work_phase_skips_already_executed_task(acme, phishing):
+    inc = make_incident(acme, subject=phishing)
+    task = _wazuh_task(inc, approved=True)
+    task.state = Task.STATE_DONE
+    task.save(update_fields=["state"])
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="run_task", arguments={"task_id": task.id}, id="c1")]),
+        ChatTurn(text="Already done."),
+    ])
+    mock_client = MagicMock()
+    with patch("security.wazuh.WazuhClient", return_value=mock_client):
+        triage_agent.run_triage_work(inc.id, provider=provider)
+    assert not mock_client.run_active_response.called  # no double-fire
+
+
 # ── the gate is wired into Classify ──────────────────────────────────────────
 
 
