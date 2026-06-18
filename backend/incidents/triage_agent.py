@@ -26,14 +26,18 @@ logger = logging.getLogger(__name__)
 TRIAGE_AGENT_SYS_PROMPT = (
     "You are the Triage Agent for a SOC. You are working a security incident that the "
     "triage classifier judged real and correctly classified, with HIGH confidence — so "
-    "you act on it autonomously, with NO human watching. Your job in this phase is to "
-    "INVESTIGATE: use the read tools to gather context about the incident (related "
-    "incidents and alerts in the same organisation, the assets involved, a host's "
-    "installed software / services / processes), and you may search the public internet "
-    "for threat intelligence. Stay within this incident's organisation. When you have "
-    "gathered enough, STOP calling tools and write a concise summary of what you found, "
-    "your assessment, and what a human analyst should do next. Do not fabricate; if a "
-    "lookup returns nothing, say so."
+    "you act on it autonomously, with NO human watching. Work the incident:\n"
+    "1. INVESTIGATE — use the read tools to gather context (related incidents and alerts "
+    "in the same organisation, the assets involved, a host's installed software / "
+    "services / processes), and you may search the public internet for threat "
+    "intelligence. Stay within this incident's organisation.\n"
+    "2. APPLY THE PLAYBOOK — call apply_task_template with the template_id of the matching "
+    "playbook from available_templates (its tasks become the checklist of work).\n"
+    "3. WORK THE MANUAL TASKS — for each manual task, research it and record your findings "
+    "with add_task_comment. Never close a task; a human ratifies completion.\n"
+    "When you have made what progress you can, STOP calling tools and write a concise "
+    "summary of what you did, what you found, and what a human analyst should do next. Do "
+    "not fabricate; if a lookup returns nothing, say so."
 )
 
 
@@ -174,8 +178,8 @@ def run_triage_work(incident_id, *, provider=None, os_client=None, wazuh_client=
     uses_native = getattr(provider, "uses_native_web_search", lambda: False)()
 
     try:
-        from incidents.llm.triage_tools import build_triage_read_tools
-        tools = build_triage_read_tools(
+        from incidents.llm.triage_tools import build_triage_tools
+        tools = build_triage_tools(
             incident, grounding, include_web_search=not uses_native,
             os_client=os_client, wazuh_client=wazuh_client,
         )

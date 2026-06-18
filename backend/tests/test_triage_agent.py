@@ -8,7 +8,7 @@ import pytest
 
 from assistants.tools import ChatTurn, ToolCall
 from incidents.llm.base import TriageResult
-from incidents.models import Comment, Incident, Subject
+from incidents.models import Comment, Incident, Subject, Task, TaskTemplate, TaskTemplateItem
 from incidents import triage_agent
 from security.models import Organization
 
@@ -154,6 +154,68 @@ def test_work_phase_error_hands_off_safely(acme, phishing):
     assert inc.triage_worked_at is not None
     comment = Comment.objects.get(incident=inc, kind=Comment.KIND_AI_TRIAGE)
     assert comment.metadata["error"] is True
+
+
+# ── executed write tools: apply playbook + work manual tasks (ADR-0025) ───────
+
+
+# These exercise the orchestrator's per-tool worker thread doing DB writes; run without
+# an outer transaction (as the real Celery worker does) so SQLite does not self-lock.
+@pytest.mark.django_db(transaction=True)
+def test_work_phase_applies_playbook(acme, phishing):
+    inc = make_incident(acme, subject=phishing)
+    tmpl = TaskTemplate.objects.create(name="Phishing playbook", subject=phishing)
+    TaskTemplateItem.objects.create(template=tmpl, title="Check sender", display_order=0)
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="apply_task_template",
+                                      arguments={"template_id": tmpl.id}, id="c1")]),
+        ChatTurn(text="Applied the phishing playbook."),
+    ])
+    triage_agent.run_triage_work(inc.id, provider=provider)
+    assert Task.objects.filter(incident=inc, title="Check sender").exists()
+
+
+@pytest.mark.django_db
+def test_work_phase_rejects_template_of_other_subject(acme, phishing):
+    other, _ = Subject.objects.get_or_create(slug="malware", defaults={"name": "Malware"})
+    inc = make_incident(acme, subject=phishing)
+    tmpl = TaskTemplate.objects.create(name="Malware playbook", subject=other)
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="apply_task_template",
+                                      arguments={"template_id": tmpl.id}, id="c1")]),
+        ChatTurn(text="Could not apply."),
+    ])
+    triage_agent.run_triage_work(inc.id, provider=provider)
+    assert not Task.objects.filter(incident=inc).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_work_phase_records_manual_task_findings_without_closing(acme, phishing):
+    inc = make_incident(acme, subject=phishing)
+    task = Task.objects.create(incident=inc, title="Investigate sender", task_type=Task.TYPE_MANUAL)
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="add_task_comment",
+                                      arguments={"task_id": task.id, "text": "Sender domain is 3 days old."},
+                                      id="c1")]),
+        ChatTurn(text="Recorded findings."),
+    ])
+    triage_agent.run_triage_work(inc.id, provider=provider)
+    task.refresh_from_db()
+    assert task.state == Task.STATE_IN_PROGRESS  # progressed, never closed
+    assert Comment.objects.filter(incident=inc, task=task, is_internal=True).exists()
+
+
+@pytest.mark.django_db
+def test_triage_write_tools_are_all_authorised():
+    """build_triage_tools registers only writes named in the authority module."""
+    from incidents.llm.triage_action_authority import TRIAGE_AGENT_WRITE_ACTIONS
+    from incidents.llm import triage_tools
+    org = Organization.objects.create(name="X", slug="x", wazuh_group="x")
+    subj, _ = Subject.objects.get_or_create(slug="phishing", defaults={"name": "Phishing"})
+    inc = Incident.objects.create(organization=org, title="t", display_id="INC-X-1", subject=subj)
+    tools = triage_tools.build_triage_tools(inc, {"incident": {}}, include_web_search=False)
+    write_names = {t.name for t in tools if t.is_write}
+    assert write_names == set(TRIAGE_AGENT_WRITE_ACTIONS)
 
 
 # ── the gate is wired into Classify ──────────────────────────────────────────

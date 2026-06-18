@@ -13,9 +13,11 @@ from assistants.tools import ToolResult, ToolSpec
 from assistants.web_search import build_web_search_tool, web_search_available
 from assistants import pap_guard
 
-# Reuse the assistant's host-inventory tool: it scopes purely by the incident's
-# organisation (never by user), so it is already correct for the unattended agent.
-from incidents.llm.assistant_tools import _host_inventory
+# Reuse the assistant's host-inventory and manual-task-findings tools: both scope purely
+# by the incident's organisation (never by user) and accept actor=None, so they are
+# already correct for the unattended agent.
+from incidents.llm.assistant_tools import _add_task_comment, _host_inventory, _record_autonomous
+from incidents.llm.triage_action_authority import TRIAGE_AGENT_WRITE_ACTIONS
 
 _LIMIT = 10
 
@@ -87,6 +89,53 @@ def _lookup_assets(incident):
     )
 
 
+# ── write (executed) tools — ADR-0025 ─────────────────────────────────────────
+
+
+def _apply_task_template(incident):
+    def executor(args):
+        from django.core.exceptions import ValidationError
+        from incidents.models import TaskTemplate
+        from incidents.services.templates import apply_template
+
+        template_id = (args or {}).get("template_id")
+        if template_id is None:
+            return ToolResult(error="template_id is required", summary="missing template_id")
+        if incident.subject_id is None:
+            return ToolResult(error="incident has no subject; cannot apply a playbook",
+                              summary="no subject")
+        tmpl = (
+            TaskTemplate.objects.filter(pk=template_id, archived=False)
+            .select_related("subject").first()
+        )
+        if tmpl is None:
+            return ToolResult(error="no such task template", summary="template not found")
+        if tmpl.subject_id != incident.subject_id:
+            return ToolResult(
+                error="that template belongs to a different subject than this incident",
+                summary="subject mismatch",
+            )
+        try:
+            apply_template(incident, tmpl, actor=None)
+        except ValidationError as exc:
+            # Idempotency: apply_template refuses to re-apply a template with active tasks.
+            return ToolResult(error=str(exc), summary="already applied")
+        _record_autonomous(incident, None, "apply_task_template",
+                           {"template_id": tmpl.id, "name": tmpl.name})
+        return ToolResult(content={"applied": tmpl.name}, summary=f"applied playbook '{tmpl.name}'")
+    return ToolSpec(
+        name="apply_task_template", is_write=True,
+        description="Apply one of this incident's available playbooks (task templates for its "
+                    "subject), creating its tasks. Pass the template_id from available_templates in "
+                    "context. This only CREATES the tasks; running automated/wazuh_response tasks is "
+                    "a separate step.",
+        parameters={"type": "object", "properties": {
+            "template_id": {"type": "integer", "description": "Id of the template (from available_templates)."}},
+            "required": ["template_id"]},
+        executor=executor,
+    )
+
+
 def build_triage_read_tools(incident, grounding, *, include_web_search=True,
                             os_client=None, wazuh_client=None):
     """Read-only tool set for the Triage Agent, scoped to the incident's org.
@@ -111,3 +160,27 @@ def build_triage_read_tools(incident, grounding, *, include_web_search=True,
         tools.append(build_web_search_tool(guard=guard))
 
     return tools
+
+
+def build_triage_tools(incident, grounding, *, include_web_search=True, read_only=False,
+                       os_client=None, wazuh_client=None):
+    """Full Triage Agent tool set: read tools (+ web search) plus the executed write tools.
+
+    `read_only=True` returns only the read tools (the slice-4 research-only behaviour).
+    Every write tool registered is asserted to be in TRIAGE_AGENT_WRITE_ACTIONS so a
+    mis-registered higher-risk action can never reach the model (ADR-0025).
+    """
+    tools = build_triage_read_tools(
+        incident, grounding, include_web_search=include_web_search,
+        os_client=os_client, wazuh_client=wazuh_client,
+    )
+    if read_only:
+        return tools
+
+    write_tools = [
+        _apply_task_template(incident),
+        _add_task_comment(incident, None),
+    ]
+    for t in write_tools:
+        assert t.name in TRIAGE_AGENT_WRITE_ACTIONS, f"unauthorised triage write tool: {t.name}"
+    return tools + write_tools
