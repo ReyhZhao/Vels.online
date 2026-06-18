@@ -1629,15 +1629,25 @@ class TaskRunView(APIView):
         if not can_view_incident(request.user, task.incident):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        from incidents.services import task_execution
+
         if task.task_type == Task.TYPE_WAZUH_RESPONSE:
-            return _run_wazuh_response_task(request, task)
+            try:
+                task = task_execution.execute_wazuh_response_task(
+                    task,
+                    actor=request.user,
+                    args=request.data.get("args"),
+                    agent_ids=request.data.get("agent_ids"),
+                    timeout=request.data.get("timeout"),
+                )
+            except task_execution.TaskExecutionError as exc:
+                return Response({"detail": exc.message}, status=exc.http_status)
+            return Response(TaskSerializer(task).data)
 
         if task.task_type != Task.TYPE_AUTOMATED:
             return Response({"detail": "Task is not of type automated."}, status=status.HTTP_400_BAD_REQUEST)
         if not task.automation_id:
             return Response({"detail": "Task has no automation attached."}, status=status.HTTP_400_BAD_REQUEST)
-
-        from automations.semaphore import SemaphoreAPIError, SemaphoreClient
 
         extra_vars, err = _build_extra_vars(task)
         if err:
@@ -1649,169 +1659,25 @@ class TaskRunView(APIView):
             extra_vars.update(override_vars)
 
         try:
-            client = SemaphoreClient()
-            semaphore_task_id = client.launch_job(
-                template_id=task.automation.semaphore_template_id,
-                extra_vars=extra_vars,
-            )
-        except SemaphoreAPIError as exc:
-            logger.exception(
-                "launch_job failed for task=%s automation=%s template_id=%s: status=%s extra_vars=%s",
-                task.pk,
-                task.automation_id,
-                task.automation.semaphore_template_id,
-                exc.status_code,
-                extra_vars,
-            )
-            return Response({"detail": "Service error launching automation."}, status=status.HTTP_502_BAD_GATEWAY)
-
-        update_fields = dict(
-            semaphore_task_id=semaphore_task_id,
-            state=Task.STATE_IN_PROGRESS,
-            automation_error=None,
-        )
-        if not task.assignee_id:
-            update_fields["assignee"] = request.user
-        Task.objects.filter(pk=task.pk).update(**update_fields)
-        task.refresh_from_db()
+            task = task_execution.execute_automated_task(task, actor=request.user, extra_vars=extra_vars)
+        except task_execution.TaskExecutionError as exc:
+            return Response({"detail": exc.message}, status=exc.http_status)
         return Response(TaskSerializer(task).data)
-
-
-def _run_wazuh_response_task(request, task):
-    from automations.interpolation import interpolate_args
-    from security.wazuh import WazuhAPIError, WazuhClient
-
-    if not task.wazuh_response_id:
-        return Response({"detail": "Task has no Wazuh response attached."}, status=status.HTTP_400_BAD_REQUEST)
-
-    wr = task.wazuh_response
-    incident = Incident.objects.prefetch_related("assets", "iocs").get(pk=task.incident_id)
-
-    # Resolve args
-    override_args = (request.data.get("args") or "").strip()
-    resolved_args = override_args if override_args else interpolate_args(wr.default_args, incident)
-
-    # Determine agent IDs to target
-    agent_ids_raw = request.data.get("agent_ids")
-    if agent_ids_raw and isinstance(agent_ids_raw, list):
-        agent_ids = [str(a) for a in agent_ids_raw]
-    else:
-        # Fall back to all assets with agent names linked to this incident
-        agent_ids = list(
-            incident.assets.filter(agent_name__isnull=False).values_list("agent_name", flat=True)
-        )
-
-    timeout_override = request.data.get("timeout")
-    timeout = int(timeout_override) if timeout_override is not None else wr.timeout
-
-    wazuh_status_code = None
-    wazuh_response_body = {}
-    error_msg = None
-
-    try:
-        client = WazuhClient()
-        wazuh_status_code, wazuh_response_body = client.run_active_response(
-            command=wr.command,
-            agent_ids=agent_ids,
-            args=resolved_args,
-            timeout=timeout,
-        )
-    except WazuhAPIError as exc:
-        logger.exception("WazuhAPIError running active response task=%s", task.pk)
-        error_msg = "Active response failed; see server logs for details."
-
-    with transaction.atomic():
-        Task.objects.filter(pk=task.pk).update(
-            state=Task.STATE_DONE,
-            automation_error=error_msg,
-            assignee=task.assignee or request.user,
-        )
-        task.refresh_from_db()
-
-        execution = WazuhResponseExecution.objects.create(
-            wazuh_response=wr,
-            executed_by=request.user,
-            agent_ids=agent_ids,
-            resolved_args=resolved_args,
-            timeout_used=timeout,
-            incident=task.incident,
-            task=task,
-            wazuh_status_code=wazuh_status_code,
-            wazuh_response_body=wazuh_response_body,
-        )
-
-        agents_str = ", ".join(agent_ids) if agent_ids else "no agents"
-        if error_msg:
-            body = (
-                f"Wazuh active response **{wr.name}** (`{wr.command}`) dispatched to {agents_str} "
-                f"by {request.user.username}. **Error:** {error_msg}"
-            )
-        else:
-            body = (
-                f"Wazuh active response **{wr.name}** (`{wr.command}`) dispatched to {agents_str} "
-                f"by {request.user.username}. Status {wazuh_status_code} — dispatch confirmed "
-                f"(not execution confirmed)."
-            )
-        Comment.objects.create(
-            incident=task.incident,
-            author=request.user,
-            body=body,
-            kind=Comment.KIND_SYSTEM,
-        )
-        record_event(
-            task.incident,
-            "wazuh_response_dispatched",
-            actor=request.user,
-            payload={
-                "task_id": task.id,
-                "wazuh_response_id": wr.id,
-                "wazuh_response_name": wr.name,
-                "command": wr.command,
-                "agent_ids": agent_ids,
-                "resolved_args": resolved_args,
-                "timeout_used": timeout,
-                "execution_id": execution.id,
-                "status_code": wazuh_status_code,
-                "error": error_msg,
-            },
-        )
-
-    return Response(TaskSerializer(task).data)
 
 
 def _build_extra_vars(task):
     """Merge default_vars + resolved mappings + hardcoded incident fields.
 
-    Returns (vars_dict, error_response) — exactly one of the two is None.
+    Returns (vars_dict, error_response) — exactly one of the two is None. Thin
+    adapter over the request-free service builder (incidents.services.task_execution),
+    preserving the `{"error": ...}` Response shape this view and TaskPreviewView expect.
     """
-    from automations.incident_vars import UnresolvableVarError, resolve_incident_vars
-    import yaml
+    from incidents.services import task_execution
 
-    incident = task.incident
-
-    extra_vars = {}
-    if task.automation.default_vars:
-        parsed = yaml.safe_load(task.automation.default_vars)
-        if isinstance(parsed, dict):
-            extra_vars.update(parsed)
-
-    if task.automation.incident_var_mappings:
-        incident = Incident.objects.prefetch_related("assets", "iocs").get(pk=incident.pk)
-        try:
-            extra_vars.update(resolve_incident_vars(task.automation.incident_var_mappings, incident))
-        except UnresolvableVarError as exc:
-            return None, Response(
-                {"error": f"Mapping for '{exc.var_name}' (source: {exc.source}) resolved to no values."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-    extra_vars.update({
-        "incident_id": incident.id,
-        "incident_display_id": incident.display_id,
-        "incident_title": incident.title,
-        "incident_severity": incident.severity,
-    })
-    return extra_vars, None
+    try:
+        return task_execution.build_automated_extra_vars(task), None
+    except task_execution.TaskExecutionError as exc:
+        return None, Response({"error": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class TaskPreviewView(APIView):

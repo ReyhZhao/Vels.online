@@ -121,6 +121,7 @@ def _serialize_wazuh_response(obj):
         "timeout": obj.timeout,
         "available_in_security_overview": obj.available_in_security_overview,
         "requires_confirmation": obj.requires_confirmation,
+        "autonomous_triage_approved": obj.autonomous_triage_approved,
         "archived": obj.archived,
         "created_by": obj.created_by_id,
         "created_at": obj.created_at.isoformat() if obj.created_at else None,
@@ -159,6 +160,7 @@ class WazuhResponseListView(APIView):
             timeout=int(request.data.get("timeout") or 0),
             available_in_security_overview=bool(request.data.get("available_in_security_overview", False)),
             requires_confirmation=bool(request.data.get("requires_confirmation", False)),
+            autonomous_triage_approved=bool(request.data.get("autonomous_triage_approved", False)),
             created_by=request.user,
         )
         return Response(_serialize_wazuh_response(obj), status=201)
@@ -180,7 +182,7 @@ class WazuhResponseDetailView(APIView):
         if "timeout" in request.data:
             obj.timeout = int(request.data["timeout"] or 0)
             update_fields.append("timeout")
-        for bool_field in ["available_in_security_overview", "requires_confirmation", "archived"]:
+        for bool_field in ["available_in_security_overview", "requires_confirmation", "autonomous_triage_approved", "archived"]:
             if bool_field in request.data:
                 setattr(obj, bool_field, bool(request.data[bool_field]))
                 update_fields.append(bool_field)

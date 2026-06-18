@@ -25,6 +25,7 @@ function ResponseRow({ response, onArchive, onUpdate }) {
   const [timeout, setTimeout_] = useState(String(response.timeout ?? 0));
   const [availableInOverview, setAvailableInOverview] = useState(response.available_in_security_overview);
   const [requiresConfirmation, setRequiresConfirmation] = useState(response.requires_confirmation);
+  const [autonomousApproved, setAutonomousApproved] = useState(response.autonomous_triage_approved);
   const [saving, setSaving] = useState(false);
 
   function togglePlatform(p) {
@@ -43,6 +44,7 @@ function ResponseRow({ response, onArchive, onUpdate }) {
         timeout: Number(timeout) || 0,
         available_in_security_overview: availableInOverview,
         requires_confirmation: requiresConfirmation,
+        autonomous_triage_approved: autonomousApproved,
       });
       onUpdate(res.data);
       setEditing(false);
@@ -138,6 +140,23 @@ function ResponseRow({ response, onArchive, onUpdate }) {
                 Requires confirmation
               </label>
             </div>
+            <label className="flex items-start gap-2 text-sm cursor-pointer rounded-md border border-red-300 bg-red-50 p-2 dark:border-red-900/50 dark:bg-red-950/30">
+              <input
+                type="checkbox"
+                checked={autonomousApproved}
+                onChange={e => setAutonomousApproved(e.target.checked)}
+                disabled={saving}
+                className="mt-0.5 rounded border-border"
+              />
+              <span>
+                <span className="font-medium text-red-800 dark:text-red-300">Approve for autonomous triage</span>
+                <span className="block text-xs text-red-700/80 dark:text-red-400/80">
+                  Lets the unattended Triage Agent run this response with no human present, on high confidence.
+                  This is <strong>global</strong> — it may auto-fire on <strong>any</strong> tenant's estate.
+                  Distinct from “requires confirmation”. Approve only when this action is safe fleet-wide.
+                </span>
+              </span>
+            </label>
             <div className="flex gap-2">
               <button onClick={handleSave} disabled={saving} className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50">
                 Save
@@ -172,6 +191,9 @@ function ResponseRow({ response, onArchive, onUpdate }) {
           {response.requires_confirmation && (
             <span className="text-xs text-orange-700 dark:text-orange-400">Confirmation</span>
           )}
+          {response.autonomous_triage_approved && (
+            <span className="text-xs font-medium text-red-700 dark:text-red-400">Autonomous</span>
+          )}
         </div>
       </td>
       <td className="px-4 py-3 text-xs text-muted-foreground">
@@ -197,6 +219,7 @@ function CreateModal({ onClose, onCreate }) {
   const [timeout, setTimeout_] = useState('0');
   const [availableInOverview, setAvailableInOverview] = useState(false);
   const [requiresConfirmation, setRequiresConfirmation] = useState(false);
+  const [autonomousApproved, setAutonomousApproved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
 
@@ -220,6 +243,7 @@ function CreateModal({ onClose, onCreate }) {
         timeout: Number(timeout) || 0,
         available_in_security_overview: availableInOverview,
         requires_confirmation: requiresConfirmation,
+        autonomous_triage_approved: autonomousApproved,
       });
       onCreate(res.data);
       onClose();
@@ -318,6 +342,23 @@ function CreateModal({ onClose, onCreate }) {
               Requires confirmation
             </label>
           </div>
+          <label className="flex items-start gap-2 text-sm cursor-pointer rounded-md border border-red-300 bg-red-50 p-2 dark:border-red-900/50 dark:bg-red-950/30">
+            <input
+              type="checkbox"
+              checked={autonomousApproved}
+              onChange={e => setAutonomousApproved(e.target.checked)}
+              disabled={saving}
+              className="mt-0.5 rounded border-border"
+            />
+            <span>
+              <span className="font-medium text-red-800 dark:text-red-300">Approve for autonomous triage</span>
+              <span className="block text-xs text-red-700/80 dark:text-red-400/80">
+                Lets the unattended Triage Agent run this response with no human present, on high confidence.
+                This is <strong>global</strong> — it may auto-fire on <strong>any</strong> tenant's estate.
+                Distinct from “requires confirmation”. Approve only when this action is safe fleet-wide.
+              </span>
+            </span>
+          </label>
           {errors._ && <p className="text-xs text-red-600">{errors._}</p>}
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} disabled={saving} className="text-sm text-muted-foreground hover:underline">

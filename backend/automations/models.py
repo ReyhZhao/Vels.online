@@ -12,6 +12,12 @@ class WazuhActiveResponse(models.Model):
     timeout = models.PositiveIntegerField(default=0)
     available_in_security_overview = models.BooleanField(default=False)
     requires_confirmation = models.BooleanField(default=False)
+    # ADR-0025: pre-authorizes the unattended Triage Agent to run this response with
+    # NO human present, on high disposition confidence. Distinct from
+    # requires_confirmation (a human-facing confirm-dialog nicety). Default off, and
+    # global per response — an approved response may auto-fire on ANY tenant's estate,
+    # so approve only when the action is safe fleet-wide.
+    autonomous_triage_approved = models.BooleanField(default=False)
     archived = models.BooleanField(default=False)
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="wazuh_active_responses"
