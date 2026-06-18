@@ -197,6 +197,11 @@ class Incident(models.Model):
     # Free-form labels. Low-risk, reversible — the incident assistant may add these
     # autonomously (ADR-0012).
     tags = models.JSONField(default=list, blank=True)
+    # Durable once-per-incident marker for the agentic Triage Work phase (ADR-0024/0025).
+    # Set when the Work phase runs so Celery retries of Classify and later-linking alerts
+    # never silently re-trigger autonomous actions; the manual triage button clears it to
+    # deliberately re-run.
+    triage_worked_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

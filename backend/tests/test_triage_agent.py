@@ -1,0 +1,189 @@
+"""Tests for the agentic Triage Work phase — the Triage Agent (ADR-0024).
+
+Drive the loop with a scripted provider that emits ChatTurns — never an LLM SDK.
+"""
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from assistants.tools import ChatTurn, ToolCall
+from incidents.llm.base import TriageResult
+from incidents.models import Comment, Incident, Subject
+from incidents import triage_agent
+from security.models import Organization
+
+
+@pytest.fixture
+def acme(db):
+    return Organization.objects.create(name="Acme", slug="acme", wazuh_group="acme")
+
+
+@pytest.fixture
+def phishing(db):
+    subj, _ = Subject.objects.get_or_create(slug="phishing", defaults={"name": "Phishing"})
+    return subj
+
+
+def make_incident(acme, subject=None, state="triaged", **kw):
+    n = Incident.objects.count()
+    return Incident.objects.create(
+        organization=acme, title="Suspicious login", description="x",
+        display_id=f"INC-2026-{n + 1:04d}", state=state, subject=subject, **kw,
+    )
+
+
+def _result(disposition=0.9):
+    return TriageResult(
+        severity_recommendation="high", summary="s", primary_action="assign_to_analyst",
+        disposition_confidence=disposition,
+    )
+
+
+class FakeProvider:
+    def __init__(self, turns):
+        self._turns = list(turns)
+        self.calls = 0
+
+    def chat(self, messages, tools):
+        self.calls += 1
+        return self._turns.pop(0) if self._turns else ChatTurn(text="done")
+
+
+# ── the gate ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_gate_opens_on_high_confidence_with_subject(acme, phishing):
+    inc = make_incident(acme, subject=phishing)
+    assert triage_agent.should_run_work_phase(inc, _result(0.95)) is True
+
+
+@pytest.mark.django_db
+def test_gate_closed_when_below_threshold(acme, phishing):
+    inc = make_incident(acme, subject=phishing)
+    assert triage_agent.should_run_work_phase(inc, _result(0.5)) is False
+
+
+@pytest.mark.django_db
+def test_gate_closed_without_subject(acme):
+    inc = make_incident(acme, subject=None)
+    assert triage_agent.should_run_work_phase(inc, _result(0.99)) is False
+
+
+@pytest.mark.django_db
+def test_gate_respects_per_org_threshold(acme, phishing):
+    acme.triage_work_threshold = 0.6
+    acme.save()
+    inc = make_incident(acme, subject=phishing)
+    assert triage_agent.should_run_work_phase(inc, _result(0.7)) is True
+    acme.triage_work_threshold = 0.99
+    acme.save()
+    inc.refresh_from_db()
+    assert triage_agent.should_run_work_phase(inc, _result(0.7)) is False
+
+
+@pytest.mark.django_db
+def test_gate_closed_when_already_worked(acme, phishing):
+    from django.utils import timezone
+    inc = make_incident(acme, subject=phishing, triage_worked_at=timezone.now())
+    assert triage_agent.should_run_work_phase(inc, _result(0.99)) is False
+
+
+# ── the work phase ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_work_phase_research_then_handoff(acme, phishing):
+    inc = make_incident(acme, subject=phishing, state="triaged")
+    provider = FakeProvider([ChatTurn(text="Investigated; benign-looking but watch host web-01.")])
+
+    triage_agent.run_triage_work(inc.id, provider=provider)
+
+    inc.refresh_from_db()
+    assert inc.state == Incident.STATE_IN_PROGRESS
+    assert inc.triage_worked_at is not None
+    comment = Comment.objects.get(incident=inc, kind=Comment.KIND_AI_TRIAGE)
+    assert "web-01" in comment.body
+    assert comment.author is None
+    assert comment.metadata["triage_agent"] is True
+    assert comment.metadata["phase"] == "work"
+    assert comment.metadata["stop_reason"] == "model_done"
+
+
+@pytest.mark.django_db
+def test_work_phase_uses_read_tools(acme, phishing):
+    """The model may call a read tool; the loop executes it and feeds the result back."""
+    inc = make_incident(acme, subject=phishing)
+    make_incident(acme, subject=phishing, state="new")  # another incident to find
+    provider = FakeProvider([
+        ChatTurn(tool_calls=[ToolCall(name="lookup_incidents", arguments={}, id="c1")]),
+        ChatTurn(text="Found a related incident; recommend review."),
+    ])
+    triage_agent.run_triage_work(inc.id, provider=provider)
+    assert provider.calls == 2
+    comment = Comment.objects.get(incident=inc, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["tool_trace"][0]["tool"] == "lookup_incidents"
+
+
+@pytest.mark.django_db
+def test_work_phase_runs_once_per_incident(acme, phishing):
+    inc = make_incident(acme, subject=phishing)
+    triage_agent.run_triage_work(inc.id, provider=FakeProvider([ChatTurn(text="first")]))
+    inc.refresh_from_db()
+    first_marker = inc.triage_worked_at
+    # second call is a no-op (marker set)
+    second = FakeProvider([ChatTurn(text="second")])
+    triage_agent.run_triage_work(inc.id, provider=second)
+    assert second.calls == 0
+    inc.refresh_from_db()
+    assert inc.triage_worked_at == first_marker
+    assert Comment.objects.filter(incident=inc, kind=Comment.KIND_AI_TRIAGE).count() == 1
+
+
+@pytest.mark.django_db
+def test_work_phase_error_hands_off_safely(acme, phishing):
+    inc = make_incident(acme, subject=phishing, state="triaged")
+
+    class Boom:
+        def chat(self, messages, tools):
+            raise RuntimeError("provider down")
+
+    triage_agent.run_triage_work(inc.id, provider=Boom())
+    inc.refresh_from_db()
+    assert inc.state == Incident.STATE_IN_PROGRESS  # never left stuck
+    assert inc.triage_worked_at is not None
+    comment = Comment.objects.get(incident=inc, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["error"] is True
+
+
+# ── the gate is wired into Classify ──────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_classify_dispatches_work_on_high_confidence(acme, phishing):
+    from incidents.tasks import run_incident_triage
+    inc = make_incident(acme, subject=phishing, state="new", severity="medium")
+    provider = MagicMock()
+    provider.triage_incident.return_value = _result(0.95)
+    provider.find_related_incidents.return_value = MagicMock(max_confidence=0.0, related_incident_ids=[])
+
+    with patch("incidents.tasks.get_triage_provider", return_value=provider), \
+         patch("incidents.tasks.run_triage_work_task.delay") as mock_delay:
+        run_incident_triage.apply(args=[inc.id])
+
+    mock_delay.assert_called_once_with(inc.id)
+
+
+@pytest.mark.django_db
+def test_classify_does_not_dispatch_on_low_confidence(acme, phishing):
+    from incidents.tasks import run_incident_triage
+    inc = make_incident(acme, subject=phishing, state="new", severity="medium")
+    provider = MagicMock()
+    provider.triage_incident.return_value = _result(0.1)
+    provider.find_related_incidents.return_value = MagicMock(max_confidence=0.0, related_incident_ids=[])
+
+    with patch("incidents.tasks.get_triage_provider", return_value=provider), \
+         patch("incidents.tasks.run_triage_work_task.delay") as mock_delay:
+        run_incident_triage.apply(args=[inc.id])
+
+    mock_delay.assert_not_called()

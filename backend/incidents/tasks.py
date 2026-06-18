@@ -241,6 +241,21 @@ def run_incident_triage(self, incident_id: int):
         },
     )
 
+    # Gate (ADR-0024): on high disposition confidence with a matched subject, hand off
+    # to the agentic Triage Work phase as a background job.
+    if not auto_closed:
+        from incidents.triage_agent import should_run_work_phase
+        incident.refresh_from_db(fields=["subject", "triage_worked_at"])
+        if should_run_work_phase(incident, result):
+            run_triage_work_task.delay(incident.id)
+
+
+@shared_task
+def run_triage_work_task(incident_id: int):
+    """Celery entry for the agentic Triage Work phase (ADR-0024)."""
+    from incidents.triage_agent import run_triage_work
+    run_triage_work(incident_id)
+
 
 def _ioc_enrichment_annotation(ioc) -> str | None:
     """Return a compact enrichment annotation string for the IOC, or None if unavailable."""

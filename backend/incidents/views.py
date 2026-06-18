@@ -2054,6 +2054,13 @@ class IncidentTriageView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
+        # A manual re-trigger is a deliberate human act: clear the durable Work-phase
+        # marker so the agentic Triage Work phase may run again (ADR-0024). Re-run safety
+        # is provided by the task-state guard, not by blocking re-entry here.
+        if incident.triage_worked_at is not None:
+            incident.triage_worked_at = None
+            incident.save(update_fields=["triage_worked_at"])
+
         run_incident_triage.delay(incident.id)
         return Response(status=status.HTTP_202_ACCEPTED)
 
