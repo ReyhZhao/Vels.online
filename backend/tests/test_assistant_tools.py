@@ -93,6 +93,46 @@ def test_lookup_assets_scoped_to_org(staff, incident, org_a, org_b):
     assert names == {"WEB-01"}
 
 
+def test_lookup_assets_returns_internet_facing_and_exposures_for_nat_host(staff, incident, org_a):
+    from incidents.models import NatExposure
+    asset = Asset.objects.create(organization=org_a, kind="host", name="DB-01")
+    NatExposure.objects.create(asset=asset, protocol="tcp", port=3389)
+    tools = build_incident_tools(incident, staff, _grounding(incident))
+    res = _tool(tools, "lookup_assets").executor({})
+    row = next(r for r in res.content if r["name"] == "DB-01")
+    assert row["internet_facing"] is True
+    assert len(row["exposures"]) == 1
+    exp = row["exposures"][0]
+    assert exp["kind"] == "direct_nat"
+    assert exp["protection"] == "raw"
+    assert exp["specifics"]["port"] == 3389
+
+
+def test_lookup_assets_returns_empty_exposures_for_unexposed_host(staff, incident, org_a):
+    Asset.objects.create(organization=org_a, kind="host", name="INTERNAL-01")
+    tools = build_incident_tools(incident, staff, _grounding(incident))
+    res = _tool(tools, "lookup_assets").executor({})
+    row = next(r for r in res.content if r["name"] == "INTERNAL-01")
+    assert row["internet_facing"] is False
+    assert row["exposures"] == []
+
+
+def test_lookup_assets_returns_ingress_route_exposure(staff, incident, org_a):
+    from ingress.models import Route
+    asset = Asset.objects.create(organization=org_a, kind="host", name="WEB-FRONT")
+    Route.objects.create(
+        organization=org_a, fqdn="app.acme.com", backend_host="10.0.0.1",
+        backend_port=443, backend_asset=asset,
+    )
+    tools = build_incident_tools(incident, staff, _grounding(incident))
+    res = _tool(tools, "lookup_assets").executor({})
+    row = next(r for r in res.content if r["name"] == "WEB-FRONT")
+    assert row["internet_facing"] is True
+    assert any(e["kind"] == "ingress_route" and e["protection"] == "protected"
+               and e["specifics"]["fqdn"] == "app.acme.com"
+               for e in row["exposures"])
+
+
 # ── host_inventory read tool (IT Hygiene Inventory, ADR-0022) ─────────────────
 
 class _FakeWazuh:
