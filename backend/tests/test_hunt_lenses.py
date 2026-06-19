@@ -565,6 +565,73 @@ def test_search_events_commits_no_findings_even_with_sink():
     assert recorded == []
 
 
+def test_search_events_two_group_by_emits_nested_agg_and_returns_nested_by_org():
+    nested_aggs = {
+        "group0": {
+            "buckets": [
+                {
+                    "key": "10.0.0.1",
+                    "doc_count": 15,
+                    "group1": {
+                        "buckets": [
+                            {"key": "alice", "doc_count": 10},
+                            {"key": "bob", "doc_count": 5},
+                        ]
+                    },
+                }
+            ]
+        }
+    }
+    mapping = {"data.srcip": "ip", "data.dstuser": "keyword"}
+    os_client = FakeOS(aggs_per_call=[nested_aggs, {}], mapping=mapping)
+    ctx = HuntContext(scope=TWO_ORGS, lookback_days=30, os_client=os_client)
+    tool = _lens(build_general_query_tools(ctx), "search_events")
+
+    result = tool.executor({
+        "group_by": ["data.srcip", "data.dstuser"],
+        "metric": {"type": "count"},
+    })
+
+    assert result.error is None
+    # lens must issue one query per org
+    assert len(os_client.calls) == 2
+    # emitted body has nested terms: group0 → group1
+    body = os_client.calls[0][1]
+    g0 = body["aggs"]["group0"]
+    assert g0["terms"]["field"] == "data.srcip"
+    g1 = g0["aggs"]["group1"]
+    assert g1["terms"]["field"] == "data.dstuser"
+    # by_org output preserves the nested agg structure unchanged
+    by_org = result.content["by_org"]
+    assert by_org[0]["organization"] == "Acme"
+    assert by_org[0]["aggregations"] == nested_aggs
+    assert by_org[1]["organization"] == "Beta"
+
+
+def test_search_events_rejects_three_group_by_fields():
+    os_client = FakeOS(mapping={"a": "keyword", "b": "keyword", "c": "keyword"})
+    ctx = _ctx(TWO_ORGS, os_client)
+    tool = _lens(build_general_query_tools(ctx), "search_events")
+
+    result = tool.executor({"group_by": ["a", "b", "c"], "metric": {"type": "count"}})
+
+    assert result.error is not None
+    assert "group_by" in result.error
+    assert os_client.calls == []  # validation fires before any query
+
+
+def test_search_events_two_group_by_second_field_validated_as_aggregatable():
+    mapping = {"data.srcip": "ip", "desc": "text"}  # desc is non-aggregatable (no .keyword)
+    os_client = FakeOS(mapping=mapping)
+    ctx = _ctx(TWO_ORGS, os_client)
+    tool = _lens(build_general_query_tools(ctx), "search_events")
+
+    result = tool.executor({"group_by": ["data.srcip", "desc"], "metric": {"type": "count"}})
+
+    assert result.error is not None
+    assert os_client.calls == []  # never queries on non-aggregatable second field
+
+
 # ── describe_fields lens (ADR-0026) ─────────────────────────────────────────────
 
 def test_describe_fields_returns_schema_only_no_values():
