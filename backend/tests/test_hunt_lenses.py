@@ -702,6 +702,64 @@ def test_search_events_rejects_sum_on_non_numeric_field():
     assert os_client.calls == []
 
 
+def test_search_events_with_interval_emits_histogram_outer_bucket_and_returns_time_series_by_org():
+    time_series_aggs = {
+        "over_time": {
+            "buckets": [
+                {"key_as_string": "2025-01-01T00:00:00", "key": 1735689600000, "doc_count": 10,
+                 "group0": {"buckets": [{"key": "10.0.0.1", "doc_count": 7}]}},
+                {"key_as_string": "2025-01-02T00:00:00", "key": 1735776000000, "doc_count": 5,
+                 "group0": {"buckets": [{"key": "10.0.0.2", "doc_count": 5}]}},
+            ]
+        }
+    }
+    mapping = {"data.srcip": "ip"}
+    os_client = FakeOS(aggs_per_call=[time_series_aggs, {}], mapping=mapping)
+    recorded = []
+    ctx = HuntContext(
+        scope=TWO_ORGS, lookback_days=30, os_client=os_client,
+        record_findings=lambda *a, **k: recorded.append(a),
+    )
+    tool = _lens(build_general_query_tools(ctx), "search_events")
+
+    result = tool.executor({
+        "filters": [],
+        "group_by": ["data.srcip"],
+        "metric": {"type": "count"},
+        "interval": "1d",
+    })
+
+    assert result.error is None
+    # one query per org
+    assert len(os_client.calls) == 2
+    # emitted body has date_histogram as the outermost aggregation
+    body = os_client.calls[0][1]
+    assert "over_time" in body["aggs"]
+    assert body["aggs"]["over_time"]["date_histogram"]["fixed_interval"] == "1d"
+    assert body["aggs"]["over_time"]["date_histogram"]["field"] == "@timestamp"
+    # group0 is nested under over_time
+    assert "aggs" in body["aggs"]["over_time"]
+    assert "group0" in body["aggs"]["over_time"]["aggs"]
+    # by_org output carries the full time-series aggregation structure
+    by_org = result.content["by_org"]
+    assert by_org[0]["organization"] == "Acme"
+    assert by_org[0]["aggregations"] == time_series_aggs
+    # never records findings
+    assert recorded == []
+
+
+def test_search_events_interval_rejected_when_invalid():
+    os_client = FakeOS(mapping={})
+    ctx = _ctx(TWO_ORGS, os_client)
+    tool = _lens(build_general_query_tools(ctx), "search_events")
+
+    result = tool.executor({"metric": {"type": "count"}, "interval": "5m"})
+
+    assert result.error is not None
+    assert "interval" in result.error
+    assert os_client.calls == []
+
+
 # ── describe_fields lens (ADR-0026) ─────────────────────────────────────────────
 
 def test_describe_fields_returns_schema_only_no_values():
