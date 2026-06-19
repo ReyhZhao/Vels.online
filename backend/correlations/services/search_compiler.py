@@ -371,6 +371,139 @@ def compile_agg_query(
 _NOVELTY_SUBAGG_SIZE = 500
 
 
+_HUNT_METRIC_TYPES = frozenset({"count", "cardinality", "sum", "avg"})
+_HUNT_VALID_INTERVALS = frozenset({"1h", "6h", "1d"})
+_HUNT_OUTER_MAX = 50
+_HUNT_INNER_MAX = 20
+
+
+def compile_hunt_agg_query(
+    filters: list,
+    group_by: list,
+    metric: dict,
+    interval: str | None,
+    agent_ids: list,
+    lookback_days: int,
+    field_mapping: dict | None = None,
+    outer_size: int = 20,
+    inner_size: int = 20,
+) -> tuple[dict | None, str | None]:
+    """Compile a structured hunt aggregation spec to an OpenSearch body.
+
+    Returns (body, None) on success or (None, error) on validation failure.
+    Grammar: filters[{field,operator,value}] + group_by[≤2 fields] + metric{type,field?} +
+    optional interval{1h|6h|1d}. Model never emits DSL (ADR-0026).
+    """
+    from types import SimpleNamespace
+
+    outer_size = min(outer_size, _HUNT_OUTER_MAX)
+    inner_size = min(inner_size, _HUNT_INNER_MAX)
+
+    if len(group_by) > 2:
+        return None, "group_by accepts at most 2 fields."
+
+    if interval is not None and interval not in _HUNT_VALID_INTERVALS:
+        return None, f"interval must be one of: {', '.join(sorted(_HUNT_VALID_INTERVALS))}."
+
+    metric_type = (metric or {}).get("type")
+    if metric_type not in _HUNT_METRIC_TYPES:
+        return None, f"metric.type must be one of: {', '.join(sorted(_HUNT_METRIC_TYPES))}."
+    metric_field = (metric or {}).get("field") if metric_type != "count" else None
+    if metric_type in ("sum", "avg") and not metric_field:
+        return None, f"metric.field is required for metric.type={metric_type!r}."
+    if metric_type == "cardinality" and not metric_field:
+        return None, "metric.field is required for metric.type='cardinality'."
+
+    if metric_field and field_mapping:
+        if metric_field not in field_mapping:
+            return None, f"metric.field '{metric_field}' does not exist in the index mapping."
+        ft = field_mapping[metric_field]
+        if metric_type in ("sum", "avg") and ft not in _NUMERIC_TYPES:
+            return None, (
+                f"metric.field '{metric_field}' has type '{ft}'; "
+                f"sum/avg require a numeric field."
+            )
+        if metric_type == "cardinality" and ft in _TEXT_TYPES:
+            kw = f"{metric_field}.keyword"
+            if kw in field_mapping:
+                metric_field = kw
+            else:
+                return None, (
+                    f"metric.field '{metric_field}' is a non-aggregatable text field "
+                    f"with no .keyword subfield."
+                )
+
+    agg_group_by = []
+    for gf in group_by:
+        if field_mapping and gf not in field_mapping:
+            return None, f"group_by field '{gf}' does not exist in the index mapping."
+        if field_mapping and field_mapping.get(gf) in _TEXT_TYPES:
+            kw = f"{gf}.keyword"
+            if kw not in field_mapping:
+                return None, (
+                    f"group_by field '{gf}' is a text field with no .keyword subfield "
+                    f"and cannot be aggregated."
+                )
+            agg_group_by.append(kw)
+        else:
+            agg_group_by.append(_agg_target(gf, field_mapping))
+
+    filter_clauses = []
+    for f in filters or []:
+        fld = f.get("field", "")
+        op = f.get("operator", "")
+        val = f.get("value", "")
+        if field_mapping:
+            ok, reason = validate_search_field(fld, op, field_mapping)
+            if not ok:
+                return None, f"Filter condition error: {reason}"
+        cond = SimpleNamespace(field_name=fld, operator=op, value=str(val))
+        clause = _condition_to_clause(cond, field_mapping)
+        if clause:
+            filter_clauses.append(clause)
+
+    q_filters = [
+        {"terms": {"agent.id": [str(a) for a in agent_ids]}},
+        {"range": {"@timestamp": {"gte": f"now-{int(lookback_days)}d"}}},
+    ] + filter_clauses
+    body: dict = {"query": {"bool": {"filter": q_filters}}, "size": 0}
+
+    def _metric_agg() -> dict:
+        if metric_type == "count":
+            return {}
+        if metric_type == "cardinality":
+            return {"metric": {"cardinality": {"field": metric_field}}}
+        if metric_type == "sum":
+            return {"metric": {"sum": {"field": metric_field}}}
+        return {"metric": {"avg": {"field": metric_field}}}
+
+    inner: dict = _metric_agg()
+    for depth in range(len(agg_group_by) - 1, -1, -1):
+        field_target = agg_group_by[depth]
+        size = outer_size if depth == 0 else inner_size
+        agg: dict = {"terms": {"field": field_target, "size": size}}
+        if inner:
+            agg["aggs"] = inner
+        inner = {f"group{depth}": agg}
+
+    if not agg_group_by:
+        m = _metric_agg()
+        inner = m if m else {}
+
+    if interval:
+        hist: dict = {"date_histogram": {"field": "@timestamp", "fixed_interval": interval}}
+        if inner:
+            hist["aggs"] = inner
+        body["aggs"] = {"over_time": hist}
+    elif inner:
+        body["aggs"] = inner
+
+    if not interval and not agg_group_by and metric_type == "count":
+        body["track_total_hits"] = True
+
+    return body, None
+
+
 def compile_novelty_agg_query(
     conditions,
     agent_ids,

@@ -441,6 +441,135 @@ def _record_inventory_finding(ctx: HuntContext):
     )
 
 
+# ── General-query lenses (ADR-0026) ────────────────────────────────────────────────
+
+_SEARCH_EVENTS_OPERATORS = ["equals", "contains", "gte", "lte", "cidr"]
+
+
+def _search_events(ctx: HuntContext):
+    def executor(args):
+        from correlations.services.search_compiler import compile_hunt_agg_query
+
+        filters = list((args or {}).get("filters") or [])
+        group_by = list((args or {}).get("group_by") or [])
+        metric = dict((args or {}).get("metric") or {"type": "count"})
+        interval = (args or {}).get("interval") or None
+
+        try:
+            field_mapping = ctx.os_client.get_field_mapping()
+        except Exception:
+            field_mapping = {}
+
+        _, err = compile_hunt_agg_query(
+            filters=filters, group_by=group_by, metric=metric, interval=interval,
+            agent_ids=[], lookback_days=ctx.lookback_days, field_mapping=field_mapping,
+        )
+        if err:
+            return ToolResult(error=err, summary="bad args")
+
+        by_org = []
+        for s in ctx.scope:
+            if not s.agent_ids:
+                continue
+            body, _ = compile_hunt_agg_query(
+                filters=filters, group_by=group_by, metric=metric, interval=interval,
+                agent_ids=s.agent_ids, lookback_days=ctx.lookback_days,
+                field_mapping=field_mapping,
+                outer_size=ctx.max_buckets, inner_size=ctx.max_buckets,
+            )
+            data = ctx.os_client._search(ctx.index, body)
+            aggs = data.get("aggregations") or {}
+            hits_total = (data.get("hits") or {}).get("total") or {}
+            total = hits_total.get("value", 0) if isinstance(hits_total, dict) else hits_total
+            by_org.append({"organization": s.org_name, "aggregations": aggs, "total": total})
+
+        return ToolResult(
+            content={"by_org": by_org},
+            summary=f"search_events across {len(by_org)} org(s)",
+        )
+
+    return ToolSpec(
+        name="search_events",
+        description=(
+            "General-query lens: compose a custom aggregation over the hunt's alerts index — "
+            "up to two grouping fields (group_by), a metric (count / cardinality / sum / avg), "
+            "and an optional time interval. Fans out one query per org, returns by_org buckets. "
+            "Exploration only — records NO Findings. Use describe_fields first to discover "
+            "available fields. Time window is fixed to the hunt's lookback_days."
+        ),
+        parameters={"type": "object", "properties": {
+            "filters": {
+                "type": "array",
+                "description": "Optional filter conditions to restrict which events are aggregated.",
+                "items": {"type": "object", "properties": {
+                    "field": {"type": "string"},
+                    "operator": {"type": "string", "enum": _SEARCH_EVENTS_OPERATORS},
+                    "value": {"type": "string"},
+                }, "required": ["field", "operator", "value"]},
+            },
+            "group_by": {
+                "type": "array",
+                "description": "0–2 field names to group by (nested terms aggregation).",
+                "items": {"type": "string"},
+                "maxItems": 2,
+            },
+            "metric": {
+                "type": "object",
+                "description": "Aggregation metric: count (default), cardinality, sum, or avg.",
+                "properties": {
+                    "type": {"type": "string", "enum": ["count", "cardinality", "sum", "avg"]},
+                    "field": {"type": "string", "description": "Required for cardinality/sum/avg."},
+                },
+                "required": ["type"],
+            },
+            "interval": {
+                "type": "string",
+                "enum": ["1h", "6h", "1d"],
+                "description": "Optional time interval for a date_histogram outer bucket.",
+            },
+        }},
+        executor=executor,
+    )
+
+
+def _describe_fields(ctx: HuntContext):
+    def executor(args):
+        prefix = ((args or {}).get("prefix") or "").strip()
+        try:
+            mapping = ctx.os_client.get_field_mapping()
+        except Exception as exc:
+            return ToolResult(error=f"could not fetch field mapping: {exc}", summary="error")
+        fields = [
+            {"name": k, "type": v}
+            for k, v in sorted(mapping.items())
+            if not prefix or k.startswith(prefix)
+        ]
+        return ToolResult(
+            content={"fields": fields, "count": len(fields)},
+            summary=(
+                f"{len(fields)} field(s) with prefix '{prefix}'"
+                if prefix else f"{len(fields)} fields in index mapping"
+            ),
+        )
+
+    return ToolSpec(
+        name="describe_fields",
+        description=(
+            "Grounding tool: returns field names and types from the alerts index mapping. "
+            "Use this to discover queryable fields before composing a search_events call. "
+            "Returns schema only (field names + types) — never tenant data values. "
+            "Use the optional prefix to narrow results (e.g. prefix='data.win' for Windows fields)."
+        ),
+        parameters={"type": "object", "properties": {
+            "prefix": {
+                "type": "string",
+                "description": "Optional dot-path prefix to filter fields (e.g. 'data.srcip', 'rule.').",
+            },
+        }},
+        executor=executor,
+    )
+
+
 def build_ioc_tools(ctx: HuntContext) -> List[ToolSpec]:
     """The minimal spine lens set (#476): IOC sweep only."""
     return [_ioc_search(ctx)]
@@ -455,8 +584,17 @@ def build_behavioral_tools(ctx: HuntContext) -> List[ToolSpec]:
     ]
 
 
-def build_hunt_lenses(ctx: HuntContext, include_behavioral: bool = True) -> List[ToolSpec]:
+def build_general_query_tools(ctx: HuntContext) -> List[ToolSpec]:
+    """The general-query lens family (ADR-0026): gated to capable models."""
+    return [_search_events(ctx), _describe_fields(ctx)]
+
+
+def build_hunt_lenses(
+    ctx: HuntContext, include_behavioral: bool = True, provider=None,
+) -> List[ToolSpec]:
     tools = build_ioc_tools(ctx)
     if include_behavioral:
         tools += build_behavioral_tools(ctx)
+    if provider is not None and getattr(provider, "supports_complex_tools", lambda: False)():
+        tools += build_general_query_tools(ctx)
     return tools

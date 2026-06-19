@@ -647,6 +647,9 @@ class GeminiTriageProvider(BaseTriageProvider):
     def uses_native_web_search(self) -> bool:
         return True
 
+    def supports_complex_tools(self) -> bool:
+        return True
+
     def chat(self, messages: list, tools: list):
         from assistants.providers import gemini_chat
         system = ""

@@ -211,6 +211,9 @@ class OllamaTriageProvider(BaseTriageProvider):
     def uses_native_web_search(self) -> bool:
         return False
 
+    def supports_complex_tools(self) -> bool:
+        return False
+
     def chat(self, messages: list, tools: list):
         from assistants.providers import ollama_chat
         return ollama_chat(self._client, self._model, messages, tools)

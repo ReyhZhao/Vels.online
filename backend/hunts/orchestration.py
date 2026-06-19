@@ -46,6 +46,18 @@ HUNT_SYS_PROMPT = (
     "recommend it in prose."
 )
 
+_GENERAL_QUERY_SYS_APPENDIX = (
+    "\n\nYou also have access to two general-query tools (ADR-0026). Use them when "
+    "the fixed lenses cannot express the pattern you need:\n"
+    "- describe_fields: discover field names and types in the alerts index (schema only, "
+    "no data values). Call this first when you need a field you have not used before.\n"
+    "- search_events: compose a custom aggregation — up to two grouping fields, a metric "
+    "(count / cardinality / sum / avg), and an optional time interval. Returns per-org "
+    "buckets. Exploration only — it records NO Findings. Reach for the fixed lenses "
+    "(top_rules, event_histogram, top_values) when they already express what you need; "
+    "use search_events for novel patterns those lenses cannot express."
+)
+
 # Scoping phase (ADR-0018): the model grills the staff member to sharpen the seed
 # *before* the authoritative search. It has the full toolset for orientation, but its
 # lens calls commit NO Findings — so it must understand it is refining, not hunting.
@@ -227,7 +239,7 @@ def run_hunt_turn(
             # report counts to the model but persist nothing; only Searching commits.
             record_findings=None if is_scoping else _collecting_sink(collected),
         )
-        tools = build_hunt_lenses(ctx, include_behavioral=include_behavioral)
+        tools = build_hunt_lenses(ctx, include_behavioral=include_behavioral, provider=provider)
         proposed_plan = {}
         if is_scoping:
             from .scoping import build_propose_hunt_plan_tool
@@ -242,6 +254,8 @@ def run_hunt_turn(
             tools.append(build_web_search_tool(search_fn=web_search_fn))
 
         sys_prompt = HUNT_SCOPING_SYS_PROMPT if is_scoping else HUNT_SYS_PROMPT
+        if getattr(provider, "supports_complex_tools", lambda: False)():
+            sys_prompt = sys_prompt + _GENERAL_QUERY_SYS_APPENDIX
         # Brief the model on the in-scope orgs' own assets so it doesn't flag the
         # customer's own hosts/IPs/domains as attacker infrastructure (ADR-0018, #512).
         # Appended to the single system prompt (not a second system message): providers

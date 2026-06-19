@@ -118,3 +118,7 @@ class BaseTriageProvider(ABC):
     def assist_incident(self, messages: list, grounding: dict) -> AssistantResult:
         """Conversational assistant grounded in an incident's current state. Override in providers that support it."""
         return AssistantResult(assistant_reply="Assistant is not available for this provider.")
+
+    def supports_complex_tools(self) -> bool:
+        """True for Cloud-tier capable models that can drive the hunt general-query grammar (ADR-0026)."""
+        return False
