@@ -101,6 +101,12 @@ class Alert(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["state", "created_at"], name="alert_state_ts"),
+            models.Index(fields=["severity", "created_at"], name="alert_severity_ts"),
+            models.Index(fields=["organization", "created_at"], name="alert_org_ts"),
+            models.Index(fields=["organization", "state", "created_at"], name="alert_org_state_ts"),
+        ]
 
     def __str__(self):
         return f"{self.display_id}: {self.title}"

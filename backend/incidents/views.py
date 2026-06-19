@@ -6,7 +6,7 @@ from adrf.views import APIView as AsyncAPIView
 from asgiref.sync import sync_to_async
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Case, F, IntegerField, Q, Value, When
+from django.db.models import Case, Count, F, IntegerField, Prefetch, Q, Value, When
 from django.http import QueryDict, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.text import slugify
@@ -344,7 +344,34 @@ class IncidentListView(ListAPIView):
     serializer_class = IncidentSerializer
 
     def get_queryset(self):
-        qs = Incident.objects.select_related("organization", "created_by", "assignee", "subject")
+        qs = Incident.objects.select_related(
+            "organization", "created_by", "assignee", "subject", "duplicate_of",
+        ).prefetch_related(
+            Prefetch(
+                "incident_assets",
+                queryset=IncidentAsset.objects.select_related(
+                    "asset__route", "asset__organization", "added_by",
+                ).prefetch_related(
+                    "asset__nat_exposures",
+                    "asset__route_exposures",
+                ),
+                to_attr="_prefetched_incident_assets",
+            ),
+            "iocs",
+            Prefetch(
+                "delegations",
+                queryset=IncidentDelegation.objects.filter(
+                    returned_at__isnull=True
+                ).select_related("user", "delegated_by"),
+                to_attr="_active_delegations",
+            ),
+            "duplicates",
+        ).annotate(
+            _alert_count=Count("alerts", distinct=True),
+            _attachment_count=Count("attachments", distinct=True),
+            _task_count=Count("tasks", distinct=True),
+            _contact_count=Count("incident_contacts", distinct=True),
+        )
         qs = filter_incidents_for_user(qs, self.request.user)
 
         tab = self.request.query_params.get("tab", "all")
@@ -470,7 +497,8 @@ class AssetListView(ListAPIView):
                 user=self.request.user
             ).values_list("organization_id", flat=True)
             qs = qs.filter(organization__in=member_org_ids)
-        return annotate_internet_facing(qs)
+        qs = annotate_internet_facing(qs)
+        return qs.prefetch_related("nat_exposures", "route_exposures")
 
     def post(self, request):
         err = _require_auth(request)
@@ -1517,7 +1545,7 @@ class TaskListView(ListAPIView):
         return (
             Task.objects
             .filter(incident_id__in=visible_ids)
-            .select_related("incident", "assignee", "template_item__template")
+            .select_related("incident", "assignee", "template_item__template", "automation", "wazuh_response")
         )
 
     def filter_queryset(self, queryset):

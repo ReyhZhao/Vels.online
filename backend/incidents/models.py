@@ -205,6 +205,12 @@ class Incident(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["state", "created_at"], name="incident_state_ts"),
+            models.Index(fields=["severity", "created_at"], name="incident_severity_ts"),
+            models.Index(fields=["organization", "created_at"], name="incident_org_ts"),
+            models.Index(fields=["organization", "state", "created_at"], name="incident_org_state_ts"),
+        ]
 
     def __str__(self):
         return f"{self.display_id}: {self.title}"
@@ -256,6 +262,9 @@ class Task(models.Model):
 
     class Meta:
         ordering = ["display_order", "created_at"]
+        indexes = [
+            models.Index(fields=["state", "created_at"], name="task_state_ts"),
+        ]
 
     def __str__(self):
         return f"{self.incident}: {self.title}"
@@ -437,6 +446,9 @@ class Asset(models.Model):
 
     class Meta:
         ordering = ["name"]
+        indexes = [
+            models.Index(fields=["organization", "is_active"], name="asset_org_active"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["organization", "agent_name"],

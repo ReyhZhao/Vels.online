@@ -105,12 +105,28 @@ class AssetSerializer(serializers.ModelSerializer):
             return False
         if hasattr(obj, "internet_facing"):
             return bool(obj.internet_facing)
+        cache = getattr(obj, "_prefetched_objects_cache", {})
+        if "route_exposures" in cache:
+            return bool(obj.route_exposures.all()) or bool(obj.nat_exposures.all())
         from incidents.services.exposures import host_exposures
         return bool(host_exposures(obj))
 
     def get_exposures(self, obj):
         if obj.kind != Asset.KIND_HOST:
             return []
+        result = []
+        # Use prefetched relations when available (list view path) to avoid N+1.
+        cache = getattr(obj, "_prefetched_objects_cache", {})
+        if "route_exposures" in cache:
+            for route in obj.route_exposures.all():
+                result.append({"kind": "ingress_route", "protection": "protected",
+                                "specifics": {"fqdn": route.fqdn, "backend_port": route.backend_port}})
+            for nat in obj.nat_exposures.all():
+                result.append({"kind": "direct_nat", "protection": "raw",
+                                "specifics": {"protocol": nat.protocol, "port": nat.port,
+                                              "public_ip": str(nat.public_ip) if nat.public_ip else None,
+                                              "description": nat.description or None, "id": nat.pk}})
+            return result
         from incidents.services.exposures import host_exposures
         return [
             {"kind": e.kind, "protection": e.protection, "specifics": e.specifics}
@@ -198,13 +214,18 @@ class IncidentSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "display_id", "org_slug", "created_by", "created_at", "updated_at"]
 
     def get_assets(self, obj):
-        qs = obj.incident_assets.select_related("asset__route", "added_by")
+        qs = getattr(obj, "_prefetched_incident_assets", None)
+        if qs is None:
+            qs = obj.incident_assets.select_related("asset__route", "added_by")
         return IncidentAssetSerializer(qs, many=True).data
 
     def get_iocs(self, obj):
         return IOCSerializer(obj.iocs.all(), many=True).data
 
     def get_active_delegations(self, obj):
+        cached = getattr(obj, "_active_delegations", None)
+        if cached is not None:
+            return IncidentDelegationSerializer(cached, many=True).data
         qs = obj.delegations.filter(returned_at__isnull=True).select_related("user", "delegated_by")
         return IncidentDelegationSerializer(qs, many=True).data
 
@@ -232,6 +253,7 @@ class IncidentSerializer(serializers.ModelSerializer):
     def get_duplicates(self, obj):
         return IncidentStubSerializer(obj.duplicates.all(), many=True).data
 
+
     def get_triage_running(self, obj):
         return get_triage_lock_started_at(obj.id) is not None
 
@@ -239,16 +261,20 @@ class IncidentSerializer(serializers.ModelSerializer):
         return get_triage_lock_started_at(obj.id)
 
     def get_linked_alert_count(self, obj):
-        return obj.alerts.count()
+        v = getattr(obj, "_alert_count", None)
+        return v if v is not None else obj.alerts.count()
 
     def get_attachment_count(self, obj):
-        return obj.attachments.count()
+        v = getattr(obj, "_attachment_count", None)
+        return v if v is not None else obj.attachments.count()
 
     def get_task_count(self, obj):
-        return obj.tasks.count()
+        v = getattr(obj, "_task_count", None)
+        return v if v is not None else obj.tasks.count()
 
     def get_contact_count(self, obj):
-        return obj.incident_contacts.count()
+        v = getattr(obj, "_contact_count", None)
+        return v if v is not None else obj.incident_contacts.count()
 
 
 class IncidentCreateSerializer(serializers.ModelSerializer):
