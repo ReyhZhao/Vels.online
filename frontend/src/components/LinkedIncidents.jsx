@@ -20,7 +20,7 @@ const STATE_CLASSES = {
   closed:      'text-muted-foreground',
 };
 
-export default function LinkedIncidents({ sourceKind, sourceRef }) {
+export default function LinkedIncidents({ sourceKind, sourceRef, excludeId }) {
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -41,7 +41,12 @@ export default function LinkedIncidents({ sourceKind, sourceRef }) {
     return () => { cancelled = true; };
   }, [sourceKind, JSON.stringify(sourceRef)]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading || incidents.length === 0) return null;
+  // On an incident's own page, drop the incident itself from the sibling list.
+  const linked = excludeId != null
+    ? incidents.filter(inc => inc.id !== excludeId)
+    : incidents;
+
+  if (loading || linked.length === 0) return null;
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-2">
@@ -49,7 +54,7 @@ export default function LinkedIncidents({ sourceKind, sourceRef }) {
         Linked Incidents
       </p>
       <div className="space-y-1.5">
-        {incidents.map(inc => (
+        {linked.map(inc => (
           <Link
             key={inc.id}
             to={`/incidents/${inc.display_id}`}

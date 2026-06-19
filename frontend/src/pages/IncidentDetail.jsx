@@ -14,6 +14,7 @@ import CreateExceptionSlideOver from '../components/CreateExceptionSlideOver';
 import ContactMessagesCard from '../components/ContactMessagesCard';
 import ContactComposeModal from '../components/ContactComposeModal';
 import IncidentAssistantDrawer from '../components/IncidentAssistantDrawer';
+import LinkedIncidents from '../components/LinkedIncidents';
 
 const TRIAGE_STATES = new Set(['new', 'triaged']);
 
@@ -1684,6 +1685,13 @@ export default function IncidentDetail() {
                   </ul>
                 </div>
               )}
+
+              {/* Other incidents from the same source */}
+              <LinkedIncidents
+                sourceKind={incident.source_kind}
+                sourceRef={incident.source_ref}
+                excludeId={incident.id}
+              />
 
               {/* Description + Activity (comments + contact messages) */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
