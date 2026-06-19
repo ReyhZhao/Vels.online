@@ -15,8 +15,16 @@ DEFAULT_MODEL = "claude-sonnet-4-6"
 PROMPT_TEMPLATE = (
     "Work on GitHub issue #{number}. "
     "Read the issue with `gh issue view {number} --comments`, understand the "
-    "requirements, implement the changes, test test changes you made, then close the loop by commiting the changes than commenting on "
-    "the issue and updating its labels as appropriate."
+    "requirements. "
+    "This issue may be one slice of a larger feature: look for a `Parent` "
+    "reference in the issue body or comments, usually formatted like "
+    "`#554 (PRD: ...)`. If you find one, read the parent PRD issue with "
+    "`gh issue view <parent-number> --comments` for the full feature context "
+    "and acceptance criteria, and make sure your implementation stays "
+    "consistent with it. "
+    "Then implement the changes, test the changes you made, and close the "
+    "loop by committing the changes, commenting on the issue, and updating "
+    "its labels as appropriate."
 )
 
 
