@@ -226,6 +226,74 @@ describe('IncidentList', () => {
     );
   });
 
+  // ── multi-select state filter ─────────────────────────────────────────────
+
+  function lastListParams() {
+    const calls = api.get.mock.calls.filter(c => c[0] === '/api/incidents/');
+    return calls[calls.length - 1]?.[1]?.params ?? {};
+  }
+
+  it('default state selection excludes only closed (no state param sent)', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage('/');
+    await waitFor(() => screen.getByLabelText('State filter'));
+    // Fresh visit omits the state param entirely → backend excludes closed
+    await waitFor(() => expect(lastListParams().state).toBeUndefined());
+
+    fireEvent.click(screen.getByLabelText('State filter'));
+    // Every non-closed state is checked; closed is not
+    for (const s of ['new', 'triaged', 'in_progress', 'on_hold', 'needs_tuning', 'pending_closure', 'resolved']) {
+      expect(screen.getByLabelText(s)).toBeChecked();
+    }
+    expect(screen.getByLabelText('closed')).not.toBeChecked();
+  });
+
+  it('exposes pending_closure as a selectable state', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByLabelText('State filter'));
+    expect(screen.getByLabelText('pending_closure')).toBeInTheDocument();
+  });
+
+  it('toggling closed on sends an explicit state list including closed', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByLabelText('closed'));
+    await waitFor(() => {
+      expect(lastListParams().state).toEqual(expect.stringContaining('closed'));
+    });
+    // All eight states selected now
+    expect(lastListParams().state.split(',')).toHaveLength(8);
+  });
+
+  it('deselecting a non-closed state drops it from the state param', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByLabelText('new')); // uncheck "new"
+    await waitFor(() => {
+      const state = lastListParams().state;
+      expect(state).toBeDefined();
+      expect(state.split(',')).not.toContain('new');
+      expect(state.split(',')).toContain('triaged');
+    });
+  });
+
+  it('restoring a saved single-state selection shows only that state checked', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage('/incidents?state=closed');
+    await waitFor(() => screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByLabelText('State filter'));
+    expect(screen.getByLabelText('closed')).toBeChecked();
+    expect(screen.getByLabelText('new')).not.toBeChecked();
+    // The lone remaining state cannot be unchecked
+    expect(screen.getByLabelText('closed')).toBeDisabled();
+  });
+
   // ── bulk actions (staff only) ─────────────────────────────────────────────
 
   it('selecting a checkbox renders the toolbar with correct count', async () => {

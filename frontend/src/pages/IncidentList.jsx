@@ -67,9 +67,24 @@ const TABS = [
   { key: '',           label: 'All' },
 ];
 
-const STATE_OPTIONS    = ['new', 'triaged', 'in_progress', 'on_hold', 'needs_tuning', 'resolved', 'closed'];
-const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low', 'info'];
-const TLP_OPTIONS      = ['white', 'green', 'amber', 'red'];
+// The complete set of real incident states, in workflow order. Keep in sync
+// with STATE_CLASSES / the backend Incident.STATE_* choices — notably this
+// includes `pending_closure` and `closed`.
+const STATE_OPTIONS      = ['new', 'triaged', 'in_progress', 'on_hold', 'needs_tuning', 'pending_closure', 'resolved', 'closed'];
+// Default state selection: every state except `closed`. Mirrors the backend's
+// implicit "exclude closed when no explicit state" behaviour, so when the
+// selection equals this we omit the `state` param entirely (see setStates).
+const DEFAULT_STATES     = STATE_OPTIONS.filter(s => s !== 'closed');
+const SEVERITY_OPTIONS   = ['critical', 'high', 'medium', 'low', 'info'];
+const TLP_OPTIONS        = ['white', 'green', 'amber', 'red'];
+
+const prettyState = s => s.replace(/_/g, ' ');
+
+function sameStateSet(a, b) {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  return a.every(s => setB.has(s));
+}
 
 const EMPTY_DATA = { count: 0, page: 1, per_page: 25, total_pages: 1, results: [] };
 
@@ -306,6 +321,75 @@ function BulkReassignDialog({ staffUsers, onConfirm, onCancel, loading }) {
   );
 }
 
+function StateMultiSelect({ selected, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  const selectedSet = new Set(selected);
+
+  let summary;
+  if (selected.length === 0) summary = 'No states';
+  else if (selected.length === STATE_OPTIONS.length) summary = 'All states';
+  else if (sameStateSet(selected, DEFAULT_STATES)) summary = 'All except closed';
+  else if (selected.length <= 2) summary = selected.map(prettyState).join(', ');
+  else summary = `${selected.length} states`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-label="State filter"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        <span>{summary}</span>
+        <span aria-hidden="true" className="text-muted-foreground">▾</span>
+      </button>
+      {open && (
+        <div
+          role="group"
+          aria-label="Incident states"
+          className="absolute z-50 mt-1 min-w-[12rem] rounded-md border border-border bg-card py-1 shadow-lg"
+        >
+          {STATE_OPTIONS.map(s => {
+            const checked = selectedSet.has(s);
+            // Never let the user clear the last remaining state — an empty
+            // selection has no sensible meaning, so keep at least one checked.
+            const lockLast = checked && selected.length === 1;
+            return (
+              <label
+                key={s}
+                className={`flex items-center gap-2 px-3 py-1.5 text-sm capitalize hover:bg-accent ${lockLast ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+              >
+                <input
+                  type="checkbox"
+                  aria-label={s}
+                  checked={checked}
+                  disabled={lockLast}
+                  onChange={() => onToggle(s)}
+                  className="rounded border-border"
+                />
+                <span className={STATE_CLASSES[s] ?? 'text-foreground'}>{prettyState(s)}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function IncidentList() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -390,6 +474,38 @@ export default function IncidentList() {
       next.delete('page');
       return next;
     });
+  }
+
+  // Multi-value state filter. When the URL has no `state` param we show the
+  // default (every state except closed); otherwise we reflect the param.
+  const stateParam = searchParams.get('state');
+  const selectedStates = stateParam
+    ? stateParam.split(',').map(s => s.trim()).filter(Boolean)
+    : DEFAULT_STATES;
+
+  function setStates(nextStates) {
+    setSelectAllPages(false);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      // The default (all-except-closed) is expressed by omitting the param, so
+      // the backend's built-in closed-exclusion applies and the URL stays clean
+      // (and future non-closed states are picked up automatically).
+      if (sameStateSet(nextStates, DEFAULT_STATES)) next.delete('state');
+      else next.set('state', nextStates.join(','));
+      next.delete('page');
+      return next;
+    });
+  }
+
+  function toggleState(stateValue) {
+    const current = new Set(selectedStates);
+    if (current.has(stateValue)) {
+      if (current.size === 1) return; // keep at least one state selected
+      current.delete(stateValue);
+    } else {
+      current.add(stateValue);
+    }
+    setStates(STATE_OPTIONS.filter(s => current.has(s)));
   }
 
   function setTab(tabKey) {
@@ -586,15 +702,7 @@ export default function IncidentList() {
           <option value="">All severities</option>
           {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select
-          value={searchParams.get('state') || ''}
-          onChange={e => setParam('state', e.target.value)}
-          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          aria-label="State filter"
-        >
-          <option value="">All states</option>
-          {STATE_OPTIONS.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-        </select>
+        <StateMultiSelect selected={selectedStates} onToggle={toggleState} />
         <select
           value={searchParams.get('tlp') || ''}
           onChange={e => setParam('tlp', e.target.value)}
