@@ -265,6 +265,9 @@ function AssetRow({ asset, selected, onToggle, onDeleted }) {
           {asset.is_permanent && (
             <span className="inline-flex items-center rounded-full bg-violet-100 dark:bg-violet-900/30 px-2 py-0.5 text-xs text-violet-700 dark:text-violet-400">permanent</span>
           )}
+          {asset.internet_facing && (
+            <span className="inline-flex items-center rounded-full bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs text-orange-700 dark:text-orange-400">internet-facing</span>
+          )}
         </div>
       </td>
       <td className="px-4 py-3 text-muted-foreground text-xs">
@@ -296,6 +299,7 @@ export default function AssetsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [internetFacingOnly, setInternetFacingOnly] = useState(false);
   const [selected, setSelected] = useState(new Set());
 
   useEffect(() => {
@@ -308,11 +312,13 @@ export default function AssetsPage() {
       .finally(() => setLoading(false));
   }, [selectedOrg]);
 
-  const filtered = assets.filter(a =>
-    a.name.toLowerCase().includes(search.toLowerCase()) ||
-    (a.agent_name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (a.ip_address || '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = assets
+    .filter(a => !internetFacingOnly || a.internet_facing)
+    .filter(a =>
+      a.name.toLowerCase().includes(search.toLowerCase()) ||
+      (a.agent_name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (a.ip_address || '').toLowerCase().includes(search.toLowerCase())
+    );
 
   const allFilteredSelected = filtered.length > 0 && filtered.every(a => selected.has(a.id));
 
@@ -383,6 +389,17 @@ export default function AssetsPage() {
           onChange={e => setSearch(e.target.value)}
           className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-64"
         />
+        <button
+          type="button"
+          onClick={() => setInternetFacingOnly(v => !v)}
+          className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+            internetFacingOnly
+              ? 'border-orange-400 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+              : 'border-border bg-background text-foreground hover:bg-accent'
+          }`}
+        >
+          Internet-facing
+        </button>
         {selected.size > 0 && (
           <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5">
             <span className="text-sm text-foreground font-medium">{selected.size} selected</span>
@@ -423,7 +440,7 @@ export default function AssetsPage() {
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Agent Name</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">IP Address</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Role</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status / Exposure</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Last Seen</th>
               <th className="px-4 py-3" />
             </tr>
@@ -436,7 +453,7 @@ export default function AssetsPage() {
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
-                  {search ? 'No assets match your search.' : 'No assets yet.'}
+                  {search || internetFacingOnly ? 'No assets match your filters.' : 'No assets yet.'}
                 </td>
               </tr>
             ) : filtered.map(asset => (

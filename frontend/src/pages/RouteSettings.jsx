@@ -71,6 +71,70 @@ function isValidIpOrCidr(value) {
   return ipv6Re.test(trimmed) && trimmed.includes(':');
 }
 
+// ── BackendAssetPicker ────────────────────────────────────────────────────────
+
+function BackendAssetPicker({ value, suggestion, hostAssets, onChange }) {
+  const [override, setOverride] = useState(false);
+
+  const linked = hostAssets.find(a => a.id === value) ?? null;
+  const suggestedAsset = suggestion ? hostAssets.find(a => a.id === suggestion.id) ?? suggestion : null;
+
+  const showSuggestion = !value && suggestedAsset && !override;
+
+  return (
+    <div className="space-y-2">
+      {linked ? (
+        <div className="flex items-center gap-2 rounded-md border border-input bg-muted px-3 py-2 text-sm">
+          <span className="flex-1 text-foreground font-medium">{linked.name}</span>
+          <span className="text-xs text-muted-foreground">{linked.ip_address || linked.agent_name}</span>
+          <button
+            type="button"
+            onClick={() => { onChange(null); setOverride(false); }}
+            className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+      ) : (
+        <select
+          value=""
+          onChange={e => { onChange(Number(e.target.value) || null); setOverride(false); }}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="">— no host linked —</option>
+          {hostAssets.map(a => (
+            <option key={a.id} value={a.id}>
+              {a.name}{a.ip_address ? ` (${a.ip_address})` : ''}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {showSuggestion && (
+        <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-800 dark:bg-blue-950/30">
+          <span className="text-blue-700 dark:text-blue-300">
+            Suggested: <span className="font-medium">{suggestedAsset.name}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => onChange(suggestedAsset.id)}
+            className="ml-auto text-xs font-medium text-blue-700 hover:underline dark:text-blue-300"
+          >
+            Use
+          </button>
+          <button
+            type="button"
+            onClick={() => setOverride(true)}
+            className="text-xs text-muted-foreground hover:underline"
+          >
+            Override
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── GeneralTab ────────────────────────────────────────────────────────────────
 
 function GeneralTab({ fqdn, routeData, onDirtyChange }) {
@@ -78,6 +142,7 @@ function GeneralTab({ fqdn, routeData, onDirtyChange }) {
   const [local, setLocal] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+  const [hostAssets, setHostAssets] = useState([]);
 
   useEffect(() => {
     if (!routeData) return;
@@ -86,9 +151,15 @@ function GeneralTab({ fqdn, routeData, onDirtyChange }) {
       backend_host: routeData.backend_host ?? '',
       backend_port: String(routeData.backend_port ?? ''),
       backend_protocol: routeData.backend_protocol ?? 'http',
+      backend_asset: routeData.backend_asset ?? null,
     };
     setSaved(s);
     setLocal(s);
+    if (routeData.org_slug) {
+      api.get('/api/assets/', { params: { org: routeData.org_slug } })
+        .then(r => setHostAssets((r.data.results || r.data).filter(a => a.kind === 'host')))
+        .catch(() => {});
+    }
   }, [routeData]);
 
   const isDirty = local && saved ? JSON.stringify(local) !== JSON.stringify(saved) : false;
@@ -194,6 +265,17 @@ function GeneralTab({ fqdn, routeData, onDirtyChange }) {
           <option value="http">http</option>
           <option value="https">https</option>
         </select>
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-sm font-medium text-foreground">Backend Asset (Host)</label>
+        <p className="text-xs text-muted-foreground">Link this route to a host asset to track it as a protected exposure.</p>
+        <BackendAssetPicker
+          value={local.backend_asset}
+          suggestion={routeData?.backend_asset_suggestion}
+          hostAssets={hostAssets}
+          onChange={v => handleChange('backend_asset', v)}
+        />
       </div>
 
       <TabToast toast={toast} />

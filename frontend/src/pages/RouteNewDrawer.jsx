@@ -286,10 +286,12 @@ function AccordionSection({ label, required, done, open, onToggle, children }) {
 export default function RouteNewDrawer({ onClose, onCreated, orgSlug }) {
   const [openSection, setOpenSection] = useState({ basics: true, backend: false, security: false });
   const [bwIp, setBwIp] = useState('');
+  const [hostAssets, setHostAssets] = useState([]);
 
   const [basics, setBasics] = useState({ name: '', fqdn: '' });
   const [backend, setBackend] = useState({
     backend_host: '', backend_port: '', backend_protocol: 'http', backend_type: 'direct',
+    backend_asset: null,
   });
   const [security, setSecurity] = useState({ ...DEFAULT_SECURITY });
 
@@ -300,7 +302,16 @@ export default function RouteNewDrawer({ onClose, onCreated, orgSlug }) {
     api.get('/api/ingress/settings/')
       .then(r => setBwIp(r.data.bunkerweb_public_ip || ''))
       .catch(() => {});
-  }, []);
+    if (orgSlug) {
+      api.get('/api/assets/', { params: { org: orgSlug } })
+        .then(r => setHostAssets((r.data.results || r.data).filter(a => a.kind === 'host')))
+        .catch(() => {});
+    }
+  }, [orgSlug]);
+
+  const ipSuggestion = backend.backend_host
+    ? hostAssets.find(a => a.ip_address && a.ip_address === backend.backend_host) ?? null
+    : null;
 
   const chBasics = e => setBasics(f => ({ ...f, [e.target.name]: e.target.value }));
   const chBackend = e => setBackend(f => ({ ...f, [e.target.name]: e.target.value }));
@@ -321,6 +332,7 @@ export default function RouteNewDrawer({ onClose, onCreated, orgSlug }) {
         ...basics,
         ...backend,
         backend_port: Number(backend.backend_port),
+        backend_asset: backend.backend_asset ?? undefined,
       });
       if (isSecurityModified(security)) {
         await api.patch(`/api/ingress/routes/${basics.fqdn}/settings/`, security);
@@ -408,6 +420,49 @@ export default function RouteNewDrawer({ onClose, onCreated, orgSlug }) {
                   </label>
                 ))}
               </div>
+            </Field>
+            <Field label="Backend Asset (Host)" hint="Optionally link this route to a host asset.">
+              {backend.backend_asset ? (
+                <div className="flex items-center gap-2 rounded-md border border-input bg-muted px-3 py-2 text-sm">
+                  <span className="flex-1 font-medium text-foreground">
+                    {hostAssets.find(a => a.id === backend.backend_asset)?.name ?? `Asset #${backend.backend_asset}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBackend(f => ({ ...f, backend_asset: null }))}
+                    className="text-xs text-muted-foreground hover:text-destructive"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : (
+                <select
+                  value=""
+                  onChange={e => setBackend(f => ({ ...f, backend_asset: Number(e.target.value) || null }))}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">— no host linked —</option>
+                  {hostAssets.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}{a.ip_address ? ` (${a.ip_address})` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {ipSuggestion && !backend.backend_asset && (
+                <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-800 dark:bg-blue-950/30">
+                  <span className="text-blue-700 dark:text-blue-300">
+                    Suggested: <span className="font-medium">{ipSuggestion.name}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBackend(f => ({ ...f, backend_asset: ipSuggestion.id }))}
+                    className="ml-auto text-xs font-medium text-blue-700 hover:underline dark:text-blue-300"
+                  >
+                    Use
+                  </button>
+                </div>
+              )}
             </Field>
           </AccordionSection>
 
