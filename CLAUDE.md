@@ -11,3 +11,7 @@ Uses the five canonical label names (needs-triage, needs-info, ready-for-agent, 
 ### Domain docs
 
 Single-context repo — one `CONTEXT.md` + `docs/adr/` at the root. See `docs/agents/domain.md`.
+
+### Frontend conventions
+
+UI rules for list affordances (filter/sort/search) and mobile responsiveness. See `docs/agents/frontend-conventions.md`.
