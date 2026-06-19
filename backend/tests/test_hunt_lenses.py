@@ -473,6 +473,28 @@ def test_compile_hunt_agg_rejects_bad_filter_operator():
     assert "Filter condition error" in err
 
 
+def test_compile_hunt_agg_rejects_non_aggregatable_cardinality():
+    mapping = {"rule.description": "text"}  # text with no .keyword subfield
+    _, err = compile_hunt_agg_query(
+        filters=[], group_by=[],
+        metric={"type": "cardinality", "field": "rule.description"},
+        interval=None, agent_ids=[], lookback_days=7, field_mapping=mapping,
+    )
+    assert err is not None
+    assert "non-aggregatable" in err
+
+
+def test_compile_hunt_agg_rejects_non_numeric_avg():
+    mapping = {"rule.description": "text"}
+    _, err = compile_hunt_agg_query(
+        filters=[], group_by=[],
+        metric={"type": "avg", "field": "rule.description"},
+        interval=None, agent_ids=[], lookback_days=7, field_mapping=mapping,
+    )
+    assert err is not None
+    assert "numeric" in err
+
+
 # ── search_events lens (ADR-0026) ───────────────────────────────────────────────
 
 def test_search_events_fans_out_one_query_per_org_and_never_records_findings():
@@ -630,6 +652,54 @@ def test_search_events_two_group_by_second_field_validated_as_aggregatable():
 
     assert result.error is not None
     assert os_client.calls == []  # never queries on non-aggregatable second field
+
+
+def test_search_events_sum_metric_value_surfaces_in_by_org_bucket():
+    aggs = {
+        "group0": {
+            "buckets": [
+                {"key": "host1", "doc_count": 5, "metric": {"value": 1234.5}},
+            ]
+        }
+    }
+    mapping = {"agent.name": "keyword", "bytes": "long"}
+    os_client = FakeOS(aggs_per_call=[aggs, {}], mapping=mapping)
+    ctx = HuntContext(scope=TWO_ORGS, lookback_days=30, os_client=os_client)
+    tool = _lens(build_general_query_tools(ctx), "search_events")
+
+    result = tool.executor({
+        "group_by": ["agent.name"],
+        "metric": {"type": "sum", "field": "bytes"},
+    })
+
+    assert result.error is None
+    buckets = result.content["by_org"][0]["aggregations"]["group0"]["buckets"]
+    assert buckets[0]["metric"]["value"] == 1234.5
+
+
+def test_search_events_rejects_cardinality_on_non_aggregatable_text_field():
+    # text field with no .keyword subfield cannot be used for cardinality
+    mapping = {"rule.description": "text"}
+    os_client = FakeOS(mapping=mapping)
+    ctx = _ctx(TWO_ORGS, os_client)
+    tool = _lens(build_general_query_tools(ctx), "search_events")
+
+    result = tool.executor({"metric": {"type": "cardinality", "field": "rule.description"}})
+
+    assert result.error is not None
+    assert os_client.calls == []  # validation fires before any query
+
+
+def test_search_events_rejects_sum_on_non_numeric_field():
+    mapping = {"rule.description": "text"}
+    os_client = FakeOS(mapping=mapping)
+    ctx = _ctx(TWO_ORGS, os_client)
+    tool = _lens(build_general_query_tools(ctx), "search_events")
+
+    result = tool.executor({"metric": {"type": "sum", "field": "rule.description"}})
+
+    assert result.error is not None
+    assert os_client.calls == []
 
 
 # ── describe_fields lens (ADR-0026) ─────────────────────────────────────────────
