@@ -31,9 +31,10 @@ describe('AdminPostList', () => {
 
     renderList();
 
+    // Both mobile card list and desktop table render titles in jsdom (no CSS media queries)
     await waitFor(() => {
-      expect(screen.getByText('Draft Post')).toBeInTheDocument();
-      expect(screen.getByText('Published Post')).toBeInTheDocument();
+      expect(screen.getAllByText('Draft Post').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Published Post').length).toBeGreaterThan(0);
     });
   });
 
@@ -48,8 +49,8 @@ describe('AdminPostList', () => {
     renderList();
 
     await waitFor(() => {
-      expect(screen.getByText('draft')).toBeInTheDocument();
-      expect(screen.getByText('published')).toBeInTheDocument();
+      expect(screen.getAllByText('draft').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('published').length).toBeGreaterThan(0);
     });
   });
 
@@ -61,8 +62,9 @@ describe('AdminPostList', () => {
     renderList();
 
     await waitFor(() => {
-      const editLink = screen.getByRole('link', { name: /edit/i });
-      expect(editLink).toHaveAttribute('href', '/admin/posts/my-post/edit');
+      const editLinks = screen.getAllByRole('link', { name: /edit/i });
+      expect(editLinks.length).toBeGreaterThan(0);
+      expect(editLinks[0]).toHaveAttribute('href', '/admin/posts/my-post/edit');
     });
   });
 
@@ -75,8 +77,8 @@ describe('AdminPostList', () => {
 
     renderList();
 
-    await waitFor(() => screen.getByText('Test Post'));
-    await userEvent.click(screen.getByRole('button', { name: /delete/i }));
+    await waitFor(() => screen.getAllByText('Test Post'));
+    await userEvent.click(screen.getAllByRole('button', { name: /delete/i })[0]);
 
     expect(window.confirm).toHaveBeenCalledWith('Delete this post?');
     expect(api.delete).toHaveBeenCalledWith('/api/posts/test-post/');
@@ -91,8 +93,8 @@ describe('AdminPostList', () => {
 
     renderList();
 
-    await waitFor(() => screen.getByText('Test Post'));
-    await userEvent.click(screen.getByRole('button', { name: /delete/i }));
+    await waitFor(() => screen.getAllByText('Test Post'));
+    await userEvent.click(screen.getAllByRole('button', { name: /delete/i })[0]);
 
     await waitFor(() => {
       expect(screen.queryByText('Test Post')).not.toBeInTheDocument();
@@ -107,8 +109,8 @@ describe('AdminPostList', () => {
 
     renderList();
 
-    await waitFor(() => screen.getByText('Test Post'));
-    await userEvent.click(screen.getByRole('button', { name: /delete/i }));
+    await waitFor(() => screen.getAllByText('Test Post'));
+    await userEvent.click(screen.getAllByRole('button', { name: /delete/i })[0]);
 
     expect(api.delete).not.toHaveBeenCalled();
   });

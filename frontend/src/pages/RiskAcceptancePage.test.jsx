@@ -79,8 +79,9 @@ describe('RiskAcceptancePage', () => {
     expect(screen.getByText('alice')).toBeInTheDocument();
     expect(screen.getByText('bob')).toBeInTheDocument();
     expect(screen.getByText('Mitigated externally.')).toBeInTheDocument();
-    expect(screen.getByText('critical')).toBeInTheDocument();
-    expect(screen.getByText('high')).toBeInTheDocument();
+    // severity values also appear in the filter dropdown options
+    expect(screen.getAllByText('critical').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('high').length).toBeGreaterThan(0);
     expect(screen.getByText('9.8')).toBeInTheDocument();
     expect(screen.getByText('7.5')).toBeInTheDocument();
   });

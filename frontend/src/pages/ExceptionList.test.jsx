@@ -61,23 +61,24 @@ describe('ExceptionList', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('shows loading state while fetching', () => {
+    // Both mobile card list and desktop table render "Loading…" in jsdom (no CSS media queries)
     api.get.mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0);
   });
 
   it('shows empty state when no rules', async () => {
     api.get.mockResolvedValue({ data: [] });
     renderPage();
-    await waitFor(() => expect(screen.getByText('No exception rules.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('No exception rules.').length).toBeGreaterThan(0));
   });
 
   it('renders rule rows with correct data', async () => {
     api.get.mockResolvedValue({ data: RULES });
     renderPage();
-    await waitFor(() => screen.getByText('Block brute force'));
-    expect(screen.getByText('200000')).toBeInTheDocument();
-    expect(screen.getByText('Suppress noisy alert')).toBeInTheDocument();
+    await waitFor(() => screen.getAllByText('Block brute force'));
+    expect(screen.getAllByText('200000').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Suppress noisy alert').length).toBeGreaterThan(0);
     expect(screen.getAllByText('applied').length).toBeGreaterThan(0);
     expect(screen.getAllByText('pending').length).toBeGreaterThan(0);
   });
@@ -139,8 +140,10 @@ describe('ExceptionList', () => {
   it('renders linked incident as a link when present', async () => {
     api.get.mockResolvedValue({ data: RULES });
     renderPage();
-    await waitFor(() => screen.getByText('INC-2026-0001'));
-    expect(screen.getByRole('link', { name: 'INC-2026-0001' })).toHaveAttribute('href', '/incidents/INC-2026-0001');
+    await waitFor(() => screen.getAllByText('INC-2026-0001'));
+    const links = screen.getAllByRole('link', { name: 'INC-2026-0001' });
+    expect(links.length).toBeGreaterThan(0);
+    expect(links[0]).toHaveAttribute('href', '/incidents/INC-2026-0001');
   });
 
   it('staff see Actions column header', async () => {
@@ -158,21 +161,21 @@ describe('ExceptionList', () => {
   it('shows Approve button for pending rules', async () => {
     api.get.mockResolvedValue({ data: [PENDING_RULE] });
     renderPage(STAFF_USER);
-    await waitFor(() => expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /approve/i }).length).toBeGreaterThan(0));
   });
 
   it('shows Disable button for applied rules', async () => {
     api.get.mockResolvedValue({ data: [APPLIED_RULE] });
     renderPage(STAFF_USER);
-    await waitFor(() => expect(screen.getByRole('button', { name: /disable/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /disable/i }).length).toBeGreaterThan(0));
   });
 
   it('clicking Approve calls POST /approve and updates row', async () => {
     api.get.mockResolvedValue({ data: [PENDING_RULE] });
     api.post.mockResolvedValueOnce({ data: { ...PENDING_RULE, status: 'applied' } });
     renderPage(STAFF_USER);
-    await waitFor(() => screen.getByRole('button', { name: /approve/i }));
-    fireEvent.click(screen.getByRole('button', { name: /approve/i }));
+    await waitFor(() => screen.getAllByRole('button', { name: /approve/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /approve/i })[0]);
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith(`/api/exceptions/${PENDING_RULE.id}/approve/`)
     );
@@ -182,8 +185,8 @@ describe('ExceptionList', () => {
     api.get.mockResolvedValue({ data: [APPLIED_RULE] });
     api.post.mockResolvedValueOnce({ data: { ...APPLIED_RULE, status: 'disabled' } });
     renderPage(STAFF_USER);
-    await waitFor(() => screen.getByRole('button', { name: /disable/i }));
-    fireEvent.click(screen.getByRole('button', { name: /disable/i }));
+    await waitFor(() => screen.getAllByRole('button', { name: /disable/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /disable/i })[0]);
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith(`/api/exceptions/${APPLIED_RULE.id}/disable/`)
     );
@@ -193,9 +196,9 @@ describe('ExceptionList', () => {
     api.get.mockResolvedValue({ data: [PENDING_RULE] });
     api.post.mockRejectedValueOnce({ response: { data: { detail: 'Pool exhausted.' } } });
     renderPage(STAFF_USER);
-    await waitFor(() => screen.getByRole('button', { name: /approve/i }));
-    fireEvent.click(screen.getByRole('button', { name: /approve/i }));
-    await waitFor(() => expect(screen.getByText('Pool exhausted.')).toBeInTheDocument());
+    await waitFor(() => screen.getAllByRole('button', { name: /approve/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /approve/i })[0]);
+    await waitFor(() => expect(screen.getAllByText('Pool exhausted.').length).toBeGreaterThan(0));
   });
 
   it('clicking Edit opens EditExceptionModal', async () => {

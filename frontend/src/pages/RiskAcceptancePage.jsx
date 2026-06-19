@@ -47,6 +47,8 @@ function RemoveConfirmDialog({ cveId, onConfirm, onCancel }) {
   );
 }
 
+const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low'];
+
 export default function RiskAcceptancePage() {
   const { selectedOrg, isLoading: orgLoading } = useOrganization();
   const [acceptances, setAcceptances] = useState([]);
@@ -54,6 +56,8 @@ export default function RiskAcceptancePage() {
   const [error, setError] = useState(null);
   const [confirmId, setConfirmId] = useState(null);
   const [removing, setRemoving] = useState(false);
+  const [search, setSearch] = useState('');
+  const [severityFilter, setSeverityFilter] = useState('');
 
   const fetchAcceptances = useCallback(async (slug) => {
     setLoading(true);
@@ -88,6 +92,16 @@ export default function RiskAcceptancePage() {
 
   const confirmItem = acceptances.find(a => a.id === confirmId);
 
+  const filtered = acceptances.filter(a => {
+    const matchSev = !severityFilter || a.severity === severityFilter;
+    const q = search.toLowerCase();
+    const matchSearch = !q ||
+      (a.cve_id || '').toLowerCase().includes(q) ||
+      (a.accepted_by || '').toLowerCase().includes(q) ||
+      (a.note || '').toLowerCase().includes(q);
+    return matchSev && matchSearch;
+  });
+
   if (orgLoading) return <p className="text-sm text-muted-foreground p-6">Loading…</p>;
   if (!selectedOrg) return <p className="text-sm text-muted-foreground p-6">No organisation assigned.</p>;
 
@@ -104,6 +118,26 @@ export default function RiskAcceptancePage() {
       <h1 className="text-2xl font-semibold text-foreground">
         Accepted Vulnerabilities — {selectedOrg.name}
       </h1>
+
+      <div className="flex flex-wrap gap-2 items-center">
+        <input
+          type="search"
+          placeholder="Search CVE, accepted by…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          aria-label="Search risk acceptances"
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-52"
+        />
+        <select
+          value={severityFilter}
+          onChange={e => setSeverityFilter(e.target.value)}
+          aria-label="Severity filter"
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="">All severities</option>
+          {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -125,14 +159,14 @@ export default function RiskAcceptancePage() {
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
-            ) : acceptances.length === 0 ? (
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                   No accepted vulnerabilities.
                 </td>
               </tr>
             ) : (
-              acceptances.map(a => (
+              filtered.map(a => (
                 <tr key={a.id} className="border-b border-border last:border-0">
                   <td className="px-4 py-3 font-mono text-xs font-medium text-foreground">{a.cve_id}</td>
                   <td className="px-4 py-3">

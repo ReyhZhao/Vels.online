@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import EditExceptionModal from '../components/EditExceptionModal';
@@ -25,8 +25,20 @@ export default function ExceptionList() {
   const [error, setError]         = useState(null);
   const [statusFilter, setStatus] = useState('');
   const [orgFilter, setOrg]       = useState('');
+  const [search, setSearch]       = useState('');
   const [editRule, setEditRule]   = useState(null);
   const [actionErrors, setActionErrors] = useState({});
+
+  const filteredRules = search.trim()
+    ? rules.filter(r => {
+        const q = search.toLowerCase();
+        return (
+          String(r.wazuh_rule_id ?? '').toLowerCase().includes(q) ||
+          (r.description || '').toLowerCase().includes(q) ||
+          (r.org_slug || '').toLowerCase().includes(q)
+        );
+      })
+    : rules;
 
   useEffect(() => {
     setLoading(true);
@@ -78,6 +90,14 @@ export default function ExceptionList() {
       </div>
 
       <div className="flex flex-wrap gap-2 items-center">
+        <input
+          type="search"
+          placeholder="Search…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          aria-label="Search exception rules"
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-48"
+        />
         <select
           value={statusFilter}
           onChange={e => setStatus(e.target.value)}
@@ -102,7 +122,69 @@ export default function ExceptionList() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : filteredRules.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No exception rules.</p>
+        ) : filteredRules.map(rule => (
+          <div key={rule.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-xs font-medium text-foreground">{rule.wazuh_rule_id ?? '—'}</span>
+              <div className="flex items-center gap-1.5">
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SCOPE_CLASSES[rule.scope] ?? ''}`}>
+                  {rule.scope}
+                </span>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[rule.status] ?? ''}`}>
+                  {rule.status}
+                </span>
+              </div>
+            </div>
+            <p className="text-sm text-foreground leading-snug">{rule.description || '—'}</p>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              {isStaff && rule.org_slug && <span>{rule.org_slug}</span>}
+              {rule.incident_display_id && (
+                <a href={`/incidents/${rule.incident_display_id}`} className="text-primary hover:underline">
+                  {rule.incident_display_id}
+                </a>
+              )}
+            </div>
+            {isStaff && (
+              <div className="flex gap-2 pt-1">
+                {rule.status === 'pending' && (
+                  <button
+                    onClick={() => handleApprove(rule)}
+                    className="rounded px-2 py-1 text-xs font-medium bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400"
+                  >
+                    Approve
+                  </button>
+                )}
+                <button
+                  onClick={() => setEditRule(rule)}
+                  className="rounded px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400"
+                >
+                  Edit
+                </button>
+                {rule.status === 'applied' && (
+                  <button
+                    onClick={() => handleDisable(rule)}
+                    className="rounded px-2 py-1 text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400"
+                  >
+                    Disable
+                  </button>
+                )}
+                {actionErrors[rule.id] && (
+                  <span className="text-xs text-red-600">{actionErrors[rule.id]}</span>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
@@ -122,16 +204,16 @@ export default function ExceptionList() {
                   Loading…
                 </td>
               </tr>
-            ) : rules.length === 0 ? (
+            ) : filteredRules.length === 0 ? (
               <tr>
                 <td colSpan={colCount} className="px-4 py-8 text-center text-muted-foreground">
                   No exception rules.
                 </td>
               </tr>
             ) : (
-              rules.map(rule => (
-                <>
-                  <tr key={rule.id} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+              filteredRules.map(rule => (
+                <Fragment key={rule.id}>
+                  <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-foreground">
                       {rule.wazuh_rule_id ?? '—'}
                     </td>
@@ -189,13 +271,13 @@ export default function ExceptionList() {
                     )}
                   </tr>
                   {actionErrors[rule.id] && (
-                    <tr key={`err-${rule.id}`} className="border-b border-border last:border-0">
+                    <tr className="border-b border-border last:border-0">
                       <td colSpan={colCount} className="px-4 py-1 text-xs text-red-600">
                         {actionErrors[rule.id]}
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))
             )}
           </tbody>
