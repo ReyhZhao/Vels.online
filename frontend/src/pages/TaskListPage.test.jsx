@@ -61,7 +61,7 @@ describe('TaskListPage', () => {
   it('shows loading state initially', () => {
     api.get.mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0);
   });
 
   it('renders Assignee column header', async () => {
@@ -71,7 +71,7 @@ describe('TaskListPage', () => {
 
   it('shows — in Assignee column when assignee_username is absent', async () => {
     renderPage();
-    await waitFor(() => screen.getByText('Review phishing email'));
+    await waitFor(() => screen.getAllByText('Review phishing email'));
     const cells = screen.getAllByRole('cell');
     const dashCells = cells.filter(c => c.textContent === '—');
     expect(dashCells.length).toBeGreaterThan(0);
@@ -81,14 +81,14 @@ describe('TaskListPage', () => {
     const tasksWithAssignee = [{ ...TASKS[0], assignee: 5, assignee_username: 'bob' }];
     api.get.mockResolvedValue(PAGE_RESPONSE(tasksWithAssignee));
     renderPage();
-    await waitFor(() => expect(screen.getByText('bob')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('bob').length).toBeGreaterThan(0));
   });
 
   it('shows task titles and state badges', async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText('Review phishing email')).toBeInTheDocument();
-      expect(screen.getByText('Patch affected systems')).toBeInTheDocument();
+      expect(screen.getAllByText('Review phishing email').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Patch affected systems').length).toBeGreaterThan(0);
       expect(screen.getAllByText('New').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Done').length).toBeGreaterThan(0);
     });
@@ -96,8 +96,8 @@ describe('TaskListPage', () => {
 
   it('shows incident display_id as a link', async () => {
     renderPage();
-    await waitFor(() => expect(screen.getByText('INC-2026-0001')).toBeInTheDocument());
-    const link = screen.getByText('INC-2026-0001').closest('a');
+    await waitFor(() => expect(screen.getAllByText('INC-2026-0001').length).toBeGreaterThan(0));
+    const link = screen.getAllByText('INC-2026-0001')[0].closest('a');
     expect(link).toHaveAttribute('href', '/incidents/INC-2026-0001');
   });
 
@@ -109,7 +109,7 @@ describe('TaskListPage', () => {
   it('shows empty state when no tasks', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE([]));
     renderPage();
-    await waitFor(() => expect(screen.getByText('No tasks found.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('No tasks found.').length).toBeGreaterThan(0));
   });
 
   it('shows error on fetch failure', async () => {
@@ -230,5 +230,50 @@ describe('TaskListPage', () => {
         params: expect.objectContaining({ assignee: 'unassigned' }),
       }))
     );
+  });
+});
+
+describe('TaskListPage — bulk reassign', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.patch = vi.fn().mockResolvedValue({ data: {} });
+    api.get.mockImplementation(url => {
+      if (url === '/api/incidents/staff-users/') {
+        return Promise.resolve({ data: [{ id: 5, username: 'bob' }, { id: 6, username: 'carol' }] });
+      }
+      return Promise.resolve(PAGE_RESPONSE());
+    });
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true } });
+  });
+
+  it('renders a sm:hidden mobile card list with selection checkboxes', async () => {
+    renderPage();
+    await waitFor(() => screen.getAllByText('Review phishing email'));
+    const cardList = document.querySelector('.sm\\:hidden');
+    expect(cardList.textContent).toContain('Review phishing email');
+    expect(cardList.querySelector('input[type="checkbox"]')).toBeTruthy();
+  });
+
+  it('selecting a task and applying a reassign PATCHes the task with the chosen assignee', async () => {
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Select all'));
+
+    fireEvent.click(screen.getByLabelText('Select all'));
+    fireEvent.change(screen.getByLabelText('Reassign to'), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: /^apply$/i }));
+
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/tasks/1/', { assignee: 5 }));
+    expect(api.patch).toHaveBeenCalledWith('/api/tasks/2/', { assignee: 5 });
+  });
+
+  it('applying Unassigned PATCHes the task with assignee null', async () => {
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Select all'));
+
+    fireEvent.click(screen.getByLabelText('Select all'));
+    fireEvent.change(screen.getByLabelText('Reassign to'), { target: { value: 'unassign' } });
+    fireEvent.click(screen.getByRole('button', { name: /^apply$/i }));
+
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/tasks/1/', { assignee: null }));
   });
 });
