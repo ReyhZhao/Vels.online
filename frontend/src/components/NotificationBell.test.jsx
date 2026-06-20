@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../lib/axios', () => ({
-  default: { get: vi.fn(), post: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
 }));
 
 vi.mock('./SlideOver', () => ({
@@ -116,5 +116,49 @@ describe('NotificationBell', () => {
       expect(api.post).toHaveBeenCalledWith('/api/me/notifications/5/read/')
     );
     expect(screen.queryByTestId('unread-badge')).not.toBeInTheDocument();
+  });
+
+  it('clears all notifications via Clear all', async () => {
+    api.get
+      .mockResolvedValueOnce({ data: { unread_count: 2 } })
+      .mockResolvedValueOnce({
+        data: {
+          results: [
+            { id: 1, kind: 'comment', read_at: null, created_at: new Date().toISOString(), payload: { title: 'One', body: '' } },
+            { id: 2, kind: 'comment', read_at: null, created_at: new Date().toISOString(), payload: { title: 'Two', body: '' } },
+          ],
+        },
+      });
+    api.delete.mockResolvedValue({ data: { deleted: 2 } });
+
+    const user = userEvent.setup();
+    renderBell();
+    await waitFor(() => screen.getByTestId('notification-bell'));
+
+    await user.click(screen.getByTestId('notification-bell'));
+    await waitFor(() => screen.getByText('One'));
+
+    await user.click(screen.getByText('Clear all'));
+
+    await waitFor(() =>
+      expect(api.delete).toHaveBeenCalledWith('/api/me/notifications/clear-all/')
+    );
+    expect(screen.queryByText('One')).not.toBeInTheDocument();
+    expect(screen.getByText('No notifications yet.')).toBeInTheDocument();
+    expect(screen.queryByTestId('unread-badge')).not.toBeInTheDocument();
+  });
+
+  it('hides Clear all when there are no notifications', async () => {
+    api.get
+      .mockResolvedValueOnce({ data: { unread_count: 0 } })
+      .mockResolvedValueOnce({ data: { results: [] } });
+
+    const user = userEvent.setup();
+    renderBell();
+    await waitFor(() => screen.getByTestId('notification-bell'));
+
+    await user.click(screen.getByTestId('notification-bell'));
+    await waitFor(() => screen.getByTestId('slideover'));
+    expect(screen.queryByText('Clear all')).not.toBeInTheDocument();
   });
 });

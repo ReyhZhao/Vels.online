@@ -84,6 +84,12 @@ class NotificationReadAllView(APIView):
         return Response({"detail": "All notifications marked as read."})
 
 
+class NotificationClearAllView(APIView):
+    def delete(self, request):
+        deleted, _ = Notification.objects.filter(recipient=request.user).delete()
+        return Response({"deleted": deleted}, status=status.HTTP_200_OK)
+
+
 class NotificationDeleteView(APIView):
     def delete(self, request, pk):
         try:

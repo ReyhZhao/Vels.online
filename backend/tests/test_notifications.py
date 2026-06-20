@@ -409,6 +409,26 @@ def test_read_all_marks_all_read(client, staff, acme):
 
 
 @pytest.mark.django_db
+def test_clear_all_deletes_only_own_notifications(client, staff, staff2, acme):
+    from django.utils import timezone as tz
+    incident = make_incident(acme)
+    # Mix of read and unread for the requesting user
+    Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={})
+    Notification.objects.create(
+        recipient=staff, kind="comment", incident=incident, payload={}, read_at=tz.now()
+    )
+    # A second user's notification must be untouched
+    other = Notification.objects.create(recipient=staff2, kind="comment", incident=incident, payload={})
+
+    client.force_login(staff)
+    response = client.delete("/api/me/notifications/clear-all/")
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 2
+    assert not Notification.objects.filter(recipient=staff).exists()
+    assert Notification.objects.filter(pk=other.id).exists()
+
+
+@pytest.mark.django_db
 def test_notification_list_filter_unread(client, staff, acme):
     incident = make_incident(acme)
     from django.utils import timezone

@@ -130,6 +130,12 @@ export default function NotificationBell() {
     setUnreadCount(0);
   }
 
+  async function handleClearAll() {
+    await api.delete('/api/me/notifications/clear-all/').catch(() => {});
+    setNotifications([]);
+    setUnreadCount(0);
+  }
+
   function handleDismiss(id, wasUnread) {
     setNotifications(prev => prev.filter(n => n.id !== id));
     if (wasUnread) setUnreadCount(prev => Math.max(0, prev - 1));
@@ -164,14 +170,24 @@ export default function NotificationBell() {
           <span className="text-xs text-muted-foreground">
             {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
           </span>
-          {unreadCount > 0 && (
-            <button
-              onClick={handleMarkAllRead}
-              className="text-xs text-primary hover:underline"
-            >
-              Mark all read
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {unreadCount > 0 && (
+              <button
+                onClick={handleMarkAllRead}
+                className="text-xs text-primary hover:underline"
+              >
+                Mark all read
+              </button>
+            )}
+            {notifications.length > 0 && (
+              <button
+                onClick={handleClearAll}
+                className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
         </div>
         {notifications.length === 0 ? (
           <p className="px-6 py-8 text-sm text-muted-foreground">No notifications yet.</p>
