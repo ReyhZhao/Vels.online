@@ -28,6 +28,18 @@ export default function ExceptionList() {
   const [search, setSearch]       = useState('');
   const [editRule, setEditRule]   = useState(null);
   const [actionErrors, setActionErrors] = useState({});
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [sortKey, setSortKey] = useState('');
+  const [sortOrder, setSortOrder] = useState('asc');
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder('asc');
+    }
+  }
 
   const filteredRules = search.trim()
     ? rules.filter(r => {
@@ -39,6 +51,50 @@ export default function ExceptionList() {
         );
       })
     : rules;
+
+  const sortedRules = sortKey
+    ? [...filteredRules].sort((a, b) => {
+        const dir = sortOrder === 'asc' ? 1 : -1;
+        if (sortKey === 'wazuh_rule_id') {
+          const an = Number(a.wazuh_rule_id), bn = Number(b.wazuh_rule_id);
+          if (!Number.isNaN(an) && !Number.isNaN(bn)) return (an - bn) * dir;
+        }
+        const av = (a[sortKey] ?? '').toString().toLowerCase();
+        const bv = (b[sortKey] ?? '').toString().toLowerCase();
+        return av.localeCompare(bv) * dir;
+      })
+    : filteredRules;
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    const ids = sortedRules.map(r => r.id);
+    const allSelected = ids.length > 0 && ids.every(id => selectedIds.has(id));
+    setSelectedIds(allSelected ? new Set() : new Set(ids));
+  }
+
+  async function handleBulkApprove() {
+    const targets = sortedRules.filter(r => selectedIds.has(r.id) && r.status === 'pending');
+    for (const rule of targets) {
+      await handleApprove(rule);
+    }
+    setSelectedIds(new Set());
+  }
+
+  async function handleBulkDisable() {
+    const targets = sortedRules.filter(r => selectedIds.has(r.id) && r.status === 'applied');
+    for (const rule of targets) {
+      await handleDisable(rule);
+    }
+    setSelectedIds(new Set());
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -80,7 +136,7 @@ export default function ExceptionList() {
     }
   }
 
-  const colCount = isStaff ? 7 : 5;
+  const colCount = isStaff ? 8 : 5;
 
   return (
     <div className="space-y-4 p-6">
@@ -126,12 +182,23 @@ export default function ExceptionList() {
       <div className="sm:hidden space-y-2">
         {loading ? (
           <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
-        ) : filteredRules.length === 0 ? (
+        ) : sortedRules.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">No exception rules.</p>
-        ) : filteredRules.map(rule => (
+        ) : sortedRules.map(rule => (
           <div key={rule.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-xs font-medium text-foreground">{rule.wazuh_rule_id ?? '—'}</span>
+              <span className="flex items-center gap-2">
+                {isStaff && (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(rule.id)}
+                    onChange={() => toggleSelect(rule.id)}
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    aria-label={`Select rule ${rule.wazuh_rule_id ?? rule.id}`}
+                  />
+                )}
+                <span className="font-mono text-xs font-medium text-foreground">{rule.wazuh_rule_id ?? '—'}</span>
+              </span>
               <div className="flex items-center gap-1.5">
                 <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SCOPE_CLASSES[rule.scope] ?? ''}`}>
                   {rule.scope}
@@ -188,11 +255,44 @@ export default function ExceptionList() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Rule ID</th>
+              {isStaff && (
+                <th className="px-4 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={sortedRules.length > 0 && sortedRules.every(r => selectedIds.has(r.id))}
+                    onChange={toggleSelectAll}
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    aria-label="Select all"
+                  />
+                </th>
+              )}
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                <button onClick={() => setSort('wazuh_rule_id')} className="flex items-center gap-1 hover:text-foreground transition-colors" aria-label="Sort by Rule ID">
+                  Rule ID
+                  {sortKey === 'wazuh_rule_id' && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                </button>
+              </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Description</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Scope</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-              {isStaff && <th className="px-4 py-3 text-left font-medium text-muted-foreground">Organisation</th>}
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                <button onClick={() => setSort('scope')} className="flex items-center gap-1 hover:text-foreground transition-colors" aria-label="Sort by Scope">
+                  Scope
+                  {sortKey === 'scope' && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                </button>
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                <button onClick={() => setSort('status')} className="flex items-center gap-1 hover:text-foreground transition-colors" aria-label="Sort by Status">
+                  Status
+                  {sortKey === 'status' && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                </button>
+              </th>
+              {isStaff && (
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                  <button onClick={() => setSort('org_slug')} className="flex items-center gap-1 hover:text-foreground transition-colors" aria-label="Sort by Organisation">
+                    Organisation
+                    {sortKey === 'org_slug' && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                  </button>
+                </th>
+              )}
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Incident</th>
               {isStaff && <th className="px-4 py-3 text-left font-medium text-muted-foreground">Actions</th>}
             </tr>
@@ -204,16 +304,27 @@ export default function ExceptionList() {
                   Loading…
                 </td>
               </tr>
-            ) : filteredRules.length === 0 ? (
+            ) : sortedRules.length === 0 ? (
               <tr>
                 <td colSpan={colCount} className="px-4 py-8 text-center text-muted-foreground">
                   No exception rules.
                 </td>
               </tr>
             ) : (
-              filteredRules.map(rule => (
+              sortedRules.map(rule => (
                 <Fragment key={rule.id}>
                   <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+                    {isStaff && (
+                      <td className="px-4 py-3 w-8">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(rule.id)}
+                          onChange={() => toggleSelect(rule.id)}
+                          className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                          aria-label={`Select rule ${rule.wazuh_rule_id ?? rule.id}`}
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-3 font-mono text-xs text-foreground">
                       {rule.wazuh_rule_id ?? '—'}
                     </td>
@@ -283,6 +394,31 @@ export default function ExceptionList() {
           </tbody>
         </table>
       </div>
+
+      {/* Bulk action toolbar (staff only) */}
+      {isStaff && selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 rounded-xl border border-border bg-background px-6 py-3 shadow-2xl">
+          <span className="text-sm text-foreground">{selectedIds.size} selected</span>
+          <button
+            onClick={handleBulkApprove}
+            className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 transition-colors"
+          >
+            Approve selected
+          </button>
+          <button
+            onClick={handleBulkDisable}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            Disable selected
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       <EditExceptionModal
         rule={editRule}

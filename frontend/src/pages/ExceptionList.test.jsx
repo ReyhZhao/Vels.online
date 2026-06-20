@@ -218,3 +218,56 @@ describe('ExceptionList', () => {
     expect(screen.queryByTestId('edit-modal')).not.toBeInTheDocument();
   });
 });
+
+describe('ExceptionList — bulk select + sort', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('staff see the select-all checkbox; non-staff do not', async () => {
+    api.get.mockResolvedValue({ data: RULES });
+    renderPage(STAFF_USER);
+    await waitFor(() => expect(screen.getByLabelText('Select all')).toBeInTheDocument());
+  });
+
+  it('non-staff do not see the select-all checkbox', async () => {
+    api.get.mockResolvedValue({ data: RULES });
+    renderPage(NON_STAFF);
+    await waitFor(() => screen.getAllByText('Block brute force'));
+    expect(screen.queryByLabelText('Select all')).not.toBeInTheDocument();
+  });
+
+  it('renders sortable Rule ID / Status / Scope / Organisation headers', async () => {
+    api.get.mockResolvedValue({ data: RULES });
+    renderPage(STAFF_USER);
+    await waitFor(() => screen.getByLabelText('Sort by Rule ID'));
+    expect(screen.getByLabelText('Sort by Status')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sort by Scope')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sort by Organisation')).toBeInTheDocument();
+  });
+
+  it('bulk approve approves only the selected pending rules', async () => {
+    api.get.mockResolvedValue({ data: [PENDING_RULE, APPLIED_RULE] });
+    api.post.mockResolvedValue({ data: { ...PENDING_RULE, status: 'applied' } });
+    renderPage(STAFF_USER);
+    await waitFor(() => screen.getByLabelText('Select all'));
+
+    fireEvent.click(screen.getByLabelText('Select all'));
+    fireEvent.click(screen.getByRole('button', { name: /approve selected/i }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(`/api/exceptions/${PENDING_RULE.id}/approve/`));
+    // applied rule must not be approved
+    expect(api.post).not.toHaveBeenCalledWith(`/api/exceptions/${APPLIED_RULE.id}/approve/`);
+  });
+
+  it('bulk disable disables only the selected applied rules', async () => {
+    api.get.mockResolvedValue({ data: [PENDING_RULE, APPLIED_RULE] });
+    api.post.mockResolvedValue({ data: { ...APPLIED_RULE, status: 'disabled' } });
+    renderPage(STAFF_USER);
+    await waitFor(() => screen.getByLabelText('Select all'));
+
+    fireEvent.click(screen.getByLabelText('Select all'));
+    fireEvent.click(screen.getByRole('button', { name: /disable selected/i }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(`/api/exceptions/${APPLIED_RULE.id}/disable/`));
+    expect(api.post).not.toHaveBeenCalledWith(`/api/exceptions/${PENDING_RULE.id}/disable/`);
+  });
+});
