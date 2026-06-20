@@ -611,9 +611,82 @@ function AlertsPage() {
         </label>
       </div>
 
-      {/* Table */}
+      {/* List */}
       <div className="flex-1 overflow-auto">
-        <table className="w-full text-sm">
+        {/* Mobile card list */}
+        <div className="sm:hidden space-y-2 p-3">
+          {loading ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+          ) : results.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              {filterState || filterSeverity || filterSourceKind || filterLinked || dateFrom || dateTo || search
+                ? 'No alerts match the current filters.'
+                : 'No alerts.'}
+            </p>
+          ) : results.map(alert => (
+            <div
+              key={alert.display_id}
+              className="rounded-lg border border-border bg-card px-4 py-3 space-y-2 cursor-pointer hover:bg-accent/50 transition-colors"
+              onClick={() => openDetail(alert)}
+            >
+              <div className="flex items-center gap-2">
+                {alert.state !== 'imported' && (
+                  <span onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(alert.display_id)}
+                      onChange={() => toggleSelect(alert.display_id)}
+                      className="rounded border-border"
+                      aria-label={`Select ${alert.display_id}`}
+                    />
+                  </span>
+                )}
+                <span className="font-mono text-xs font-medium text-foreground">{alert.display_id}</span>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[alert.severity] ?? ''}`}>
+                  {alert.severity}
+                </span>
+                <span className={`ml-auto inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATE_CLASSES[alert.state] ?? ''}`}>
+                  {alert.state}
+                </span>
+              </div>
+              <p className="text-sm font-medium text-foreground leading-snug">{alert.title}</p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 font-medium text-slate-700 dark:text-slate-300">
+                  {SOURCE_KIND_LABELS[alert.source_kind] ?? alert.source_kind}
+                </span>
+                {alert.incident_display_id && (
+                  <Link
+                    to={`/incidents/${alert.incident_display_id}`}
+                    className="font-mono text-blue-600 hover:underline dark:text-blue-400"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {alert.incident_display_id}
+                  </Link>
+                )}
+                <span className="ml-auto">{formatDatetime(alert.created_at)}</span>
+              </div>
+              {alert.state === 'new' && (
+                <div className="flex gap-2 pt-1" onClick={e => e.stopPropagation()}>
+                  <button
+                    onClick={e => handleQuickAction(e, alert, 'acknowledged')}
+                    className="rounded px-2 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50 transition-colors"
+                  >
+                    Ack
+                  </button>
+                  <button
+                    onClick={e => handleQuickAction(e, alert, 'ignored')}
+                    className="rounded px-2 py-1 text-xs bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    Ignore
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <table className="hidden sm:table w-full text-sm">
           <thead className="sticky top-0 bg-muted/50 backdrop-blur border-b border-border">
             <tr>
               <th className="px-4 py-2 w-8">

@@ -325,3 +325,45 @@ describe('AlertsPage — improved filters (#426)', () => {
     );
   });
 });
+
+describe('AlertsPage — mobile card layout', () => {
+  const ALERT = {
+    display_id: 'AL-0001',
+    title: 'Suspicious login detected',
+    severity: 'high',
+    state: 'new',
+    source_kind: 'wazuh_event',
+    incident_display_id: null,
+    created_at: '2026-06-01T10:00:00Z',
+    org_slug: 'acme',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockNavigate.mockReset();
+    useAuth.mockReturnValue({ user: { id: 1 } });
+    api.get.mockImplementation(url => {
+      if (url === '/api/correlations/suggestions/') return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: { count: 1, page: 1, per_page: 25, total_pages: 1, results: [ALERT] } });
+    });
+  });
+
+  it('renders a sm:hidden mobile card list containing each alert', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+
+    const cardList = document.querySelector('.sm\\:hidden');
+    expect(cardList).toBeTruthy();
+    expect(cardList.textContent).toContain('AL-0001');
+    expect(cardList.textContent).toContain('Suspicious login detected');
+  });
+
+  it('renders the desktop table as hidden sm:table (no element-level horizontal scroll wrapper)', async () => {
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/alerts/', expect.any(Object)));
+
+    const table = document.querySelector('table');
+    expect(table.className).toContain('hidden');
+    expect(table.className).toContain('sm:table');
+  });
+});
