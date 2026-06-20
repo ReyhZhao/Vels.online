@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
 
@@ -24,6 +24,13 @@ const STATUS_FILTERS = [
 ];
 const IN_FLIGHT = ['running', 'scoping_running'];
 
+const SORT_COLUMNS = {
+  status:    { label: 'Status',    defaultOrder: 'asc' },
+  findings:  { label: 'Findings',  defaultOrder: 'desc' },
+  incidents: { label: 'Incidents', defaultOrder: 'desc' },
+  owner:     { label: 'Owner',     defaultOrder: 'asc' },
+};
+
 export default function ThreatHuntingPage() {
   const navigate = useNavigate();
   const [hunts, setHunts] = useState([]);
@@ -34,6 +41,12 @@ export default function ThreatHuntingPage() {
   // List search + status filter (issue #508).
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+
+  // List sort + bulk selection (issue #581).
+  const [sortKey, setSortKey] = useState(null);
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // composer state
   const [seedKind, setSeedKind] = useState('question');
@@ -82,6 +95,87 @@ export default function ThreatHuntingPage() {
     } catch (e2) {
       setError(e2.response?.data?.detail || 'Could not delete hunt.');
     }
+  }
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder(SORT_COLUMNS[key]?.defaultOrder ?? 'asc');
+    }
+  }
+
+  const visible = useMemo(() => {
+    if (!sortKey) return hunts;
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    return [...hunts].sort((a, b) => {
+      if (sortKey === 'findings') return ((a.finding_count || 0) - (b.finding_count || 0)) * dir;
+      if (sortKey === 'incidents') return ((a.spawned_incident_count || 0) - (b.spawned_incident_count || 0)) * dir;
+      if (sortKey === 'owner') return (a.owner_username || '').localeCompare(b.owner_username || '') * dir;
+      return (a.status || '').localeCompare(b.status || '') * dir;
+    });
+  }, [hunts, sortKey, sortOrder]);
+
+  // In-flight hunts (running / scoping_running) can't be deleted while the
+  // worker is still writing to them, so they're never selectable for bulk delete.
+  const deletableIds = visible.filter((h) => !IN_FLIGHT.includes(h.status)).map((h) => h.id);
+  const allDeletableSelected = deletableIds.length > 0 && deletableIds.every((id) => selectedIds.has(id));
+  const someDeletableSelected = deletableIds.some((id) => selectedIds.has(id));
+
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allDeletableSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        deletableIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => new Set([...prev, ...deletableIds]));
+    }
+  }
+
+  async function bulkDelete() {
+    const targets = visible.filter((h) => selectedIds.has(h.id) && !IN_FLIGHT.includes(h.status));
+    if (targets.length === 0) return;
+    if (!window.confirm(`Delete ${targets.length} hunt${targets.length === 1 ? '' : 's'} permanently?`)) return;
+    setBulkBusy(true);
+    setError(null);
+    for (const h of targets) {
+      try {
+        await api.delete(`/api/hunts/${h.id}/`);
+        setHunts((prev) => prev.filter((x) => x.id !== h.id));
+      } catch {
+        setError('Could not delete one or more hunts.');
+      }
+    }
+    setSelectedIds(new Set());
+    setBulkBusy(false);
+  }
+
+  function SortHeader({ field }) {
+    return (
+      <th className="p-2">
+        <button
+          type="button"
+          onClick={() => setSort(field)}
+          className="flex items-center gap-1 font-medium hover:underline"
+          aria-label={`Sort by ${SORT_COLUMNS[field].label}`}
+        >
+          {SORT_COLUMNS[field].label}
+          {sortKey === field && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+        </button>
+      </th>
+    );
   }
 
   async function submit(e) {
@@ -181,29 +275,117 @@ export default function ThreatHuntingPage() {
         </select>
       </div>
 
-      <div className="border rounded-lg dark:border-gray-700 overflow-hidden">
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 border rounded-lg p-2 text-sm dark:border-gray-700">
+          <span className="font-medium">{selectedIds.size} selected</span>
+          <button
+            type="button"
+            onClick={bulkDelete}
+            disabled={bulkBusy}
+            aria-label="Delete selected"
+            className="rounded border border-red-300 px-3 py-1 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/50 dark:hover:bg-red-900/20"
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-gray-500">Loading…</p>
+        ) : visible.length === 0 ? (
+          <p className="py-8 text-center text-gray-500">
+            {search.trim() || statusFilter ? 'No hunts match your filters.' : 'No hunts yet.'}
+          </p>
+        ) : visible.map((h) => (
+          <div key={h.id} className="border rounded-lg p-3 space-y-2 dark:border-gray-700">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2 min-w-0">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(h.id)}
+                  disabled={IN_FLIGHT.includes(h.status)}
+                  onChange={() => toggleSelect(h.id)}
+                  aria-label={`Select ${h.title}`}
+                  className="mt-1 h-4 w-4 rounded disabled:opacity-40"
+                />
+                <button
+                  type="button"
+                  onClick={() => navigate(`/hunting/${h.id}`)}
+                  className="text-left font-medium hover:underline truncate"
+                >
+                  {h.title}
+                </button>
+              </div>
+              <span className={`shrink-0 px-2 py-0.5 rounded text-xs ${STATUS_CLASSES[h.status] || ''}`}>{h.status}</span>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
+              <span>{h.scope_all_orgs ? 'All orgs' : 'Selected'}</span>
+              <span>Findings: {h.finding_count}</span>
+              <span>Incidents: {h.spawned_incident_count}</span>
+              <span>Owner: {h.owner_username || '—'}</span>
+            </div>
+            {!IN_FLIGHT.includes(h.status) && (
+              <button onClick={(e) => deleteHunt(e, h)} aria-label="Delete hunt" className="text-xs text-red-600 hover:text-red-700">
+                Delete
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block border rounded-lg dark:border-gray-700 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-left">
             <tr>
+              <th className="p-2 w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all"
+                  checked={allDeletableSelected}
+                  ref={(el) => { if (el) el.indeterminate = someDeletableSelected && !allDeletableSelected; }}
+                  onChange={toggleSelectAll}
+                  className="h-4 w-4 rounded"
+                />
+              </th>
               <th className="p-2">Seed</th>
               <th className="p-2">Scope</th>
-              <th className="p-2">Status</th>
-              <th className="p-2">Findings</th>
-              <th className="p-2">Incidents</th>
-              <th className="p-2">Owner</th>
+              <SortHeader field="status" />
+              <SortHeader field="findings" />
+              <SortHeader field="incidents" />
+              <SortHeader field="owner" />
               <th className="p-2 w-0" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="p-4 text-center text-gray-500">Loading…</td></tr>
-            ) : hunts.length === 0 ? (
-              <tr><td colSpan={7} className="p-4 text-center text-gray-500">
+              <tr><td colSpan={8} className="p-4 text-center text-gray-500">Loading…</td></tr>
+            ) : visible.length === 0 ? (
+              <tr><td colSpan={8} className="p-4 text-center text-gray-500">
                 {search.trim() || statusFilter ? 'No hunts match your filters.' : 'No hunts yet.'}
               </td></tr>
-            ) : hunts.map((h) => (
+            ) : visible.map((h) => (
               <tr key={h.id} className="border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                   onClick={() => navigate(`/hunting/${h.id}`)}>
+                <td className="p-2 w-8" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(h.id)}
+                    disabled={IN_FLIGHT.includes(h.status)}
+                    onChange={() => toggleSelect(h.id)}
+                    aria-label={`Select ${h.title}`}
+                    className="h-4 w-4 rounded disabled:opacity-40"
+                  />
+                </td>
                 <td className="p-2 max-w-xs truncate">{h.title}</td>
                 <td className="p-2">{h.scope_all_orgs ? 'All orgs' : 'Selected'}</td>
                 <td className="p-2">
