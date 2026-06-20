@@ -387,4 +387,25 @@ describe('AppSidebar', () => {
     await user.click(screen.getByRole('button', { name: /close-modal/i }));
     expect(screen.queryByTestId('report-modal')).not.toBeInTheDocument();
   });
+
+  // ── version badge ─────────────────────────────────────────────────────────
+
+  it('shows the version badge for staff users', () => {
+    renderSidebar(staffUser);
+    expect(screen.getByText(/^v\d+\.\d+\.\d+ ·/)).toBeInTheDocument();
+  });
+
+  it('does not show the version badge for non-staff users', () => {
+    renderSidebar(regularUser);
+    expect(screen.queryByText(/^v\d+\.\d+\.\d+ ·/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the version badge visible when the sidebar is collapsed', async () => {
+    const user = userEvent.setup();
+    renderSidebar(staffUser);
+    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }));
+    // Report issue button is hidden when collapsed, but the version stays.
+    expect(screen.queryByRole('button', { name: /report issue/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^Version \d+\.\d+\.\d+/)).toBeInTheDocument();
+  });
 });
