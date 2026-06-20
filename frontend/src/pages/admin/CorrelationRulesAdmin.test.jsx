@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -93,6 +93,17 @@ function renderPage() {
   );
 }
 
+// Both a mobile card list and a desktop table render in jsdom; the table is
+// the deterministic surface for assertions.
+function table() {
+  return screen.getByRole('table');
+}
+
+async function openKebab(user, name) {
+  await user.click(within(table()).getByLabelText(`Actions for ${name}`));
+  return within(table()).getByRole('menu');
+}
+
 describe('CorrelationRulesAdmin', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -105,63 +116,125 @@ describe('CorrelationRulesAdmin', () => {
   it('shows loading state', () => {
     api.get.mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0);
   });
 
   it('shows empty state', async () => {
     mockGet([]);
     renderPage();
-    await waitFor(() => screen.getByText('No correlation rules.'));
+    await waitFor(() => expect(screen.getAllByText('No correlation rules.').length).toBeGreaterThan(0));
   });
 
   it('renders rule rows with severity and status badges', async () => {
     mockGet();
     renderPage();
-    await waitFor(() => screen.getByText('Port Scan Rule'));
-    expect(screen.getByText('Brute Force Rule')).toBeInTheDocument();
-    expect(screen.getAllByText('Enabled').length).toBeGreaterThan(0);
-    expect(screen.getByText('Disabled')).toBeInTheDocument();
-    expect(screen.getByText('high')).toBeInTheDocument();
-    expect(screen.getByText('critical')).toBeInTheDocument();
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    expect(within(table()).getByText('Brute Force Rule')).toBeInTheDocument();
+    expect(within(table()).getByText('Enabled')).toBeInTheDocument();
+    expect(within(table()).getByText('Disabled')).toBeInTheDocument();
+    expect(within(table()).getByText('high')).toBeInTheDocument();
+    expect(within(table()).getByText('critical')).toBeInTheDocument();
   });
 
-  it('shows leg count in table', async () => {
+  it('filters by search query', async () => {
     mockGet();
+    const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Port Scan Rule'));
-    expect(screen.getByText('1')).toBeInTheDocument();
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    await user.type(screen.getByLabelText('Search rules'), 'brute');
+    await waitFor(() => expect(within(table()).queryByText('Port Scan Rule')).not.toBeInTheDocument());
+    expect(within(table()).getByText('Brute Force Rule')).toBeInTheDocument();
   });
 
-  it('disables a rule via toggle', async () => {
+  it('filters by severity', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    await user.selectOptions(screen.getByLabelText('Severity filter'), 'critical');
+    await waitFor(() => expect(within(table()).queryByText('Port Scan Rule')).not.toBeInTheDocument());
+    expect(within(table()).getByText('Brute Force Rule')).toBeInTheDocument();
+  });
+
+  it('filters by enabled/disabled status', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    await user.selectOptions(screen.getByLabelText('Status filter'), 'disabled');
+    await waitFor(() => expect(within(table()).queryByText('Port Scan Rule')).not.toBeInTheDocument());
+    expect(within(table()).getByText('Brute Force Rule')).toBeInTheDocument();
+  });
+
+  it('sorts by name', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    // default name asc → Brute Force Rule first
+    let rows = within(table()).getAllByRole('row').slice(1);
+    expect(within(rows[0]).getByText('Brute Force Rule')).toBeInTheDocument();
+    await user.click(within(table()).getByRole('button', { name: 'Sort by Name' }));
+    rows = within(table()).getAllByRole('row').slice(1);
+    expect(within(rows[0]).getByText('Port Scan Rule')).toBeInTheDocument();
+  });
+
+  it('disables a rule via the kebab', async () => {
     mockGet();
     api.patch.mockResolvedValue({ data: { ...RULES[0], enabled: false } });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Port Scan Rule'));
-    const disableBtns = screen.getAllByRole('button', { name: 'Disable' });
-    await user.click(disableBtns[0]);
-    await waitFor(() =>
-      expect(api.patch).toHaveBeenCalledWith(
-        '/api/correlations/rules/1/',
-        { enabled: false }
-      )
-    );
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    const menu = await openKebab(user, 'Port Scan Rule');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Disable' }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/correlations/rules/1/', { enabled: false }));
   });
 
-  it('enables a disabled rule', async () => {
+  it('enables a disabled rule via the kebab', async () => {
     mockGet();
     api.patch.mockResolvedValue({ data: { ...RULES[1], enabled: true } });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Brute Force Rule'));
-    const enableBtns = screen.getAllByRole('button', { name: 'Enable' });
-    await user.click(enableBtns[0]);
-    await waitFor(() =>
-      expect(api.patch).toHaveBeenCalledWith(
-        '/api/correlations/rules/2/',
-        { enabled: true }
-      )
-    );
+    await waitFor(() => within(table()).getByText('Brute Force Rule'));
+    const menu = await openKebab(user, 'Brute Force Rule');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Enable' }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/correlations/rules/2/', { enabled: true }));
+  });
+
+  it('deletes a rule after confirmation via the kebab', async () => {
+    mockGet();
+    api.delete.mockResolvedValue({});
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    const menu = await openKebab(user, 'Port Scan Rule');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/correlations/rules/1/'));
+    await waitFor(() => expect(within(table()).queryByText('Port Scan Rule')).not.toBeInTheDocument());
+  });
+
+  it('bulk-disables selected rules', async () => {
+    mockGet();
+    api.patch.mockResolvedValue({ data: { ...RULES[0], enabled: false } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    await user.click(within(table()).getByLabelText('Select Port Scan Rule'));
+    await user.click(screen.getByRole('button', { name: 'Disable selected' }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/correlations/rules/1/', { enabled: false }));
+  });
+
+  it('bulk-deletes selected rules after confirmation', async () => {
+    mockGet();
+    api.delete.mockResolvedValue({});
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    await user.click(within(table()).getByLabelText('Select Port Scan Rule'));
+    await user.click(screen.getByRole('button', { name: 'Delete selected' }));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/correlations/rules/1/'));
   });
 
   it('opens the drawer when New rule is clicked', async () => {
@@ -173,13 +246,13 @@ describe('CorrelationRulesAdmin', () => {
     expect(screen.getByText('New Correlation Rule')).toBeInTheDocument();
   });
 
-  it('opens edit drawer with pre-filled data', async () => {
+  it('opens edit drawer with pre-filled data via the kebab', async () => {
     mockGet();
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Port Scan Rule'));
-    const editBtns = screen.getAllByRole('button', { name: 'Edit' });
-    await user.click(editBtns[0]);
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    const menu = await openKebab(user, 'Port Scan Rule');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
     expect(screen.getByText('Edit Rule')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Port Scan Rule')).toBeInTheDocument();
   });
@@ -206,12 +279,9 @@ describe('CorrelationRulesAdmin', () => {
     await user.type(screen.getByPlaceholderText('Rule name'), 'New Rule');
     await user.click(screen.getByRole('button', { name: 'Create rule' }));
     await waitFor(() =>
-      expect(api.post).toHaveBeenCalledWith(
-        '/api/correlations/rules/',
-        expect.objectContaining({ name: 'New Rule' })
-      )
+      expect(api.post).toHaveBeenCalledWith('/api/correlations/rules/', expect.objectContaining({ name: 'New Rule' }))
     );
-    await waitFor(() => screen.getByText('New Rule'));
+    await waitFor(() => within(table()).getByText('New Rule'));
   });
 
   it('saves an edited rule via patch', async () => {
@@ -219,32 +289,16 @@ describe('CorrelationRulesAdmin', () => {
     api.patch.mockResolvedValue({ data: { ...RULES[0], name: 'Updated Rule' } });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Port Scan Rule'));
-    const editBtns = screen.getAllByRole('button', { name: 'Edit' });
-    await user.click(editBtns[0]);
+    await waitFor(() => within(table()).getByText('Port Scan Rule'));
+    const menu = await openKebab(user, 'Port Scan Rule');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
     const nameInput = screen.getByDisplayValue('Port Scan Rule');
     await user.clear(nameInput);
     await user.type(nameInput, 'Updated Rule');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() =>
-      expect(api.patch).toHaveBeenCalledWith(
-        '/api/correlations/rules/1/',
-        expect.objectContaining({ name: 'Updated Rule' })
-      )
+      expect(api.patch).toHaveBeenCalledWith('/api/correlations/rules/1/', expect.objectContaining({ name: 'Updated Rule' }))
     );
-  });
-
-  it('deletes a rule after confirmation', async () => {
-    mockGet();
-    api.delete.mockResolvedValue({});
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => screen.getByText('Port Scan Rule'));
-    const deleteBtns = screen.getAllByRole('button', { name: 'Delete' });
-    await user.click(deleteBtns[0]);
-    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/correlations/rules/1/'));
-    await waitFor(() => expect(screen.queryByText('Port Scan Rule')).not.toBeInTheDocument());
   });
 
   it('leg builder adds and removes conditions', async () => {

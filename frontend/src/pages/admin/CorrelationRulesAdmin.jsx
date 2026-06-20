@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import api from '@/lib/axios';
 import RuleAuthorDrawer from '@/components/RuleAuthorDrawer';
 
@@ -383,74 +383,78 @@ function RuleDrawer({ rule, catalog, onClose, onSaved }) {
   );
 }
 
-// ── RuleRow ────────────────────────────────────────────────────────────────
+// ── Shared list helpers ────────────────────────────────────────────────────
 
-function RuleRow({ rule, onEdit, onToggle, onDelete }) {
-  const [toggling, setToggling] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+const SORT_COLUMNS = {
+  name:     { label: 'Name',     defaultOrder: 'asc' },
+  severity: { label: 'Severity', defaultOrder: 'desc' },
+  status:   { label: 'Status',   defaultOrder: 'asc' },
+};
 
-  async function handleToggle() {
-    setToggling(true);
-    try {
-      await onToggle(rule);
-    } finally {
-      setToggling(false);
-    }
-  }
+const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 
-  async function handleDelete() {
-    if (!window.confirm(`Delete rule "${rule.name}"?`)) return;
-    setDeleting(true);
-    try {
-      await onDelete(rule);
-    } finally {
-      setDeleting(false);
-    }
-  }
+function SeverityBadge({ severity }) {
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_COLORS[severity] ?? ''}`}>
+      {severity}
+    </span>
+  );
+}
+
+function StatusBadge({ enabled }) {
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${enabled ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'}`}>
+      {enabled ? 'Enabled' : 'Disabled'}
+    </span>
+  );
+}
+
+function KebabMenu({ label, children }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
 
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
-      <td className="px-4 py-3 font-medium text-foreground">{rule.name}</td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">
-        {rule.correlation_key === 'none' ? 'Org-wide' : rule.correlation_key}
-      </td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">{rule.window_minutes}m</td>
-      <td className="px-4 py-3">
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_COLORS[rule.severity] ?? ''}`}>
-          {rule.severity}
-        </span>
-      </td>
-      <td className="px-4 py-3 text-center text-xs text-muted-foreground">{rule.legs?.length ?? 0}</td>
-      <td className="px-4 py-3">
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${rule.enabled ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'}`}>
-          {rule.enabled ? 'Enabled' : 'Disabled'}
-        </span>
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={() => onEdit(rule)}
-            className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
-          >
-            Edit
-          </button>
-          <button
-            onClick={handleToggle}
-            disabled={toggling}
-            className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-          >
-            {rule.enabled ? 'Disable' : 'Enable'}
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
-          >
-            Delete
-          </button>
+    <div ref={ref} className="relative inline-block text-left">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label={label}
+        className="rounded-md px-2 py-1 text-base leading-none text-muted-foreground hover:bg-accent transition-colors"
+      >
+        ⋮
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-20 mt-1 w-36 rounded-md border border-border bg-card py-1 shadow-lg"
+          onClick={() => setOpen(false)}
+        >
+          {children}
         </div>
-      </td>
-    </tr>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({ onClick, children, danger }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`block w-full px-3 py-1.5 text-left text-xs font-medium hover:bg-accent transition-colors ${danger ? 'text-red-600' : 'text-foreground'}`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -463,6 +467,14 @@ export default function CorrelationRulesAdmin() {
   const [error, setError] = useState(null);
   const [drawerRule, setDrawerRule] = useState(undefined);
   const [ruleAuthorOpen, setRuleAuthorOpen] = useState(false);
+
+  const [search, setSearch] = useState('');
+  const [severityFilter, setSeverityFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortKey, setSortKey] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -501,6 +513,12 @@ export default function CorrelationRulesAdmin() {
     try {
       await api.delete(`/api/correlations/rules/${rule.id}/`);
       setRules(prev => prev.filter(r => r.id !== rule.id));
+      setSelectedIds(prev => {
+        if (!prev.has(rule.id)) return prev;
+        const next = new Set(prev);
+        next.delete(rule.id);
+        return next;
+      });
     } catch {
       setError('Failed to delete rule.');
     }
@@ -509,6 +527,110 @@ export default function CorrelationRulesAdmin() {
   function handleRuleAuthorSaved(rule) {
     setRules(prev => [...prev, rule]);
     setRuleAuthorOpen(false);
+  }
+
+  function handleDeleteWithConfirm(rule) {
+    if (!window.confirm(`Delete rule "${rule.name}"?`)) return;
+    handleDelete(rule);
+  }
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder(SORT_COLUMNS[key]?.defaultOrder ?? 'asc');
+    }
+  }
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let rows = rules.filter(r => {
+      if (severityFilter !== 'all' && r.severity !== severityFilter) return false;
+      if (statusFilter === 'enabled' && !r.enabled) return false;
+      if (statusFilter === 'disabled' && r.enabled) return false;
+      if (!q) return true;
+      return (r.name || '').toLowerCase().includes(q);
+    });
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    rows = [...rows].sort((a, b) => {
+      if (sortKey === 'status') return ((a.enabled ? 1 : 0) - (b.enabled ? 1 : 0)) * dir;
+      if (sortKey === 'severity') return ((SEVERITY_RANK[a.severity] ?? 0) - (SEVERITY_RANK[b.severity] ?? 0)) * dir;
+      return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()) * dir;
+    });
+    return rows;
+  }, [rules, search, severityFilter, statusFilter, sortKey, sortOrder]);
+
+  const visibleIds = visible.map(r => r.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+  const someVisibleSelected = visibleIds.some(id => selectedIds.has(id));
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        visibleIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => new Set([...prev, ...visibleIds]));
+    }
+  }
+
+  async function handleBulkToggle(enabled) {
+    setBulkBusy(true);
+    const targets = visible.filter(r => selectedIds.has(r.id) && r.enabled !== enabled);
+    for (const r of targets) {
+      await handleToggle(r);
+    }
+    setSelectedIds(new Set());
+    setBulkBusy(false);
+  }
+
+  async function handleBulkDelete() {
+    const targets = visible.filter(r => selectedIds.has(r.id));
+    if (targets.length === 0) return;
+    if (!window.confirm(`Delete ${targets.length} rule${targets.length === 1 ? '' : 's'}?`)) return;
+    setBulkBusy(true);
+    for (const r of targets) {
+      await handleDelete(r);
+    }
+    setSelectedIds(new Set());
+    setBulkBusy(false);
+  }
+
+  function SortHeader({ field, className = '' }) {
+    return (
+      <th className={`px-4 py-3 text-left font-medium text-muted-foreground ${className}`}>
+        <button
+          onClick={() => setSort(field)}
+          className="flex items-center gap-1 hover:text-foreground transition-colors"
+          aria-label={`Sort by ${SORT_COLUMNS[field].label}`}
+        >
+          {SORT_COLUMNS[field].label}
+          {sortKey === field && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+        </button>
+      </th>
+    );
+  }
+
+  function RowMenu({ rule }) {
+    return (
+      <KebabMenu label={`Actions for ${rule.name}`}>
+        <MenuItem onClick={() => setDrawerRule(rule)}>Edit</MenuItem>
+        <MenuItem onClick={() => handleToggle(rule)}>{rule.enabled ? 'Disable' : 'Enable'}</MenuItem>
+        <MenuItem danger onClick={() => handleDeleteWithConfirm(rule)}>Delete</MenuItem>
+      </KebabMenu>
+    );
   }
 
   return (
@@ -524,7 +646,7 @@ export default function CorrelationRulesAdmin() {
         <RuleDrawer
           rule={drawerRule || null}
           catalog={catalog}
-          onClose={() => { setDrawerRule(undefined); setDraftWarnings([]); }}
+          onClose={() => setDrawerRule(undefined)}
           onSaved={handleSaved}
         />
       )}
@@ -549,39 +671,163 @@ export default function CorrelationRulesAdmin() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-max">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Corr. key</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Window</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
-                <th className="px-4 py-3 text-center font-medium text-muted-foreground">Legs</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
-              ) : rules.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No correlation rules.</td></tr>
-              ) : (
-                rules.map(rule => (
-                  <RuleRow
-                    key={rule.id}
-                    rule={rule}
-                    onEdit={setDrawerRule}
-                    onToggle={handleToggle}
-                    onDelete={handleDelete}
-                  />
-                ))
-              )}
-            </tbody>
-          </table>
+      <div className="flex flex-wrap gap-2 items-center">
+        <input
+          type="search"
+          placeholder="Search rules…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          aria-label="Search rules"
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-52"
+        />
+        <select
+          value={severityFilter}
+          onChange={e => setSeverityFilter(e.target.value)}
+          aria-label="Severity filter"
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="all">All severities</option>
+          {(catalog?.severities ?? ['critical', 'high', 'medium', 'low', 'info']).map(s => (
+            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+          ))}
+        </select>
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          aria-label="Status filter"
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="all">All statuses</option>
+          <option value="enabled">Enabled</option>
+          <option value="disabled">Disabled</option>
+        </select>
+      </div>
+
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-4 py-2">
+          <span className="text-sm font-medium text-foreground">{selectedIds.size} selected</span>
+          <button
+            onClick={() => handleBulkToggle(true)}
+            disabled={bulkBusy}
+            aria-label="Enable selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            Enable
+          </button>
+          <button
+            onClick={() => handleBulkToggle(false)}
+            disabled={bulkBusy}
+            aria-label="Disable selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            Disable
+          </button>
+          <button
+            onClick={handleBulkDelete}
+            disabled={bulkBusy}
+            aria-label="Delete selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
         </div>
+      )}
+
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : visible.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No correlation rules.</p>
+        ) : visible.map(rule => (
+          <div key={rule.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(rule.id)}
+                  onChange={() => toggleSelect(rule.id)}
+                  aria-label={`Select ${rule.name}`}
+                  className="mt-1 h-4 w-4 rounded border-border"
+                />
+                <div>
+                  <p className="font-medium text-foreground leading-snug">{rule.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {rule.correlation_key === 'none' ? 'Org-wide' : rule.correlation_key} · {rule.window_minutes}m · {rule.legs?.length ?? 0} legs
+                  </p>
+                </div>
+              </div>
+              <RowMenu rule={rule} />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <SeverityBadge severity={rule.severity} />
+              <StatusBadge enabled={rule.enabled} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="px-4 py-3 w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all"
+                  checked={allVisibleSelected}
+                  ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                  onChange={toggleSelectAll}
+                  className="rounded border-border"
+                />
+              </th>
+              <SortHeader field="name" />
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Corr. key</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Window</th>
+              <SortHeader field="severity" />
+              <th className="px-4 py-3 text-center font-medium text-muted-foreground">Legs</th>
+              <SortHeader field="status" />
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+            ) : visible.length === 0 ? (
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No correlation rules.</td></tr>
+            ) : (
+              visible.map(rule => (
+                <tr key={rule.id} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+                  <td className="px-4 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${rule.name}`}
+                      checked={selectedIds.has(rule.id)}
+                      onChange={() => toggleSelect(rule.id)}
+                      className="rounded border-border"
+                    />
+                  </td>
+                  <td className="px-4 py-3 font-medium text-foreground">{rule.name}</td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">
+                    {rule.correlation_key === 'none' ? 'Org-wide' : rule.correlation_key}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">{rule.window_minutes}m</td>
+                  <td className="px-4 py-3"><SeverityBadge severity={rule.severity} /></td>
+                  <td className="px-4 py-3 text-center text-xs text-muted-foreground">{rule.legs?.length ?? 0}</td>
+                  <td className="px-4 py-3"><StatusBadge enabled={rule.enabled} /></td>
+                  <td className="px-4 py-3 text-right"><RowMenu rule={rule} /></td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
