@@ -98,6 +98,7 @@ const SORT_COLUMNS = {
 const CLOSURE_REASONS = [
   { value: 'resolved',       label: 'Resolved' },
   { value: 'false_positive', label: 'False Positive' },
+  { value: 'no_impact',      label: 'No Impact' },
   { value: 'duplicate',      label: 'Duplicate' },
   { value: 'informational',  label: 'Informational' },
   { value: 'accepted_risk',  label: 'Accepted Risk' },

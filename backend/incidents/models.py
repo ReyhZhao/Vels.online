@@ -153,12 +153,16 @@ class Incident(models.Model):
 
     CLOSURE_RESOLVED = "resolved"
     CLOSURE_FALSE_POSITIVE = "false_positive"
+    # True positive, but the incident caused no impact — distinct from a
+    # false positive (which was not a real detection at all).
+    CLOSURE_NO_IMPACT = "no_impact"
     CLOSURE_DUPLICATE = "duplicate"
     CLOSURE_INFORMATIONAL = "informational"
     CLOSURE_ACCEPTED_RISK = "accepted_risk"
     CLOSURE_REASON_CHOICES = [
         (CLOSURE_RESOLVED, "Resolved"),
         (CLOSURE_FALSE_POSITIVE, "False Positive"),
+        (CLOSURE_NO_IMPACT, "No Impact"),
         (CLOSURE_DUPLICATE, "Duplicate"),
         (CLOSURE_INFORMATIONAL, "Informational"),
         (CLOSURE_ACCEPTED_RISK, "Accepted Risk"),

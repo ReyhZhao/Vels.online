@@ -126,7 +126,7 @@ def test_close_without_closure_reason_raises(acme, actor):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("reason", ["resolved", "false_positive", "informational", "accepted_risk"])
+@pytest.mark.parametrize("reason", ["resolved", "false_positive", "no_impact", "informational", "accepted_risk"])
 def test_close_with_valid_closure_reason(reason, acme, actor):
     incident = make_incident(acme, state="in_progress")
     result = transition_incident(incident, "closed", actor=actor, closure_reason=reason)
