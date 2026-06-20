@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -23,6 +23,12 @@ function renderPage() {
   );
 }
 
+// The component renders both a mobile card list and a desktop table in jsdom
+// (no CSS media queries), so the desktop table is the deterministic surface.
+function table() {
+  return screen.getByRole('table');
+}
+
 describe('SubjectsAdmin', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -35,23 +41,23 @@ describe('SubjectsAdmin', () => {
   it('shows loading state', () => {
     api.get.mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0);
   });
 
   it('shows empty state', async () => {
     api.get.mockResolvedValue({ data: [] });
     renderPage();
-    await waitFor(() => screen.getByText('No subjects.'));
+    await waitFor(() => expect(screen.getAllByText('No subjects.').length).toBeGreaterThan(0));
   });
 
   it('renders subject rows', async () => {
     api.get.mockResolvedValue({ data: SUBJECTS });
     renderPage();
-    await waitFor(() => screen.getByText('Phishing'));
-    expect(screen.getByText('Malware')).toBeInTheDocument();
-    expect(screen.getByText('phishing')).toBeInTheDocument();
-    expect(screen.getByText('Active')).toBeInTheDocument();
-    expect(screen.getByText('Archived')).toBeInTheDocument();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    expect(within(table()).getByText('Malware')).toBeInTheDocument();
+    expect(within(table()).getByText('phishing')).toBeInTheDocument();
+    expect(within(table()).getByText('Active')).toBeInTheDocument();
+    expect(within(table()).getByText('Archived')).toBeInTheDocument();
   });
 
   it('creates a new subject', async () => {
@@ -63,7 +69,7 @@ describe('SubjectsAdmin', () => {
     await user.type(screen.getByPlaceholderText('Subject name'), 'Ransomware');
     await user.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/subjects/', { name: 'Ransomware', description: '' }));
-    await waitFor(() => screen.getByText('Ransomware'));
+    await waitFor(() => within(table()).getByText('Ransomware'));
   });
 
   it('shows form error on create failure', async () => {
@@ -82,9 +88,53 @@ describe('SubjectsAdmin', () => {
     api.patch.mockResolvedValue({ data: { ...SUBJECTS[0], archived: true } });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing'));
-    const archiveButtons = screen.getAllByRole('button', { name: 'Archive' });
+    await waitFor(() => within(table()).getByText('Phishing'));
+    const archiveButtons = within(table()).getAllByRole('button', { name: 'Archive' });
     await user.click(archiveButtons[0]);
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/subjects/1/', { archived: true }));
+  });
+
+  it('filters by search query', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    await user.type(screen.getByLabelText('Search subjects'), 'malw');
+    await waitFor(() => expect(within(table()).queryByText('Phishing')).not.toBeInTheDocument());
+    expect(within(table()).getByText('Malware')).toBeInTheDocument();
+  });
+
+  it('filters by status', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    await user.selectOptions(screen.getByLabelText('Status filter'), 'archived');
+    await waitFor(() => expect(within(table()).queryByText('Phishing')).not.toBeInTheDocument());
+    expect(within(table()).getByText('Malware')).toBeInTheDocument();
+  });
+
+  it('sorts by name', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    // default sort name asc → Malware before Phishing
+    let rows = within(table()).getAllByRole('row').slice(1);
+    expect(within(rows[0]).getByText('Malware')).toBeInTheDocument();
+    await user.click(within(table()).getByRole('button', { name: 'Sort by Name' }));
+    rows = within(table()).getAllByRole('row').slice(1);
+    expect(within(rows[0]).getByText('Phishing')).toBeInTheDocument();
+  });
+
+  it('bulk-archives selected subjects', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    api.patch.mockResolvedValue({ data: { ...SUBJECTS[0], archived: true } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    await user.click(within(table()).getByLabelText('Select Phishing'));
+    await user.click(screen.getByRole('button', { name: 'Archive selected' }));
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/subjects/1/', { archived: true }));
   });
 });
