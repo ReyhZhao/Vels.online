@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
@@ -227,17 +227,15 @@ function SemaphoreTemplateSelect({ value, valueName, onChange, disabled }) {
   );
 }
 
-// ── AutomationRow ─────────────────────────────────────────────────────────────
+// ── AutomationEditor (shared edit fields, used by desktop row + mobile card) ──
 
-function AutomationRow({ automation, onArchive, onUpdate }) {
-  const [editing, setEditing] = useState(false);
+function AutomationEditor({ automation, onUpdate, onCancel }) {
   const [name, setName] = useState(automation.name);
   const [templateId, setTemplateId] = useState(automation.semaphore_template_id);
   const [templateName, setTemplateName] = useState(automation.semaphore_template_name || '');
   const [defaultVars, setDefaultVars] = useState(automation.default_vars || '');
   const [incidentVarMappings, setIncidentVarMappings] = useState(automation.incident_var_mappings || '');
   const [saving, setSaving] = useState(false);
-  const [archiving, setArchiving] = useState(false);
 
   async function handleSave() {
     if (!name.trim() || !templateId) return;
@@ -251,112 +249,66 @@ function AutomationRow({ automation, onArchive, onUpdate }) {
         incident_var_mappings: incidentVarMappings.trim() || null,
       });
       onUpdate(res.data);
-      setEditing(false);
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleArchive() {
-    setArchiving(true);
-    try {
-      await onArchive(automation);
-    } finally {
-      setArchiving(false);
-    }
-  }
-
-  if (editing) {
-    return (
-      <tr className="border-b border-border bg-accent/30">
-        <td className="px-4 py-3" colSpan={4}>
-          <div className="space-y-3">
-            <input
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Automation name"
-              disabled={saving}
-              className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
-            />
-            <SemaphoreTemplateSelect
-              value={templateId}
-              valueName={templateName}
-              onChange={(id, tName) => { setTemplateId(id); setTemplateName(tName); }}
-              disabled={saving}
-            />
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Default vars (YAML)</label>
-              <YamlEditor
-                value={defaultVars}
-                onChange={setDefaultVars}
-                disabled={saving}
-                placeholder="Default vars YAML"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Incident var mappings (YAML)</label>
-              <YamlEditor
-                value={incidentVarMappings}
-                onChange={setIncidentVarMappings}
-                disabled={saving}
-                useMappingsLinter
-                placeholder="Incident var mappings YAML"
-              />
-            </div>
-          </div>
-        </td>
-        <td className="px-4 py-3 align-top">
-          <div className="flex flex-col gap-1">
-            <button
-              onClick={handleSave}
-              disabled={saving || !name.trim() || !templateId}
-              className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
-            >
-              Save
-            </button>
-            <button onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:underline">
-              Cancel
-            </button>
-          </div>
-        </td>
-      </tr>
-    );
-  }
-
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
-      <td className="px-4 py-3 font-medium text-foreground">{automation.name}</td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">
-        {automation.semaphore_template_name || `#${automation.semaphore_template_id}`}
-      </td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">
-        {automation.default_vars
-          ? <code className="rounded bg-muted px-1 py-0.5 text-xs">{automation.default_vars.slice(0, 40)}{automation.default_vars.length > 40 ? '…' : ''}</code>
-          : '—'}
-      </td>
-      <td className="px-4 py-3">
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${automation.archived ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'}`}>
-          {automation.archived ? 'Archived' : 'Active'}
-        </span>
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex gap-2">
-          {!automation.archived && (
-            <button onClick={() => setEditing(true)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">
-              Edit
-            </button>
-          )}
-          <button
-            onClick={handleArchive}
-            disabled={archiving}
-            className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-          >
-            {automation.archived ? 'Unarchive' : 'Archive'}
-          </button>
-        </div>
-      </td>
-    </tr>
+    <div className="space-y-3">
+      <input
+        value={name}
+        onChange={e => setName(e.target.value)}
+        placeholder="Automation name"
+        disabled={saving}
+        className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
+      />
+      <SemaphoreTemplateSelect
+        value={templateId}
+        valueName={templateName}
+        onChange={(id, tName) => { setTemplateId(id); setTemplateName(tName); }}
+        disabled={saving}
+      />
+      <div>
+        <label className="mb-1 block text-xs font-medium text-muted-foreground">Default vars (YAML)</label>
+        <YamlEditor value={defaultVars} onChange={setDefaultVars} disabled={saving} placeholder="Default vars YAML" />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-medium text-muted-foreground">Incident var mappings (YAML)</label>
+        <YamlEditor value={incidentVarMappings} onChange={setIncidentVarMappings} disabled={saving} useMappingsLinter placeholder="Incident var mappings YAML" />
+      </div>
+      <div className="flex gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving || !name.trim() || !templateId}
+          className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
+        >
+          Save
+        </button>
+        <button onClick={onCancel} className="text-xs text-muted-foreground hover:underline">
+          Cancel
+        </button>
+      </div>
+    </div>
   );
+}
+
+function StatusBadge({ archived }) {
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${archived ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'}`}>
+      {archived ? 'Archived' : 'Active'}
+    </span>
+  );
+}
+
+const SORT_COLUMNS = {
+  name:     { label: 'Name',               defaultOrder: 'asc' },
+  template: { label: 'Semaphore Template', defaultOrder: 'asc' },
+  status:   { label: 'Status',             defaultOrder: 'asc' },
+};
+
+function templateLabel(a) {
+  return a.semaphore_template_name || `#${a.semaphore_template_id}`;
 }
 
 // ── AutomationsAdmin page ─────────────────────────────────────────────────────
@@ -373,6 +325,14 @@ export default function AutomationsAdmin() {
   const [incidentVarMappings, setIncidentVarMappings] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortKey, setSortKey] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [editingId, setEditingId] = useState(null);
 
   useEffect(() => {
     api.get('/api/automations/?include_archived=1')
@@ -426,6 +386,86 @@ export default function AutomationsAdmin() {
 
   function handleUpdate(updated) {
     setAutomations(prev => prev.map(a => a.id === updated.id ? updated : a));
+    setEditingId(null);
+  }
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder(SORT_COLUMNS[key]?.defaultOrder ?? 'asc');
+    }
+  }
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let rows = automations.filter(a => {
+      if (statusFilter === 'active' && a.archived) return false;
+      if (statusFilter === 'archived' && !a.archived) return false;
+      if (!q) return true;
+      return (
+        (a.name || '').toLowerCase().includes(q) ||
+        templateLabel(a).toLowerCase().includes(q)
+      );
+    });
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    rows = [...rows].sort((a, b) => {
+      if (sortKey === 'status') return ((a.archived ? 1 : 0) - (b.archived ? 1 : 0)) * dir;
+      if (sortKey === 'template') return templateLabel(a).toLowerCase().localeCompare(templateLabel(b).toLowerCase()) * dir;
+      return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()) * dir;
+    });
+    return rows;
+  }, [automations, search, statusFilter, sortKey, sortOrder]);
+
+  const visibleIds = visible.map(a => a.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+  const someVisibleSelected = visibleIds.some(id => selectedIds.has(id));
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        visibleIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => new Set([...prev, ...visibleIds]));
+    }
+  }
+
+  async function handleBulk(archived) {
+    setBulkBusy(true);
+    const targets = visible.filter(a => selectedIds.has(a.id) && a.archived !== archived);
+    for (const a of targets) {
+      await handleArchive(a);
+    }
+    setSelectedIds(new Set());
+    setBulkBusy(false);
+  }
+
+  function SortHeader({ field, className = '' }) {
+    return (
+      <th className={`px-4 py-3 text-left font-medium text-muted-foreground ${className}`}>
+        <button
+          onClick={() => setSort(field)}
+          className="flex items-center gap-1 hover:text-foreground transition-colors"
+          aria-label={`Sort by ${SORT_COLUMNS[field].label}`}
+        >
+          {SORT_COLUMNS[field].label}
+          {sortKey === field && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+        </button>
+      </th>
+    );
   }
 
   return (
@@ -480,30 +520,179 @@ export default function AutomationsAdmin() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="flex flex-wrap gap-2 items-center">
+        <input
+          type="search"
+          placeholder="Search automations…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          aria-label="Search automations"
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-52"
+        />
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          aria-label="Status filter"
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="archived">Archived</option>
+        </select>
+      </div>
+
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-4 py-2">
+          <span className="text-sm font-medium text-foreground">{selectedIds.size} selected</span>
+          <button
+            onClick={() => handleBulk(true)}
+            disabled={bulkBusy}
+            aria-label="Archive selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            Archive
+          </button>
+          <button
+            onClick={() => handleBulk(false)}
+            disabled={bulkBusy}
+            aria-label="Unarchive selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            Unarchive
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : visible.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No automations yet.</p>
+        ) : visible.map(a => (
+          <div key={a.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+            {editingId === a.id ? (
+              <AutomationEditor automation={a} onUpdate={handleUpdate} onCancel={() => setEditingId(null)} />
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(a.id)}
+                      onChange={() => toggleSelect(a.id)}
+                      aria-label={`Select ${a.name}`}
+                      className="mt-1 h-4 w-4 rounded border-border"
+                    />
+                    <div>
+                      <p className="font-medium text-foreground leading-snug">{a.name}</p>
+                      <p className="text-xs text-muted-foreground">{templateLabel(a)}</p>
+                    </div>
+                  </div>
+                  <StatusBadge archived={a.archived} />
+                </div>
+                {a.default_vars && (
+                  <code className="block rounded bg-muted px-1 py-0.5 text-xs text-muted-foreground">
+                    {a.default_vars.slice(0, 60)}{a.default_vars.length > 60 ? '…' : ''}
+                  </code>
+                )}
+                <div className="flex gap-2">
+                  {!a.archived && (
+                    <button onClick={() => setEditingId(a.id)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">
+                      Edit
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleArchive(a)}
+                    className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                  >
+                    {a.archived ? 'Unarchive' : 'Archive'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Semaphore Template</th>
+              <th className="px-4 py-3 w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all"
+                  checked={allVisibleSelected}
+                  ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                  onChange={toggleSelectAll}
+                  className="rounded border-border"
+                />
+              </th>
+              <SortHeader field="name" />
+              <SortHeader field="template" />
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Default Vars</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
+              <SortHeader field="status" />
               <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
-            ) : automations.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No automations yet.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+            ) : visible.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No automations yet.</td></tr>
             ) : (
-              automations.map(a => (
-                <AutomationRow
-                  key={a.id}
-                  automation={a}
-                  onArchive={handleArchive}
-                  onUpdate={handleUpdate}
-                />
+              visible.map(a => (
+                editingId === a.id ? (
+                  <tr key={a.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3" />
+                    <td className="px-4 py-3 align-top" colSpan={5}>
+                      <AutomationEditor automation={a} onUpdate={handleUpdate} onCancel={() => setEditingId(null)} />
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={a.id} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+                    <td className="px-4 py-3 w-8">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${a.name}`}
+                        checked={selectedIds.has(a.id)}
+                        onChange={() => toggleSelect(a.id)}
+                        className="rounded border-border"
+                      />
+                    </td>
+                    <td className="px-4 py-3 font-medium text-foreground">{a.name}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{templateLabel(a)}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                      {a.default_vars
+                        ? <code className="rounded bg-muted px-1 py-0.5 text-xs">{a.default_vars.slice(0, 40)}{a.default_vars.length > 40 ? '…' : ''}</code>
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3"><StatusBadge archived={a.archived} /></td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2">
+                        {!a.archived && (
+                          <button onClick={() => setEditingId(a.id)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">
+                            Edit
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleArchive(a)}
+                          className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                        >
+                          {a.archived ? 'Unarchive' : 'Archive'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
               ))
             )}
           </tbody>
