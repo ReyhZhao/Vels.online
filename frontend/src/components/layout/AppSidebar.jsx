@@ -37,6 +37,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
 import api from '@/lib/axios';
+import { VERSION_LABEL, VERSION_DETAIL, GIT_SHA } from '@/lib/version';
 
 function readLS(key, fallback) {
   try {
@@ -426,15 +427,27 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
           </div>
         </nav>
 
-        {isStaff && !collapsed && (
-          <div className="shrink-0 border-t border-border p-3">
-            <button
-              onClick={() => setReportOpen(true)}
-              className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors text-left"
-              aria-label="Report issue"
+        {isStaff && (
+          <div className="shrink-0 border-t border-border p-3 space-y-2">
+            {!collapsed && (
+              <button
+                onClick={() => setReportOpen(true)}
+                className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors text-left"
+                aria-label="Report issue"
+              >
+                Report issue
+              </button>
+            )}
+            <p
+              title={VERSION_DETAIL}
+              aria-label={VERSION_DETAIL}
+              className={cn(
+                'select-none text-[10px] leading-tight text-muted-foreground/50',
+                collapsed ? 'text-center' : 'px-1'
+              )}
             >
-              Report issue
-            </button>
+              {collapsed ? GIT_SHA.slice(0, 4) : VERSION_LABEL}
+            </p>
           </div>
         )}
       </aside>
