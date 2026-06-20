@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -66,6 +66,18 @@ function renderPage() {
   );
 }
 
+// Both a mobile card list and a desktop table render in jsdom (no media
+// queries), so the desktop table is the deterministic surface for assertions.
+function table() {
+  return screen.getByRole('table');
+}
+
+// Open a template's desktop kebab and return the rendered menu container.
+async function openKebab(user, name) {
+  await user.click(within(table()).getByLabelText(`Actions for ${name}`));
+  return within(table()).getByRole('menu');
+}
+
 describe('TaskTemplatesAdmin', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -78,30 +90,30 @@ describe('TaskTemplatesAdmin', () => {
   it('shows loading state', () => {
     api.get.mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0);
   });
 
   it('shows empty state', async () => {
     mockGet([], SUBJECTS);
     renderPage();
-    await waitFor(() => screen.getByText('No templates.'));
+    await waitFor(() => expect(screen.getAllByText('No templates.').length).toBeGreaterThan(0));
   });
 
   it('renders template rows with subject and status', async () => {
     mockGet();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing Playbook'));
-    expect(screen.getByText('Malware Playbook')).toBeInTheDocument();
-    expect(screen.getAllByText('Auto-apply').length).toBeGreaterThan(0);
-    expect(screen.getByText('Archived')).toBeInTheDocument();
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    expect(within(table()).getByText('Malware Playbook')).toBeInTheDocument();
+    expect(within(table()).getByText('Auto-apply')).toBeInTheDocument();
+    expect(within(table()).getByText('Archived')).toBeInTheDocument();
+    expect(within(table()).getByText('Active')).toBeInTheDocument();
   });
 
   it('shows item count in table', async () => {
     mockGet();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing Playbook'));
-    expect(screen.getByText('2')).toBeInTheDocument();
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    expect(within(table()).getByText('2')).toBeInTheDocument();
   });
 
   it('creates a new template', async () => {
@@ -121,17 +133,71 @@ describe('TaskTemplatesAdmin', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'Subject' }), '1');
     await user.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/task-templates/', expect.objectContaining({ name: 'New Template' })));
-    await waitFor(() => screen.getByText('New Template'));
+    await waitFor(() => within(table()).getByText('New Template'));
   });
 
-  it('archives a template via DELETE', async () => {
+  it('filters by search query', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    await user.type(screen.getByLabelText('Search templates'), 'malware');
+    await waitFor(() => expect(within(table()).queryByText('Phishing Playbook')).not.toBeInTheDocument());
+    expect(within(table()).getByText('Malware Playbook')).toBeInTheDocument();
+  });
+
+  it('filters by status', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    await user.selectOptions(screen.getByLabelText('Status filter'), 'archived');
+    await waitFor(() => expect(within(table()).queryByText('Phishing Playbook')).not.toBeInTheDocument());
+    expect(within(table()).getByText('Malware Playbook')).toBeInTheDocument();
+  });
+
+  it('filters by subject', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    await user.selectOptions(screen.getByLabelText('Subject filter'), '2');
+    await waitFor(() => expect(within(table()).queryByText('Phishing Playbook')).not.toBeInTheDocument());
+    expect(within(table()).getByText('Malware Playbook')).toBeInTheDocument();
+  });
+
+  it('sorts by name', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    // default name asc → Malware Playbook first
+    let rows = within(table()).getAllByRole('row').slice(1);
+    expect(within(rows[0]).getByText('Malware Playbook')).toBeInTheDocument();
+    await user.click(within(table()).getByRole('button', { name: 'Sort by Name' }));
+    rows = within(table()).getAllByRole('row').slice(1);
+    expect(within(rows[0]).getByText('Phishing Playbook')).toBeInTheDocument();
+  });
+
+  it('archives a template via DELETE through the kebab', async () => {
     mockGet();
     api.delete.mockResolvedValue({});
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing Playbook'));
-    const archiveBtns = screen.getAllByRole('button', { name: 'Archive' });
-    await user.click(archiveBtns[0]);
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    const menu = await openKebab(user, 'Phishing Playbook');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Archive' }));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/task-templates/1/'));
+  });
+
+  it('bulk-archives selected templates', async () => {
+    mockGet();
+    api.delete.mockResolvedValue({});
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    await user.click(within(table()).getByLabelText('Select Phishing Playbook'));
+    await user.click(screen.getByRole('button', { name: 'Archive selected' }));
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/task-templates/1/'));
   });
 
@@ -139,21 +205,21 @@ describe('TaskTemplatesAdmin', () => {
     mockGet();
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing Playbook'));
-    const editBtns = screen.getAllByRole('button', { name: 'Edit items' });
-    await user.click(editBtns[0]);
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    const menu = await openKebab(user, 'Phishing Playbook');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit items' }));
     expect(screen.getByRole('heading', { name: 'Phishing Playbook' })).toBeInTheDocument();
     expect(screen.getByText('Step 1')).toBeInTheDocument();
     expect(screen.getByText('Step 2')).toBeInTheDocument();
   });
 
-  it('opens meta editor modal when Edit button clicked', async () => {
+  it('opens meta editor modal when Edit clicked', async () => {
     mockGet();
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing Playbook'));
-    const editBtns = screen.getAllByRole('button', { name: 'Edit' });
-    await user.click(editBtns[0]);
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    const menu = await openKebab(user, 'Phishing Playbook');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
     expect(screen.getByRole('heading', { name: 'Edit Template' })).toBeInTheDocument();
   });
 
@@ -161,8 +227,9 @@ describe('TaskTemplatesAdmin', () => {
     mockGet();
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing Playbook'));
-    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    const menu = await openKebab(user, 'Phishing Playbook');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
     expect(screen.getByDisplayValue('Phishing Playbook')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Phishing response steps.')).toBeInTheDocument();
     const modal = screen.getByRole('heading', { name: 'Edit Template' }).closest('div[class*="fixed"]');
@@ -176,8 +243,9 @@ describe('TaskTemplatesAdmin', () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing Playbook'));
-    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    const menu = await openKebab(user, 'Phishing Playbook');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
     const nameInput = screen.getByDisplayValue('Phishing Playbook');
     await user.clear(nameInput);
     await user.type(nameInput, 'Updated Name');
@@ -186,7 +254,7 @@ describe('TaskTemplatesAdmin', () => {
       '/api/task-templates/1/',
       expect.objectContaining({ name: 'Updated Name', description: 'Phishing response steps.', is_auto_apply: true })
     ));
-    await waitFor(() => screen.getByText('Updated Name'));
+    await waitFor(() => within(table()).getByText('Updated Name'));
   });
 
   it('shows backend error in meta editor on PATCH failure', async () => {
@@ -196,8 +264,9 @@ describe('TaskTemplatesAdmin', () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing Playbook'));
-    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    const menu = await openKebab(user, 'Phishing Playbook');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => screen.getByText('A template with this name already exists.'));
   });
@@ -206,8 +275,9 @@ describe('TaskTemplatesAdmin', () => {
     mockGet();
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getByText('Phishing Playbook'));
-    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    const menu = await openKebab(user, 'Phishing Playbook');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
     expect(screen.getByRole('heading', { name: 'Edit Template' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('heading', { name: 'Edit Template' })).not.toBeInTheDocument();
@@ -220,8 +290,9 @@ describe('TaskTemplatesAdmin', () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => screen.getAllByRole('button', { name: 'Edit items' }));
-    await user.click(screen.getAllByRole('button', { name: 'Edit items' })[0]);
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    const menu = await openKebab(user, 'Phishing Playbook');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit items' }));
     await waitFor(() => screen.getByPlaceholderText('Title'));
     await user.type(screen.getByPlaceholderText('Title'), 'New Step');
     await user.click(screen.getByRole('button', { name: 'Add' }));

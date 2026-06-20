@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import api from '@/lib/axios';
 
 function ItemRow({ item, templateId, onUpdate, onDelete, automations, wazuhResponses }) {
@@ -372,54 +372,74 @@ function TemplateMetaEditor({ template, onClose, onSave }) {
   );
 }
 
-function TemplateRow({ template, onArchive, onEdit, onEditMeta }) {
-  const [archiving, setArchiving] = useState(false);
+const SORT_COLUMNS = {
+  name:    { label: 'Name',    defaultOrder: 'asc' },
+  subject: { label: 'Subject', defaultOrder: 'asc' },
+  status:  { label: 'Status',  defaultOrder: 'asc' },
+};
 
-  async function handleArchive() {
-    setArchiving(true);
-    try {
-      await onArchive(template);
-    } finally {
-      setArchiving(false);
-    }
-  }
+function ApplyBadge({ autoApply }) {
+  return autoApply ? (
+    <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">Auto-apply</span>
+  ) : (
+    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">Manual</span>
+  );
+}
+
+function StatusBadge({ archived }) {
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${archived ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'}`}>
+      {archived ? 'Archived' : 'Active'}
+    </span>
+  );
+}
+
+function KebabMenu({ label, children }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
 
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
-      <td className="px-4 py-3 font-medium text-foreground">{template.name}</td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">{template.subject_name}</td>
-      <td className="px-4 py-3 text-sm text-muted-foreground max-w-xs truncate">{template.description || '—'}</td>
-      <td className="px-4 py-3">
-        {template.is_auto_apply ? (
-          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">Auto-apply</span>
-        ) : (
-          <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">Manual</span>
-        )}
-      </td>
-      <td className="px-4 py-3">
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${template.archived ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'}`}>
-          {template.archived ? 'Archived' : 'Active'}
-        </span>
-      </td>
-      <td className="px-4 py-3 text-center text-xs text-muted-foreground">{template.items?.length ?? 0}</td>
-      <td className="px-4 py-3">
-        <div className="flex gap-2">
-          <button onClick={() => onEditMeta(template)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">
-            Edit
-          </button>
-          <button onClick={() => onEdit(template)} className="rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors">
-            Edit items
-          </button>
-          <button
-            onClick={handleArchive}
-            disabled={archiving}
-            className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-          >
-            {template.archived ? 'Unarchive' : 'Archive'}
-          </button>
+    <div ref={ref} className="relative inline-block text-left">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label={label}
+        className="rounded-md px-2 py-1 text-base leading-none text-muted-foreground hover:bg-accent transition-colors"
+      >
+        ⋮
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-20 mt-1 w-40 rounded-md border border-border bg-card py-1 shadow-lg"
+          onClick={() => setOpen(false)}
+        >
+          {children}
         </div>
-      </td>
-    </tr>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({ onClick, children, danger }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`block w-full px-3 py-1.5 text-left text-xs font-medium hover:bg-accent transition-colors ${danger ? 'text-red-600' : 'text-foreground'}`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -437,6 +457,14 @@ export default function TaskTemplatesAdmin() {
   const [isAutoApply, setIsAutoApply] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [subjectFilter, setSubjectFilter] = useState('all');
+  const [sortKey, setSortKey] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     Promise.all([api.get('/api/task-templates/'), api.get('/api/subjects/')])
@@ -484,6 +512,99 @@ export default function TaskTemplatesAdmin() {
     } catch {
       setError('Failed to update template.');
     }
+  }
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder(SORT_COLUMNS[key]?.defaultOrder ?? 'asc');
+    }
+  }
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let rows = templates.filter(t => {
+      if (statusFilter === 'active' && t.archived) return false;
+      if (statusFilter === 'archived' && !t.archived) return false;
+      if (subjectFilter !== 'all' && String(t.subject) !== String(subjectFilter)) return false;
+      if (!q) return true;
+      return (
+        (t.name || '').toLowerCase().includes(q) ||
+        (t.description || '').toLowerCase().includes(q)
+      );
+    });
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    rows = [...rows].sort((a, b) => {
+      if (sortKey === 'status') return ((a.archived ? 1 : 0) - (b.archived ? 1 : 0)) * dir;
+      const key = sortKey === 'subject' ? 'subject_name' : 'name';
+      return (a[key] || '').toString().toLowerCase()
+        .localeCompare((b[key] || '').toString().toLowerCase()) * dir;
+    });
+    return rows;
+  }, [templates, search, statusFilter, subjectFilter, sortKey, sortOrder]);
+
+  const visibleIds = visible.map(t => t.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+  const someVisibleSelected = visibleIds.some(id => selectedIds.has(id));
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        visibleIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => new Set([...prev, ...visibleIds]));
+    }
+  }
+
+  async function handleBulk(archived) {
+    setBulkBusy(true);
+    const targets = visible.filter(t => selectedIds.has(t.id) && t.archived !== archived);
+    for (const t of targets) {
+      await handleArchive(t);
+    }
+    setSelectedIds(new Set());
+    setBulkBusy(false);
+  }
+
+  function SortHeader({ field, className = '' }) {
+    return (
+      <th className={`px-4 py-3 text-left font-medium text-muted-foreground ${className}`}>
+        <button
+          onClick={() => setSort(field)}
+          className="flex items-center gap-1 hover:text-foreground transition-colors"
+          aria-label={`Sort by ${SORT_COLUMNS[field].label}`}
+        >
+          {SORT_COLUMNS[field].label}
+          {sortKey === field && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+        </button>
+      </th>
+    );
+  }
+
+  function RowMenu({ template }) {
+    return (
+      <KebabMenu label={`Actions for ${template.name}`}>
+        <MenuItem onClick={() => setEditingMeta(template)}>Edit</MenuItem>
+        <MenuItem onClick={() => setEditing(template)}>Edit items</MenuItem>
+        <MenuItem onClick={() => handleArchive(template)}>
+          {template.archived ? 'Unarchive' : 'Archive'}
+        </MenuItem>
+      </KebabMenu>
+    );
   }
 
   return (
@@ -559,33 +680,153 @@ export default function TaskTemplatesAdmin() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-max">
+      <div className="flex flex-wrap gap-2 items-center">
+        <input
+          type="search"
+          placeholder="Search templates…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          aria-label="Search templates"
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-52"
+        />
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          aria-label="Status filter"
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="archived">Archived</option>
+        </select>
+        {subjects.length > 0 && (
+          <select
+            value={subjectFilter}
+            onChange={e => setSubjectFilter(e.target.value)}
+            aria-label="Subject filter"
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="all">All subjects</option>
+            {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        )}
+      </div>
+
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-4 py-2">
+          <span className="text-sm font-medium text-foreground">{selectedIds.size} selected</span>
+          <button
+            onClick={() => handleBulk(true)}
+            disabled={bulkBusy}
+            aria-label="Archive selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            Archive
+          </button>
+          <button
+            onClick={() => handleBulk(false)}
+            disabled={bulkBusy}
+            aria-label="Unarchive selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            Unarchive
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : visible.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No templates.</p>
+        ) : visible.map(t => (
+          <div key={t.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(t.id)}
+                  onChange={() => toggleSelect(t.id)}
+                  aria-label={`Select ${t.name}`}
+                  className="mt-1 h-4 w-4 rounded border-border"
+                />
+                <div>
+                  <p className="font-medium text-foreground leading-snug">{t.name}</p>
+                  <p className="text-xs text-muted-foreground">{t.subject_name}</p>
+                </div>
+              </div>
+              <RowMenu template={t} />
+            </div>
+            {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
+            <div className="flex flex-wrap items-center gap-2">
+              <ApplyBadge autoApply={t.is_auto_apply} />
+              <StatusBadge archived={t.archived} />
+              <span className="text-xs text-muted-foreground">{t.items?.length ?? 0} items</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
+        <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Subject</th>
+              <th className="px-4 py-3 w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all"
+                  checked={allVisibleSelected}
+                  ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                  onChange={toggleSelectAll}
+                  className="rounded border-border"
+                />
+              </th>
+              <SortHeader field="name" />
+              <SortHeader field="subject" />
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Description</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Apply</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
+              <SortHeader field="status" />
               <th className="px-4 py-3 text-center font-medium text-muted-foreground">Items</th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
-            ) : templates.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No templates.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+            ) : visible.length === 0 ? (
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No templates.</td></tr>
             ) : (
-              templates.map(t => (
-                <TemplateRow key={t.id} template={t} onArchive={handleArchive} onEdit={setEditing} onEditMeta={setEditingMeta} />
+              visible.map(t => (
+                <tr key={t.id} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+                  <td className="px-4 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${t.name}`}
+                      checked={selectedIds.has(t.id)}
+                      onChange={() => toggleSelect(t.id)}
+                      className="rounded border-border"
+                    />
+                  </td>
+                  <td className="px-4 py-3 font-medium text-foreground">{t.name}</td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">{t.subject_name}</td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground max-w-xs truncate">{t.description || '—'}</td>
+                  <td className="px-4 py-3"><ApplyBadge autoApply={t.is_auto_apply} /></td>
+                  <td className="px-4 py-3"><StatusBadge archived={t.archived} /></td>
+                  <td className="px-4 py-3 text-center text-xs text-muted-foreground">{t.items?.length ?? 0}</td>
+                  <td className="px-4 py-3 text-right"><RowMenu template={t} /></td>
+                </tr>
               ))
             )}
           </tbody>
         </table>
-        </div>
       </div>
     </div>
   );
