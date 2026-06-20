@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
@@ -220,6 +220,12 @@ export default function SecurityDashboard() {
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
 
+  // Embedded agents collection affordances (issue #584).
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortKey, setSortKey] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+
   const fetchData = useCallback(async (slug) => {
     setLoading(true);
     setError(null);
@@ -276,6 +282,59 @@ export default function SecurityDashboard() {
 
   const isStaff = user?.is_staff ?? false;
   const hasWazuhResponses = wazuhResponses.length > 0;
+  const showActions = isStaff && hasWazuhResponses;
+
+  const AGENT_SORT = {
+    name:      { label: 'Agent',     defaultOrder: 'asc' },
+    status:    { label: 'Status',    defaultOrder: 'asc' },
+    last_seen: { label: 'Last Seen', defaultOrder: 'desc' },
+  };
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder(AGENT_SORT[key]?.defaultOrder ?? 'asc');
+    }
+  }
+
+  const visibleAgents = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let rows = agents.filter(a => {
+      if (statusFilter !== 'all' && a.status !== statusFilter) return false;
+      if (!q) return true;
+      return (
+        (a.name || '').toLowerCase().includes(q) ||
+        (a.ip || '').toLowerCase().includes(q) ||
+        (a.os || '').toLowerCase().includes(q)
+      );
+    });
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    rows = [...rows].sort((a, b) => {
+      if (sortKey === 'last_seen') {
+        return ((a.last_seen ? new Date(a.last_seen).getTime() : 0) - (b.last_seen ? new Date(b.last_seen).getTime() : 0)) * dir;
+      }
+      return (a[sortKey] || '').toString().toLowerCase()
+        .localeCompare((b[sortKey] || '').toString().toLowerCase()) * dir;
+    });
+    return rows;
+  }, [agents, search, statusFilter, sortKey, sortOrder]);
+
+  function AgentSortHeader({ field }) {
+    return (
+      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+        <button
+          onClick={() => setSort(field)}
+          className="flex items-center gap-1 hover:text-foreground transition-colors"
+          aria-label={`Sort by ${AGENT_SORT[field].label}`}
+        >
+          {AGENT_SORT[field].label}
+          {sortKey === field && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+        </button>
+      </th>
+    );
+  }
 
   return (
     <div className="space-y-6 p-6">
@@ -323,27 +382,94 @@ export default function SecurityDashboard() {
             <StatCard label="Events (24h)" value={stats?.events_24h} />
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
+          {agents.length > 0 && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                type="search"
+                placeholder="Search agents…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                aria-label="Search agents"
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-52"
+              />
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                aria-label="Status filter"
+                className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="disconnected">Disconnected</option>
+              </select>
+            </div>
+          )}
+
+          {/* Mobile card list */}
+          <div className="sm:hidden space-y-2">
+            {agents.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">No agents enrolled.</p>
+            ) : visibleAgents.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">No agents match your filters.</p>
+            ) : visibleAgents.map((agent) => (
+              <div key={agent.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/security/agents/${agent.id}`)}
+                    className="text-left font-medium text-foreground hover:text-primary hover:underline leading-snug"
+                  >
+                    {agent.name}
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <StatusBadge status={agent.status} />
+                    {showActions && agent.status === 'active' && (
+                      <AgentKebab
+                        agent={agent}
+                        responses={wazuhResponses}
+                        orgSlug={selectedOrg.slug}
+                        onResponseSuccess={handleResponseSuccess}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>{agent.os || '—'}</span>
+                  <span>{agent.ip || '—'}</span>
+                  <span>Last seen: {agent.last_seen ? new Date(agent.last_seen).toLocaleString() : '—'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Agent</th>
+                  <AgentSortHeader field="name" />
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">OS</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">IP</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Last Seen</th>
-                  {isStaff && hasWazuhResponses && <th className="px-4 py-3 w-12" />}
+                  <AgentSortHeader field="status" />
+                  <AgentSortHeader field="last_seen" />
+                  {showActions && <th className="px-4 py-3 w-12" />}
                 </tr>
               </thead>
               <tbody>
                 {agents.length === 0 ? (
                   <tr>
-                    <td colSpan={isStaff && hasWazuhResponses ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
+                    <td colSpan={showActions ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
                       No agents enrolled.
                     </td>
                   </tr>
+                ) : visibleAgents.length === 0 ? (
+                  <tr>
+                    <td colSpan={showActions ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
+                      No agents match your filters.
+                    </td>
+                  </tr>
                 ) : (
-                  agents.map((agent) => (
+                  visibleAgents.map((agent) => (
                     <tr
                       key={agent.id}
                       onClick={() => navigate(`/security/agents/${agent.id}`)}
@@ -358,7 +484,7 @@ export default function SecurityDashboard() {
                       <td className="px-4 py-3 text-muted-foreground">
                         {agent.last_seen ? new Date(agent.last_seen).toLocaleString() : '—'}
                       </td>
-                      {isStaff && hasWazuhResponses && (
+                      {showActions && (
                         <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                           {agent.status === 'active' && (
                             <AgentKebab

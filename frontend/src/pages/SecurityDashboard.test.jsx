@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -61,6 +61,10 @@ function renderDashboard(selectedOrg = SELECTED_ORG) {
   );
 }
 
+// Both a mobile card list and a desktop table render in jsdom; the table is
+// the deterministic surface for agent-row assertions.
+const table = () => screen.getByRole('table');
+
 describe('SecurityDashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -84,13 +88,11 @@ describe('SecurityDashboard', () => {
   it('renders agent list with correct status indicators', async () => {
     renderDashboard();
 
-    await waitFor(() => expect(screen.getByText('server-01')).toBeInTheDocument());
-    expect(screen.getByText('server-02')).toBeInTheDocument();
+    await waitFor(() => expect(within(table()).getByText('server-01')).toBeInTheDocument());
+    expect(within(table()).getByText('server-02')).toBeInTheDocument();
 
-    const activeBadge = screen.getByText('active');
-    const disconnectedBadge = screen.getByText('disconnected');
-    expect(activeBadge).toBeInTheDocument();
-    expect(disconnectedBadge).toBeInTheDocument();
+    expect(within(table()).getByText('active')).toBeInTheDocument();
+    expect(within(table()).getByText('disconnected')).toBeInTheDocument();
   });
 
   it('shows empty state when agent list is empty', async () => {
@@ -102,14 +104,44 @@ describe('SecurityDashboard', () => {
 
     renderDashboard();
 
-    await waitFor(() => expect(screen.getByText('No agents enrolled.')).toBeInTheDocument());
+    await waitFor(() => expect(within(table()).getByText('No agents enrolled.')).toBeInTheDocument());
+  });
+
+  it('filters agents by search query (name / IP / OS)', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await waitFor(() => within(table()).getByText('server-01'));
+    await user.type(screen.getByLabelText('Search agents'), 'Windows');
+    await waitFor(() => expect(within(table()).queryByText('server-01')).not.toBeInTheDocument());
+    expect(within(table()).getByText('server-02')).toBeInTheDocument();
+  });
+
+  it('filters agents by status', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await waitFor(() => within(table()).getByText('server-01'));
+    await user.selectOptions(screen.getByLabelText('Status filter'), 'disconnected');
+    await waitFor(() => expect(within(table()).queryByText('server-01')).not.toBeInTheDocument());
+    expect(within(table()).getByText('server-02')).toBeInTheDocument();
+  });
+
+  it('sorts agents by name', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await waitFor(() => within(table()).getByText('server-01'));
+    // default name asc → server-01 first
+    let rows = within(table()).getAllByRole('row').slice(1);
+    expect(within(rows[0]).getByText('server-01')).toBeInTheDocument();
+    await user.click(within(table()).getByRole('button', { name: 'Sort by Agent' }));
+    rows = within(table()).getAllByRole('row').slice(1);
+    expect(within(rows[0]).getByText('server-02')).toBeInTheDocument();
   });
 
   it('refresh button calls refresh endpoint and re-fetches data', async () => {
     const user = userEvent.setup();
     renderDashboard();
 
-    await waitFor(() => expect(screen.getByText('server-01')).toBeInTheDocument());
+    await waitFor(() => expect(within(table()).getByText('server-01')).toBeInTheDocument());
 
     await user.click(screen.getByRole('button', { name: /refresh/i }));
 
