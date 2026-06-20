@@ -37,8 +37,12 @@ describe('AssetsPage — mobile layout + sort', () => {
     renderPage();
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/assets/', expect.any(Object)));
 
+    // Wait for the async load to render before asserting on content.
+    await waitFor(() => {
+      const cardList = document.querySelector('.sm\\:hidden');
+      expect(cardList.textContent).toContain('alpha-host');
+    });
     const cardList = document.querySelector('.sm\\:hidden');
-    expect(cardList).toBeTruthy();
     expect(cardList.textContent).toContain('zulu-host');
     expect(cardList.textContent).toContain('alpha-host');
   });
@@ -53,15 +57,18 @@ describe('AssetsPage — mobile layout + sort', () => {
 
   it('sorts by name ascending by default and toggles to descending on header click', async () => {
     renderPage();
-    await waitFor(() => expect(api.get).toHaveBeenCalled());
 
-    const table = document.querySelector('table');
-    let rows = within(table).getAllByRole('row').slice(1); // drop header row
-    expect(rows[0].textContent).toContain('alpha-host'); // asc default
+    // Wait for the async load to render real rows (not the "Loading…" row).
+    await waitFor(() => {
+      const rows = within(document.querySelector('table')).getAllByRole('row').slice(1);
+      expect(rows[0].textContent).toContain('alpha-host'); // asc default
+    });
 
     fireEvent.click(screen.getByRole('button', { name: /sort by name/i }));
 
-    rows = within(table).getAllByRole('row').slice(1);
-    expect(rows[0].textContent).toContain('zulu-host'); // desc after toggle
+    await waitFor(() => {
+      const rows = within(document.querySelector('table')).getAllByRole('row').slice(1);
+      expect(rows[0].textContent).toContain('zulu-host'); // desc after toggle
+    });
   });
 });
