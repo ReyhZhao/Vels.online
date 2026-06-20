@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import EventSlideOver from '../components/EventSlideOver';
 import PromoteToIncidentButton from '../components/PromoteToIncidentButton';
+
+const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low', 'info'];
 
 const SEVERITY_CLASSES = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
@@ -44,8 +46,20 @@ function SeverityBadge({ severity }) {
   );
 }
 
+function eventSourceRef(event) {
+  return {
+    event_id: event.id,
+    agent_id: event.agent_id,
+    agent_name: event.agent_name,
+    rule_id: event.rule_id,
+    rule_description: event.rule_description,
+    level: event.level,
+  };
+}
+
 export default function FleetEventsPage() {
   const { selectedOrg, isLoading: orgLoading } = useOrganization();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const severityParam = searchParams.get('severity') || '';
@@ -64,6 +78,72 @@ export default function FleetEventsPage() {
   const [error, setError] = useState(null);
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [selectedAgentId, setSelectedAgentId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkForm, setBulkForm] = useState(null);
+  const [bulkPreparing, setBulkPreparing] = useState(false);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkError, setBulkError] = useState(null);
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    const ids = events.map(e => e.id);
+    const allSelected = ids.length > 0 && ids.every(id => selectedIds.has(id));
+    setSelectedIds(allSelected ? new Set() : new Set(ids));
+  }
+
+  async function handleBulkPromote() {
+    const sel = events.filter(e => selectedIds.has(e.id));
+    if (sel.length === 0) return;
+    setBulkPreparing(true);
+    setBulkError(null);
+    try {
+      const primary = sel[0];
+      const res = await api.post('/api/incidents/promote/', {
+        source_kind: 'wazuh_event',
+        source_ref: eventSourceRef(primary),
+      });
+      const fp = res.data.form_payload;
+      const lines = sel.map(e => `- ${e.agent_name} | ${e.rule_id} | ${e.rule_description}`).join('\n');
+      setBulkForm({
+        ...fp,
+        title: sel.length > 1 ? `${sel.length} Wazuh events` : fp.title,
+        description: `${fp.description}\n\nIncluded events (${sel.length}):\n${lines}`,
+      });
+    } catch (err) {
+      setBulkError(err.response?.data?.detail || 'Failed to prepare incident.');
+    } finally {
+      setBulkPreparing(false);
+    }
+  }
+
+  async function handleBulkSubmit(e) {
+    e.preventDefault();
+    if (!selectedOrg) return;
+    setBulkSubmitting(true);
+    setBulkError(null);
+    try {
+      const res = await api.post('/api/incidents/promote/', {
+        ...bulkForm,
+        commit: true,
+        org: selectedOrg.slug,
+      });
+      setBulkForm(null);
+      setSelectedIds(new Set());
+      navigate(`/incidents/${res.data.display_id}`);
+    } catch (err) {
+      setBulkError(err.response?.data?.detail || 'Failed to create incident.');
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }
 
   function updateParams(updates) {
     setSearchParams(prev => {
@@ -237,11 +317,48 @@ export default function FleetEventsPage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {/* Events table */}
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : events.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No events found.</p>
+        ) : events.map((event, idx) => (
+          <div key={`${event.id}-${idx}`} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selectedIds.has(event.id)}
+                onChange={() => toggleSelect(event.id)}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                aria-label={`Select event ${event.rule_id}`}
+              />
+              <span className="text-sm font-medium text-foreground">{event.agent_name}</span>
+              <span className="ml-auto"><SeverityBadge severity={event.severity} /></span>
+            </div>
+            <p className="text-sm text-foreground leading-snug cursor-pointer" onClick={() => handleRowClick(event)}>{event.rule_description}</p>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="font-mono">{event.rule_id}</span>
+              <span className="ml-auto">{event.timestamp ? new Date(event.timestamp).toLocaleString() : '—'}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
+              <th className="px-4 py-3 w-8">
+                <input
+                  type="checkbox"
+                  checked={events.length > 0 && events.every(e => selectedIds.has(e.id))}
+                  onChange={toggleSelectAll}
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  aria-label="Select all"
+                />
+              </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Agent</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Timestamp</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
@@ -253,11 +370,11 @@ export default function FleetEventsPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
             ) : events.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No events found.</td>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No events found.</td>
               </tr>
             ) : (
               events.map((event, idx) => (
@@ -265,6 +382,15 @@ export default function FleetEventsPage() {
                   key={`${event.id}-${idx}`}
                   className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors"
                 >
+                  <td className="px-4 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(event.id)}
+                      onChange={() => toggleSelect(event.id)}
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      aria-label={`Select event ${event.rule_id}`}
+                    />
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground cursor-pointer" onClick={() => handleRowClick(event)}>{event.agent_name}</td>
                   <td className="px-4 py-3 text-muted-foreground whitespace-nowrap cursor-pointer" onClick={() => handleRowClick(event)}>
                     {event.timestamp ? new Date(event.timestamp).toLocaleString() : '—'}
@@ -277,14 +403,7 @@ export default function FleetEventsPage() {
                   <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <PromoteToIncidentButton
                       sourceKind="wazuh_event"
-                      sourceRef={{
-                        event_id: event.id,
-                        agent_id: event.agent_id,
-                        agent_name: event.agent_name,
-                        rule_id: event.rule_id,
-                        rule_description: event.rule_description,
-                        level: event.level,
-                      }}
+                      sourceRef={eventSourceRef(event)}
                       orgSlug={selectedOrg?.slug}
                     />
                   </td>
@@ -294,6 +413,81 @@ export default function FleetEventsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Bulk promote toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 rounded-xl border border-border bg-background px-6 py-3 shadow-2xl">
+          <span className="text-sm text-foreground">{selectedIds.size} selected</span>
+          <button
+            onClick={handleBulkPromote}
+            disabled={bulkPreparing}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {bulkPreparing ? 'Preparing…' : `Promote to incident (${selectedIds.size})`}
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+      {bulkError && !bulkForm && <p className="text-sm text-red-600">{bulkError}</p>}
+
+      {/* Bulk promote modal */}
+      {bulkForm && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 pt-12 pb-12">
+          <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg space-y-5 mx-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-foreground">Create Incident from {selectedIds.size} events</h2>
+              <button onClick={() => setBulkForm(null)} className="text-sm text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <form onSubmit={handleBulkSubmit} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Title</label>
+                <input
+                  value={bulkForm.title}
+                  onChange={e => setBulkForm(d => ({ ...d, title: e.target.value }))}
+                  required
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Severity</label>
+                <select
+                  value={bulkForm.severity}
+                  onChange={e => setBulkForm(d => ({ ...d, severity: e.target.value }))}
+                  aria-label="Severity"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</label>
+                <textarea
+                  value={bulkForm.description}
+                  onChange={e => setBulkForm(d => ({ ...d, description: e.target.value }))}
+                  rows={5}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                />
+              </div>
+              {bulkError && <p className="text-sm text-red-600">{bulkError}</p>}
+              <div className="flex justify-end gap-3 pt-1">
+                <button type="button" onClick={() => setBulkForm(null)} disabled={bulkSubmitting}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={bulkSubmitting || !bulkForm.title?.trim()}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+                  {bulkSubmitting ? 'Creating…' : 'Create incident'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Show more */}
       {!loading && total > events.length && (
