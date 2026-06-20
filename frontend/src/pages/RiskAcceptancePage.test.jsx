@@ -49,8 +49,6 @@ function renderPage(selectedOrg = SELECTED_ORG) {
 describe('RiskAcceptancePage', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  // ── loading / empty states ──────────────────────────────────────────────────
-
   it('shows no org message when selectedOrg is null', () => {
     renderPage(null);
     expect(screen.getByText('No organisation assigned.')).toBeInTheDocument();
@@ -59,26 +57,24 @@ describe('RiskAcceptancePage', () => {
   it('shows loading state while fetching', async () => {
     api.get.mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0);
   });
 
   it('shows empty state when no acceptances', async () => {
     api.get.mockResolvedValue({ data: [] });
     renderPage();
-    await waitFor(() => expect(screen.getByText('No accepted vulnerabilities.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('No accepted vulnerabilities.').length).toBeGreaterThan(0));
   });
-
-  // ── rendering acceptances ───────────────────────────────────────────────────
 
   it('renders acceptance rows with correct data', async () => {
     api.get.mockResolvedValue({ data: ACCEPTANCES });
     renderPage();
 
-    await waitFor(() => screen.getByText('CVE-2024-0001'));
-    expect(screen.getByText('CVE-2024-0002')).toBeInTheDocument();
-    expect(screen.getByText('alice')).toBeInTheDocument();
-    expect(screen.getByText('bob')).toBeInTheDocument();
-    expect(screen.getByText('Mitigated externally.')).toBeInTheDocument();
+    await waitFor(() => screen.getAllByText('CVE-2024-0001'));
+    expect(screen.getAllByText('CVE-2024-0002').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('alice').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('bob').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Mitigated externally.').length).toBeGreaterThan(0);
     // severity values also appear in the filter dropdown options
     expect(screen.getAllByText('critical').length).toBeGreaterThan(0);
     expect(screen.getAllByText('high').length).toBeGreaterThan(0);
@@ -89,8 +85,7 @@ describe('RiskAcceptancePage', () => {
   it('shows — for empty note', async () => {
     api.get.mockResolvedValue({ data: ACCEPTANCES });
     renderPage();
-    await waitFor(() => screen.getByText('CVE-2024-0002'));
-    // CVE-2024-0002 has empty note — should show —
+    await waitFor(() => screen.getAllByText('CVE-2024-0002'));
     const cells = screen.getAllByText('—');
     expect(cells.length).toBeGreaterThan(0);
   });
@@ -101,14 +96,12 @@ describe('RiskAcceptancePage', () => {
     await waitFor(() => expect(screen.getByText(/Accepted Vulnerabilities — Acme Corp/i)).toBeInTheDocument());
   });
 
-  // ── remove button and confirmation dialog ──────────────────────────────────
-
   it('shows confirmation dialog when Remove is clicked', async () => {
     api.get.mockResolvedValue({ data: ACCEPTANCES });
     const user = userEvent.setup();
     renderPage();
 
-    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    await waitFor(() => screen.getAllByText('CVE-2024-0001'));
     const removeButtons = screen.getAllByRole('button', { name: /^remove$/i });
     await user.click(removeButtons[0]);
 
@@ -121,10 +114,10 @@ describe('RiskAcceptancePage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    await waitFor(() => screen.getAllByText('CVE-2024-0001'));
     const removeButtons = screen.getAllByRole('button', { name: /^remove$/i });
     await user.click(removeButtons[0]);
-    await user.click(screen.getByRole('button', { name: /cancel/i }));
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
 
     expect(screen.queryByText('Remove risk acceptance?')).not.toBeInTheDocument();
   });
@@ -135,14 +128,14 @@ describe('RiskAcceptancePage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    await waitFor(() => screen.getAllByText('CVE-2024-0001'));
     const removeButtons = screen.getAllByRole('button', { name: /^remove$/i });
     await user.click(removeButtons[0]);
     await user.click(screen.getByRole('button', { name: /confirm remove/i }));
 
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/security/risk-acceptances/1/'));
     await waitFor(() => expect(screen.queryByText('CVE-2024-0001')).not.toBeInTheDocument());
-    expect(screen.getByText('CVE-2024-0002')).toBeInTheDocument();
+    expect(screen.getAllByText('CVE-2024-0002').length).toBeGreaterThan(0);
   });
 
   it('shows error message when DELETE fails', async () => {
@@ -151,7 +144,7 @@ describe('RiskAcceptancePage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await waitFor(() => screen.getByText('CVE-2024-0001'));
+    await waitFor(() => screen.getAllByText('CVE-2024-0001'));
     const removeButtons = screen.getAllByRole('button', { name: /^remove$/i });
     await user.click(removeButtons[0]);
     await user.click(screen.getByRole('button', { name: /confirm remove/i }));
@@ -163,5 +156,41 @@ describe('RiskAcceptancePage', () => {
     api.get.mockResolvedValue({ data: [] });
     renderPage();
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/security/risk-acceptances/?org=acme'));
+  });
+});
+
+describe('RiskAcceptancePage — cards, bulk remove, sort', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('renders a sm:hidden mobile card list with per-row checkboxes', async () => {
+    api.get.mockResolvedValue({ data: ACCEPTANCES });
+    renderPage();
+    await waitFor(() => screen.getAllByText('CVE-2024-0001'));
+    const cardList = document.querySelector('.sm\\:hidden');
+    expect(cardList.querySelector('input[type="checkbox"]')).toBeTruthy();
+    expect(cardList.textContent).toContain('CVE-2024-0001');
+  });
+
+  it('renders sortable CVE ID / Severity / Accepted At headers', async () => {
+    api.get.mockResolvedValue({ data: ACCEPTANCES });
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Sort by CVE ID'));
+    expect(screen.getByLabelText('Sort by Severity')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sort by Accepted At')).toBeInTheDocument();
+  });
+
+  it('bulk remove deletes every selected acceptance after confirmation', async () => {
+    api.get.mockResolvedValue({ data: ACCEPTANCES });
+    api.delete.mockResolvedValue({});
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Select all'));
+
+    await user.click(screen.getByLabelText('Select all'));
+    await user.click(screen.getByRole('button', { name: /remove selected/i }));
+    await user.click(screen.getByRole('button', { name: /confirm bulk remove/i }));
+
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/security/risk-acceptances/1/'));
+    expect(api.delete).toHaveBeenCalledWith('/api/security/risk-acceptances/2/');
   });
 });
