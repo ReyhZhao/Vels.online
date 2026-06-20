@@ -139,16 +139,49 @@ export default function RouteList() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [selected, setSelected] = useState(new Set());
+  const [sortValue, setSortValue] = useState('');
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     if (!selectedOrg) return;
     setLoading(true);
     setError(null);
+    setSelected(new Set());
     api.get('/api/ingress/routes/', { params: { org: selectedOrg.slug } })
       .then(res => setRoutes(res.data))
       .catch(() => setError('Failed to load routes.'))
       .finally(() => setLoading(false));
   }, [selectedOrg]);
+
+  function toggleSelect(fqdn) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(fqdn)) next.delete(fqdn);
+      else next.add(fqdn);
+      return next;
+    });
+  }
+
+  async function handleBulkDelete() {
+    const fqdns = [...selected];
+    setBulkDeleting(true);
+    try {
+      for (const fqdn of fqdns) {
+        try {
+          await api.delete(`/api/ingress/routes/${fqdn}/`);
+          setRoutes(prev => prev.filter(r => r.fqdn !== fqdn));
+        } catch {
+          setError('Failed to delete one or more routes.');
+        }
+      }
+      setSelected(new Set());
+      setBulkConfirm(false);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
 
   function handleImported(newRoutes) {
     setRoutes(prev => [...newRoutes, ...prev]);
@@ -170,6 +203,25 @@ export default function RouteList() {
     const matchStatus = statusFilter === 'all' || r.status === statusFilter;
     return matchSearch && matchStatus;
   });
+
+  const sorted = sortValue
+    ? [...filtered].sort((a, b) => {
+        switch (sortValue) {
+          case 'fqdn_asc':    return (a.fqdn || '').localeCompare(b.fqdn || '');
+          case 'fqdn_desc':   return (b.fqdn || '').localeCompare(a.fqdn || '');
+          case 'status_asc':  return (a.status || '').localeCompare(b.status || '');
+          case 'created_asc': return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+          case 'created_desc':return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+          default:            return 0;
+        }
+      })
+    : filtered;
+
+  const allSelected = sorted.length > 0 && sorted.every(r => selected.has(r.fqdn));
+
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(sorted.map(r => r.fqdn)));
+  }
 
   const statusButtonClass = (s) => {
     const active = statusFilter === s;
@@ -249,6 +301,33 @@ export default function RouteList() {
               </button>
             ))}
           </div>
+
+          <select
+            value={sortValue}
+            onChange={e => setSortValue(e.target.value)}
+            aria-label="Sort routes"
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            <option value="">Sort: default</option>
+            <option value="fqdn_asc">FQDN A–Z</option>
+            <option value="fqdn_desc">FQDN Z–A</option>
+            <option value="status_asc">Status</option>
+            <option value="created_desc">Newest</option>
+            <option value="created_asc">Oldest</option>
+          </select>
+
+          {sorted.length > 0 && (
+            <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleSelectAll}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                aria-label="Select all"
+              />
+              Select all
+            </label>
+          )}
         </div>
 
         {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
@@ -276,15 +355,27 @@ export default function RouteList() {
           </div>
         )}
 
-        {filtered.length > 0 && (
+        {sorted.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map(route => (
+            {sorted.map(route => (
               <Link
                 key={route.fqdn}
                 to={`/routes/${route.fqdn}`}
-                className="group flex flex-col rounded-xl border border-border bg-card p-5 hover:border-primary/40 hover:shadow-md hover:shadow-black/20 transition-all duration-150"
+                className="group relative flex flex-col rounded-xl border border-border bg-card p-5 hover:border-primary/40 hover:shadow-md hover:shadow-black/20 transition-all duration-150"
               >
-                <div className="flex items-start justify-between gap-2 mb-3">
+                <span
+                  className="absolute left-3 top-3"
+                  onClick={e => { e.preventDefault(); e.stopPropagation(); toggleSelect(route.fqdn); }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(route.fqdn)}
+                    onChange={() => {}}
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    aria-label={`Select ${route.fqdn}`}
+                  />
+                </span>
+                <div className="flex items-start justify-between gap-2 mb-3 pl-6">
                   <div className="flex-1 min-w-0">
                     <p className="font-mono text-sm font-semibold text-foreground truncate">{route.fqdn}</p>
                     {route.name && <p className="text-xs text-muted-foreground mt-0.5">{route.name}</p>}
@@ -304,7 +395,43 @@ export default function RouteList() {
             ))}
           </div>
         )}
+
+        {/* Bulk delete toolbar */}
+        {selected.size > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 rounded-xl border border-border bg-background px-6 py-3 shadow-2xl">
+            <span className="text-sm text-foreground">{selected.size} selected</span>
+            <button
+              onClick={() => setBulkConfirm(true)}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+            >
+              Delete selected
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        )}
       </div>
+
+      {bulkConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg">
+            <h2 className="text-lg font-semibold text-foreground">Delete {selected.size} route{selected.size !== 1 ? 's' : ''}?</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This removes the selected routes and their BunkerWeb services. This cannot be undone.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setBulkConfirm(false)} disabled={bulkDeleting} className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50">Cancel</button>
+              <button onClick={handleBulkDelete} disabled={bulkDeleting} aria-label="Confirm bulk delete" className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50">
+                {bulkDeleting ? 'Deleting…' : 'Delete routes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

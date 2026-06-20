@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../lib/axios', () => ({
-  default: { get: vi.fn(), post: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
 }));
 
 vi.mock('../context/OrgContext', () => ({
@@ -239,5 +239,48 @@ describe('RouteList — import modal', () => {
     fireEvent.click(screen.getAllByRole('checkbox')[0]);
     fireEvent.click(screen.getByText('Import (1)'));
     await waitFor(() => expect(screen.getByText('Route quota exceeded.')).toBeInTheDocument());
+  });
+});
+
+describe('RouteList — bulk delete + sort', () => {
+  const SORT_ROUTES = [
+    { fqdn: 'app.example.com', name: 'My App', backend_host: '10.0.0.1', backend_port: 8080, backend_protocol: 'http', status: 'active', created_at: '2026-01-01T00:00:00Z' },
+    { fqdn: 'api.example.com', name: '', backend_host: '10.0.0.2', backend_port: 3000, backend_protocol: 'https', status: 'pending', created_at: '2026-03-01T00:00:00Z' },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useOrganization.mockReturnValue({ selectedOrg: ACME_ORG });
+    useAuth.mockReturnValue({ user: { id: 1, is_staff: false } });
+    api.get.mockResolvedValue({ data: SORT_ROUTES });
+    api.delete.mockResolvedValue({});
+  });
+
+  it('renders a sort dropdown above the card grid', async () => {
+    renderPage();
+    await waitFor(() => screen.getByText('app.example.com'));
+    expect(screen.getByLabelText('Sort routes')).toBeInTheDocument();
+  });
+
+  it('sorting by FQDN A–Z reorders the cards', async () => {
+    renderPage();
+    await waitFor(() => screen.getByText('app.example.com'));
+
+    fireEvent.change(screen.getByLabelText('Sort routes'), { target: { value: 'fqdn_asc' } });
+
+    const cards = document.querySelectorAll('.grid > a');
+    expect(cards[0].textContent).toContain('api.example.com');
+  });
+
+  it('bulk delete confirms then DELETEs every selected route', async () => {
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Select all'));
+
+    fireEvent.click(screen.getByLabelText('Select all'));
+    fireEvent.click(screen.getByRole('button', { name: /delete selected/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm bulk delete/i }));
+
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/ingress/routes/app.example.com/'));
+    expect(api.delete).toHaveBeenCalledWith('/api/ingress/routes/api.example.com/');
   });
 });
