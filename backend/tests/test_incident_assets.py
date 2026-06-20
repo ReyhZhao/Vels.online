@@ -273,3 +273,98 @@ def test_incident_asset_unlink_not_linked_returns_404(client, staff, acme):
     client.force_login(staff)
     response = client.delete(f"/api/incidents/{inc.display_id}/assets/{asset.id}/")
     assert response.status_code == 404
+
+
+# ── route-asset fan-out (PRD #563) ───────────────────────────────────────────
+
+
+def _make_route(org, fqdn):
+    from ingress.models import Route
+    return Route.objects.create(
+        organization=org, fqdn=fqdn, backend_host="10.0.0.9", backend_port=8080,
+    )
+
+
+@pytest.mark.django_db
+def test_link_route_asset_fans_out_to_siblings(client, staff, acme):
+    inc = make_incident(acme)
+    route = _make_route(acme, "app.acme.test")
+    route_asset = Asset.objects.create(organization=acme, kind="route", name="app", route=route)
+    behind1 = Asset.objects.create(organization=acme, kind="host", name="h1", agent_name="h1", route=route)
+    behind2 = Asset.objects.create(organization=acme, kind="host", name="h2", agent_name="h2", route=route)
+    unrelated = Asset.objects.create(organization=acme, kind="host", name="h3", agent_name="h3")
+
+    client.force_login(staff)
+    response = client.post(
+        f"/api/incidents/{inc.display_id}/assets/",
+        {"asset": route_asset.id},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    # response is the directly-linked (route) asset
+    assert response.json()["asset"]["id"] == route_asset.id
+
+    linked_ids = set(IncidentAsset.objects.filter(incident=inc).values_list("asset_id", flat=True))
+    assert linked_ids == {route_asset.id, behind1.id, behind2.id}
+    assert unrelated.id not in linked_ids
+
+
+@pytest.mark.django_db
+def test_link_route_asset_is_idempotent_over_siblings(client, staff, acme):
+    inc = make_incident(acme)
+    route = _make_route(acme, "app.acme.test")
+    route_asset = Asset.objects.create(organization=acme, kind="route", name="app", route=route)
+    behind = Asset.objects.create(organization=acme, kind="host", name="h1", agent_name="h1", route=route)
+    # pre-link a sibling
+    IncidentAsset.objects.create(incident=inc, asset=behind, added_by=None)
+
+    client.force_login(staff)
+    response = client.post(
+        f"/api/incidents/{inc.display_id}/assets/",
+        {"asset": route_asset.id},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    # no duplicate link rows; both end up linked exactly once
+    assert IncidentAsset.objects.filter(incident=inc, asset=behind).count() == 1
+    assert IncidentAsset.objects.filter(incident=inc, asset=route_asset).count() == 1
+
+
+@pytest.mark.django_db
+def test_link_route_asset_respects_org_isolation(client, staff, acme, contoso):
+    inc = make_incident(acme)
+    route = _make_route(acme, "app.acme.test")
+    route_asset = Asset.objects.create(organization=acme, kind="route", name="app", route=route)
+    acme_behind = Asset.objects.create(organization=acme, kind="host", name="h1", agent_name="h1", route=route)
+    # a foreign-org asset that happens to point at the same route must NOT be linked
+    contoso_behind = Asset.objects.create(organization=contoso, kind="host", name="x1", agent_name="x1", route=route)
+
+    client.force_login(staff)
+    response = client.post(
+        f"/api/incidents/{inc.display_id}/assets/",
+        {"asset": route_asset.id},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    linked_ids = set(IncidentAsset.objects.filter(incident=inc).values_list("asset_id", flat=True))
+    assert acme_behind.id in linked_ids
+    assert contoso_behind.id not in linked_ids
+
+
+@pytest.mark.django_db
+def test_link_host_asset_does_not_fan_out(client, staff, acme):
+    inc = make_incident(acme)
+    route = _make_route(acme, "app.acme.test")
+    host = Asset.objects.create(organization=acme, kind="host", name="h1", agent_name="h1", route=route)
+    other_behind = Asset.objects.create(organization=acme, kind="host", name="h2", agent_name="h2", route=route)
+
+    client.force_login(staff)
+    response = client.post(
+        f"/api/incidents/{inc.display_id}/assets/",
+        {"asset": host.id},
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    linked_ids = set(IncidentAsset.objects.filter(incident=inc).values_list("asset_id", flat=True))
+    assert linked_ids == {host.id}
+    assert other_behind.id not in linked_ids

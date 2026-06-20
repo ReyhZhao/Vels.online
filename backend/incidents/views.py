@@ -748,10 +748,30 @@ class IncidentAssetLinkView(APIView):
         if IncidentAsset.objects.filter(incident=incident, asset=asset).exists():
             return Response({"detail": "Asset already linked to this incident."}, status=status.HTTP_400_BAD_REQUEST)
 
-        link = IncidentAsset.objects.create(incident=incident, asset=asset, added_by=request.user)
         from incidents.services.contacts import auto_link_contacts_for_asset
-        auto_link_contacts_for_asset(incident, asset)
-        return Response(IncidentAssetSerializer(link).data, status=status.HTTP_201_CREATED)
+
+        # Linking a route-kind asset also links the assets "behind" it: every other
+        # asset in the same organisation that points at the same Route. The expansion
+        # is a snapshot taken at link time — assets added behind the route later are
+        # not retroactively linked, and unlinking the route asset does not cascade.
+        targets = [asset]
+        if asset.kind == Asset.KIND_ROUTE and asset.route_id:
+            siblings = Asset.objects.filter(
+                route_id=asset.route_id, organization=incident.organization
+            ).exclude(pk=asset.pk)
+            targets.extend(siblings)
+
+        primary_link = None
+        for target in targets:
+            link, created = IncidentAsset.objects.get_or_create(
+                incident=incident, asset=target, defaults={"added_by": request.user}
+            )
+            if created:
+                auto_link_contacts_for_asset(incident, target)
+            if target.pk == asset.pk:
+                primary_link = link
+
+        return Response(IncidentAssetSerializer(primary_link).data, status=status.HTTP_201_CREATED)
 
 
 class IncidentAssetUnlinkView(APIView):
