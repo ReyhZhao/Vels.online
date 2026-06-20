@@ -156,6 +156,7 @@ class IncidentSerializer(serializers.ModelSerializer):
     created_by_username = serializers.SerializerMethodField()
     assignee_username = serializers.SerializerMethodField()
     org_slug = serializers.CharField(source="organization.slug", read_only=True)
+    org_name = serializers.CharField(source="organization.name", read_only=True)
     subject_slug = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
     active_delegations = serializers.SerializerMethodField()
@@ -193,6 +194,7 @@ class IncidentSerializer(serializers.ModelSerializer):
             "source_kind",
             "source_ref",
             "org_slug",
+            "org_name",
             "assignee",
             "assignee_username",
             "active_delegations",
@@ -211,7 +213,7 @@ class IncidentSerializer(serializers.ModelSerializer):
             "task_count",
             "contact_count",
         ]
-        read_only_fields = ["id", "display_id", "org_slug", "created_by", "created_at", "updated_at"]
+        read_only_fields = ["id", "display_id", "org_slug", "org_name", "created_by", "created_at", "updated_at"]
 
     def get_assets(self, obj):
         qs = getattr(obj, "_prefetched_incident_assets", None)

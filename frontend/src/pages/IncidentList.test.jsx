@@ -33,6 +33,7 @@ const INCIDENTS = [
     tlp: 'amber',
     state: 'new',
     org_slug: 'acme',
+    org_name: 'Acme Corp',
     created_at: '2026-01-15T10:00:00Z',
     assignee_username: null,
   },
@@ -44,6 +45,7 @@ const INCIDENTS = [
     tlp: 'green',
     state: 'in_progress',
     org_slug: 'acme',
+    org_name: 'Acme Corp',
     created_at: '2026-01-20T12:00:00Z',
     assignee_username: 'charlie',
   },
@@ -92,9 +94,7 @@ describe('IncidentList', () => {
     expect(screen.getAllByText('critical').length).toBeGreaterThan(0);
   });
 
-  it('aligns desktop State and TLP cells under their own headers', async () => {
-    // Regression for #392: header order was State, TLP but the body rendered
-    // TLP, State — so each value sat under the wrong column header.
+  it('drops the TLP column and renders an aligned Org column (#575)', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE());
     renderPage();
     await waitFor(() => screen.getAllByText('INC-2026-0001'));
@@ -103,15 +103,18 @@ describe('IncidentList', () => {
     const headers = within(table)
       .getAllByRole('columnheader')
       .map(h => h.textContent.trim());
+    // The TLP *column* is gone (the TLP filter dropdown still exists elsewhere)
+    expect(headers.some(h => /^TLP/.test(h))).toBe(false);
+
     const stateIdx = headers.findIndex(h => /^State/.test(h));
-    const tlpIdx = headers.findIndex(h => /^TLP/.test(h));
+    const orgIdx = headers.findIndex(h => /^Org/.test(h));
     expect(stateIdx).toBeGreaterThanOrEqual(0);
-    expect(tlpIdx).toBeGreaterThanOrEqual(0);
+    expect(orgIdx).toBeGreaterThanOrEqual(0);
 
     const firstRow = within(table).getAllByRole('row')[1]; // [0] is the header row
     const cells = within(firstRow).getAllByRole('cell');
     expect(cells[stateIdx].textContent).toContain('new');       // INC-2026-0001.state
-    expect(cells[tlpIdx].textContent).toContain('TLP:AMBER');    // INC-2026-0001.tlp
+    expect(cells[orgIdx].textContent).toContain('Acme Corp');   // INC-2026-0001.org_name
   });
 
   it('shows page heading', async () => {

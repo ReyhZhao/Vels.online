@@ -56,6 +56,17 @@ def test_list_returns_own_org_incidents(client, acme_member, acme, contoso):
 
 
 @pytest.mark.django_db
+def test_list_exposes_org_name_for_org_column(client, acme_member, acme):
+    make_incident(acme, tlp="amber")
+    client.force_login(acme_member)
+    response = client.get("/api/incidents/")
+    assert response.status_code == 200
+    row = response.json()["results"][0]
+    assert row["org_slug"] == acme.slug
+    assert row["org_name"] == acme.name
+
+
+@pytest.mark.django_db
 def test_list_hides_tlp_red_from_members(client, acme_member, acme):
     visible = make_incident(acme, tlp="amber")
     hidden = make_incident(acme, tlp="red")

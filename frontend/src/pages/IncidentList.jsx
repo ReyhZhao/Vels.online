@@ -43,13 +43,6 @@ const SEVERITY_CLASSES = {
   info:     'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
 };
 
-const TLP_CLASSES = {
-  white: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
-  green: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-  amber: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
-  red:   'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-};
-
 const STATE_CLASSES = {
   new:          'text-blue-600 dark:text-blue-400',
   triaged:      'text-purple-600 dark:text-purple-400',
@@ -816,6 +809,9 @@ export default function IncidentList() {
                 {inc.state?.replace('_', ' ')}
               </span>
               <span className="text-muted-foreground">{inc.assignee_username || 'Unassigned'}</span>
+              {(inc.org_name || inc.org_slug) && (
+                <span className="text-muted-foreground">{inc.org_name || inc.org_slug}</span>
+              )}
               <span className="text-muted-foreground ml-auto">
                 {formatDatetime(inc.created_at)}
               </span>
@@ -856,7 +852,7 @@ export default function IncidentList() {
                   </button>
                 </th>
               ))}
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">TLP</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Org</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">SLA</th>
               {['assignee', 'created_at'].map(field => (
                 <th key={field} className="px-4 py-3 text-left font-medium text-muted-foreground">
@@ -922,11 +918,7 @@ export default function IncidentList() {
                       {inc.state?.replace('_', ' ')}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TLP_CLASSES[inc.tlp] ?? ''}`}>
-                      TLP:{inc.tlp?.toUpperCase()}
-                    </span>
-                  </td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs">{inc.org_name || inc.org_slug || '—'}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
                       <SLAPill sla={inc.response_sla} label="Response SLA" compact />
