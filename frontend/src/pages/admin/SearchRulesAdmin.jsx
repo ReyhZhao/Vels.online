@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Play, Sparkles, Bug, FlaskConical, Copy, MoreVertical, Pencil, Power, TestTube, Trash2 } from 'lucide-react';
 import api from '@/lib/axios';
 import SearchRuleAuthorDrawer from '@/components/SearchRuleAuthorDrawer';
@@ -1005,7 +1005,7 @@ function FiringBadge({ summary }) {
   );
 }
 
-function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, onDebug, onTests, onRunTests }) {
+function RuleActionsMenu({ rule, onEdit, onClone, onToggle, onDelete, onRunNow, onDebug, onTests, onRunTests }) {
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [running, setRunning] = useState(false);
@@ -1028,9 +1028,6 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
     setRunningTests(true);
     try { await onRunTests(rule); } finally { setRunningTests(false); }
   }
-
-  const isSystem = rule.organization === null;
-  const orgName = isSystem ? 'All orgs (system)' : (orgs.find(o => o.id === rule.organization)?.name ?? `#${rule.organization}`);
 
   async function handleToggle() {
     setMenuOpen(false);
@@ -1060,11 +1057,110 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
   }
 
   return (
+    <div className="relative flex items-center gap-2" ref={menuRef}>
+      <button
+        onClick={() => setMenuOpen(o => !o)}
+        aria-label="Actions"
+        aria-haspopup="true"
+        aria-expanded={menuOpen}
+        className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+      {runFeedback && (
+        <span className={`text-xs ${runFeedback.startsWith('Queued') ? 'text-green-600' : 'text-destructive'}`}>{runFeedback}</span>
+      )}
+      {menuOpen && (
+        <div className="absolute right-0 top-7 z-20 min-w-36 rounded-md border border-border bg-card shadow-lg py-1">
+          <button
+            onClick={() => { setMenuOpen(false); onEdit(rule); }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+          >
+            <Pencil className="h-3 w-3" />
+            Edit
+          </button>
+          <button
+            onClick={() => { setMenuOpen(false); onClone(rule); }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+          >
+            <Copy className="h-3 w-3" />
+            Clone
+          </button>
+          <button
+            onClick={handleToggle}
+            disabled={toggling}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            <Power className="h-3 w-3" />
+            {toggling ? 'Saving…' : rule.enabled ? 'Disable' : 'Enable'}
+          </button>
+          <button
+            onClick={handleRunNow}
+            disabled={running}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            <Play className="h-3 w-3" />
+            {running ? 'Queuing…' : 'Run now'}
+          </button>
+          <button
+            onClick={() => { setMenuOpen(false); onDebug(rule); }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+          >
+            <Bug className="h-3 w-3" />
+            Debug
+          </button>
+          <button
+            onClick={() => { setMenuOpen(false); onTests(rule); }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+          >
+            <FlaskConical className="h-3 w-3" />
+            Tests
+          </button>
+          <button
+            onClick={handleRunTests}
+            disabled={runningTests}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            <TestTube className="h-3 w-3" />
+            {runningTests ? 'Testing…' : 'Run tests'}
+          </button>
+          <div className="my-1 border-t border-border" />
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+          >
+            <Trash2 className="h-3 w-3" />
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function orgLabel(rule, orgs) {
+  const isSystem = rule.organization === null;
+  return isSystem ? 'All orgs (system)' : (orgs.find(o => o.id === rule.organization)?.name ?? `#${rule.organization}`);
+}
+
+function RuleRow({ rule, orgs, selected, onToggleSelect, ...actions }) {
+  const isSystem = rule.organization === null;
+  return (
     <tr className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+      <td className="px-4 py-3 w-8">
+        <input
+          type="checkbox"
+          aria-label={`Select ${rule.name}`}
+          checked={selected}
+          onChange={() => onToggleSelect(rule.id)}
+          className="rounded border-border"
+        />
+      </td>
       <td className="px-4 py-3 font-medium text-foreground">
         <button
           type="button"
-          onClick={() => onEdit(rule)}
+          onClick={() => actions.onEdit(rule)}
           className="text-left text-foreground hover:text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm cursor-pointer"
         >
           {rule.name}
@@ -1073,7 +1169,7 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
           <span className="ml-2 inline-flex items-center rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 text-xs font-medium">system</span>
         )}
       </td>
-      <td className="px-4 py-3 text-xs text-muted-foreground">{orgName}</td>
+      <td className="px-4 py-3 text-xs text-muted-foreground">{orgLabel(rule, orgs)}</td>
       <td className="px-4 py-3 text-xs text-muted-foreground">
         {rule.correlation_key === 'none' ? 'None' : rule.correlation_key}
       </td>
@@ -1092,87 +1188,54 @@ function RuleRow({ rule, orgs, onEdit, onClone, onToggle, onDelete, onRunNow, on
         </span>
       </td>
       <td className="px-4 py-3">
-        <div className="relative flex items-center gap-2" ref={menuRef}>
-          <button
-            onClick={() => setMenuOpen(o => !o)}
-            aria-label="Actions"
-            aria-haspopup="true"
-            aria-expanded={menuOpen}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            <MoreVertical className="h-4 w-4" />
-          </button>
-          {runFeedback && (
-            <span className={`text-xs ${runFeedback.startsWith('Queued') ? 'text-green-600' : 'text-destructive'}`}>{runFeedback}</span>
-          )}
-          {menuOpen && (
-            <div className="absolute right-0 top-7 z-20 min-w-36 rounded-md border border-border bg-card shadow-lg py-1">
-              <button
-                onClick={() => { setMenuOpen(false); onEdit(rule); }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
-              >
-                <Pencil className="h-3 w-3" />
-                Edit
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onClone(rule); }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
-              >
-                <Copy className="h-3 w-3" />
-                Clone
-              </button>
-              <button
-                onClick={handleToggle}
-                disabled={toggling}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-              >
-                <Power className="h-3 w-3" />
-                {toggling ? 'Saving…' : rule.enabled ? 'Disable' : 'Enable'}
-              </button>
-              <button
-                onClick={handleRunNow}
-                disabled={running}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-              >
-                <Play className="h-3 w-3" />
-                {running ? 'Queuing…' : 'Run now'}
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onDebug(rule); }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
-              >
-                <Bug className="h-3 w-3" />
-                Debug
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onTests(rule); }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
-              >
-                <FlaskConical className="h-3 w-3" />
-                Tests
-              </button>
-              <button
-                onClick={handleRunTests}
-                disabled={runningTests}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
-              >
-                <TestTube className="h-3 w-3" />
-                {runningTests ? 'Testing…' : 'Run tests'}
-              </button>
-              <div className="my-1 border-t border-border" />
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
-              >
-                <Trash2 className="h-3 w-3" />
-                {deleting ? 'Deleting…' : 'Delete'}
-              </button>
-            </div>
-          )}
-        </div>
+        <RuleActionsMenu rule={rule} {...actions} />
       </td>
     </tr>
+  );
+}
+
+function RuleCard({ rule, orgs, selected, onToggleSelect, ...actions }) {
+  const isSystem = rule.organization === null;
+  return (
+    <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            aria-label={`Select ${rule.name}`}
+            checked={selected}
+            onChange={() => onToggleSelect(rule.id)}
+            className="mt-1 h-4 w-4 rounded border-border"
+          />
+          <div>
+            <button
+              type="button"
+              onClick={() => actions.onEdit(rule)}
+              className="text-left font-medium text-foreground hover:text-primary hover:underline leading-snug"
+            >
+              {rule.name}
+            </button>
+            {isSystem && (
+              <span className="ml-2 inline-flex items-center rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 text-xs font-medium">system</span>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {orgLabel(rule, orgs)} · {rule.correlation_key === 'none' ? 'None' : rule.correlation_key} · {rule.window_minutes}m/{rule.interval_minutes}m · {rule.legs?.length ?? 0} legs
+            </p>
+          </div>
+        </div>
+        <RuleActionsMenu rule={rule} {...actions} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_COLORS[rule.severity] ?? ''}`}>
+          {rule.severity}
+        </span>
+        <TestHealthBadge summary={rule.test_summary} />
+        <FiringBadge summary={rule.firing_summary} />
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${rule.enabled ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500'}`}>
+          {rule.enabled ? 'Enabled' : 'Disabled'}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -1188,6 +1251,14 @@ export default function SearchRulesAdmin() {
   const [showAiDrawer, setShowAiDrawer] = useState(false);
   const [debugRule, setDebugRule] = useState(null);
   const [testsRule, setTestsRule] = useState(null);
+
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [orgFilter, setOrgFilter] = useState('all');
+  const [sortKey, setSortKey] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -1253,6 +1324,115 @@ export default function SearchRulesAdmin() {
     }
   }
 
+  const SORT_COLUMNS = {
+    name:     { label: 'Name',     defaultOrder: 'asc' },
+    severity: { label: 'Severity', defaultOrder: 'desc' },
+    status:   { label: 'Status',   defaultOrder: 'asc' },
+  };
+  const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder(SORT_COLUMNS[key]?.defaultOrder ?? 'asc');
+    }
+  }
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let rows = rules.filter(r => {
+      if (statusFilter === 'enabled' && !r.enabled) return false;
+      if (statusFilter === 'disabled' && r.enabled) return false;
+      if (orgFilter === 'system' && r.organization !== null) return false;
+      if (orgFilter === 'org' && r.organization === null) return false;
+      if (!q) return true;
+      return (r.name || '').toLowerCase().includes(q);
+    });
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    rows = [...rows].sort((a, b) => {
+      if (sortKey === 'status') return ((a.enabled ? 1 : 0) - (b.enabled ? 1 : 0)) * dir;
+      if (sortKey === 'severity') return ((SEVERITY_RANK[a.severity] ?? 0) - (SEVERITY_RANK[b.severity] ?? 0)) * dir;
+      return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()) * dir;
+    });
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rules, search, statusFilter, orgFilter, sortKey, sortOrder]);
+
+  const visibleIds = visible.map(r => r.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+  const someVisibleSelected = visibleIds.some(id => selectedIds.has(id));
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        visibleIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => new Set([...prev, ...visibleIds]));
+    }
+  }
+
+  async function handleBulkToggle(enabled) {
+    setBulkBusy(true);
+    const targets = visible.filter(r => selectedIds.has(r.id) && r.enabled !== enabled);
+    for (const r of targets) {
+      await handleToggle(r);
+    }
+    setSelectedIds(new Set());
+    setBulkBusy(false);
+  }
+
+  async function handleBulkDelete() {
+    const targets = visible.filter(r => selectedIds.has(r.id));
+    if (targets.length === 0) return;
+    if (!window.confirm(`Delete ${targets.length} rule${targets.length === 1 ? '' : 's'}?`)) return;
+    setBulkBusy(true);
+    for (const r of targets) {
+      await handleDelete(r);
+    }
+    setSelectedIds(new Set());
+    setBulkBusy(false);
+  }
+
+  const rowActions = {
+    onEdit: setDrawerRule,
+    onClone: handleClone,
+    onToggle: handleToggle,
+    onDelete: handleDelete,
+    onRunNow: handleRunNow,
+    onDebug: setDebugRule,
+    onTests: setTestsRule,
+    onRunTests: handleRunTests,
+  };
+
+  function SortHeader({ field }) {
+    return (
+      <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+        <button
+          onClick={() => setSort(field)}
+          className="flex items-center gap-1 hover:text-foreground transition-colors"
+          aria-label={`Sort by ${SORT_COLUMNS[field].label}`}
+        >
+          {SORT_COLUMNS[field].label}
+          {sortKey === field && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+        </button>
+      </th>
+    );
+  }
+
   return (
     <div className="space-y-6 p-6">
       {drawerRule !== undefined && (
@@ -1306,48 +1486,137 @@ export default function SearchRulesAdmin() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-max">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Org</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Corr. key</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Window / Interval</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Severity</th>
-                <th className="px-4 py-3 text-center font-medium text-muted-foreground">Legs</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tests</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Firings</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
-              ) : rules.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">No scheduled search rules.</td></tr>
-              ) : (
-                rules.map(rule => (
-                  <RuleRow
-                    key={rule.id}
-                    rule={rule}
-                    orgs={orgs}
-                    onEdit={setDrawerRule}
-                    onClone={handleClone}
-                    onToggle={handleToggle}
-                    onDelete={handleDelete}
-                    onRunNow={handleRunNow}
-                    onDebug={setDebugRule}
-                    onTests={setTestsRule}
-                    onRunTests={handleRunTests}
-                  />
-                ))
-              )}
-            </tbody>
-          </table>
+      <div className="flex flex-wrap gap-2 items-center">
+        <input
+          type="search"
+          placeholder="Search rules…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          aria-label="Search rules"
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-52"
+        />
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          aria-label="Status filter"
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="all">All statuses</option>
+          <option value="enabled">Enabled</option>
+          <option value="disabled">Disabled</option>
+        </select>
+        <select
+          value={orgFilter}
+          onChange={e => setOrgFilter(e.target.value)}
+          aria-label="Organization filter"
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="all">All rules</option>
+          <option value="system">System rules</option>
+          <option value="org">Org rules</option>
+        </select>
+      </div>
+
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-4 py-2">
+          <span className="text-sm font-medium text-foreground">{selectedIds.size} selected</span>
+          <button
+            onClick={() => handleBulkToggle(true)}
+            disabled={bulkBusy}
+            aria-label="Enable selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            Enable
+          </button>
+          <button
+            onClick={() => handleBulkToggle(false)}
+            disabled={bulkBusy}
+            aria-label="Disable selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            Disable
+          </button>
+          <button
+            onClick={handleBulkDelete}
+            disabled={bulkBusy}
+            aria-label="Delete selected"
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
         </div>
+      )}
+
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : visible.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No scheduled search rules.</p>
+        ) : visible.map(rule => (
+          <RuleCard
+            key={rule.id}
+            rule={rule}
+            orgs={orgs}
+            selected={selectedIds.has(rule.id)}
+            onToggleSelect={toggleSelect}
+            {...rowActions}
+          />
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="px-4 py-3 w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all"
+                  checked={allVisibleSelected}
+                  ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                  onChange={toggleSelectAll}
+                  className="rounded border-border"
+                />
+              </th>
+              <SortHeader field="name" />
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Org</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Corr. key</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Window / Interval</th>
+              <SortHeader field="severity" />
+              <th className="px-4 py-3 text-center font-medium text-muted-foreground">Legs</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tests</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Firings</th>
+              <SortHeader field="status" />
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+            ) : visible.length === 0 ? (
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">No scheduled search rules.</td></tr>
+            ) : (
+              visible.map(rule => (
+                <RuleRow
+                  key={rule.id}
+                  rule={rule}
+                  orgs={orgs}
+                  selected={selectedIds.has(rule.id)}
+                  onToggleSelect={toggleSelect}
+                  {...rowActions}
+                />
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

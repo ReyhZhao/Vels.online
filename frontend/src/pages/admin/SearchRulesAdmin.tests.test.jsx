@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -31,13 +31,17 @@ function renderPage() {
   return render(<MemoryRouter><SearchRulesAdmin /></MemoryRouter>);
 }
 
+// Both a mobile card list and a desktop table render in jsdom; scope row
+// assertions to the desktop table.
+const table = () => screen.getByRole('table');
+
 describe('SearchRulesAdmin — test health badge + run all', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('shows the test health badge from the rule summary', async () => {
     mockGet();
     renderPage();
-    expect(await screen.findByText('Tests 3/4')).toBeInTheDocument();
+    await waitFor(() => expect(within(table()).getByText('Tests 3/4')).toBeInTheDocument());
   });
 
   it('runs all tests and updates the badge from the response', async () => {
@@ -46,17 +50,17 @@ describe('SearchRulesAdmin — test health badge + run all', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByText('Tests 3/4');
-    await user.click(screen.getByRole('button', { name: 'Actions' }));
-    await user.click(screen.getByText('Run tests'));
+    await waitFor(() => within(table()).getByText('Tests 3/4'));
+    await user.click(within(table()).getByRole('button', { name: 'Actions' }));
+    await user.click(within(table()).getByText('Run tests'));
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/correlations/search-rules/5/tests/run-all/'));
-    expect(await screen.findByText('Tests 4/4')).toBeInTheDocument();
+    await waitFor(() => expect(within(table()).getByText('Tests 4/4')).toBeInTheDocument());
   });
 
   it('shows "No tests" when the rule has none', async () => {
     mockGet([{ ...RULE, test_summary: { total: 0, passing: 0, failing: 0, error: 0, never: 0 } }]);
     renderPage();
-    expect(await screen.findByText('No tests')).toBeInTheDocument();
+    await waitFor(() => expect(within(table()).getByText('No tests')).toBeInTheDocument());
   });
 });

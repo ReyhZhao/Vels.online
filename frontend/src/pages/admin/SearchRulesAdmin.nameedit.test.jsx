@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -46,6 +46,10 @@ function renderPage() {
   return render(<MemoryRouter><SearchRulesAdmin /></MemoryRouter>);
 }
 
+// Both a mobile card list and a desktop table render in jsdom; scope row
+// interactions to the desktop table.
+const table = () => screen.getByRole('table');
+
 describe('SearchRulesAdmin — clickable rule name', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -54,8 +58,8 @@ describe('SearchRulesAdmin — clickable rule name', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const nameButton = await screen.findByRole('button', { name: 'Brute Force' });
-    await user.click(nameButton);
+    await waitFor(() => within(table()).getByRole('button', { name: 'Brute Force' }));
+    await user.click(within(table()).getByRole('button', { name: 'Brute Force' }));
 
     // Same edit UI as the row actions menu's Edit item.
     expect(await screen.findByText('Edit Search Rule')).toBeInTheDocument();
@@ -70,9 +74,9 @@ describe('SearchRulesAdmin — clickable rule name', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByRole('button', { name: 'Brute Force' });
-    await user.click(screen.getByRole('button', { name: 'Actions' }));
-    await user.click(screen.getByText('Edit'));
+    await waitFor(() => within(table()).getByRole('button', { name: 'Brute Force' }));
+    await user.click(within(table()).getByRole('button', { name: 'Actions' }));
+    await user.click(within(table()).getByText('Edit'));
 
     expect(await screen.findByText('Edit Search Rule')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Brute Force')).toBeInTheDocument();

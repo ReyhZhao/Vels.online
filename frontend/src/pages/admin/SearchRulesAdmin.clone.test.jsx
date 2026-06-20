@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -46,6 +46,10 @@ function renderPage() {
   return render(<MemoryRouter><SearchRulesAdmin /></MemoryRouter>);
 }
 
+// Both a mobile card list and a desktop table render in jsdom; scope row
+// interactions to the desktop table.
+const table = () => screen.getByRole('table');
+
 describe('SearchRulesAdmin — clone rule', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -54,9 +58,9 @@ describe('SearchRulesAdmin — clone rule', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByText('Brute Force');
-    await user.click(screen.getByRole('button', { name: 'Actions' }));
-    await user.click(screen.getByText('Clone'));
+    await waitFor(() => within(table()).getByText('Brute Force'));
+    await user.click(within(table()).getByRole('button', { name: 'Actions' }));
+    await user.click(within(table()).getByText('Clone'));
 
     // Create mode, not edit mode.
     expect(await screen.findByText('New Scheduled Search Rule')).toBeInTheDocument();
@@ -73,9 +77,9 @@ describe('SearchRulesAdmin — clone rule', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByText('Brute Force');
-    await user.click(screen.getByRole('button', { name: 'Actions' }));
-    await user.click(screen.getByText('Clone'));
+    await waitFor(() => within(table()).getByText('Brute Force'));
+    await user.click(within(table()).getByRole('button', { name: 'Actions' }));
+    await user.click(within(table()).getByText('Clone'));
     await screen.findByText('Create rule');
     await user.click(screen.getByText('Create rule'));
 
