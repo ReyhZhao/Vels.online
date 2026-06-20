@@ -164,9 +164,22 @@ export default function ContactsPage() {
   const [editContact, setEditContact] = useState(null);
   const [search, setSearch] = useState('');
   const [currentOrgOnly, setCurrentOrgOnly] = useState(true);
+  const [selected, setSelected] = useState(new Set());
+  const [sortKey, setSortKey] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder('asc');
+    }
+  }
 
   useEffect(() => {
     setLoading(true);
+    setSelected(new Set());
     const params = currentOrgOnly && selectedOrg ? { org: selectedOrg.slug } : {};
     api.get('/api/contacts/', { params })
       .then(res => setContacts(res.data))
@@ -189,6 +202,49 @@ export default function ContactsPage() {
     c.email.toLowerCase().includes(search.toLowerCase()) ||
     (c.department || '').toLowerCase().includes(search.toLowerCase())
   );
+
+  const sorted = [...filtered].sort((a, b) => {
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    const av = (a[sortKey] || '').toString().toLowerCase();
+    const bv = (b[sortKey] || '').toString().toLowerCase();
+    return av.localeCompare(bv) * dir;
+  });
+
+  const allSelected = sorted.length > 0 && sorted.every(c => selected.has(c.id));
+
+  function toggleAll() {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allSelected) sorted.forEach(c => next.delete(c.id));
+      else sorted.forEach(c => next.add(c.id));
+      return next;
+    });
+  }
+
+  function toggleOne(id) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkDelete() {
+    const ids = [...selected];
+    if (!confirm(`Delete ${ids.length} contact${ids.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    for (const id of ids) {
+      try {
+        await api.delete(`/api/contacts/${id}/`);
+        setContacts(prev => prev.filter(c => c.id !== id));
+      } catch {
+        setError('Failed to delete one or more contacts.');
+      }
+    }
+    setSelected(new Set());
+  }
+
+  const colSpan = currentOrgOnly ? 6 : 7;
 
   return (
     <div className="space-y-4 p-6">
@@ -242,21 +298,90 @@ export default function ContactsPage() {
             All contacts
           </button>
         </div>
+        {selected.size > 0 && (
+          <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5">
+            <span className="text-sm text-foreground font-medium">{selected.size} selected</span>
+            <button
+              onClick={handleBulkDelete}
+              className="rounded-md px-3 py-1 text-xs font-medium text-red-600 hover:bg-accent transition-colors"
+            >
+              Delete selected
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        )}
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-max">
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : sorted.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            {search ? 'No contacts match your search.' : 'No contacts yet.'}
+          </p>
+        ) : sorted.map(contact => (
+          <div key={contact.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-1">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selected.has(contact.id)}
+                onChange={() => toggleOne(contact.id)}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                aria-label={`Select ${contact.name}`}
+              />
+              <Link to={`/contacts/${contact.id}`} className="font-medium text-foreground hover:underline">{contact.name}</Link>
+            </div>
+            <p className="text-xs text-muted-foreground">{contact.email}</p>
+            <p className="text-xs text-muted-foreground">
+              {[contact.job_title, contact.department].filter(Boolean).join(' · ') || '—'}
+              {!currentOrgOnly && contact.org_name ? ` · ${contact.org_name}` : ''}
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setEditContact(contact)} className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors">Edit</button>
+              <button onClick={() => handleDelete(contact)} className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-accent transition-colors">Delete</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
+        <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
+              <th className="px-4 py-3 w-8">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  aria-label="Select all"
+                />
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                <button onClick={() => setSort('name')} className="flex items-center gap-1 hover:text-foreground transition-colors" aria-label="Sort by Name">
+                  Name
+                  {sortKey === 'name' && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                </button>
+              </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Email</th>
               {!currentOrgOnly && (
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Organisation</th>
               )}
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Department</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                <button onClick={() => setSort('department')} className="flex items-center gap-1 hover:text-foreground transition-colors" aria-label="Sort by Department">
+                  Department
+                  {sortKey === 'department' && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                </button>
+              </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Job Title</th>
               <th className="px-4 py-3" />
             </tr>
@@ -264,16 +389,25 @@ export default function ContactsPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={currentOrgOnly ? 5 : 6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={colSpan} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
-            ) : filtered.length === 0 ? (
+            ) : sorted.length === 0 ? (
               <tr>
-                <td colSpan={currentOrgOnly ? 5 : 6} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={colSpan} className="px-4 py-8 text-center text-muted-foreground">
                   {search ? 'No contacts match your search.' : 'No contacts yet.'}
                 </td>
               </tr>
-            ) : filtered.map(contact => (
+            ) : sorted.map(contact => (
               <tr key={contact.id} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+                <td className="px-4 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(contact.id)}
+                    onChange={() => toggleOne(contact.id)}
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    aria-label={`Select ${contact.name}`}
+                  />
+                </td>
                 <td className="px-4 py-3 font-medium text-foreground">
                   <Link to={`/contacts/${contact.id}`} className="hover:underline">{contact.name}</Link>
                 </td>
@@ -303,7 +437,6 @@ export default function ContactsPage() {
             ))}
           </tbody>
         </table>
-        </div>
       </div>
     </div>
   );
