@@ -301,6 +301,17 @@ export default function AssetsPage() {
   const [search, setSearch] = useState('');
   const [internetFacingOnly, setInternetFacingOnly] = useState(false);
   const [selected, setSelected] = useState(new Set());
+  const [sortKey, setSortKey] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder('asc');
+    }
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -320,7 +331,22 @@ export default function AssetsPage() {
       (a.ip_address || '').toLowerCase().includes(search.toLowerCase())
     );
 
-  const allFilteredSelected = filtered.length > 0 && filtered.every(a => selected.has(a.id));
+  const sorted = [...filtered].sort((a, b) => {
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    if (sortKey === 'last_seen_at') {
+      const av = a.last_seen_at ? new Date(a.last_seen_at).getTime() : null;
+      const bv = b.last_seen_at ? new Date(b.last_seen_at).getTime() : null;
+      if (av === bv) return 0;
+      if (av === null) return 1; // nulls last regardless of direction
+      if (bv === null) return -1;
+      return (av - bv) * dir;
+    }
+    const av = (a[sortKey] || '').toString().toLowerCase();
+    const bv = (b[sortKey] || '').toString().toLowerCase();
+    return av.localeCompare(bv) * dir;
+  });
+
+  const allFilteredSelected = sorted.length > 0 && sorted.every(a => selected.has(a.id));
 
   function toggleAll() {
     if (allFilteredSelected) {
@@ -421,9 +447,49 @@ export default function AssetsPage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-max">
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : sorted.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            {search || internetFacingOnly ? 'No assets match your filters.' : 'No assets yet.'}
+          </p>
+        ) : sorted.map(asset => (
+          <div key={asset.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selected.has(asset.id)}
+                onChange={() => toggleOne(asset.id)}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                aria-label={`Select ${asset.name}`}
+              />
+              <Link to={`/assets/${asset.id}`} className="font-medium text-foreground hover:underline">{asset.name}</Link>
+              <span className="ml-auto text-xs text-muted-foreground capitalize">{asset.kind}</span>
+            </div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+              {asset.agent_name && (<><dt className="text-muted-foreground">Agent</dt><dd className="text-foreground">{asset.agent_name}</dd></>)}
+              {asset.ip_address && (<><dt className="text-muted-foreground">IP</dt><dd className="text-foreground">{asset.ip_address}</dd></>)}
+              {asset.role && (<><dt className="text-muted-foreground">Role</dt><dd className="text-foreground">{ASSET_ROLES.find(r => r.value === asset.role)?.label ?? asset.role}</dd></>)}
+              <dt className="text-muted-foreground">Last seen</dt>
+              <dd className="text-foreground">{asset.last_seen_at ? new Date(asset.last_seen_at).toLocaleString() : '—'}</dd>
+            </dl>
+            <div className="flex flex-wrap items-center gap-1">
+              {asset.is_active === false
+                ? <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs text-muted-foreground">inactive</span>
+                : <span className="inline-flex items-center rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">active</span>}
+              {asset.is_permanent && <span className="inline-flex items-center rounded-full bg-violet-100 dark:bg-violet-900/30 px-2 py-0.5 text-xs text-violet-700 dark:text-violet-400">permanent</span>}
+              {asset.internet_facing && <span className="inline-flex items-center rounded-full bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs text-orange-700 dark:text-orange-400">internet-facing</span>}
+              <Link to={`/assets/${asset.id}`} className="ml-auto rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors">Edit</Link>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden sm:block overflow-hidden rounded-lg border border-border bg-card">
+        <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
               <th className="px-4 py-3">
@@ -435,13 +501,27 @@ export default function AssetsPage() {
                   aria-label="Select all"
                 />
               </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Kind</th>
+              {[
+                { key: 'name', label: 'Name' },
+                { key: 'kind', label: 'Kind' },
+              ].map(({ key, label }) => (
+                <th key={key} className="px-4 py-3 text-left font-medium text-muted-foreground">
+                  <button onClick={() => setSort(key)} className="flex items-center gap-1 hover:text-foreground transition-colors" aria-label={`Sort by ${label}`}>
+                    {label}
+                    {sortKey === key && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                  </button>
+                </th>
+              ))}
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Agent Name</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">IP Address</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Role</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status / Exposure</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Last Seen</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                <button onClick={() => setSort('last_seen_at')} className="flex items-center gap-1 hover:text-foreground transition-colors" aria-label="Sort by Last Seen">
+                  Last Seen
+                  {sortKey === 'last_seen_at' && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                </button>
+              </th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
@@ -450,13 +530,13 @@ export default function AssetsPage() {
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
-            ) : filtered.length === 0 ? (
+            ) : sorted.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
                   {search || internetFacingOnly ? 'No assets match your filters.' : 'No assets yet.'}
                 </td>
               </tr>
-            ) : filtered.map(asset => (
+            ) : sorted.map(asset => (
               <AssetRow
                 key={asset.id}
                 asset={asset}
@@ -470,7 +550,6 @@ export default function AssetsPage() {
             ))}
           </tbody>
         </table>
-        </div>
       </div>
     </div>
   );
