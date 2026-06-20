@@ -13,6 +13,10 @@ Visibility into the devices and agents across your monitored estate.
 - Per-agent detail pages show status, OS, IP address, last keepalive, and linked incidents.
 - Fleet events feed shows real-time activity across all agents.
 - Assets can be manually added and assigned to Contacts (see [Incident Contacts](incident-response.md#incident-contacts)).
+- **Internet-facing status (derived, never toggled)** — a Host Asset is shown as internet-facing exactly when it has one or more **Exposures**; it is never a free-standing operator-flipped boolean, so a host can't be silently mislabelled as safe. Each exposure carries a **protection trait** so analysts (and the LLM flows) see not just *that* a host is reachable but *how*:
+  - **Ingress-route exposures** are derived-on-read from the [Route](#app-ingress-reverse-proxy--waf) that points at the host (the `Route → backend_asset` link is the single source of truth) and are **protected** — they sit behind the BunkerWeb WAF. The app suggests the link by matching the route's backend host and **auto-applies it only on an unambiguous exact IP match**; name-only hits are surfaced as a non-committing suggestion.
+  - **Direct-NAT exposures** are explicitly recorded rows — one per forwarded service (protocol + port, optional public IP and description) — and are **raw** (no WAF in front). A NAT exposure editor on the host lets operators record these directly.
+- **Surfaced to the LLM flows** — the per-exposure list (with protection trait) feeds the [Incident Assistant](incident-response.md#incident-assistant) and the [Threat Hunting](incident-response.md#threat-hunting) in-scope asset inventory, so automated reasoning knows a host's real external attack surface.
 
 ---
 
@@ -43,3 +47,4 @@ Let customers safely publish their own services to the internet without manual i
 - **Advanced tab** — configure upstream proxy timeouts (connect, read, send), WebSocket proxying, proxy buffering, maximum request body size, allowed HTTP methods, real-IP extraction headers, and full CORS settings.
 - **Blocked activity reports** — live feed of blocked requests (source IP, rule triggered, action taken) fetched on demand from BunkerWeb.
 - Routes support both direct (public IP) and NetBird (overlay network) backend types.
+- **Backend host picker** — a route can be explicitly linked to the Host Asset it fronts. The link drives the host's derived [internet-facing status](#fleet--asset-management) and lets analysts link a route to an incident to automatically pull in the asset behind it.

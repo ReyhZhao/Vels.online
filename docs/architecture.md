@@ -6,7 +6,7 @@ How data moves through Vels.online — from raw detection to closed incident —
 
 ## How It Works
 
-Everything in Vels.online flows through two stages: detections arrive as **Alerts** and are filtered in the **Alert Ingestion Pipeline**, and the ones that matter become **Incidents** that move through an automated **Incident Lifecycle** — IOC enrichment, AI triage, on-call routing, playbooks, and the Incident Assistant — with notifications firing at every meaningful step.
+Everything in Vels.online flows through two stages: detections arrive as **Alerts** and are filtered in the **Alert Ingestion Pipeline**, and the ones that matter become **Incidents** that move through an automated **Incident Lifecycle** — IOC enrichment, two-stage AI triage (a cheap classify plus a confidence-gated **Triage Agent** that works the playbook unattended), on-call routing, and the Incident Assistant — with notifications firing at every meaningful step.
 
 ```mermaid
 flowchart TD
@@ -48,13 +48,22 @@ flowchart TD
         direction TB
         INC["Incident created · INC-NNNN"]
         IOC["IOC extraction + enrichment<br/>AbuseIPDB · VirusTotal"]
-        TRIAGE["AI triage · LLM<br/>severity · summary · actions · FP score"]
+        CLASSIFY["AI triage · Classify (always)<br/>severity · subject · summary<br/>FP + disposition confidence"]
+        FPCLOSE["Auto-close<br/>false positive"]
+        GATE{"Confident +<br/>subject matched?"}
+        AGENT["Triage Agent · unattended<br/>apply playbook · work manual tasks<br/>run automated + approved responses<br/>notify contacts · escalate"]
         ONCALL["On-call routing<br/>assign analyst on duty"]
-        PLAY["Apply playbook<br/>task templates"]
         WORK["Analyst + Incident Assistant<br/>agentic investigate & act"]
+        PEND["pending_closure<br/>threat contained · awaiting<br/>human ratification"]
         CLOSE["Resolve / close"]
 
-        INC --> IOC --> TRIAGE --> ONCALL --> PLAY --> WORK --> CLOSE
+        INC --> IOC --> CLASSIFY
+        CLASSIFY -- "high FP confidence" --> FPCLOSE
+        CLASSIFY --> GATE
+        GATE -- "yes" --> AGENT --> ONCALL
+        GATE -- "no" --> ONCALL
+        ONCALL --> WORK --> CLOSE
+        AGENT -. "threat contained" .-> PEND --> CLOSE
     end
 
     %% ---- Pipeline hands off to an incident ----
@@ -70,7 +79,8 @@ flowchart TD
     %% ---- Notifications fire throughout ----
     NOTIFY["Notifications<br/>in-app · web push · email"]
     LINK -.-> NOTIFY
-    TRIAGE -.-> NOTIFY
+    CLASSIFY -.-> NOTIFY
+    AGENT -.-> NOTIFY
     ONCALL -.-> NOTIFY
     WORK -.-> NOTIFY
     CLOSE -.-> NOTIFY
@@ -82,10 +92,11 @@ _Solid arrows show how data moves; dotted arrows show where notifications are se
 
 1. **Detections arrive.** Wazuh agents, Scheduled Search Rules (pulled from OpenSearch), webhooks, forwarded phishing email, vulnerability scans, staff-driven Threat Hunts, and manual entry all feed the platform. Push-based detections land in the **Alert inbox** as `AL-NNN` records, each carrying a normalised ECS entity envelope; phishing email, vulnerability scans, confirmed Threat Hunt findings, and manual reports open an incident directly.
 2. **The pipeline filters noise.** Each new alert is checked against open incidents — a match **links** in instead of creating a duplicate. Unmatched alerts are routed by severity: **high/critical auto-promote** to a new incident; **low/medium wait** in the inbox until an analyst acts or an asset-threshold promotion fires. In parallel, the **correlation engine** raises an incident when multiple alerts satisfy a rule's legs within its window, and an **LLM residual safety-net** groups leftover signals into **Detection Suggestions** for analyst review.
-3. **An incident is created.** However it was raised, the incident enters the same lifecycle: **IOC enrichment** scores indicators against AbuseIPDB and VirusTotal, then **AI triage** has the LLM recommend a severity, write a summary, suggest actions, and score false-positive likelihood.
-4. **It reaches the right analyst.** **On-call routing** assigns the triaged incident to whoever is on duty, and the matching **playbook** applies its task-template checklist automatically.
-5. **The analyst works it — with help.** The **Incident Assistant** runs an agentic loop alongside the analyst: it investigates (related incidents, alerts, assets, live web search), auto-executes safe internal actions, works manual tasks, and proposes anything consequential for one-click confirmation — until the incident is resolved or closed.
-6. **Notifications keep everyone informed.** In-app, web-push, and email notifications fire on assignment, triage results, state changes, and closure, so no one has to poll for updates.
+3. **An incident is created.** However it was raised, the incident enters the same lifecycle: **IOC enrichment** scores indicators against AbuseIPDB and VirusTotal, then the **Classify** phase of triage has the LLM recommend a severity, set the subject, write a summary, suggest actions, and emit two confidence scores (false-positive *and* disposition). High false-positive confidence auto-closes the incident; everything else moves on.
+4. **A confident incident gets worked automatically.** When the disposition confidence clears the org's work threshold *and* a subject (hence a playbook) matched, a gated **Triage Agent** runs the shared agentic loop unattended: it applies the playbook, researches and annotates manual tasks, fires `automated` runbooks and pre-approved `wazuh_response` actions, and notifies contacts or escalates. It never closes the incident — it hands off to on-call, landing the incident either back in `in_progress` (work remains) or in **`pending_closure`** (threat contained, only human ratification left). Low-confidence or subject-less incidents skip straight to on-call as before.
+5. **It reaches the right analyst.** **On-call routing** assigns the incident to whoever is on duty, who inherits either a blank incident or one the Triage Agent has already part-worked.
+6. **The analyst works it — with help.** The **Incident Assistant** runs an agentic loop alongside the analyst: it investigates (related incidents, alerts, assets, host inventory, internet-facing exposure, live web search), auto-executes safe internal actions, works manual tasks, and proposes anything consequential for one-click confirmation — until the incident is resolved or closed.
+7. **Notifications keep everyone informed.** In-app, web-push, and email notifications fire on assignment, triage results, autonomous Triage Agent actions, state changes, and closure, so no one has to poll for updates.
 
 For the detail behind each stage, see the [feature docs](features/).
 
