@@ -1,8 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Clock, X } from 'lucide-react';
 import api from '@/lib/axios';
 
 const POLL_MS = 30_000;
+
+const SORT_COLUMNS = {
+  status:   { label: 'Status',   defaultOrder: 'asc' },
+  started:  { label: 'Started',  defaultOrder: 'desc' },
+  finished: { label: 'Finished', defaultOrder: 'desc' },
+  duration: { label: 'Duration', defaultOrder: 'desc' },
+};
+
+const SORT_ACCESSORS = {
+  status:   t => t.status ?? '',
+  started:  t => (t.date_created ? new Date(t.date_created).getTime() : 0),
+  finished: t => (t.date_done ? new Date(t.date_done).getTime() : 0),
+  duration: t => (t.duration ?? -1),
+};
 
 const STATUS_CLASSES = {
   SUCCESS: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
@@ -93,6 +107,8 @@ export default function TaskHistory() {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [sortKey, setSortKey] = useState(null);
+  const [sortOrder, setSortOrder] = useState('asc');
   const [selectedTask, setSelectedTask] = useState(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -142,6 +158,43 @@ export default function TaskHistory() {
   };
 
   const secondsAgo = lastUpdated ? Math.round((Date.now() - lastUpdated) / 1000) : null;
+
+  function setSort(key) {
+    if (sortKey === key) {
+      setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder(SORT_COLUMNS[key]?.defaultOrder ?? 'asc');
+    }
+  }
+
+  const visible = useMemo(() => {
+    if (!sortKey) return results;
+    const accessor = SORT_ACCESSORS[sortKey];
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    return [...results].sort((a, b) => {
+      const av = accessor(a);
+      const bv = accessor(b);
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+  }, [results, sortKey, sortOrder]);
+
+  function SortHeader({ field }) {
+    return (
+      <th className="px-4 py-3 text-left">
+        <button
+          type="button"
+          onClick={() => setSort(field)}
+          className="flex items-center gap-1 uppercase hover:text-foreground transition-colors"
+          aria-label={`Sort by ${SORT_COLUMNS[field].label}`}
+        >
+          {SORT_COLUMNS[field].label}
+          {sortKey === field && <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+        </button>
+      </th>
+    );
+  }
 
   return (
     <>
@@ -195,41 +248,68 @@ export default function TaskHistory() {
         )}
 
         {results.length > 0 && (
-          <div className="rounded-xl border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wider">
-                <tr>
-                  <th className="px-4 py-3 text-left">Task</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                  <th className="px-4 py-3 text-left">Started</th>
-                  <th className="px-4 py-3 text-left">Finished</th>
-                  <th className="px-4 py-3 text-left">Duration</th>
-                  <th className="px-4 py-3 text-left">Worker</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {results.map(task => (
-                  <tr
-                    key={task.task_id}
-                    onClick={() => openDetail(task)}
-                    className="hover:bg-muted/30 cursor-pointer transition-colors"
-                    title={task.task_name}
-                  >
-                    <td className="px-4 py-3 font-mono text-xs text-foreground max-w-xs truncate">
-                      {shortName(task.task_name)}
-                    </td>
-                    <td className="px-4 py-3"><StatusBadge status={task.status} /></td>
-                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatTs(task.date_created)}</td>
-                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatTs(task.date_done)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatDuration(task.duration)}</td>
-                    <td className="px-4 py-3 text-muted-foreground font-mono text-xs truncate max-w-xs">
-                      {task.worker ?? '—'}
-                    </td>
+          <>
+            {/* Mobile card list */}
+            <div className="sm:hidden space-y-2">
+              {visible.map(task => (
+                <button
+                  key={task.task_id}
+                  type="button"
+                  onClick={() => openDetail(task)}
+                  title={task.task_name}
+                  className="block w-full rounded-lg border border-border bg-card px-4 py-3 text-left space-y-2 hover:bg-muted/30 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-mono text-xs text-foreground truncate">{shortName(task.task_name)}</span>
+                    <StatusBadge status={task.status} />
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span>Started: {formatTs(task.date_created)}</span>
+                    <span>Finished: {formatTs(task.date_done)}</span>
+                    <span>Duration: {formatDuration(task.duration)}</span>
+                    {task.worker && <span className="font-mono">Worker: {task.worker}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden sm:block rounded-xl border border-border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Task</th>
+                    <SortHeader field="status" />
+                    <SortHeader field="started" />
+                    <SortHeader field="finished" />
+                    <SortHeader field="duration" />
+                    <th className="px-4 py-3 text-left">Worker</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {visible.map(task => (
+                    <tr
+                      key={task.task_id}
+                      onClick={() => openDetail(task)}
+                      className="hover:bg-muted/30 cursor-pointer transition-colors"
+                      title={task.task_name}
+                    >
+                      <td className="px-4 py-3 font-mono text-xs text-foreground max-w-xs truncate">
+                        {shortName(task.task_name)}
+                      </td>
+                      <td className="px-4 py-3"><StatusBadge status={task.status} /></td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatTs(task.date_created)}</td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatTs(task.date_done)}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{formatDuration(task.duration)}</td>
+                      <td className="px-4 py-3 text-muted-foreground font-mono text-xs truncate max-w-xs">
+                        {task.worker ?? '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {modalLoading && (
