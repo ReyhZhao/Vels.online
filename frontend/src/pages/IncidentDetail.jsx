@@ -10,6 +10,7 @@ import IncidentComments from '../components/IncidentComments';
 import IncidentTimeline from '../components/IncidentTimeline';
 import IncidentTasks from './IncidentTasks';
 import SLAPill from '../components/SLAPill';
+import { HelpTooltip } from '../components/ui/help-tooltip';
 import CreateExceptionSlideOver from '../components/CreateExceptionSlideOver';
 import ContactMessagesCard from '../components/ContactMessagesCard';
 import ContactComposeModal from '../components/ContactComposeModal';
@@ -888,10 +889,30 @@ function ResolveDropdown({ onResolve, onNeedsTuning, disabled }) {
   );
 }
 
-function Badge({ label, value, badgeClass }) {
+// Short, plain-language descriptions for the incident header fields, surfaced
+// via the reusable HelpTooltip (see issue #589).
+const FIELD_HELP = {
+  State: 'Where the incident is in its lifecycle (e.g. New → Triaged → In progress → On hold → Pending closure → Resolved/Closed).',
+  SLA: 'Service Level Agreement: the time target for responding to / resolving this incident. The pill shows time remaining or how overdue it is.',
+  Severity: 'How serious the incident is, based on impact and urgency. Drives prioritisation.',
+  Source: 'Where the incident originated (e.g. an alert, a manual report, or an integration).',
+  TLP: 'Traffic Light Protocol: how widely this information may be shared (Clear / Green / Amber / Red).',
+  PAP: 'Permissible Actions Protocol: what active actions an analyst may take on the related indicators without risking tipping off an adversary (Clear / Green / Amber / Red).',
+};
+
+function FieldLabel({ label, help }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+      {label}
+      {help && <HelpTooltip label={label} text={help} />}
+    </span>
+  );
+}
+
+function Badge({ label, value, badgeClass, help }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
+      <FieldLabel label={label} help={help} />
       <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
         {value}
       </span>
@@ -899,19 +920,19 @@ function Badge({ label, value, badgeClass }) {
   );
 }
 
-function Field({ label, value }) {
+function Field({ label, value, help }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
+      <FieldLabel label={label} help={help} />
       <span className="text-sm text-foreground">{value || '—'}</span>
     </div>
   );
 }
 
-function InlineSelect({ label, value, options, colorClasses, onChange, saving }) {
+function InlineSelect({ label, value, options, colorClasses, onChange, saving, help }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
+      <FieldLabel label={label} help={help} />
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
@@ -1599,6 +1620,7 @@ export default function IncidentDetail() {
                   label="State"
                   value={incident.state.replace('_', ' ')}
                   badgeClass={STATE_CLASSES[incident.state] ?? ''}
+                  help={FIELD_HELP.State}
                 />
                 <InlineSelect
                   label="Severity"
@@ -1607,6 +1629,7 @@ export default function IncidentDetail() {
                   colorClasses={SEVERITY_CLASSES}
                   onChange={v => handleBadgeChange('severity', v)}
                   saving={savingBadge}
+                  help={FIELD_HELP.Severity}
                 />
                 <InlineSelect
                   label="TLP"
@@ -1615,6 +1638,7 @@ export default function IncidentDetail() {
                   colorClasses={TLP_CLASSES}
                   onChange={v => handleBadgeChange('tlp', v)}
                   saving={savingBadge}
+                  help={FIELD_HELP.TLP}
                 />
                 <InlineSelect
                   label="PAP"
@@ -1623,9 +1647,10 @@ export default function IncidentDetail() {
                   colorClasses={TLP_CLASSES}
                   onChange={v => handleBadgeChange('pap', v)}
                   saving={savingBadge}
+                  help={FIELD_HELP.PAP}
                 />
                 <Field label="Organisation" value={incident.org_slug} />
-                <Field label="Source"       value={incident.source_kind} />
+                <Field label="Source"       value={incident.source_kind} help={FIELD_HELP.Source} />
                 <Field label="Assignee"     value={incident.assignee_username} />
                 <Field label="Created By"   value={incident.created_by_username} />
                 {incident.closure_reason && (
@@ -1644,13 +1669,13 @@ export default function IncidentDetail() {
                 )}
                 {incident.response_sla?.applies && (
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Response SLA</span>
+                    <FieldLabel label="Response SLA" help={FIELD_HELP.SLA} />
                     <SLAPill sla={incident.response_sla} label="Response SLA" />
                   </div>
                 )}
                 {incident.resolve_sla?.applies && (
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Resolve SLA</span>
+                    <FieldLabel label="Resolve SLA" help={FIELD_HELP.SLA} />
                     <SLAPill sla={incident.resolve_sla} label="Resolve SLA" />
                   </div>
                 )}

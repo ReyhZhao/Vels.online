@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -118,6 +118,23 @@ describe('IncidentDetail', () => {
     mockGet();
     renderPage();
     await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
+  });
+
+  it('shows help affordances for the header fields (#589)', async () => {
+    mockGet({
+      ...INCIDENT,
+      response_sla: { applies: true, breached: false, label: '2h left' },
+      resolve_sla: { applies: true, breached: false, label: '1d left' },
+    });
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Severity'));
+    // One reusable help control per field; SLA fields share the same copy.
+    ['State', 'Severity', 'Source', 'TLP', 'PAP', 'Response SLA', 'Resolve SLA'].forEach(label => {
+      expect(screen.getByRole('button', { name: `Help: ${label}` })).toBeInTheDocument();
+    });
+
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Help: TLP' }));
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Traffic Light Protocol');
   });
 
   it('shows not found message on 404', async () => {
