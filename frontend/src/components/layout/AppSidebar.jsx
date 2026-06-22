@@ -238,6 +238,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     <SidebarLink to="/hunting" icon={Search} collapsed={collapsed}>
                       Threat Hunting
                     </SidebarLink>
+                    <SidebarLink to="/attack-map" icon={Globe} collapsed={collapsed}>
+                      Attack Map
+                    </SidebarLink>
                     <SidebarLink to="/admin/incidents/oncall" icon={CalendarClock} collapsed={collapsed}>
                       On-Call
                     </SidebarLink>

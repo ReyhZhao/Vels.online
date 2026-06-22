@@ -46,6 +46,7 @@ import CorrelationRulesAdmin from './pages/admin/CorrelationRulesAdmin';
 import SearchRulesAdmin from './pages/admin/SearchRulesAdmin';
 import ThreatHuntingPage from './pages/ThreatHuntingPage';
 import HuntDetail from './pages/HuntDetail';
+import LiveAttackMap from './pages/LiveAttackMap';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -84,6 +85,7 @@ function App() {
           <Route path="/admin/tasks/history" element={<TaskHistory />} />
           <Route path="/admin/tasks/scheduled" element={<ScheduledTasks />} />
           <Route path="/admin/email-templates" element={<EmailTemplates />} />
+          <Route path="/attack-map" element={<LiveAttackMap />} />
         </Route>
 
         <Route path="/security" element={<SecurityDashboard />} />
