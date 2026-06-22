@@ -76,7 +76,7 @@ describe('SearchRulesAdmin — clickable rule name', () => {
 
     await waitFor(() => within(table()).getByRole('button', { name: 'Brute Force' }));
     await user.click(within(table()).getByRole('button', { name: 'Actions' }));
-    await user.click(within(table()).getByText('Edit'));
+    await user.click(screen.getByText('Edit'));
 
     expect(await screen.findByText('Edit Search Rule')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Brute Force')).toBeInTheDocument();

@@ -52,7 +52,7 @@ describe('SearchRulesAdmin — test health badge + run all', () => {
 
     await waitFor(() => within(table()).getByText('Tests 3/4'));
     await user.click(within(table()).getByRole('button', { name: 'Actions' }));
-    await user.click(within(table()).getByText('Run tests'));
+    await user.click(screen.getByText('Run tests'));
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/correlations/search-rules/5/tests/run-all/'));
     await waitFor(() => expect(within(table()).getByText('Tests 4/4')).toBeInTheDocument());

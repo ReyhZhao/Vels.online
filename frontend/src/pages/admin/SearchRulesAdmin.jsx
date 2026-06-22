@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Play, Sparkles, Bug, FlaskConical, Copy, MoreVertical, Pencil, Power, TestTube, Trash2 } from 'lucide-react';
 import api from '@/lib/axios';
 import SearchRuleAuthorDrawer from '@/components/SearchRuleAuthorDrawer';
@@ -1012,15 +1013,57 @@ function RuleActionsMenu({ rule, onEdit, onClone, onToggle, onDelete, onRunNow, 
   const [runFeedback, setRunFeedback] = useState(null);
   const [runningTests, setRunningTests] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  // Position of the portalled dropdown, anchored to the trigger via fixed
+  // coordinates so it escapes the table's `overflow-hidden` wrapper (which
+  // would otherwise clip the menu on the bottom rows — see #590).
+  const [menuPos, setMenuPos] = useState(null);
+  const triggerRef = useRef(null);
+  const menuContentRef = useRef(null);
 
+  // Rough upper bound on the menu's height; used only to decide whether to
+  // flip the menu above the trigger when there isn't room below.
+  const MENU_MAX_HEIGHT = 320;
+
+  function computeMenuPos() {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < MENU_MAX_HEIGHT && rect.top > spaceBelow;
+    setMenuPos({
+      // Right-align the menu under (or above) the trigger.
+      right: Math.max(8, window.innerWidth - rect.right),
+      top: openUp ? undefined : rect.bottom + 4,
+      bottom: openUp ? window.innerHeight - rect.top + 4 : undefined,
+    });
+  }
+
+  function toggleMenu() {
+    setMenuOpen(o => {
+      const next = !o;
+      if (next) computeMenuPos();
+      return next;
+    });
+  }
+
+  // Keep the menu pinned to the trigger while it's open (scroll/resize), and
+  // close it on any click outside both the trigger and the portalled menu.
   useEffect(() => {
     if (!menuOpen) return;
     function handleOutside(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+      if (triggerRef.current?.contains(e.target)) return;
+      if (menuContentRef.current?.contains(e.target)) return;
+      setMenuOpen(false);
     }
+    function reposition() { computeMenuPos(); }
     document.addEventListener('mousedown', handleOutside);
-    return () => document.removeEventListener('mousedown', handleOutside);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
   }, [menuOpen]);
 
   async function handleRunTests() {
@@ -1057,9 +1100,10 @@ function RuleActionsMenu({ rule, onEdit, onClone, onToggle, onDelete, onRunNow, 
   }
 
   return (
-    <div className="relative flex items-center gap-2" ref={menuRef}>
+    <div className="relative flex items-center gap-2">
       <button
-        onClick={() => setMenuOpen(o => !o)}
+        ref={triggerRef}
+        onClick={toggleMenu}
         aria-label="Actions"
         aria-haspopup="true"
         aria-expanded={menuOpen}
@@ -1070,8 +1114,12 @@ function RuleActionsMenu({ rule, onEdit, onClone, onToggle, onDelete, onRunNow, 
       {runFeedback && (
         <span className={`text-xs ${runFeedback.startsWith('Queued') ? 'text-green-600' : 'text-destructive'}`}>{runFeedback}</span>
       )}
-      {menuOpen && (
-        <div className="absolute right-0 top-7 z-20 min-w-36 rounded-md border border-border bg-card shadow-lg py-1">
+      {menuOpen && menuPos && createPortal(
+        <div
+          ref={menuContentRef}
+          style={{ position: 'fixed', top: menuPos.top, bottom: menuPos.bottom, right: menuPos.right }}
+          className="z-50 min-w-36 rounded-md border border-border bg-card shadow-lg py-1"
+        >
           <button
             onClick={() => { setMenuOpen(false); onEdit(rule); }}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
@@ -1133,7 +1181,8 @@ function RuleActionsMenu({ rule, onEdit, onClone, onToggle, onDelete, onRunNow, 
             <Trash2 className="h-3 w-3" />
             {deleting ? 'Deleting…' : 'Delete'}
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

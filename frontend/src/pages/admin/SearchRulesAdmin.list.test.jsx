@@ -113,4 +113,24 @@ describe('SearchRulesAdmin — list affordances', () => {
     renderPage();
     await waitFor(() => expect(screen.getAllByText('No scheduled search rules.').length).toBeGreaterThan(0));
   });
+
+  it('renders the kebab menu outside the overflow-hidden table wrapper so it is not clipped (#590)', async () => {
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Alpha Rule'));
+
+    const triggers = within(table()).getAllByRole('button', { name: 'Actions' });
+    await user.click(triggers[triggers.length - 1]); // last row
+
+    // The menu is portalled to the body, so all items are reachable...
+    const deleteItem = await screen.findByText('Delete');
+    expect(deleteItem).toBeInTheDocument();
+    // ...and it is *not* a descendant of the clipped table wrapper.
+    expect(within(table()).queryByText('Delete')).not.toBeInTheDocument();
+
+    // Outside click still closes it.
+    await user.click(document.body);
+    await waitFor(() => expect(screen.queryByText('Delete')).not.toBeInTheDocument());
+  });
 });

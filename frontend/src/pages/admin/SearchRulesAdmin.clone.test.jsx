@@ -60,7 +60,7 @@ describe('SearchRulesAdmin — clone rule', () => {
 
     await waitFor(() => within(table()).getByText('Brute Force'));
     await user.click(within(table()).getByRole('button', { name: 'Actions' }));
-    await user.click(within(table()).getByText('Clone'));
+    await user.click(screen.getByText('Clone'));
 
     // Create mode, not edit mode.
     expect(await screen.findByText('New Scheduled Search Rule')).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe('SearchRulesAdmin — clone rule', () => {
 
     await waitFor(() => within(table()).getByText('Brute Force'));
     await user.click(within(table()).getByRole('button', { name: 'Actions' }));
-    await user.click(within(table()).getByText('Clone'));
+    await user.click(screen.getByText('Clone'));
     await screen.findByText('Create rule');
     await user.click(screen.getByText('Create rule'));
 
