@@ -1501,7 +1501,7 @@ export default function IncidentDetail() {
                 disabled={transitioning}
               />
             )}
-            {user?.is_staff && (
+            {user?.is_staff && incident.state !== 'closed' && (
               <button
                 onClick={handleOpenTransfer}
                 disabled={transitioning || transferring}
@@ -1519,7 +1519,7 @@ export default function IncidentDetail() {
                 Change Org
               </button>
             )}
-            {user?.is_staff && incident.source_kind === 'wazuh_event' && (
+            {user?.is_staff && incident.source_kind === 'wazuh_event' && incident.state !== 'closed' && (
               <button
                 onClick={() => setShowExceptionSlideOver(true)}
                 className="rounded-md border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-600 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40"
