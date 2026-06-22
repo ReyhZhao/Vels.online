@@ -6,6 +6,27 @@ import MarkdownToolbar from './MarkdownToolbar';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
+// A confidence value may legitimately be 0, so test presence rather than truthiness.
+function isPresent(value) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+// LLM confidences arrive as 0–1 floats; show them as whole percentages.
+function formatConfidence(value) {
+  return `${Math.round(Number(value) * 100)}%`;
+}
+
+// Whether an ai_triage comment carries any of the LLM-response fields we surface as labels.
+function hasTriageLabels(metadata) {
+  return (
+    isPresent(metadata.primary_action) ||
+    isPresent(metadata.secondary_action) ||
+    isPresent(metadata.false_positive_confidence) ||
+    isPresent(metadata.disposition_confidence) ||
+    isPresent(metadata.subject_recommendation)
+  );
+}
+
 function isEditable(comment, currentUserId) {
   if (comment.deleted_at) return false;
   if (comment.author !== currentUserId) return false;
@@ -19,7 +40,7 @@ function isDeletable(comment, currentUserId, isStaff) {
   return Date.now() - new Date(comment.created_at).getTime() < EDIT_WINDOW_MS;
 }
 
-function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
+function CommentItem({ comment, superseded = false, currentUserId, isStaff, onEdited, onDeleted }) {
   const [editing, setEditing] = useState(false);
   const [editBody, setEditBody] = useState(comment.body);
   const [saving, setSaving] = useState(false);
@@ -56,7 +77,7 @@ function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
   const canDelete = isDeletable(comment, currentUserId, isStaff);
 
   return (
-    <div className={`rounded-md border p-3 space-y-1 ${comment.is_internal ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-700' : 'border-border bg-muted'}`}>
+    <div className={`rounded-md border p-3 space-y-1 ${comment.is_internal ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-700' : 'border-border bg-muted'} ${superseded ? 'opacity-60' : ''}`}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">
           {comment.kind === 'ai_triage' ? 'AI Triage' : comment.kind === 'system' ? 'System' : (comment.author_username ?? '[deleted user]')}
@@ -68,9 +89,14 @@ function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
             Internal
           </span>
         )}
+        {superseded && (
+          <span className="ml-1 rounded-full bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+            Superseded
+          </span>
+        )}
       </div>
 
-      {comment.kind === 'ai_triage' && comment.metadata && (comment.metadata.primary_action || comment.metadata.secondary_action) && (
+      {comment.kind === 'ai_triage' && comment.metadata && hasTriageLabels(comment.metadata) && (
         <div className="mt-1 flex flex-wrap gap-2">
           {comment.metadata.primary_action && (
             <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/30 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:text-blue-300">
@@ -80,6 +106,21 @@ function CommentItem({ comment, currentUserId, isStaff, onEdited, onDeleted }) {
           {comment.metadata.secondary_action && (
             <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300">
               {comment.metadata.secondary_action.replace(/_/g, ' ')}
+            </span>
+          )}
+          {isPresent(comment.metadata.false_positive_confidence) && (
+            <span className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:text-emerald-300">
+              FP confidence: {formatConfidence(comment.metadata.false_positive_confidence)}
+            </span>
+          )}
+          {isPresent(comment.metadata.disposition_confidence) && (
+            <span className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:text-emerald-300">
+              Disposition confidence: {formatConfidence(comment.metadata.disposition_confidence)}
+            </span>
+          )}
+          {comment.metadata.subject_recommendation && (
+            <span className="inline-flex items-center rounded-full bg-purple-100 dark:bg-purple-900/30 px-2.5 py-0.5 text-xs font-medium text-purple-800 dark:text-purple-300">
+              Subject: {comment.metadata.subject_recommendation.replace(/_/g, ' ')}
             </span>
           )}
         </div>
@@ -244,6 +285,14 @@ export default function IncidentComments({ incidentId, taskId, currentUserId, is
     setComments(prev => prev.map(c => c.id === id ? { ...c, deleted_at: new Date().toISOString() } : c));
   }
 
+  // Rerunning triage posts a fresh AI Triage comment that supersedes the previous one
+  // (#593). The newest ai_triage comment by created_at is current; older ones are dimmed.
+  const latestTriageId = comments
+    .filter(c => c.kind === 'ai_triage' && !c.deleted_at)
+    .reduce((latest, c) => (
+      !latest || new Date(c.created_at) >= new Date(latest.created_at) ? c : latest
+    ), null)?.id;
+
   return (
     <div className="space-y-3">
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -255,6 +304,7 @@ export default function IncidentComments({ incidentId, taskId, currentUserId, is
             <CommentItem
               key={c.id}
               comment={c}
+              superseded={c.kind === 'ai_triage' && c.id !== latestTriageId}
               currentUserId={currentUserId}
               isStaff={isStaff}
               onEdited={handleEdited}
