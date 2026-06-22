@@ -11,6 +11,12 @@ ONCALL_ROUTING = os.environ.get("ONCALL_ROUTING", "always")
 
 DEBUG = os.environ.get("DEBUG", "False") == "True"
 
+# Local-dev only: skip interactive login and auto-authenticate as the admin
+# superuser (see config.middleware.DevAutoLoginMiddleware). Set ONLY in
+# docker-compose.yaml — never in the deployment/ Helm manifests. Intentionally
+# independent of DEBUG, since prod also runs with DEBUG=True.
+DEV_AUTO_LOGIN = os.environ.get("DEV_AUTO_LOGIN", "False") == "True"
+
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",")
 
 CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
@@ -81,6 +87,9 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # Local-dev auto-login (no-op unless DEV_AUTO_LOGIN=True; see middleware).
+    # Must follow Session + Authentication middleware so request.session/user exist.
+    "config.middleware.DevAutoLoginMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",

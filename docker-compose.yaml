@@ -45,6 +45,9 @@ services:
       DJANGO_SUPERUSER_USERNAME: admin
       DJANGO_SUPERUSER_EMAIL: admin@localhost
       DJANGO_SUPERUSER_PASSWORD: admin
+      # Local-dev only: auto-authenticate every request as the admin superuser
+      # so no login is needed. Never set this in deployment/ (Helm) manifests.
+      DEV_AUTO_LOGIN: "True"
       # Disable OIDC locally; override the placeholder value in .env
       AUTHENTIK_SERVER_URL: ""
     depends_on:
