@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Outlet } from 'react-router-dom';
 import PublicLayout from './components/layout/PublicLayout';
 import AppLayout from './components/layout/AppLayout';
@@ -46,7 +47,10 @@ import CorrelationRulesAdmin from './pages/admin/CorrelationRulesAdmin';
 import SearchRulesAdmin from './pages/admin/SearchRulesAdmin';
 import ThreatHuntingPage from './pages/ThreatHuntingPage';
 import HuntDetail from './pages/HuntDetail';
-import LiveAttackMap from './pages/LiveAttackMap';
+// Lazy so the heavy map deps (d3-geo, topojson-client, world-atlas) code-split out of
+// the main bundle until a staff user opens the map (also keeps the bundle under the
+// PWA precache size limit).
+const LiveAttackMap = lazy(() => import('./pages/LiveAttackMap'));
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -85,7 +89,14 @@ function App() {
           <Route path="/admin/tasks/history" element={<TaskHistory />} />
           <Route path="/admin/tasks/scheduled" element={<ScheduledTasks />} />
           <Route path="/admin/email-templates" element={<EmailTemplates />} />
-          <Route path="/attack-map" element={<LiveAttackMap />} />
+          <Route
+            path="/attack-map"
+            element={
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading attack map…</div>}>
+                <LiveAttackMap />
+              </Suspense>
+            }
+          />
         </Route>
 
         <Route path="/security" element={<SecurityDashboard />} />
