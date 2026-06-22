@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrgContext';
 import SLAPill from '../components/SLAPill';
 import CreateIncidentModal from '../components/CreateIncidentModal';
 import { OnCallWidgetCompact } from '../components/OnCallWidget';
 
 // Keys that are persisted as user preferences (excludes transient keys like page, q)
-const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'created_within', 'sort', 'order'];
+const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'org', 'created_within', 'sort', 'order'];
 
 function getPrefsStorageKey(userId) {
   return `incident_list_prefs_${userId ?? 'anon'}`;
@@ -386,6 +387,11 @@ function StateMultiSelect({ selected, onToggle }) {
 
 export default function IncidentList() {
   const { user } = useAuth();
+  const orgContext = useOrganization();
+  const orgs = orgContext?.orgs ?? [];
+  // Mirror OrgSwitcher's visibility rule: hide the org control when there's
+  // nothing to choose between (no orgs, or a single-org non-admin user).
+  const showOrgFilter = orgs.length > 0 && (user?.is_staff || orgs.length > 1);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData]         = useState(EMPTY_DATA);
@@ -706,6 +712,19 @@ export default function IncidentList() {
           <option value="">All TLP</option>
           {TLP_OPTIONS.map(t => <option key={t} value={t}>TLP:{t.toUpperCase()}</option>)}
         </select>
+        {showOrgFilter && (
+          <select
+            value={searchParams.get('org') || ''}
+            onChange={e => setParam('org', e.target.value)}
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            aria-label="Organization filter"
+          >
+            <option value="">All organizations</option>
+            {orgs.map(org => (
+              <option key={org.id} value={org.slug}>{org.name}</option>
+            ))}
+          </select>
+        )}
         <select
           value={searchParams.get('created_within') || ''}
           onChange={e => setParam('created_within', e.target.value)}

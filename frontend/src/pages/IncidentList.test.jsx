@@ -15,6 +15,9 @@ vi.mock('../components/CreateIncidentModal', () => ({
 const mockUseAuth = vi.fn(() => ({ user: null }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => mockUseAuth() }));
 
+const mockUseOrganization = vi.fn(() => null);
+vi.mock('../context/OrgContext', () => ({ useOrganization: () => mockUseOrganization() }));
+
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
@@ -67,6 +70,7 @@ describe('IncidentList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: null });
+    mockUseOrganization.mockReturnValue(null);
     mockNavigate.mockReset();
   });
 
@@ -115,6 +119,71 @@ describe('IncidentList', () => {
     const cells = within(firstRow).getAllByRole('cell');
     expect(cells[stateIdx].textContent).toContain('new');       // INC-2026-0001.state
     expect(cells[orgIdx].textContent).toContain('Acme Corp');   // INC-2026-0001.org_name
+  });
+
+  describe('organization filter (#588)', () => {
+    const ORGS = [
+      { id: 1, slug: 'acme', name: 'Acme Corp' },
+      { id: 2, slug: 'globex', name: 'Globex' },
+    ];
+
+    it('is hidden when no org context is available', async () => {
+      api.get.mockResolvedValue(PAGE_RESPONSE());
+      renderPage();
+      await waitFor(() => screen.getAllByText('INC-2026-0001'));
+      expect(screen.queryByLabelText('Organization filter')).not.toBeInTheDocument();
+    });
+
+    it('is hidden for a single-org non-admin user', async () => {
+      mockUseAuth.mockReturnValue({ user: { id: 7, is_staff: false } });
+      mockUseOrganization.mockReturnValue({ orgs: [ORGS[0]] });
+      api.get.mockResolvedValue(PAGE_RESPONSE());
+      renderPage();
+      await waitFor(() => screen.getAllByText('INC-2026-0001'));
+      expect(screen.queryByLabelText('Organization filter')).not.toBeInTheDocument();
+    });
+
+    it('shows the org filter (defaulting to all orgs) when multiple orgs are visible', async () => {
+      mockUseOrganization.mockReturnValue({ orgs: ORGS });
+      api.get.mockResolvedValue(PAGE_RESPONSE());
+      renderPage();
+      await waitFor(() => screen.getAllByText('INC-2026-0001'));
+      const select = screen.getByLabelText('Organization filter');
+      expect(select).toHaveValue('');
+      expect(within(select).getByText('All organizations')).toBeInTheDocument();
+      expect(within(select).getByText('Acme Corp')).toBeInTheDocument();
+      expect(within(select).getByText('Globex')).toBeInTheDocument();
+    });
+
+    it('sends org=<slug> when an org is selected and clears it for all orgs', async () => {
+      mockUseOrganization.mockReturnValue({ orgs: ORGS });
+      api.get.mockResolvedValue(PAGE_RESPONSE());
+      renderPage();
+      await waitFor(() => screen.getAllByText('INC-2026-0001'));
+
+      const select = screen.getByLabelText('Organization filter');
+      fireEvent.change(select, { target: { value: 'globex' } });
+      await waitFor(() =>
+        expect(api.get).toHaveBeenLastCalledWith(
+          '/api/incidents/',
+          expect.objectContaining({ params: expect.objectContaining({ org: 'globex' }) }),
+        ),
+      );
+
+      fireEvent.change(select, { target: { value: '' } });
+      await waitFor(() => {
+        const lastParams = api.get.mock.calls.at(-1)[1].params;
+        expect(lastParams).not.toHaveProperty('org');
+      });
+    });
+
+    it('restores the org filter from the URL', async () => {
+      mockUseOrganization.mockReturnValue({ orgs: ORGS });
+      api.get.mockResolvedValue(PAGE_RESPONSE());
+      renderPage('/?org=globex');
+      await waitFor(() => screen.getAllByText('INC-2026-0001'));
+      expect(screen.getByLabelText('Organization filter')).toHaveValue('globex');
+    });
   });
 
   it('shows page heading', async () => {
