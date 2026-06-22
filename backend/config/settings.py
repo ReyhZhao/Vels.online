@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     "alerts",
     "correlations",
     "hunts",
+    "attackmap",
     "core",
     "django_celery_results",
     "django_celery_beat",
@@ -156,6 +157,11 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
     }
 }
+
+# Live Attack Map (PRD #594): global severity floor feeding the snapshot producer.
+# Default 3 — deliberately low for arc density while the map is young; raise toward 7
+# later. A runtime cache override (attackmap.config.set_severity_floor) wins over this.
+ATTACK_MAP_SEVERITY_FLOOR = int(os.environ.get("ATTACK_MAP_SEVERITY_FLOOR", "3"))
 
 UPTIMEROBOT_API_KEY = os.environ.get("UPTIMEROBOT_API_KEY", "")
 

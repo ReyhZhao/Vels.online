@@ -724,3 +724,59 @@ class OpenSearchClient:
             return []
 
         return [h.get("_source", {}) for h in data.get("hits", {}).get("hits", [])]
+
+    def get_attack_snapshot(self, floor: int, window_minutes: int = 15, size: int = 300) -> dict:
+        """One query for the Live Attack Map (PRD #594, ADR-0027).
+
+        Returns BOTH the recent geo-locatable inbound hits (→ arcs) AND terms
+        aggregations over the same rolling window (→ side panels), so the whole
+        deployment costs at most one OpenSearch query per producer tick regardless of
+        audience. Scoped across all agents + agent.id="000" (staff-global; no per-org
+        restriction). The geo coalesce ``should`` clause salvages FortiGate-only
+        events (data.srccountry, not "Reserved") that Wazuh's own GeoIP missed.
+        """
+        geo_coalesce = {
+            "bool": {
+                "should": [
+                    {"exists": {"field": "GeoLocation.country_name"}},
+                    {
+                        "bool": {
+                            "must": [{"exists": {"field": "data.srccountry"}}],
+                            "must_not": [{"term": {"data.srccountry": "Reserved"}}],
+                        }
+                    },
+                ],
+                "minimum_should_match": 1,
+            }
+        }
+        body = {
+            "size": size,
+            "track_total_hits": True,
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"range": {"rule.level": {"gte": floor}}},
+                        {"range": {"@timestamp": {"gte": f"now-{window_minutes}m"}}},
+                        geo_coalesce,
+                    ]
+                }
+            },
+            "sort": [{"@timestamp": {"order": "desc"}}],
+            "_source": [
+                "@timestamp", "timestamp", "rule.level", "rule.description",
+                "rule.groups", "agent.id", "GeoLocation.country_name",
+                "GeoLocation.location", "data.srccountry",
+            ],
+            "aggs": {
+                "by_geo_country": {"terms": {"field": "GeoLocation.country_name", "size": 10}},
+                "by_src_country": {"terms": {"field": "data.srccountry", "size": 10}},
+                "by_attack_type": {"terms": {"field": "rule.groups", "size": 15}},
+            },
+        }
+        data = self._search(_ALERTS_INDEX, body)
+        return {
+            "hits": data.get("hits", {}).get("hits", []),
+            "total": data.get("hits", {}).get("total", {}).get("value", 0),
+            "aggregations": data.get("aggregations", {}),
+            "window_minutes": window_minutes,
+        }

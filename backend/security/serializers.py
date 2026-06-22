@@ -21,6 +21,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "triage_prompt_context", "triage_fp_threshold", "triage_work_threshold",
             "alert_match_lookback_days", "alert_auto_promote_threshold",
             "alert_auto_promote_window_minutes", "timezone",
+            "latitude", "longitude",
         ]
         read_only_fields = ["id", "slug", "wazuh_group", "is_infrastructure"]
 

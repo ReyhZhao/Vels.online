@@ -1,0 +1,30 @@
+# The Live Attack Map is one presence-gated shared snapshot, streamed to all viewers over SSE
+
+The **Live Attack Map** ([CONTEXT.md](../../CONTEXT.md) → Live attack map) is a staff-only, cross-org SOC dashboard that animates recent **Attacks** (geo-locatable inbound Wazuh events, source country → targeted org) in near-real-time. Its hard requirement is that it must stay cheap on the Wazuh **OpenSearch** backend *regardless of how many staff open it at once* — the obvious "each open map queries OpenSearch" design makes backend load scale with the audience, the exact failure mode to avoid. The data is high-volume (≈733k level-3 events/day before geo-filtering) and purely a live visualisation — not an audit record.
+
+## Decision
+
+Decouple OpenSearch load entirely from viewer count: compute **one** shared snapshot on a fixed cadence and let every viewer read that same shared copy, following the existing **Hunt** SSE pattern (`backend/hunts/views.py` — a per-connection async generator tailing a monotonic-`seq` store, resumed via `?after=<seq>`).
+
+- **One producer, fixed cadence.** A single Celery-beat task (~10s) issues **one** OpenSearch `_search` per tick that returns both the recent **Attack** documents (the arcs) *and* terms-aggregations over a rolling window (top source countries, top attack types, rate — the side panels). OpenSearch load is **O(1) per tick**, independent of audience.
+- **Presence-gated.** Each open map refreshes a short-TTL Redis heartbeat key (`presence:attackmap:<conn_id>`, EX ~15s) every SSE loop. The producer's first act each tick is a cheap presence check; with **zero** viewers it returns before touching OpenSearch. TTL keys (not an incr/decr counter) so a dead connection self-heals on expiry rather than leaking a stuck count. Net OpenSearch load across the whole deployment is bounded to **`[0, ~6 queries/min]`, forever.**
+- **Shared Redis capped buffer.** The producer appends new Attacks to a Redis buffer with a monotonic `seq`, bounded **both** by count (MAXLEN ~500) **and** age (trim > ~15 min). It is ephemeral viz data, so it lives in Redis, **not** a Postgres table like `HuntEvent` (which exists because a Hunt is a durable, auditable entity). The buffer doubles as the **cold-join backfill**: a newly-connected client replays the buffer first (so the map paints immediately) then tails live — this is why SSE does *not* remove the need for the buffer; the buffer *is* the warm state.
+- **Per-connection SSE tail, not a broadcast.** Each connection independently tails the shared buffer (`seq > after`); fan-out is cheap Redis reads, never a per-viewer OpenSearch query. The "shared" property comes from every connection reading one shared store, **not** from an active pub/sub push to each socket.
+- **Resume-from-idle repaints history.** After an idle gap the buffer has aged out, so the producer's first tick on resume queries the **last N minutes** (not just "since last tick") so whoever just opened the map sees recent history rather than an empty world.
+
+## Considered Options
+
+- **Presence-gated shared snapshot over SSE (chosen)** — OpenSearch load is O(1) per tick *and* zero when unwatched; reuses the Hunt streaming pattern already in production; the buffer solves the cold-join empty-map problem for free. The cost is a small amount of producer/presence machinery and a ~10s snapshot cadence (the client animates arcs smoothly between ticks, so it still *looks* continuously live).
+- **Per-client query — each map polls OpenSearch or tails it via SSE (rejected)** — trivially simple, but OpenSearch query volume grows linearly with concurrent viewers. This is precisely the overload the feature must not cause.
+- **Redis pub/sub broadcast — producer publishes each bundle, SSE views forward to their sockets (rejected)** — same O(1) backend profile, but adds a pub/sub broadcast layer and connection bookkeeping the codebase doesn't otherwise use; the Hunt pattern's "every connection tails one shared store" achieves the same goal with machinery we already run.
+- **Postgres buffer like `HuntEvent` (rejected)** — maximal consistency with the Hunt pattern and trivially queryable, but it is durable storage for deliberately throwaway data: it needs a migration and a prune job, and it churns the write DB every tick. Redis fits ephemeral, auto-trimmed viz data better.
+- **Lazy leader-locked producer started on first connect, stopped after idle (rejected for v1)** — truly zero scheduled work when idle, but needs distributed leader election so exactly one producer runs across workers. The beat-fires-but-short-circuits approach gets ~all the idle savings (one Redis `EXISTS` per tick) with none of the lifecycle complexity.
+
+## Consequences
+
+- A new Celery-beat task and a Redis presence/buffer convention are added; `Organization` gains nullable `latitude`/`longitude` (the **Infrastructure organisation**'s row carries the home/perimeter point — ADR-0017).
+- The SSE wire contract is "backfill the buffer on connect, then tail `seq > after`, plus a periodic stats blob for the panels" — a client protocol, not just an endpoint, so changing the buffer/snapshot shape is a coordinated server+client change (hence this ADR).
+- "Live" is bounded by the ~10s producer cadence, not sub-second; acceptable because client-side arc animation carries the live feel between ticks. Genuinely instantaneous push is explicitly out of scope.
+- The single per-tick query carries both hits and aggregations, so the side panels reflect a stable time window regardless of how fast the arc buffer churns at high volume.
+- This is the first piece of infrastructure for streaming live SOC signals to staff; if live alert/incident streams follow, they should reuse this producer/shared-buffer/presence shape rather than introduce per-client querying or a separate pub/sub layer.
+- **Out of scope / deferred:** the v2 *egress* axis (internal-origin `"Reserved"`-source events drawn as the opposite arc) and any per-org (non-staff) attack map both inherit this same delivery architecture.

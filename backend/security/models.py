@@ -76,6 +76,12 @@ class Organization(models.Model):
     # IANA timezone name (e.g. "Europe/Amsterdam"). Used to interpret a Scheduled
     # Search Rule's time-of-day window in the owning org's local time (#440).
     timezone = models.CharField(max_length=64, default="UTC")
+    # Live Attack Map (PRD #594, ADR-0027): the org's location, where its inbound
+    # attack arcs land. Nullable — orgs without coordinates fall back to the
+    # Infrastructure org's home/perimeter point. The Infrastructure org's own row
+    # carries that home coordinate (ADR-0017).
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
 
     objects = OrganizationManager()
 
