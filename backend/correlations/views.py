@@ -671,13 +671,22 @@ class _SearchLegConditionSerializer(_s.ModelSerializer):
         fields = ["id", "field_name", "operator", "value"]
 
     def validate(self, data):
-        from correlations.services.search_compiler import validate_search_field
+        from correlations.models import SEARCH_OPERATOR_CIDR
+        from correlations.services.search_compiler import (
+            validate_cidr_value,
+            validate_search_field,
+        )
         field_name = data.get("field_name", "")
         operator = data.get("operator", "")
         mapping = _get_mapping_safe()
         ok, reason = validate_search_field(field_name, operator, mapping)
         if not ok:
             raise _s.ValidationError({"field_name": reason})
+        if operator == SEARCH_OPERATOR_CIDR:
+            field_type = mapping.get(field_name, "keyword") if mapping else "keyword"
+            ok, reason = validate_cidr_value(data.get("value", ""), field_type)
+            if not ok:
+                raise _s.ValidationError({"value": reason})
         return data
 
 

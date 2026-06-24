@@ -9,9 +9,11 @@ from correlations.models import (
     CORRELATION_KEY_NONE,
     SEARCH_COUNT_OP_GTE,
     SEARCH_COUNT_OP_LTE,
+    SEARCH_OPERATOR_CIDR,
 )
 from correlations.services.search_compiler import (
     _operators_for_type,
+    validate_cidr_value,
     validate_diversity_constraint,
     validate_novelty_constraint,
 )
@@ -165,6 +167,17 @@ def sanitize_search_draft(draft: dict, mapping: dict) -> tuple:
                         f"Leg {leg_i + 1} condition {cond_i + 1}: "
                         f"operator '{operator}' not valid for '{field_name}' "
                         f"(type: {mapping[field_name]}); condition removed."
+                    )
+                    continue
+
+            # An unparseable (or IPv6, on a keyword field) CIDR literal would compile to a
+            # clause that never matches — strip it with a warning rather than carry it through.
+            if operator == SEARCH_OPERATOR_CIDR:
+                field_type = mapping.get(field_name, "keyword") if mapping else "keyword"
+                ok, reason = validate_cidr_value(cond.get("value", ""), field_type)
+                if not ok:
+                    warnings.append(
+                        f"Leg {leg_i + 1} condition {cond_i + 1}: {reason} condition removed."
                     )
                     continue
 

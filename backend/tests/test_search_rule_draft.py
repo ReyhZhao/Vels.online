@@ -190,14 +190,37 @@ def test_sanitizer_drops_field_absent_from_mapping():
 
 def test_sanitizer_drops_operator_type_mismatch():
     draft = _valid_search_draft()
-    # cidr is not valid for keyword fields
+    # cidr is not valid for a numeric field
     draft["legs"][0]["conditions"] = [
-        {"field_name": "rule.id", "operator": "cidr", "value": "192.168.0.0/24"}
+        {"field_name": "rule.level", "operator": "cidr", "value": "192.168.0.0/24"}
     ]
     mapping = _stub_mapping()
     sanitized, warnings = sanitize_search_draft(draft, mapping)
     assert sanitized["legs"][0]["conditions"] == []
     assert any("cidr" in w for w in warnings)
+
+
+def test_sanitizer_allows_cidr_for_keyword_ip_field():
+    # Keyword fields commonly hold dotted-quad IPv4 strings; cidr with a valid block is kept (#602).
+    draft = _valid_search_draft()
+    draft["legs"][0]["conditions"] = [
+        {"field_name": "agent.name", "operator": "cidr", "value": "10.0.0.0/8"}
+    ]
+    mapping = _stub_mapping()
+    sanitized, warnings = sanitize_search_draft(draft, mapping)
+    assert len(sanitized["legs"][0]["conditions"]) == 1
+    assert warnings == []
+
+
+def test_sanitizer_drops_invalid_cidr_literal():
+    draft = _valid_search_draft()
+    draft["legs"][0]["conditions"] = [
+        {"field_name": "agent.name", "operator": "cidr", "value": "10.0.0.0/99"}
+    ]
+    mapping = _stub_mapping()
+    sanitized, warnings = sanitize_search_draft(draft, mapping)
+    assert sanitized["legs"][0]["conditions"] == []
+    assert warnings
 
 
 def test_sanitizer_allows_cidr_for_ip_field():

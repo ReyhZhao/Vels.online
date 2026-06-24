@@ -122,8 +122,12 @@ class TestSearchCompiler:
         clause = _condition_to_clause(_make_condition("rule.level", SEARCH_OPERATOR_LTE, "3"))
         assert clause == {"range": {"rule.level": {"lte": "3"}}}
 
-    def test_cidr_produces_term(self):
-        clause = _condition_to_clause(_make_condition("source.ip", SEARCH_OPERATOR_CIDR, "10.0.0.0/8"))
+    def test_cidr_on_ip_field_produces_term(self):
+        # A true ip-typed field still compiles to a term (OpenSearch evaluates CIDR natively).
+        clause = _condition_to_clause(
+            _make_condition("source.ip", SEARCH_OPERATOR_CIDR, "10.0.0.0/8"),
+            field_mapping={"source.ip": "ip"},
+        )
         assert clause == {"term": {"source.ip": "10.0.0.0/8"}}
 
     def test_unknown_operator_returns_none(self):
@@ -1085,10 +1089,11 @@ class TestValidateSearchField:
         assert "nonexistent.field" in msg
         assert "mapping" in msg.lower()
 
-    def test_type_mismatch_cidr_on_keyword_rejected(self):
-        ok, msg = self.validate("rule.id", SEARCH_OPERATOR_CIDR, _STUB_MAPPING)
-        assert ok is False
-        assert "cidr" in msg.lower() or "not valid" in msg.lower()
+    def test_cidr_on_keyword_accepted(self):
+        # data.srcip is mapped as keyword in this deployment; CIDR must be offered there (#602).
+        ok, msg = self.validate("agent.name", SEARCH_OPERATOR_CIDR, _STUB_MAPPING)
+        assert ok is True
+        assert msg == ""
 
     def test_type_mismatch_gte_on_ip_rejected(self):
         ok, msg = self.validate("data.srcip", SEARCH_OPERATOR_GTE, _STUB_MAPPING)
@@ -1176,6 +1181,123 @@ class TestTypeAwareCompilerClause:
         filters = body["query"]["bool"]["filter"]
         term_clauses = [f for f in filters if "term" in f]
         assert any("rule.description.keyword" in c["term"] for c in term_clauses)
+
+
+def _ipv4_to_int(dotted: str) -> int:
+    """Mirror of the painless dotted-quad → 32-bit conversion, for asserting boundaries."""
+    parts = dotted.split(".")
+    assert len(parts) == 4
+    v = 0
+    for p in parts:
+        o = int(p)
+        assert 0 <= o <= 255
+        v = (v << 8) + o
+    return v
+
+
+class TestKeywordCidrCompiler:
+    """CIDR on a keyword IP field compiles to a defensive painless range script (#602)."""
+
+    def _params(self, value):
+        cond = _make_condition("data.srcip", SEARCH_OPERATOR_CIDR, value)
+        clause = _condition_to_clause(cond, field_mapping={"data.srcip": "keyword"})
+        assert "script" in clause
+        return clause["script"]["script"]["params"]
+
+    def test_keyword_cidr_uses_script_not_term(self):
+        cond = _make_condition("data.srcip", SEARCH_OPERATOR_CIDR, "10.0.0.0/8")
+        clause = _condition_to_clause(cond, field_mapping={"data.srcip": "keyword"})
+        assert "term" not in clause
+        assert clause["script"]["script"]["lang"] == "painless"
+        assert clause["script"]["script"]["params"]["field"] == "data.srcip"
+
+    def test_no_mapping_keyword_default_uses_script(self):
+        # Absent mapping defaults to keyword, so CIDR must still compile to the script form.
+        cond = _make_condition("data.srcip", SEARCH_OPERATOR_CIDR, "10.0.0.0/8")
+        clause = _condition_to_clause(cond, field_mapping=None)
+        assert "script" in clause
+
+    def test_range_includes_inside_address(self):
+        params = self._params("10.0.0.0/8")
+        v = _ipv4_to_int("10.1.2.3")
+        assert params["low"] <= v <= params["high"]
+
+    def test_range_excludes_outside_address(self):
+        params = self._params("10.0.0.0/8")
+        v = _ipv4_to_int("11.0.0.1")
+        assert not (params["low"] <= v <= params["high"])
+
+    def test_range_boundaries_network_and_broadcast(self):
+        params = self._params("10.0.0.0/8")
+        assert params["low"] == _ipv4_to_int("10.0.0.0")       # network address
+        assert params["high"] == _ipv4_to_int("10.255.255.255")  # broadcast address
+
+    def test_single_host_32_range(self):
+        params = self._params("192.168.1.1/32")
+        host = _ipv4_to_int("192.168.1.1")
+        assert params["low"] == host and params["high"] == host
+
+    def test_invalid_cidr_skips_condition(self):
+        cond = _make_condition("data.srcip", SEARCH_OPERATOR_CIDR, "10.0.0.0/99")
+        clause = _condition_to_clause(cond, field_mapping={"data.srcip": "keyword"})
+        assert clause is None
+
+    def test_script_is_defensive_about_non_ip(self):
+        # The script must not assume a parseable value: it guards size, part count and parse.
+        src = self._params("10.0.0.0/8") and _condition_to_clause(
+            _make_condition("data.srcip", SEARCH_OPERATOR_CIDR, "10.0.0.0/8"),
+            field_mapping={"data.srcip": "keyword"},
+        )["script"]["script"]["source"]
+        assert "size() == 0" in src
+        assert "parts.length != 4" in src
+        assert "NumberFormatException" in src
+
+
+class TestCidrValueValidation:
+    """cidr_to_ipv4_range / validate_cidr_value — save-time CIDR literal validation (#602)."""
+
+    def setup_method(self):
+        from correlations.services.search_compiler import (
+            cidr_to_ipv4_range,
+            validate_cidr_value,
+        )
+        self.to_range = cidr_to_ipv4_range
+        self.validate = validate_cidr_value
+
+    def test_valid_ipv4_cidr(self):
+        low, high = self.to_range("10.0.0.0/8")
+        assert low == _ipv4_to_int("10.0.0.0")
+        assert high == _ipv4_to_int("10.255.255.255")
+
+    def test_bare_address_is_a_32_range(self):
+        low, high = self.to_range("8.8.8.8")
+        assert low == high == _ipv4_to_int("8.8.8.8")
+
+    def test_invalid_cidr_raises(self):
+        with pytest.raises(ValueError):
+            self.to_range("10.0.0.0/99")
+
+    def test_ipv6_cidr_raises(self):
+        with pytest.raises(ValueError):
+            self.to_range("2001:db8::/32")
+
+    def test_validate_keyword_accepts_ipv4(self):
+        ok, _ = self.validate("10.0.0.0/8", "keyword")
+        assert ok is True
+
+    def test_validate_keyword_rejects_ipv6_clearly(self):
+        ok, msg = self.validate("2001:db8::/32", "keyword")
+        assert ok is False
+        assert "ipv6" in msg.lower()
+
+    def test_validate_keyword_rejects_garbage(self):
+        ok, msg = self.validate("not-an-ip", "keyword")
+        assert ok is False
+
+    def test_validate_ip_field_accepts_ipv6(self):
+        # ip-typed fields evaluate CIDR natively (incl. IPv6) — validation must not block them.
+        ok, _ = self.validate("2001:db8::/32", "ip")
+        assert ok is True
 
 
 class TestGetFieldMappingClient:
@@ -1406,13 +1528,48 @@ class TestSearchRuleConditionValidation:
 
     @patch("correlations.views._get_mapping_safe")
     def test_operator_type_mismatch_rejected_with_400(self, mock_mapping, org):
-        # rule.id is keyword — cidr is only valid for ip
-        mock_mapping.return_value = {"rule.id": "keyword"}
+        # rule.level is numeric — cidr is not a valid operator for it.
+        mock_mapping.return_value = {"rule.level": "long"}
         client = self._staff_client()
         resp = client.post(
             "/api/correlations/search-rules/",
-            self._rule_payload(org, "rule.id", "cidr"),
+            self._rule_payload(org, "rule.level", "cidr"),
             format="json",
+        )
+        assert resp.status_code == 400
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_cidr_on_keyword_ip_field_accepted(self, mock_mapping, org):
+        # data.srcip is keyword in this deployment; cidr with a valid IPv4 block saves (#602).
+        mock_mapping.return_value = {"data.srcip": "keyword"}
+        payload = self._rule_payload(org, "data.srcip", "cidr")
+        payload["legs"][0]["conditions"][0]["value"] = "10.0.0.0/8"
+        with patch("correlations.services.search_schedule.sync_rule_schedule"):
+            client = self._staff_client()
+            resp = client.post(
+                "/api/correlations/search-rules/", payload, format="json",
+            )
+        assert resp.status_code == 201, resp.data
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_invalid_cidr_literal_rejected_with_400(self, mock_mapping, org):
+        mock_mapping.return_value = {"data.srcip": "keyword"}
+        payload = self._rule_payload(org, "data.srcip", "cidr")
+        payload["legs"][0]["conditions"][0]["value"] = "10.0.0.0/99"
+        client = self._staff_client()
+        resp = client.post(
+            "/api/correlations/search-rules/", payload, format="json",
+        )
+        assert resp.status_code == 400
+
+    @patch("correlations.views._get_mapping_safe")
+    def test_ipv6_cidr_on_keyword_rejected_with_400(self, mock_mapping, org):
+        mock_mapping.return_value = {"data.srcip": "keyword"}
+        payload = self._rule_payload(org, "data.srcip", "cidr")
+        payload["legs"][0]["conditions"][0]["value"] = "2001:db8::/32"
+        client = self._staff_client()
+        resp = client.post(
+            "/api/correlations/search-rules/", payload, format="json",
         )
         assert resp.status_code == 400
 

@@ -1,4 +1,5 @@
 """OpenSearch DSL compiler for SearchLegCondition instances."""
+import ipaddress
 import logging
 
 from correlations.models import (
@@ -46,8 +47,83 @@ def _operators_for_type(field_type: str) -> list:
         return [SEARCH_OPERATOR_EQUALS, SEARCH_OPERATOR_GTE, SEARCH_OPERATOR_LTE]
     if field_type in _IP_TYPES:
         return [SEARCH_OPERATOR_EQUALS, SEARCH_OPERATOR_CIDR]
-    # keyword, text, boolean, and unknown types
-    return [SEARCH_OPERATOR_EQUALS, SEARCH_OPERATOR_CONTAINS]
+    if field_type in _TEXT_TYPES:
+        return [SEARCH_OPERATOR_EQUALS, SEARCH_OPERATOR_CONTAINS]
+    # keyword, boolean, and unknown types. keyword fields commonly hold dotted-quad
+    # IPv4 strings (data.srcip et al. are mapped as keyword in this deployment, #602),
+    # so CIDR is offered too — compiled to a painless range check, not a native term.
+    return [SEARCH_OPERATOR_EQUALS, SEARCH_OPERATOR_CONTAINS, SEARCH_OPERATOR_CIDR]
+
+
+def cidr_to_ipv4_range(value: str) -> tuple[int, int]:
+    """Parse an IPv4 CIDR (or bare address) into an inclusive [low, high] 32-bit range.
+
+    Raises ValueError with a user-facing message for an unparseable value or an IPv6
+    value — CIDR matching on a keyword field is IPv4-only (#602), because the painless
+    range check operates on 32-bit integers.
+    """
+    try:
+        net = ipaddress.ip_network((value or "").strip(), strict=False)
+    except ValueError:
+        raise ValueError(f"'{value}' is not a valid CIDR block or IP address.")
+    if net.version != 4:
+        raise ValueError(
+            f"'{value}' is an IPv6 CIDR; CIDR matching on a keyword field supports IPv4 only."
+        )
+    return int(net.network_address), int(net.broadcast_address)
+
+
+def validate_cidr_value(value: str, field_type: str) -> tuple[bool, str]:
+    """Validate a CIDR literal for the `cidr` operator against a field's type.
+
+    `ip`-typed fields accept any valid CIDR/IP (OpenSearch evaluates IPv4 and IPv6
+    natively via a `term`). `keyword`-typed fields accept IPv4 only (the painless range
+    check is 32-bit). Returns (True, "") when valid, else (False, reason).
+    """
+    if field_type in _IP_TYPES:
+        try:
+            ipaddress.ip_network((value or "").strip(), strict=False)
+        except ValueError:
+            return False, f"'{value}' is not a valid CIDR block or IP address."
+        return True, ""
+    try:
+        cidr_to_ipv4_range(value)
+    except ValueError as exc:
+        return False, str(exc)
+    return True, ""
+
+
+def _ipv4_cidr_script_clause(field: str, low: int, high: int) -> dict:
+    """A painless `script` filter testing IPv4 CIDR membership on a keyword field (#602).
+
+    Parses the document's dotted-quad string into a 32-bit integer and checks it falls
+    inside [low, high]. Defensive: a missing field or a value that is not a parseable
+    IPv4 address simply does not match (it never raises), mirroring the time-of-day
+    window filter's script-filter precedent.
+    """
+    source = (
+        "if (doc[params.field].size() == 0) { return false; } "
+        "String ip = doc[params.field].value; "
+        "String[] parts = ip.splitOnToken(params.dot); "
+        "if (parts.length != 4) { return false; } "
+        "long v = 0; "
+        "for (int i = 0; i < 4; i++) { "
+        "try { int o = Integer.parseInt(parts[i]); "
+        "if (o < 0 || o > 255) { return false; } "
+        "v = (v << 8) + o; "
+        "} catch (NumberFormatException e) { return false; } "
+        "} "
+        "return v >= params.low && v <= params.high;"
+    )
+    return {
+        "script": {
+            "script": {
+                "lang": "painless",
+                "source": source,
+                "params": {"field": field, "dot": ".", "low": low, "high": high},
+            }
+        }
+    }
 
 
 def validate_search_field(field: str, operator: str, mapping: dict) -> tuple[bool, str]:
@@ -197,6 +273,7 @@ def _condition_to_clause(condition, field_mapping: dict | None = None) -> dict |
     field_mapping, if provided, is used to select the correct DSL form:
       - text + equals  → term on {field}.keyword
       - ip + cidr      → term (OpenSearch evaluates CIDR on ip fields)
+      - keyword + cidr → painless IPv4 range script (true CIDR on dotted-quad strings)
       - numeric/date   → range for gte/lte
     """
     field = condition.field_name
@@ -214,7 +291,17 @@ def _condition_to_clause(condition, field_mapping: dict | None = None) -> dict |
     if op == SEARCH_OPERATOR_LTE:
         return {"range": {field: {"lte": value}}}
     if op == SEARCH_OPERATOR_CIDR:
-        return {"term": {field: value}}
+        # A true ip-typed field: OpenSearch evaluates CIDR membership on a term (unchanged).
+        if field_type in _IP_TYPES:
+            return {"term": {field: value}}
+        # keyword (or unknown) field holding dotted-quad IPv4 strings: term would only
+        # match the literal "10.0.0.0/8" string, so compile real membership via painless.
+        try:
+            low, high = cidr_to_ipv4_range(value)
+        except ValueError:
+            logger.warning("search_compiler: invalid CIDR %r — skipping condition", value)
+            return None
+        return _ipv4_cidr_script_clause(field, low, high)
 
     logger.warning("search_compiler: unknown operator %r — skipping condition", op)
     return None
