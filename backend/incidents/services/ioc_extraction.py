@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import re
 from urllib.parse import urlparse
@@ -29,6 +30,55 @@ def _owned_assets(organization):
     )
 
     return owned_ips, owned_domains
+
+
+def _parse_internal_networks(organization):
+    """Parse the org's declared internal CIDR ranges into ip_network objects (#603).
+
+    Bad entries are skipped defensively — the serializer validates on write, but a
+    row could predate that or be edited out-of-band; extraction must never raise.
+    """
+    networks = []
+    for entry in (getattr(organization, "internal_ip_ranges", None) or []):
+        try:
+            networks.append(ipaddress.ip_network((entry or "").strip(), strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def _owned_domain_suffixes(organization):
+    """Return the org's declared owned domains, lower-cased (#603)."""
+    return [
+        d.strip().lower().rstrip(".")
+        for d in (getattr(organization, "owned_domains", None) or [])
+        if (d or "").strip()
+    ]
+
+
+def _ip_in_internal_ranges(value: str, networks) -> bool:
+    if not networks:
+        return False
+    try:
+        addr = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return False
+    return any(addr in net for net in networks)
+
+
+def _domain_is_owned(domain: str, suffixes) -> bool:
+    """True if `domain` equals or is a subdomain of any owned suffix.
+
+    Case-insensitive, and guards the partial-label trap: `evilexample.com` is NOT
+    matched by `example.com` (only a `.`-boundary or exact match counts).
+    """
+    if not domain or not suffixes:
+        return False
+    candidate = domain.strip().lower().rstrip(".")
+    for suffix in suffixes:
+        if candidate == suffix or candidate.endswith("." + suffix):
+            return True
+    return False
 
 
 def _url_hostname(url: str) -> str:
@@ -69,35 +119,45 @@ def _alert_evidence_text(incident) -> str:
 def extract_and_save_iocs(incident):
     from incidents.models import IOC
 
-    owned_ips, owned_domains = _owned_assets(incident.organization)
+    org = incident.organization
+    owned_ips, owned_domains = _owned_assets(org)
+    internal_networks = _parse_internal_networks(org)
+    owned_suffixes = _owned_domain_suffixes(org)
+
+    def _is_owned_ip(ip):
+        return ip in owned_ips or _ip_in_internal_ranges(ip, internal_networks)
+
+    def _is_owned_domain(domain):
+        return domain.lower() in owned_domains or _domain_is_owned(domain, owned_suffixes)
 
     text = f"{incident.title}\n{incident.description}\n{_alert_evidence_text(incident)}"
     found = find_iocs(text)
 
     iocs = []
     for ip in found.get("ipv4s", []):
-        if ip not in owned_ips:
+        if not _is_owned_ip(ip):
             iocs.append(IOC(incident=incident, kind=IOC.KIND_IP, value=ip))
     for ip in found.get("ipv6s", []):
-        if ip not in owned_ips:
+        if not _is_owned_ip(ip):
             iocs.append(IOC(incident=incident, kind=IOC.KIND_IP, value=ip))
     for domain in found.get("domains", []):
-        if domain.lower() not in owned_domains:
+        if not _is_owned_domain(domain):
             iocs.append(IOC(incident=incident, kind=IOC.KIND_DOMAIN, value=domain))
     for url in found.get("urls", []):
-        if _url_hostname(url).lower() not in owned_domains:
+        if not _is_owned_domain(_url_hostname(url)):
             iocs.append(IOC(incident=incident, kind=IOC.KIND_URL, value=url))
 
     if incident.source_kind == "inbound_email":
-        iocs.extend(_extract_email_iocs(incident, found))
+        iocs.extend(_extract_email_iocs(incident, found, owned_suffixes))
 
     if iocs:
         IOC.objects.bulk_create(iocs, ignore_conflicts=True)
 
 
-def _extract_email_iocs(incident, found_in_text):
+def _extract_email_iocs(incident, found_in_text, owned_suffixes=None):
     from incidents.models import IOC
 
+    owned_suffixes = owned_suffixes or []
     source_ref = incident.source_ref or {}
     forwarder_address = (source_ref.get("forwarder_address") or "").lower()
 
@@ -111,6 +171,9 @@ def _extract_email_iocs(incident, found_in_text):
         if forwarder_address and addr == forwarder_address:
             return
         if _is_soc_address(addr):
+            return
+        domain_part = addr.split("@", 1)[-1] if "@" in addr else ""
+        if _domain_is_owned(domain_part, owned_suffixes):
             return
         seen.add(addr)
         iocs.append(IOC(incident=incident, kind=IOC.KIND_EMAIL, value=addr))

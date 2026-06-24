@@ -72,6 +72,12 @@ class Organization(models.Model):
     alert_match_lookback_days = models.PositiveIntegerField(default=30)
     alert_auto_promote_threshold = models.PositiveIntegerField(default=5)
     alert_auto_promote_window_minutes = models.PositiveIntegerField(default=60)
+    # IOC-extraction exclusions beyond registered Assets (#603). Indicators that
+    # fall inside one of these CIDR ranges (membership) or that equal/are a
+    # subdomain of one of these owned domains (suffix match) are dropped before
+    # being saved as IOCs on the org's incidents. Both default to empty.
+    internal_ip_ranges = models.JSONField(default=list, blank=True)
+    owned_domains = models.JSONField(default=list, blank=True)
     llm_residual_autocreate_threshold = models.FloatField(null=True, blank=True)
     # IANA timezone name (e.g. "Europe/Amsterdam"). Used to interpret a Scheduled
     # Search Rule's time-of-day window in the owning org's local time (#440).

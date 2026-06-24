@@ -120,3 +120,113 @@ def test_non_owned_ip_still_extracted(acme):
     )
     extract_and_save_iocs(inc)
     assert IOC.objects.filter(incident=inc, kind=IOC.KIND_IP, value="192.168.1.55").exists()
+
+
+# ── #603: internal IP ranges + owned domains exclusion ────────────────────────
+
+
+@pytest.mark.django_db
+def test_internal_ipv4_range_excluded(acme):
+    acme.internal_ip_ranges = ["10.0.0.0/8"]
+    acme.save(update_fields=["internal_ip_ranges"])
+    inc = Incident.objects.create(
+        organization=acme,
+        title="Internal traffic",
+        description="Saw 10.1.2.3 and external 203.0.113.9",
+        display_id="INC-2026-RANGE4",
+    )
+    extract_and_save_iocs(inc)
+    assert not IOC.objects.filter(incident=inc, kind=IOC.KIND_IP, value="10.1.2.3").exists()
+    assert IOC.objects.filter(incident=inc, kind=IOC.KIND_IP, value="203.0.113.9").exists()
+
+
+@pytest.mark.django_db
+def test_internal_ipv6_range_excluded(acme):
+    acme.internal_ip_ranges = ["fd00::/8"]
+    acme.save(update_fields=["internal_ip_ranges"])
+    inc = Incident.objects.create(
+        organization=acme,
+        title="IPv6 traffic",
+        description="Saw fd00::1234 in the logs",
+        display_id="INC-2026-RANGE6",
+    )
+    extract_and_save_iocs(inc)
+    assert not IOC.objects.filter(incident=inc, kind=IOC.KIND_IP, value="fd00::1234").exists()
+
+
+@pytest.mark.django_db
+def test_owned_domain_subdomain_excluded(acme):
+    acme.owned_domains = ["corp.example"]
+    acme.save(update_fields=["owned_domains"])
+    inc = Incident.objects.create(
+        organization=acme,
+        title="Alert",
+        description="Traffic to mail.corp.example and corp.example",
+        display_id="INC-2026-SUBDOM",
+    )
+    extract_and_save_iocs(inc)
+    assert not IOC.objects.filter(incident=inc, kind=IOC.KIND_DOMAIN, value="mail.corp.example").exists()
+    assert not IOC.objects.filter(incident=inc, kind=IOC.KIND_DOMAIN, value="corp.example").exists()
+
+
+@pytest.mark.django_db
+def test_owned_domain_partial_label_not_excluded(acme):
+    acme.owned_domains = ["example.com"]
+    acme.save(update_fields=["owned_domains"])
+    inc = Incident.objects.create(
+        organization=acme,
+        title="Alert",
+        description="C2 to evilexample.com",
+        display_id="INC-2026-PARTIAL",
+    )
+    extract_and_save_iocs(inc)
+    assert IOC.objects.filter(incident=inc, kind=IOC.KIND_DOMAIN, value="evilexample.com").exists()
+
+
+@pytest.mark.django_db
+def test_owned_domain_case_insensitive(acme):
+    acme.owned_domains = ["corp.example"]
+    acme.save(update_fields=["owned_domains"])
+    inc = Incident.objects.create(
+        organization=acme,
+        title="Alert",
+        description="Traffic to MAIL.CORP.EXAMPLE flagged",
+        display_id="INC-2026-CASE",
+    )
+    extract_and_save_iocs(inc)
+    assert not IOC.objects.filter(incident=inc, kind=IOC.KIND_DOMAIN, value__iexact="mail.corp.example").exists()
+
+
+@pytest.mark.django_db
+def test_owned_domain_excludes_url_hostname(acme):
+    acme.owned_domains = ["corp.example"]
+    acme.save(update_fields=["owned_domains"])
+    inc = Incident.objects.create(
+        organization=acme,
+        title="Alert",
+        description="Visit https://intranet.corp.example/login for details",
+        display_id="INC-2026-URLHOST",
+    )
+    extract_and_save_iocs(inc)
+    assert not IOC.objects.filter(incident=inc, kind=IOC.KIND_URL).filter(value__icontains="corp.example").exists()
+
+
+@pytest.mark.django_db
+def test_owned_domain_excludes_email_ioc(acme):
+    acme.owned_domains = ["corp.example"]
+    acme.save(update_fields=["owned_domains"])
+    inc = Incident.objects.create(
+        organization=acme,
+        display_id="INC-2026-EMAILDOM",
+        title="Phishing",
+        description="Reply came from helpdesk@corp.example and attacker@evil.com",
+        source_kind="inbound_email",
+        source_ref={
+            "sender_address": "attacker@evil.com",
+            "subject_normalised": "urgent",
+            "forwarder_address": "user@whatever.test",
+        },
+    )
+    extract_and_save_iocs(inc)
+    assert not IOC.objects.filter(incident=inc, kind=IOC.KIND_EMAIL, value="helpdesk@corp.example").exists()
+    assert IOC.objects.filter(incident=inc, kind=IOC.KIND_EMAIL, value="attacker@evil.com").exists()

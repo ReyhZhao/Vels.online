@@ -1,6 +1,15 @@
+import ipaddress
+import re
+
 from rest_framework import serializers
 
 from .models import Download, Organization, RiskAcceptance, WorkPackage, WorkPackageItem
+
+# A syntactically valid domain label: alphanumerics and hyphens, not starting or
+# ending with a hyphen, up to 63 chars. A domain is one or more such labels joined
+# by dots. Deliberately permissive on TLD (no registry check).
+_DOMAIN_LABEL = r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
+_DOMAIN_RE = re.compile(rf"^{_DOMAIN_LABEL}(\.{_DOMAIN_LABEL})+$")
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -13,6 +22,12 @@ class OrganizationSerializer(serializers.ModelSerializer):
     triage_work_threshold = serializers.FloatField(
         required=False, min_value=0.0, max_value=1.0
     )
+    internal_ip_ranges = serializers.ListField(
+        child=serializers.CharField(), required=False
+    )
+    owned_domains = serializers.ListField(
+        child=serializers.CharField(), required=False
+    )
 
     class Meta:
         model = Organization
@@ -21,6 +36,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "triage_prompt_context", "triage_fp_threshold", "triage_work_threshold",
             "alert_match_lookback_days", "alert_auto_promote_threshold",
             "alert_auto_promote_window_minutes", "timezone",
+            "internal_ip_ranges", "owned_domains",
             "latitude", "longitude",
         ]
         read_only_fields = ["id", "slug", "wazuh_group", "is_infrastructure"]
@@ -32,6 +48,32 @@ class OrganizationSerializer(serializers.ModelSerializer):
         except (ZoneInfoNotFoundError, ValueError, KeyError):
             raise serializers.ValidationError("Unknown IANA timezone name.")
         return value
+
+    def validate_internal_ip_ranges(self, value):
+        cleaned = []
+        for entry in value:
+            entry = (entry or "").strip()
+            if not entry:
+                continue
+            try:
+                # strict=False so a host-bit-set CIDR like 10.0.0.5/24 is accepted
+                # and normalised to its network address.
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                raise serializers.ValidationError(f"Invalid CIDR range: {entry!r}")
+            cleaned.append(str(network))
+        return cleaned
+
+    def validate_owned_domains(self, value):
+        cleaned = []
+        for entry in value:
+            entry = (entry or "").strip().lower().rstrip(".")
+            if not entry:
+                continue
+            if not _DOMAIN_RE.match(entry):
+                raise serializers.ValidationError(f"Invalid domain: {entry!r}")
+            cleaned.append(entry)
+        return cleaned
 
 
 class AgentSerializer(serializers.Serializer):

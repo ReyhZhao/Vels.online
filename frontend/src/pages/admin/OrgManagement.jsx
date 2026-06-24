@@ -126,6 +126,12 @@ function OrgRow({ org }) {
   const [alertSaveError, setAlertSaveError] = useState(null);
   const [alertSaved, setAlertSaved] = useState(false);
 
+  const [internalRanges, setInternalRanges] = useState((org.internal_ip_ranges ?? []).join('\n'));
+  const [ownedDomains, setOwnedDomains] = useState((org.owned_domains ?? []).join('\n'));
+  const [savingIoc, setSavingIoc] = useState(false);
+  const [iocSaveError, setIocSaveError] = useState(null);
+  const [iocSaved, setIocSaved] = useState(false);
+
   const [systemRules, setSystemRules] = useState(null);
   const [loadingSystemRules, setLoadingSystemRules] = useState(false);
   const [muteTogglingId, setMuteTogglingId] = useState(null);
@@ -258,6 +264,29 @@ function OrgRow({ org }) {
       setAlertSaveError(err.response?.data?.timezone?.[0] ?? 'Failed to save alert settings.');
     } finally {
       setSavingAlerts(false);
+    }
+  }
+
+  async function handleSaveIocExclusions(e) {
+    e.preventDefault();
+    setSavingIoc(true);
+    setIocSaveError(null);
+    setIocSaved(false);
+    const toList = (text) => text.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    try {
+      await api.patch(`/api/security/organizations/${org.slug}/`, {
+        internal_ip_ranges: toList(internalRanges),
+        owned_domains: toList(ownedDomains),
+      });
+      setIocSaved(true);
+    } catch (err) {
+      setIocSaveError(
+        err.response?.data?.internal_ip_ranges?.[0]
+        ?? err.response?.data?.owned_domains?.[0]
+        ?? 'Failed to save IOC exclusions.'
+      );
+    } finally {
+      setSavingIoc(false);
     }
   }
 
@@ -455,6 +484,51 @@ function OrgRow({ org }) {
               <div className="flex justify-end">
                 <Button type="submit" size="sm" disabled={savingAlerts}>
                   {savingAlerts ? 'Saving…' : 'Save alert settings'}
+                </Button>
+              </div>
+            </form>
+
+            <form onSubmit={handleSaveIocExclusions} className="space-y-3 border-t border-border/50 pt-3 mt-3">
+              <p className="text-xs font-semibold text-foreground uppercase tracking-wider">IOC Exclusions</p>
+              <p className="text-xs text-muted-foreground">
+                Indicators inside these internal IP ranges or owned domains are excluded from
+                automatic IOC extraction. One entry per line (or comma-separated).
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`ioc-ranges-${org.slug}`}>
+                    Internal IP ranges (CIDR)
+                  </label>
+                  <Textarea
+                    id={`ioc-ranges-${org.slug}`}
+                    rows={4}
+                    placeholder={'10.0.0.0/8\n192.168.0.0/16\nfd00::/8'}
+                    value={internalRanges}
+                    onChange={e => { setInternalRanges(e.target.value); setIocSaved(false); }}
+                    disabled={savingIoc}
+                    className="text-xs font-mono resize-y"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`ioc-domains-${org.slug}`}>
+                    Owned domains
+                  </label>
+                  <Textarea
+                    id={`ioc-domains-${org.slug}`}
+                    rows={4}
+                    placeholder={'corp.example\nexample.com'}
+                    value={ownedDomains}
+                    onChange={e => { setOwnedDomains(e.target.value); setIocSaved(false); }}
+                    disabled={savingIoc}
+                    className="text-xs font-mono resize-y"
+                  />
+                </div>
+              </div>
+              {iocSaveError && <p className="text-xs text-destructive">{iocSaveError}</p>}
+              {iocSaved && <p className="text-xs text-green-600 dark:text-green-400">Saved.</p>}
+              <div className="flex justify-end">
+                <Button type="submit" size="sm" disabled={savingIoc}>
+                  {savingIoc ? 'Saving…' : 'Save IOC exclusions'}
                 </Button>
               </div>
             </form>

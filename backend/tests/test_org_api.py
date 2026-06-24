@@ -285,3 +285,53 @@ def test_patch_triage_work_threshold_rejects_out_of_range(admin_client, acme):
     assert response.status_code == 400
     acme.refresh_from_db()
     assert acme.triage_work_threshold == 0.95
+
+
+# ---------------------------------------------------------------- #603 IOC exclusions
+
+
+@pytest.mark.django_db
+def test_org_detail_returns_ioc_exclusion_fields(admin_client, acme):
+    response = admin_client.get(f"/api/security/organizations/{acme.slug}/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["internal_ip_ranges"] == []
+    assert data["owned_domains"] == []
+
+
+@pytest.mark.django_db
+def test_patch_ioc_exclusions_as_staff(admin_client, acme):
+    response = admin_client.patch(
+        f"/api/security/organizations/{acme.slug}/",
+        {"internal_ip_ranges": ["10.0.0.0/8", "fd00::/8"], "owned_domains": ["Corp.Example", "example.com."]},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    acme.refresh_from_db()
+    assert acme.internal_ip_ranges == ["10.0.0.0/8", "fd00::/8"]
+    # normalised: lower-cased, trailing dot stripped
+    assert acme.owned_domains == ["corp.example", "example.com"]
+
+
+@pytest.mark.django_db
+def test_patch_invalid_cidr_returns_400(admin_client, acme):
+    response = admin_client.patch(
+        f"/api/security/organizations/{acme.slug}/",
+        {"internal_ip_ranges": ["not-a-cidr"]},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    acme.refresh_from_db()
+    assert acme.internal_ip_ranges == []
+
+
+@pytest.mark.django_db
+def test_patch_invalid_domain_returns_400(admin_client, acme):
+    response = admin_client.patch(
+        f"/api/security/organizations/{acme.slug}/",
+        {"owned_domains": ["not a domain!"]},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    acme.refresh_from_db()
+    assert acme.owned_domains == []
