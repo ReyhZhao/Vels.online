@@ -96,8 +96,23 @@ export function renderAlertLinked(payload) {
   return id ? `Alert ${id} linked.` : 'Alert linked.';
 }
 
+export function renderIocAdded(payload) {
+  return payload?.value ? `IOC added: ${payload.value} (${payload.kind}).` : 'IOC added.';
+}
+
+export function renderIocUpdated(payload) {
+  return payload?.value ? `IOC updated: ${payload.value} (${payload.kind}).` : 'IOC updated.';
+}
+
+export function renderIocRemoved(payload) {
+  return payload?.value ? `IOC removed: ${payload.value} (${payload.kind}).` : 'IOC removed.';
+}
+
 const KIND_RENDERERS = {
   incident_updated: renderIncidentUpdated,
+  ioc_added: renderIocAdded,
+  ioc_updated: renderIocUpdated,
+  ioc_removed: renderIocRemoved,
   incident_created: () => 'Incident created.',
   comment_added: renderCommentAdded,
   comment_edited: renderCommentEdited,
@@ -143,6 +158,9 @@ const KIND_CONFIG = {
   contact_message_sent:         { Icon: Mail,           badge: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400',                label: 'MESSAGE'   },
   contact_message_received:     { Icon: MailOpen,       badge: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',               label: 'REPLY'     },
   alert_linked:                 { Icon: Link2,          badge: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400',           label: 'LINKED'    },
+  ioc_added:                    { Icon: ShieldCheck,    badge: 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400',           label: 'IOC'       },
+  ioc_updated:                  { Icon: ShieldCheck,    badge: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',           label: 'IOC'       },
+  ioc_removed:                  { Icon: ShieldCheck,    badge: 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300',           label: 'IOC'       },
   assistant_action:             { Icon: Bot,            badge: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',   label: 'ASSISTANT' },
 };
 

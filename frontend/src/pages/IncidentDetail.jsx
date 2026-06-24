@@ -220,8 +220,74 @@ function EnrichmentDetail({ ioc }) {
   );
 }
 
-function IOCRow({ ioc, kindClass }) {
+function IOCRow({ ioc, kindClass, onSave, onDelete }) {
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editKind, setEditKind] = useState(ioc.kind);
+  const [editValue, setEditValue] = useState(ioc.value);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  function startEdit() {
+    setEditKind(ioc.kind);
+    setEditValue(ioc.value);
+    setError(null);
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    if (!editValue.trim()) { setError('Value is required.'); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(ioc.id, { kind: editKind, value: editValue.trim() });
+      setEditing(false);
+    } catch (err) {
+      setError(err.response?.data?.detail || err.response?.data?.value?.[0] || 'Failed to save IOC.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    setBusy(true);
+    try {
+      await onDelete(ioc.id);
+    } catch {
+      setBusy(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="rounded border border-border bg-background px-2 py-1.5 space-y-2">
+        <div className="flex items-center gap-2">
+          <select
+            value={editKind}
+            onChange={e => setEditKind(e.target.value)}
+            disabled={busy}
+            className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+            aria-label="IOC kind"
+          >
+            {['ip', 'domain', 'url', 'email'].map(k => (
+              <option key={k} value={k}>{IOC_KIND_LABELS[k]}</option>
+            ))}
+          </select>
+          <input
+            value={editValue}
+            onChange={e => setEditValue(e.target.value)}
+            disabled={busy}
+            className="flex-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+            aria-label="IOC value"
+          />
+          <button onClick={saveEdit} disabled={busy} className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50">Save</button>
+          <button onClick={() => setEditing(false)} disabled={busy} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+        </div>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded border border-border bg-background">
       <div className="flex items-center gap-2 px-2 py-1.5">
@@ -235,8 +301,10 @@ function IOCRow({ ioc, kindClass }) {
           </svg>
         </button>
         <span className={`font-mono text-xs ${kindClass}`}>{ioc.value}</span>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <EnrichmentBadge ioc={ioc} />
+          <button onClick={startEdit} disabled={busy} className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50">Edit</button>
+          <button onClick={handleDelete} disabled={busy} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">Remove</button>
         </div>
       </div>
       {expanded && (
@@ -248,7 +316,85 @@ function IOCRow({ ioc, kindClass }) {
   );
 }
 
-function IOCSection({ iocs }) {
+function AddIOCForm({ onAdd }) {
+  const [kind, setKind] = useState('ip');
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!value.trim()) { setError('Value is required.'); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      await onAdd({ kind, value: value.trim() });
+      setValue('');
+    } catch (err) {
+      setError(err.response?.data?.detail || err.response?.data?.value?.[0] || 'Failed to add IOC.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-2 border-t border-border pt-3">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Add IOC</p>
+      <div className="flex items-center gap-2">
+        <select
+          value={kind}
+          onChange={e => setKind(e.target.value)}
+          disabled={busy}
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+          aria-label="New IOC kind"
+        >
+          {['ip', 'domain', 'url', 'email'].map(k => (
+            <option key={k} value={k}>{IOC_KIND_LABELS[k]}</option>
+          ))}
+        </select>
+        <input
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          disabled={busy}
+          placeholder="Indicator value…"
+          className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          aria-label="New IOC value"
+        />
+        <button
+          type="submit"
+          disabled={busy || !value.trim()}
+          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {busy ? 'Adding…' : 'Add'}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </form>
+  );
+}
+
+function IOCSection({ displayId, initialIocs }) {
+  const [iocs, setIocs] = useState(initialIocs ?? []);
+
+  function reload() {
+    return api.get(`/api/incidents/${displayId}/iocs/`).then(r => setIocs(r.data));
+  }
+
+  async function addIoc(payload) {
+    await api.post(`/api/incidents/${displayId}/iocs/`, payload);
+    await reload();
+  }
+
+  async function saveIoc(id, payload) {
+    await api.patch(`/api/incidents/${displayId}/iocs/${id}/`, payload);
+    await reload();
+  }
+
+  async function removeIoc(id) {
+    await api.delete(`/api/incidents/${displayId}/iocs/${id}/`);
+    setIocs(prev => prev.filter(i => i.id !== id));
+  }
+
   const grouped = iocs.reduce((acc, ioc) => {
     if (!acc[ioc.kind]) acc[ioc.kind] = [];
     acc[ioc.kind].push(ioc);
@@ -261,7 +407,7 @@ function IOCSection({ iocs }) {
     <div className="rounded-lg border border-border bg-card p-6 space-y-4">
       <h2 className="text-base font-semibold text-foreground">Indicators of Compromise</h2>
       {kinds.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No IOCs were extracted from this incident.</p>
+        <p className="text-sm text-muted-foreground">No IOCs recorded for this incident.</p>
       ) : (
         <div className="space-y-4">
           {kinds.map(kind => (
@@ -271,13 +417,14 @@ function IOCSection({ iocs }) {
               </p>
               <div className="space-y-1">
                 {grouped[kind].map(ioc => (
-                  <IOCRow key={ioc.id} ioc={ioc} kindClass={IOC_KIND_CLASSES[kind]} />
+                  <IOCRow key={ioc.id} ioc={ioc} kindClass={IOC_KIND_CLASSES[kind]} onSave={saveIoc} onDelete={removeIoc} />
                 ))}
               </div>
             </div>
           ))}
         </div>
       )}
+      <AddIOCForm onAdd={addIoc} />
     </div>
   );
 }
@@ -1782,7 +1929,7 @@ export default function IncidentDetail() {
             />
           )}
           {activeTab === 'iocs' && (
-            <IOCSection iocs={incident.iocs ?? []} />
+            <IOCSection displayId={displayId} initialIocs={incident.iocs ?? []} />
           )}
           {activeTab === 'contacts' && (
             <IncidentContactsPanel displayId={displayId} orgSlug={incident.org_slug} />

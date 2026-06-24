@@ -38,6 +38,8 @@ from .serializers import (
     IncidentEventSerializer,
     IncidentSerializer,
     IncidentUpdateSerializer,
+    IOCSerializer,
+    IOCWriteSerializer,
     SubjectCreateSerializer,
     SubjectSerializer,
     SubjectUpdateSerializer,
@@ -63,7 +65,7 @@ from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
 from .services.change_org import change_incident_org
 from .services.visibility import can_view_incident, filter_comments_for_user, filter_events_for_user, filter_incidents_for_user
-from .tasks import acquire_triage_lock, enrich_iocs_then_triage, run_incident_triage
+from .tasks import acquire_triage_lock, enrich_iocs_then_triage, enrich_single_ioc, run_incident_triage
 
 logger = logging.getLogger(__name__)
 
@@ -794,6 +796,119 @@ class IncidentAssetUnlinkView(APIView):
             return Response({"detail": "Asset not linked to this incident."}, status=status.HTTP_404_NOT_FOUND)
 
         link.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class IncidentIOCListView(APIView):
+    """List and create analyst-managed IOCs on an incident (#604)."""
+
+    def _get_incident(self, request, display_id):
+        err = _require_auth(request)
+        if err:
+            return None, err
+        try:
+            incident = Incident.objects.get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, incident):
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return incident, None
+
+    def get(self, request, display_id):
+        incident, err = self._get_incident(request, display_id)
+        if err:
+            return err
+        return Response(IOCSerializer(incident.iocs.all(), many=True).data)
+
+    def post(self, request, display_id):
+        incident, err = self._get_incident(request, display_id)
+        if err:
+            return err
+
+        serializer = IOCWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        kind = serializer.validated_data["kind"]
+        value = serializer.validated_data["value"]
+
+        if IOC.objects.filter(incident=incident, kind=kind, value=value).exists():
+            return Response(
+                {"detail": "An IOC with this kind and value already exists on this incident."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ioc = IOC.objects.create(incident=incident, kind=kind, value=value)
+        record_event(
+            incident, "ioc_added", actor=request.user,
+            payload={"ioc_id": ioc.id, "kind": kind, "value": value},
+        )
+        transaction.on_commit(lambda: enrich_single_ioc.delay(ioc.id))
+        return Response(IOCSerializer(ioc).data, status=status.HTTP_201_CREATED)
+
+
+class IncidentIOCDetailView(APIView):
+    """Update and delete a single analyst-managed IOC on an incident (#604)."""
+
+    def _get_ioc(self, request, display_id, pk):
+        err = _require_auth(request)
+        if err:
+            return None, err
+        try:
+            incident = Incident.objects.get(display_id=display_id)
+        except Incident.DoesNotExist:
+            return None, Response(status=status.HTTP_404_NOT_FOUND)
+        if not can_view_incident(request.user, incident):
+            return None, Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            ioc = IOC.objects.get(pk=pk, incident=incident)
+        except IOC.DoesNotExist:
+            return None, Response(status=status.HTTP_404_NOT_FOUND)
+        return ioc, None
+
+    def patch(self, request, display_id, pk):
+        ioc, err = self._get_ioc(request, display_id, pk)
+        if err:
+            return err
+
+        serializer = IOCWriteSerializer(instance=ioc, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        new_kind = serializer.validated_data.get("kind", ioc.kind)
+        new_value = serializer.validated_data.get("value", ioc.value)
+
+        changed = new_kind != ioc.kind or new_value != ioc.value
+        if changed and IOC.objects.filter(
+            incident=ioc.incident, kind=new_kind, value=new_value
+        ).exclude(pk=ioc.pk).exists():
+            return Response(
+                {"detail": "An IOC with this kind and value already exists on this incident."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ioc.kind = new_kind
+        ioc.value = new_value
+        update_fields = ["kind", "value"]
+        if changed:
+            # Drop stale enrichment so the badge never shows the previous value's data.
+            ioc.enrichment_data = {}
+            update_fields.append("enrichment_data")
+        ioc.save(update_fields=update_fields)
+
+        record_event(
+            ioc.incident, "ioc_updated", actor=request.user,
+            payload={"ioc_id": ioc.id, "kind": new_kind, "value": new_value},
+        )
+        if changed:
+            ioc_id = ioc.id
+            transaction.on_commit(lambda: enrich_single_ioc.delay(ioc_id))
+        return Response(IOCSerializer(ioc).data)
+
+    def delete(self, request, display_id, pk):
+        ioc, err = self._get_ioc(request, display_id, pk)
+        if err:
+            return err
+        incident = ioc.incident
+        payload = {"ioc_id": ioc.id, "kind": ioc.kind, "value": ioc.value}
+        ioc.delete()
+        record_event(incident, "ioc_removed", actor=request.user, payload=payload)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

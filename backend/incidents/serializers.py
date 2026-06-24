@@ -13,6 +13,27 @@ class IOCSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "enrichment_data", "created_at"]
 
 
+class IOCWriteSerializer(serializers.ModelSerializer):
+    """Write serializer for analyst-managed IOCs (#604).
+
+    `kind`/`value` are client-settable; `enrichment_data`, `created_at`, and
+    `incident` stay server-managed. The (incident, kind, value) uniqueness is
+    enforced in the view so a collision returns a clean 400, not a 500.
+    """
+    kind = serializers.ChoiceField(choices=IOC.KIND_CHOICES)
+    value = serializers.CharField(trim_whitespace=True)
+
+    class Meta:
+        model = IOC
+        fields = ["kind", "value"]
+
+    def validate_value(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("This field may not be blank.")
+        return value
+
+
 class SubjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject

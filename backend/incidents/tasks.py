@@ -120,6 +120,28 @@ def enrich_iocs_then_triage(incident_id: int):
     run_incident_triage.delay(incident_id)
 
 
+@shared_task
+def enrich_single_ioc(ioc_id: int):
+    """Enrich one IOC via the shared enrichment path (#604 manual add/edit).
+
+    Used after an analyst manually creates or edits an IOC, so its enrichment
+    badge reflects the current value. Does not trigger triage.
+    """
+    from incidents.services.ioc_enrichment import enrich_ioc
+    from incidents.models import IOC
+
+    try:
+        ioc = IOC.objects.get(id=ioc_id)
+    except IOC.DoesNotExist:
+        return
+    try:
+        result = enrich_ioc(ioc)
+        ioc.enrichment_data = result or {}
+        ioc.save(update_fields=["enrichment_data"])
+    except Exception as exc:
+        logger.warning("enrich_single_ioc: enrichment failed for IOC %s: %s", ioc_id, exc)
+
+
 @shared_task(bind=True, max_retries=3)
 def run_incident_triage(self, incident_id: int):
     from incidents.models import Comment, Incident
