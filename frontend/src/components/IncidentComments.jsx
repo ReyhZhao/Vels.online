@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../lib/axios';
 import MarkdownToolbar from './MarkdownToolbar';
+import { usePresence } from '../context/PresenceContext';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
@@ -40,12 +41,49 @@ function isDeletable(comment, currentUserId, isStaff) {
   return Date.now() - new Date(comment.created_at).getTime() < EDIT_WINDOW_MS;
 }
 
-function CommentItem({ comment, superseded = false, currentUserId, isStaff, onEdited, onDeleted }) {
+function CommentItem({ comment, superseded = false, currentUserId, isStaff, onEdited, onDeleted, editHolderName, presenceEnabled }) {
+  const presence = usePresence();
   const [editing, setEditing] = useState(false);
   const [editBody, setEditBody] = useState(comment.body);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  // Soft comment-edit lock (PRD #605 slice #609): when another analyst holds the
+  // lock we open a read-only editor attributed to them. Fails open.
+  const [readOnly, setReadOnly] = useState(false);
+  const [lockHolder, setLockHolder] = useState(null);
   const editRef = useRef(null);
+  const refreshTimer = useRef(null);
+
+  async function handleEditClick() {
+    if (presenceEnabled) {
+      const res = await presence.acquireLock(comment.id);
+      if (res.granted === false) {
+        setReadOnly(true);
+        setLockHolder(res.holder || 'another analyst');
+      } else {
+        setReadOnly(false);
+        setLockHolder(null);
+      }
+    }
+    setEditBody(comment.body);
+    setEditing(true);
+  }
+
+  function releaseAndClose() {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    if (presenceEnabled) presence.setViewing();
+    setEditing(false);
+    setReadOnly(false);
+    setLockHolder(null);
+  }
+
+  function handleEditKeystroke(value) {
+    setEditBody(value);
+    if (presenceEnabled && !readOnly) {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+      refreshTimer.current = setTimeout(() => presence.refreshLock(comment.id), 800);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -53,7 +91,7 @@ function CommentItem({ comment, superseded = false, currentUserId, isStaff, onEd
     try {
       const res = await api.patch(`/api/comments/${comment.id}/`, { body: editBody });
       onEdited(res.data);
-      setEditing(false);
+      releaseAndClose();
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to save.');
     } finally {
@@ -126,33 +164,47 @@ function CommentItem({ comment, superseded = false, currentUserId, isStaff, onEd
         </div>
       )}
 
+      {!comment.deleted_at && !editing && editHolderName && (
+        <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="comment-edit-marker">
+          🔒 {editHolderName} is editing this comment
+        </p>
+      )}
+
       {comment.deleted_at ? (
         <p className="text-sm italic text-muted-foreground">[deleted]</p>
       ) : editing ? (
         <div className="space-y-2">
-          <MarkdownToolbar textareaRef={editRef} value={editBody} onChange={setEditBody} />
+          {readOnly && (
+            <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="comment-lock-banner">
+              🔒 {lockHolder} is editing this comment
+            </p>
+          )}
+          <MarkdownToolbar textareaRef={editRef} value={editBody} onChange={handleEditKeystroke} />
           <textarea
             ref={editRef}
             value={editBody}
-            onChange={e => setEditBody(e.target.value)}
+            onChange={e => handleEditKeystroke(e.target.value)}
             rows={3}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+            readOnly={readOnly}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none disabled:opacity-50"
           />
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex gap-2">
+            {!readOnly && (
+              <button
+                onClick={handleSave}
+                disabled={saving || !editBody.trim()}
+                className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            )}
             <button
-              onClick={handleSave}
-              disabled={saving || !editBody.trim()}
-              className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              onClick={() => { setEditing(false); setEditBody(comment.body); }}
+              onClick={() => { releaseAndClose(); setEditBody(comment.body); }}
               disabled={saving}
               className="rounded-md border border-border px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
-              Cancel
+              {readOnly ? 'Close' : 'Cancel'}
             </button>
           </div>
         </div>
@@ -166,7 +218,7 @@ function CommentItem({ comment, superseded = false, currentUserId, isStaff, onEd
         <div className="flex gap-3 pt-1">
           {canEdit && (
             <button
-              onClick={() => setEditing(true)}
+              onClick={handleEditClick}
               className="text-xs text-muted-foreground hover:text-foreground"
             >
               Edit
@@ -188,12 +240,21 @@ function CommentItem({ comment, superseded = false, currentUserId, isStaff, onEd
   );
 }
 
-function CommentForm({ onSubmit }) {
+function CommentForm({ onSubmit, presenceEnabled }) {
+  const presence = usePresence();
   const [body, setBody] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const bodyRef = useRef(null);
+
+  // Composing a *new* comment is advisory "writing a comment" — never locked.
+  function handleFocus() {
+    if (presenceEnabled) presence.setActivity('editing', null);
+  }
+  function handleBlur() {
+    if (presenceEnabled) presence.setViewing();
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -204,6 +265,7 @@ function CommentForm({ onSubmit }) {
       await onSubmit({ body: body.trim(), is_internal: isInternal });
       setBody('');
       setIsInternal(false);
+      if (presenceEnabled) presence.setViewing();
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to post comment.');
     } finally {
@@ -219,6 +281,8 @@ function CommentForm({ onSubmit }) {
           ref={bodyRef}
           value={body}
           onChange={e => setBody(e.target.value)}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           placeholder="Add a comment…"
           rows={3}
           disabled={submitting}
@@ -251,9 +315,22 @@ function CommentForm({ onSubmit }) {
 }
 
 export default function IncidentComments({ incidentId, taskId, currentUserId, isStaff, refreshKey = 0 }) {
+  const presence = usePresence();
+  // Presence editing applies to the incident comment thread, not per-task threads.
+  const presenceEnabled = !taskId;
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Map of comment id -> display name of *another* analyst currently editing it.
+  const editHolderByComment = {};
+  if (presenceEnabled) {
+    for (const m of presence.roster ?? []) {
+      if (m.activity === 'editing' && m.target != null && m.actor_id !== currentUserId) {
+        editHolderByComment[m.target] = m.display_name;
+      }
+    }
+  }
 
   const url = taskId
     ? `/api/tasks/${taskId}/comments/`
@@ -309,11 +386,13 @@ export default function IncidentComments({ incidentId, taskId, currentUserId, is
               isStaff={isStaff}
               onEdited={handleEdited}
               onDeleted={handleDeleted}
+              editHolderName={editHolderByComment[c.id]}
+              presenceEnabled={presenceEnabled}
             />
           ))}
         </div>
       )}
-      <CommentForm onSubmit={handlePost} />
+      <CommentForm onSubmit={handlePost} presenceEnabled={presenceEnabled} />
     </div>
   );
 }

@@ -16,6 +16,9 @@ import ContactMessagesCard from '../components/ContactMessagesCard';
 import ContactComposeModal from '../components/ContactComposeModal';
 import IncidentAssistantDrawer from '../components/IncidentAssistantDrawer';
 import LinkedIncidents from '../components/LinkedIncidents';
+import PresenceRoster from '../components/PresenceRoster';
+import { PresenceContext } from '../context/PresenceContext';
+import useIncidentPresence from '../hooks/useIncidentPresence';
 
 const TRIAGE_STATES = new Set(['new', 'triaged']);
 
@@ -1340,6 +1343,8 @@ function SubjectDropdown({ incident, subjects, onSubjectChange, saving }) {
 export default function IncidentDetail() {
   const { displayId } = useParams();
   const { user } = useAuth();
+  // Incident Presence (PRD #605) — staff-only; non-staff open no stream.
+  const presence = useIncidentPresence(displayId, { enabled: !!user?.is_staff });
   const [incident, setIncident]           = useState(null);
   const [subjects, setSubjects]           = useState([]);
   const [loading, setLoading]             = useState(true);
@@ -1559,6 +1564,7 @@ export default function IncidentDetail() {
   const nextStates = ALLOWED_TRANSITIONS[incident.state] ?? [];
 
   return (
+    <PresenceContext.Provider value={presence}>
     <div className="space-y-6 p-6">
       {pendingClose && (
         <ClosureReasonDialog
@@ -1627,6 +1633,7 @@ export default function IncidentDetail() {
           <div className="min-w-0">
             <p className="font-mono text-xs text-muted-foreground">{incident.display_id}</p>
             <h1 className="mt-1 text-2xl font-semibold text-foreground">{incident.title}</h1>
+            <div className="mt-2"><PresenceRoster /></div>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
             {user?.is_staff && nextStates.map(({ state, label }) => (
@@ -1940,6 +1947,7 @@ export default function IncidentDetail() {
         </div>
       </div>
     </div>
+    </PresenceContext.Provider>
   );
 }
 

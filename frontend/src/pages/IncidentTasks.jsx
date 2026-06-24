@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
+import { usePresence } from '../context/PresenceContext';
 import IncidentComments from '../components/IncidentComments';
 
 const TASK_STATE_LABELS = {
@@ -799,10 +800,22 @@ function TemplatePicker({ incidentId, subjectId, onApplied }) {
 
 export default function IncidentTasks({ incidentId, subjectId, refreshKey }) {
   const { user } = useAuth();
+  const presence = usePresence();
   const [tasks, setTasks]               = useState([]);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
+
+  // Incident Presence (PRD #605 slice #607): focusing a task is advisory "working
+  // task N"; closing reverts to viewing. Debounced so rapid open/close doesn't flap.
+  // Never touches durable Task.state/assignee.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (selectedTask) presence.setActivity('working', selectedTask.id);
+      else presence.setViewing();
+    }, 400);
+    return () => clearTimeout(t);
+  }, [selectedTask, presence]);
 
   const loadTasks = useCallback(() => {
     setLoading(true);

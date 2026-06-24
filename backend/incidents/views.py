@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import threading
 
@@ -52,6 +53,7 @@ from .serializers import (
     TaskTemplateSerializer,
     TaskTemplateWriteSerializer,
 )
+from . import presence
 from .services.assets import link_asset_from_source_ref
 from .services.ioc_extraction import extract_and_save_iocs
 from .services.events import collapse_alert_linked_events, record_event
@@ -2398,12 +2400,19 @@ class IncidentAssistantView(AsyncAPIView):
         event_queue: asyncio.Queue = asyncio.Queue()
         cancel_event = threading.Event()
 
+        # Surface this Assistant run as a live AI roster member, attributed to the
+        # invoking analyst (PRD #605 slice #610). Dropped in _run_sync_loop's finally.
+        from incidents.presence_bridge import AIPresence, ASSISTANT_NAME
+        ai = AIPresence(incident.id, ASSISTANT_NAME, run_by=request.user.get_username())
+
         def on_event(event_dict):
+            ai.on_event(event_dict)
             loop.call_soon_threadsafe(event_queue.put_nowait, event_dict)
 
         def _run_sync_loop():
             from assistants.orchestrator import LoopCaps, research_notes, run_research_phase
             from incidents.llm.assistant_tools import build_incident_tools
+            ai.start()
             try:
                 if hasattr(provider, "chat"):
                     uses_native = getattr(provider, "uses_native_web_search", lambda: False)()
@@ -2442,6 +2451,7 @@ class IncidentAssistantView(AsyncAPIView):
                     "detail": "The incident assistant encountered an error.",
                 })
             finally:
+                ai.drop()
                 loop.call_soon_threadsafe(event_queue.put_nowait, None)
 
         thread = threading.Thread(target=_run_sync_loop, daemon=True)
@@ -2510,6 +2520,117 @@ class IncidentAssistantConfirmView(APIView):
             payload={"action_type": action_type, "label": action_label},
         )
         return Response({"recorded": True})
+
+
+# ── Incident Presence (PRD #605, ADR-0028) ────────────────────────────────────
+
+_PRESENCE_LOOP_SLEEP = 1.5
+_PRESENCE_IDLE_LOOP_LIMIT = 2400  # ~60 min safety bound on an abandoned socket
+
+
+class IncidentPresenceView(AsyncAPIView):
+    """Staff-only Incident Presence: SSE roster stream (GET) + activity/lock POST.
+
+    GET holds a long-lived SSE connection that heartbeats the viewer each ~1.5s,
+    polls the cache registry, and emits the full roster snapshot whenever it
+    changes (no resume/seq). POST declares a ``working``/``editing`` activity and,
+    for an existing comment, acquires the soft edit lock (409 if held by another).
+    Everything fails open: a cache outage degrades to an empty roster / unlocked
+    edit, never an error. The roster is never written to the IncidentEvent timeline.
+    """
+
+    schema = None
+
+    async def _resolve(self, request, display_id):
+        """Return (incident, error_response). Staff-gated + incident-access-gated."""
+        if not request.user.is_authenticated or not request.user.is_staff:
+            return None, Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            incident = await sync_to_async(Incident.objects.get)(display_id=display_id)
+        except Incident.DoesNotExist:
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not await sync_to_async(can_view_incident)(request.user, incident):
+            return None, Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return incident, None
+
+    async def get(self, request, display_id):
+        incident, err = await self._resolve(request, display_id)
+        if err:
+            return err
+
+        incident_id = incident.id
+        user = request.user
+        actor_key = presence.human_actor_key(user.id)
+        display_name = user.get_username()
+        user_id = user.id
+
+        beat = sync_to_async(presence.heartbeat)
+        get_roster = sync_to_async(presence.roster)
+        drop = sync_to_async(presence.drop)
+
+        async def event_stream():
+            last_payload = None
+            idle = 0
+            try:
+                while True:
+                    await beat(
+                        incident_id, actor_key,
+                        display_name=display_name, actor_id=user_id,
+                    )
+                    snapshot = await get_roster(incident_id)
+                    payload = json.dumps(snapshot, sort_keys=True)
+                    if payload != last_payload:
+                        last_payload = payload
+                        yield f"event: roster\ndata: {payload}\n\n"
+                        idle = 0
+                    else:
+                        idle += 1
+                        if idle > _PRESENCE_IDLE_LOOP_LIMIT:
+                            return
+                    await asyncio.sleep(_PRESENCE_LOOP_SLEEP)
+            finally:
+                await drop(incident_id, actor_key)
+
+        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+        response["X-Accel-Buffering"] = "no"
+        response["Cache-Control"] = "no-cache"
+        return response
+
+    async def post(self, request, display_id):
+        incident, err = await self._resolve(request, display_id)
+        if err:
+            return err
+
+        incident_id = incident.id
+        user = request.user
+        actor_key = presence.human_actor_key(user.id)
+        display_name = user.get_username()
+
+        activity = request.data.get("activity")
+        target = request.data.get("target")
+        if activity not in presence.VALID_ACTIVITIES:
+            return Response({"detail": "Invalid activity."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Editing an *existing* comment (target present) is the soft-lock path.
+        if activity == presence.ACTIVITY_EDITING and target is not None:
+            granted, holder = await sync_to_async(presence.acquire_comment_lock)(
+                incident_id, actor_key, target,
+                display_name=display_name, actor_id=user.id,
+            )
+            if not granted:
+                return Response(
+                    {"detail": "Comment is being edited by another analyst.",
+                     "holder": (holder or {}).get("display_name")},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            return Response({"granted": True})
+
+        # Advisory facets: working a task, or composing a new comment (editing/no target).
+        await sync_to_async(presence.set_activity)(
+            incident_id, actor_key, activity, target,
+            display_name=display_name, actor_id=user.id,
+        )
+        return Response({"ok": True})
 
 
 class NatExposureListView(APIView):

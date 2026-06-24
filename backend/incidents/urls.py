@@ -23,6 +23,7 @@ from .views import (
     IncidentIOCListView,
     IncidentLinkedAlertsView,
     IncidentListView,
+    IncidentPresenceView,
     IncidentTaskListView,
     IncidentTimelineView,
     IncidentChangeOrgView,
@@ -64,6 +65,7 @@ urlpatterns = [
     path("<str:display_id>/contact-messages/", IncidentContactMessageListView.as_view()),
     path("<str:display_id>/contact-messages/mark-read/", IncidentContactMessageMarkReadView.as_view()),
     path("<str:display_id>/alerts/", IncidentLinkedAlertsView.as_view()),
+    path("<str:display_id>/presence/", IncidentPresenceView.as_view()),
     path("<str:display_id>/assistant/", IncidentAssistantView.as_view()),
     path("<str:display_id>/assistant-confirm/", IncidentAssistantConfirmView.as_view()),
 ]

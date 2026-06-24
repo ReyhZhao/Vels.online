@@ -198,18 +198,23 @@ def run_triage_work(incident_id, *, provider=None, os_client=None, wazuh_client=
 
     try:
         from incidents.llm.triage_tools import build_triage_tools
+        from incidents.presence_bridge import ai_presence, TRIAGE_AGENT_NAME
         contained = {"flag": False}
         tools = build_triage_tools(
             incident, grounding, include_web_search=not uses_native,
             os_client=os_client, wazuh_client=wazuh_client,
             on_contained=lambda: contained.update(flag=True),
         )
-        research = run_research_phase(
-            provider, tools,
-            [{"role": "system", "content": TRIAGE_AGENT_SYS_PROMPT},
-             {"role": "user", "content": _user_brief(grounding)}],
-            caps or triage_agent_caps(),
-        )
+        # Surface this re-run as a live AI roster member while it works the incident
+        # (PRD #605 slice #610). Dropped in the context manager's finally / TTL backstop.
+        with ai_presence(incident.id, TRIAGE_AGENT_NAME) as ai:
+            research = run_research_phase(
+                provider, tools,
+                [{"role": "system", "content": TRIAGE_AGENT_SYS_PROMPT},
+                 {"role": "user", "content": _user_brief(grounding)}],
+                caps or triage_agent_caps(),
+                on_event=ai.on_event,
+            )
         # The agent lands the incident in pending_closure when it judged the threat
         # contained, otherwise in_progress for a human to continue (ADR-0025).
         target_state = (
