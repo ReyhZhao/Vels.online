@@ -1,3 +1,4 @@
+import json
 import re
 from urllib.parse import urlparse
 
@@ -37,12 +38,40 @@ def _url_hostname(url: str) -> str:
         return ""
 
 
+def _alert_evidence_text(incident) -> str:
+    """Collect IOC-bearing evidence from an incident's linked Alerts (#601).
+
+    Some incidents carry their indicators on the linked Alerts rather than in the
+    incident title/description — notably scheduled-search incidents, whose title/description
+    are a generated rule summary. Each Alert's raw `source_ref` (the Wazuh `_source` doc,
+    e.g. data.srcip/data.dstip/data.url) and its normalised entity envelope are flattened
+    into a text blob so find_iocs can surface them. Benefits any incident whose evidence
+    lives on its alerts, not just scheduled-search.
+    """
+    alerts_rel = getattr(incident, "alerts", None)
+    if alerts_rel is None:
+        return ""
+
+    parts = []
+    for alert in alerts_rel.all().prefetch_related("entities"):
+        source_ref = alert.source_ref
+        if isinstance(source_ref, dict) and source_ref:
+            try:
+                parts.append(json.dumps(source_ref, default=str))
+            except (TypeError, ValueError):
+                pass
+        for entity in alert.entities.all():
+            if entity.value:
+                parts.append(entity.value)
+    return "\n".join(parts)
+
+
 def extract_and_save_iocs(incident):
     from incidents.models import IOC
 
     owned_ips, owned_domains = _owned_assets(incident.organization)
 
-    text = f"{incident.title}\n{incident.description}"
+    text = f"{incident.title}\n{incident.description}\n{_alert_evidence_text(incident)}"
     found = find_iocs(text)
 
     iocs = []

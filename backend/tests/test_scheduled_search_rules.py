@@ -2604,3 +2604,100 @@ class TestTimeOfDayWindowSerializer:
         assert resp.status_code == 201, resp.data
         rule = SearchRule.objects.get(pk=resp.data["id"])
         assert rule.has_time_window is False
+
+
+# ── #601: scheduled-search IOC extraction + Host Asset linking ─────────────────
+
+_ENRICH_HIT = {
+    "_id": "doc-enrich-1",
+    "_index": "wazuh-alerts-4.x-2026.06.01",
+    "_source": {
+        "agent": {"id": "001", "name": "web-01"},
+        "rule": {"description": "suspicious outbound", "level": 10},
+        "data": {
+            "srcip": "203.0.113.45",
+            "dstip": "198.51.100.7",
+            "url": "http://malware.example.org/payload",
+        },
+        "@timestamp": "2026-06-06T10:00:00Z",
+    },
+}
+
+
+@pytest.mark.django_db
+class TestSearchIncidentEnrichment:
+    """#601: a scheduled-search incident extracts IOCs and links Host Assets from its
+    alerts' evidence (source_ref), not just its generated title/description."""
+
+    def _run(self, rule, org, hits):
+        from correlations.services.search_evaluator import run
+        # NB: extract_and_save_iocs is intentionally NOT patched here so the real
+        # enrichment runs against the materialised alerts' source_ref.
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response(hits=hits)
+            return run(rule, org)
+
+    def test_public_ip_extracted_as_ioc(self, rule, org):
+        from incidents.models import IOC
+        incident = self._run(rule, org, [_ENRICH_HIT])
+        ips = set(
+            IOC.objects.filter(incident=incident, kind=IOC.KIND_IP).values_list("value", flat=True)
+        )
+        assert "203.0.113.45" in ips
+        assert "198.51.100.7" in ips
+
+    def test_domain_and_url_extracted(self, rule, org):
+        from incidents.models import IOC
+        incident = self._run(rule, org, [_ENRICH_HIT])
+        domains = set(
+            IOC.objects.filter(incident=incident, kind=IOC.KIND_DOMAIN).values_list("value", flat=True)
+        )
+        urls = set(
+            IOC.objects.filter(incident=incident, kind=IOC.KIND_URL).values_list("value", flat=True)
+        )
+        assert "malware.example.org" in domains
+        assert any("malware.example.org" in u for u in urls)
+
+    def test_owned_asset_ip_excluded(self, rule, org):
+        from incidents.models import Asset, IOC
+        Asset.objects.create(
+            organization=org, kind=Asset.KIND_HOST, name="owned",
+            agent_name="owned-host", ip_address="203.0.113.45", is_active=True,
+        )
+        incident = self._run(rule, org, [_ENRICH_HIT])
+        ips = set(
+            IOC.objects.filter(incident=incident, kind=IOC.KIND_IP).values_list("value", flat=True)
+        )
+        assert "203.0.113.45" not in ips   # owned → excluded
+        assert "198.51.100.7" in ips       # not owned → kept
+
+    def test_host_asset_linked(self, rule, org):
+        from incidents.models import Asset, IncidentAsset
+        incident = self._run(rule, org, [_ENRICH_HIT])
+        asset = Asset.objects.get(organization=org, kind=Asset.KIND_HOST, agent_name="web-01")
+        assert IncidentAsset.objects.filter(incident=incident, asset=asset).exists()
+
+    def test_fold_in_enriches_existing_incident(self, rule, org):
+        from incidents.models import IOC
+        first = self._run(rule, org, [_ENRICH_HIT])
+        second_hit = {
+            "_id": "doc-enrich-2",
+            "_index": "wazuh-alerts-4.x-2026.06.01",
+            "_source": {
+                "agent": {"id": "001", "name": "web-01"},
+                "rule": {"description": "suspicious outbound", "level": 10},
+                "data": {"srcip": "192.0.2.123"},
+                "@timestamp": "2026-06-06T10:05:00Z",
+            },
+        }
+        incident = self._run(rule, org, [second_hit])
+        assert incident.id == first.id  # folded into the open incident
+        ips = set(
+            IOC.objects.filter(incident=incident, kind=IOC.KIND_IP).values_list("value", flat=True)
+        )
+        assert "192.0.2.123" in ips  # the folded-in alert's IP was extracted too

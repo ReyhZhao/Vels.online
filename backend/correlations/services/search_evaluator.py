@@ -152,6 +152,22 @@ def compose_absence_description(rule, leg, window_start, now, matched_count) -> 
     return "\n".join(line for line in lines if line is not None).rstrip() + "\n"
 
 
+def _enrich_incident_from_alerts(incident, new_alerts):
+    """Link Host Assets and extract IOCs from a scheduled-search incident's evidence (#601).
+
+    The incident's title/description are a generated rule summary; the indicators and the
+    host identity live on each materialised Alert's raw source_ref (the Wazuh _source doc).
+    Must run AFTER the alerts are linked to the incident so the IOC extractor can reach
+    them. Both linkers are idempotent, so it is safe on the live-firing fold-in path too.
+    """
+    from incidents.services.assets import link_asset_from_source_ref
+    from incidents.services.ioc_extraction import extract_and_save_iocs
+
+    for alert in new_alerts:
+        link_asset_from_source_ref(incident, "scheduled_search", alert.source_ref)
+    extract_and_save_iocs(incident)
+
+
 def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinct_info=None, novelty_info=None):
     """Persist alerts for *hits* and create/update an Incident for the given key_value.
 
@@ -169,7 +185,6 @@ def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinc
     from incidents.serializers import IncidentCreateSerializer
     from incidents.services.events import record_event
     from incidents.services.identifiers import next_display_id
-    from incidents.services.ioc_extraction import extract_and_save_iocs
     from incidents.tasks import acquire_triage_lock, enrich_iocs_then_triage
 
     with transaction.atomic():
@@ -261,6 +276,9 @@ def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinc
                 finding_count=len(new_alerts),
             )
 
+            # Enrich the live incident from the newly-folded-in alerts' evidence (#601).
+            _enrich_incident_from_alerts(incident, new_alerts)
+
             return incident
 
         # No live incident — create a fresh one.
@@ -338,7 +356,9 @@ def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinc
             finding_count=len(new_alerts),
         )
 
-        extract_and_save_iocs(incident)
+        # Link Host Assets + extract IOCs from the materialised alerts' evidence (#601),
+        # after the alerts are linked above so the evidence is reachable.
+        _enrich_incident_from_alerts(incident, new_alerts)
         if acquire_triage_lock(incident.id):
             incident_id = incident.id
             transaction.on_commit(lambda: enrich_iocs_then_triage.delay(incident_id))

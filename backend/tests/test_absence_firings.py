@@ -219,6 +219,26 @@ class TestAbsenceFiring:
         assert payload["source_kind"] == "scheduled_search"
         assert payload["description"] == incident.description
 
+    def test_absence_produces_no_iocs_or_assets(self, org):
+        """#601: an Absence Firing has no alerts, so enrichment yields no IOCs/asset links."""
+        from incidents.models import IOC, IncidentAsset
+        rule = _absence_rule(org)
+
+        # Run with real (unpatched) IOC extraction — there is nothing to extract from.
+        from correlations.services.search_evaluator import run
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _empty_os_response()
+            incident = run(rule, org)
+
+        assert incident is not None
+        assert IOC.objects.filter(incident=incident).count() == 0
+        assert IncidentAsset.objects.filter(incident=incident).count() == 0
+
 
 # ── Description composer ──────────────────────────────────────────────────────
 
