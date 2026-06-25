@@ -14,7 +14,7 @@ def build_incident_grounding(incident) -> dict:
 
     Recomputed server-side every turn; never read from the client.
     """
-    from incidents.models import Incident, TaskTemplate
+    from incidents.models import Incident, ReportTemplate, TaskTemplate
 
     assets = [
         {
@@ -70,6 +70,13 @@ def build_incident_grounding(incident) -> dict:
                 "item_count": tmpl.items.count(),
             })
 
+    # Global report templates the assistant may propose generating a Report from
+    # (PRD #625). The assistant proposes; the analyst confirms (ADR-0029/0012).
+    available_report_templates = [
+        {"id": t.id, "name": t.name, "audience": t.audience}
+        for t in ReportTemplate.objects.filter(organization__isnull=True, archived=False)
+    ]
+
     allowed_transitions = sorted(ALLOWED_TRANSITIONS.get(incident.state, set()))
     closure_reasons = [value for value, _ in Incident.CLOSURE_REASON_CHOICES]
 
@@ -103,6 +110,7 @@ def build_incident_grounding(incident) -> dict:
         "tasks": tasks,
         "applied_templates": applied_templates,
         "available_templates": available_templates,
+        "available_report_templates": available_report_templates,
         "allowed_transitions": allowed_transitions,
         "closure_reasons": closure_reasons,
         "field_allowlist": sorted(ASSISTANT_FIELD_ALLOWLIST),

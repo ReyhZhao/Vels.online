@@ -507,3 +507,58 @@ class AttachmentSerializer(serializers.ModelSerializer):
 
     def get_uploader_username(self, obj):
         return obj.uploader.username if obj.uploader else None
+
+
+# ── Incident Reporting (PRD #618, ADR-0029) ───────────────────────────────────
+
+from .models import Report, ReportTemplate  # noqa: E402
+
+
+class ReportTemplateSerializer(serializers.ModelSerializer):
+    created_by_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReportTemplate
+        fields = [
+            "id", "name", "audience", "sections",
+            "intro_text", "outro_text", "recommendations_text",
+            "archived", "created_by", "created_by_username",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "created_by", "created_by_username", "created_at", "updated_at"]
+
+    def get_created_by_username(self, obj):
+        return obj.created_by.username if obj.created_by else None
+
+    def validate_sections(self, value):
+        from .services.report_sections import catalog_kinds
+
+        if not isinstance(value, list):
+            raise serializers.ValidationError("sections must be a list of section kinds.")
+        valid = set(catalog_kinds())
+        for kind in value:
+            if kind not in valid:
+                raise serializers.ValidationError(
+                    f"Unknown section kind '{kind}'. Valid kinds: {', '.join(sorted(valid))}."
+                )
+        return value
+
+
+class ReportSerializer(serializers.ModelSerializer):
+    generated_by_username = serializers.SerializerMethodField()
+    incident_display_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Report
+        fields = [
+            "id", "reference_id", "template", "template_name", "audience",
+            "tlp", "incident_state", "incident_display_id",
+            "generated_by", "generated_by_username", "generated_at", "size_bytes",
+        ]
+        read_only_fields = fields
+
+    def get_generated_by_username(self, obj):
+        return obj.generated_by.username if obj.generated_by else None
+
+    def get_incident_display_id(self, obj):
+        return obj.incident.display_id

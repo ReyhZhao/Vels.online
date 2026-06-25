@@ -559,3 +559,104 @@ class WazuhResponseExecution(models.Model):
 
     def __str__(self):
         return f"WazuhExecution {self.pk} ({self.wazuh_response})"
+
+
+# ── Incident Reporting (PRD #618, ADR-0029) ───────────────────────────────────
+
+
+class ReportTemplate(models.Model):
+    """SOC-authored, global report template (ADR-0029).
+
+    Composed from a fixed catalog of section kinds (never raw markup) plus
+    free-text intro/outro/recommendations blocks. ``audience`` fixes the
+    visibility floor once, at authoring time: a ``customer`` template renders
+    only what an org member could see; an ``internal`` template renders full
+    fidelity. Global in v1 (``organization = null``, like a System Rule) —
+    tenants cannot author templates.
+    """
+
+    AUDIENCE_CUSTOMER = "customer"
+    AUDIENCE_INTERNAL = "internal"
+    AUDIENCE_CHOICES = [
+        (AUDIENCE_CUSTOMER, "Customer"),
+        (AUDIENCE_INTERNAL, "Internal"),
+    ]
+
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="report_templates",
+    )
+    name = models.CharField(max_length=255)
+    audience = models.CharField(
+        max_length=20, choices=AUDIENCE_CHOICES, default=AUDIENCE_CUSTOMER
+    )
+    # Ordered list of section-kind strings drawn from the server-side catalog
+    # (incidents.services.report_sections.SECTION_CATALOG). Ordering is honored
+    # at render time.
+    sections = models.JSONField(default=list, blank=True)
+    intro_text = models.TextField(blank=True, default="")
+    outro_text = models.TextField(blank=True, default="")
+    recommendations_text = models.TextField(blank=True, default="")
+    archived = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_report_templates",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.audience})"
+
+
+class Report(models.Model):
+    """An immutable, point-in-time PDF snapshot of one Incident (ADR-0029).
+
+    Denormalized at generation so editing or deleting the source template never
+    alters the historical record of what was shared. Stores the rendered PDF via
+    the same object-storage backend as Attachments, but is its own entity (not an
+    Attachment row).
+    """
+
+    AUDIENCE_CUSTOMER = ReportTemplate.AUDIENCE_CUSTOMER
+    AUDIENCE_INTERNAL = ReportTemplate.AUDIENCE_INTERNAL
+
+    incident = models.ForeignKey(
+        Incident, on_delete=models.CASCADE, related_name="reports"
+    )
+    template = models.ForeignKey(
+        ReportTemplate, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="reports",
+    )
+    # Denormalized snapshot — preserved even if the template is later edited/deleted.
+    reference_id = models.CharField(max_length=32, unique=True, blank=True)
+    template_name = models.CharField(max_length=255)
+    audience = models.CharField(
+        max_length=20, choices=ReportTemplate.AUDIENCE_CHOICES
+    )
+    tlp = models.CharField(max_length=10)
+    incident_state = models.CharField(max_length=20)
+    # LLM-generated executive summary prose, frozen at generation (PRD #621). Never
+    # re-run when an existing Report is viewed/downloaded later.
+    executive_summary = models.TextField(blank=True, default="")
+    # The rendered section contexts, frozen for audit/immutability.
+    content = models.JSONField(default=dict, blank=True)
+    s3_key = models.CharField(max_length=500, unique=True)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    generated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="generated_reports",
+    )
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-generated_at"]
+        indexes = [
+            models.Index(fields=["incident", "generated_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.reference_id} ({self.incident.display_id})"

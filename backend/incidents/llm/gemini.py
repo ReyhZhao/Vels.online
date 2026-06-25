@@ -134,6 +134,25 @@ Do NOT include a salutation or sign-off — just the body text.
 Return only the message text. No JSON, no markdown, no code fences.
 """
 
+REPORT_SUMMARY_SYSTEM_PROMPT = """\
+You are a senior security analyst writing the executive summary of an incident report.
+
+You are given an audience-filtered grounding as JSON. It contains ONLY the content the \
+report's audience is permitted to see — there is no hidden internal material. Write a clear, \
+factual executive summary (2-5 sentences) of what happened on this incident, drawing strictly \
+from the grounding provided.
+
+The summary should:
+- Open with what the incident was about and its severity
+- Summarise the sequence of what happened and what was done, based only on the grounding
+- Be readable by the report's audience (a customer audience must not be told internal SOC detail —
+  but you only have access to audience-appropriate content here anyway)
+
+Never invent facts not present in the grounding. Do NOT speculate about internal findings. \
+Do NOT include a heading, salutation, or sign-off — just the summary prose.
+Return only the summary text. No JSON, no markdown, no code fences.
+"""
+
 RESIDUAL_GROUPING_SYSTEM_PROMPT = """\
 You are a senior security analyst performing threat detection over a batch of unprocessed security alerts. \
 Each alert has not been linked to an incident by any automated rule. \
@@ -372,6 +391,25 @@ def _parse_assistant_result(data: dict, grounding: dict) -> AssistantResult:
                 label=item.get("label", f"Send message to {contact_name}"),
                 payload={"contact_id": contact_id, "message": message, "contact_name": contact_name},
             ))
+        elif action_type == "propose_generate_report":
+            template_id = item.get("template_id")
+            available = grounding.get("available_report_templates", [])
+            available_ids = {t["id"] for t in available}
+            if template_id not in available_ids:
+                warnings.append(
+                    f"Proposed report template id {template_id!r} is not available; skipped."
+                )
+                continue
+            tmpl = next((t for t in available if t["id"] == template_id), None)
+            proposed_actions.append(ProposedAction(
+                type="propose_generate_report",
+                label=item.get("label", f"Generate report '{tmpl['name']}'"),
+                payload={
+                    "template_id": template_id,
+                    "template_name": tmpl["name"],
+                    "audience": tmpl["audience"],
+                },
+            ))
         else:
             warnings.append(f"Unknown proposed action type '{action_type}'; skipped.")
 
@@ -389,10 +427,16 @@ def _build_assistant_system_prompt(grounding: dict) -> str:
     field_allowlist = grounding.get("field_allowlist", [])
     closure_reasons = grounding.get("closure_reasons", [])
     contacts = grounding.get("contacts", [])
+    report_templates = grounding.get("available_report_templates", [])
 
     template_lines = "\n".join(
         f'  - id={t["id"]}: "{t["name"]}" ({t["item_count"]} tasks)'
         for t in available_templates
+    ) or "  (none)"
+
+    report_template_lines = "\n".join(
+        f'  - id={t["id"]}: "{t["name"]}" ({t["audience"]} audience)'
+        for t in report_templates
     ) or "  (none)"
 
     contact_lines = "\n".join(
@@ -469,6 +513,13 @@ Each proposed action must be one of these shapes:
     The contact_id MUST be one of the contacts already attached to this incident:
 {contact_lines}
     This is an externally visible action. Only propose it when there is a clear reason to notify a contact.
+
+  Propose generating an incident report (PDF) from a report template:
+    {{"type": "propose_generate_report", "template_id": <integer id>, "label": "<short human label>"}}
+    Available report templates:
+{report_template_lines}
+    This produces an outward-facing document — always a proposal the analyst confirms, never
+    generated unattended. Pick a template whose audience suits the request (customer vs internal).
 
 Rules:
 - Only propose actions from the shapes above. Never invent action types.
@@ -713,6 +764,20 @@ class GeminiTriageProvider(BaseTriageProvider):
             return response.text.strip()
         except Exception as exc:
             raise TriageError(f"Gemini closure message error: {exc}") from exc
+
+    def generate_report_summary(self, grounding: dict) -> str:
+        prompt = json.dumps(grounding, indent=2)
+        try:
+            response = self._client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=REPORT_SUMMARY_SYSTEM_PROMPT,
+                ),
+            )
+            return response.text.strip()
+        except Exception as exc:
+            raise TriageError(f"Gemini report summary error: {exc}") from exc
 
 
 def _parse_residual_grouping_result(data: dict) -> ResidualGroupingResult:

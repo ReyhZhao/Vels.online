@@ -21,3 +21,23 @@ def next_display_id():
         else:
             seq = 1
         return f"{prefix}{seq:04d}"
+
+
+def next_report_reference_id():
+    from incidents.models import Report
+
+    year = timezone.now().year
+    prefix = f"REP-{year}-"
+
+    with transaction.atomic():
+        last = (
+            Report.objects.select_for_update()
+            .filter(reference_id__startswith=prefix)
+            .order_by("-reference_id")
+            .first()
+        )
+        if last:
+            seq = int(last.reference_id.split("-")[-1]) + 1
+        else:
+            seq = 1
+        return f"{prefix}{seq:04d}"

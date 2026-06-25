@@ -16,6 +16,7 @@ from .base import (
 from .gemini import (
     CLOSURE_MESSAGE_SYSTEM_PROMPT,
     CORRELATION_SYSTEM_PROMPT,
+    REPORT_SUMMARY_SYSTEM_PROMPT,
     RESIDUAL_GROUPING_SYSTEM_PROMPT,
     TASK_SUMMARY_SYSTEM_PROMPT,
     _build_assistant_system_prompt,
@@ -206,6 +207,20 @@ class OllamaTriageProvider(BaseTriageProvider):
             return response.message.content.strip()
         except Exception as exc:
             raise TriageError(f"Ollama closure message error: {exc}") from exc
+
+    def generate_report_summary(self, grounding: dict) -> str:
+        prompt = json.dumps(grounding, indent=2)
+        try:
+            response = self._client.chat(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": REPORT_SUMMARY_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return response.message.content.strip()
+        except Exception as exc:
+            raise TriageError(f"Ollama report summary error: {exc}") from exc
 
     # ── agentic loop (ADR-0011) ──────────────────────────────────────────────
     def uses_native_web_search(self) -> bool:

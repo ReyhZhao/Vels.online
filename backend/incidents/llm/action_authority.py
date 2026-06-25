@@ -26,6 +26,9 @@ PROPOSE_ACTIONS = frozenset({
     "send_contact_message",
     "create_exception",
     "close",
+    # Generating an outward-facing Report must be confirmed by the analyst (ADR-0029);
+    # the Triage Agent never generates Reports (ADR-0025 boundary holds).
+    "propose_generate_report",
 })
 
 

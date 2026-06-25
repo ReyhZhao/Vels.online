@@ -29,7 +29,7 @@ from security.models import Organization, OrganizationMembership
 from django.contrib.auth.models import User
 
 from .filters import AssetFilterSet, IncidentFilterSet, TaskFilterSet, TaskTemplateFilterSet
-from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, NatExposure, Subject, Task, TaskTemplate, TaskTemplateItem, WazuhResponseExecution
+from .models import Asset, Attachment, Comment, IOC, Incident, IncidentAsset, IncidentDelegation, IncidentEvent, NatExposure, Report, ReportTemplate, Subject, Task, TaskTemplate, TaskTemplateItem, WazuhResponseExecution
 from .serializers import (
     AssetSerializer,
     NatExposureSerializer,
@@ -44,6 +44,8 @@ from .serializers import (
     IncidentUpdateSerializer,
     IOCSerializer,
     IOCWriteSerializer,
+    ReportSerializer,
+    ReportTemplateSerializer,
     SubjectCreateSerializer,
     SubjectSerializer,
     SubjectUpdateSerializer,
@@ -2718,3 +2720,181 @@ class NatExposureDetailView(APIView):
             return err
         nat.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Incident Reporting (PRD #618, ADR-0029) ───────────────────────────────────
+
+
+def _require_staff(request):
+    err = _require_auth(request)
+    if err:
+        return err
+    if not request.user.is_staff:
+        return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+    return None
+
+
+class ReportSectionCatalogView(APIView):
+    """Staff-only: the server-defined catalog of selectable Report section kinds.
+
+    The authoring UI lists whatever the catalog registers (#626).
+    """
+
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        from .services.report_sections import SECTION_TITLES, catalog_kinds
+
+        return Response([
+            {"kind": kind, "title": SECTION_TITLES.get(kind, kind)}
+            for kind in catalog_kinds()
+        ])
+
+
+class ReportTemplateListView(APIView):
+    """Staff-only CRUD entry for global Report Templates (ADR-0029)."""
+
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        qs = ReportTemplate.objects.all()
+        if request.query_params.get("include_archived") not in ("1", "true", "True"):
+            qs = qs.filter(archived=False)
+        return Response(ReportTemplateSerializer(qs, many=True).data)
+
+    def post(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        ser = ReportTemplateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        # Templates are global in v1 — organization stays null regardless of input.
+        template = ser.save(created_by=request.user, organization=None)
+        return Response(ReportTemplateSerializer(template).data, status=status.HTTP_201_CREATED)
+
+
+class ReportTemplateDetailView(APIView):
+    """Staff-only retrieve/update/delete of a global Report Template (#626)."""
+
+    def _get(self, request):
+        err = _require_staff(request)
+        if err:
+            return None, err
+        return None, None
+
+    def get(self, request, pk):
+        _, err = self._get(request)
+        if err:
+            return err
+        try:
+            template = ReportTemplate.objects.get(pk=pk)
+        except ReportTemplate.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ReportTemplateSerializer(template).data)
+
+    def patch(self, request, pk):
+        _, err = self._get(request)
+        if err:
+            return err
+        try:
+            template = ReportTemplate.objects.get(pk=pk)
+        except ReportTemplate.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        ser = ReportTemplateSerializer(instance=template, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response(ReportTemplateSerializer(template).data)
+
+    def delete(self, request, pk):
+        _, err = self._get(request)
+        if err:
+            return err
+        try:
+            template = ReportTemplate.objects.get(pk=pk)
+        except ReportTemplate.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        # Reports keep their denormalized snapshot (template FK is SET_NULL), so
+        # deleting a template never destroys the historical record of what was shared.
+        template.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _reports_for_user(incident, user):
+    """Reports an actor may see for an incident.
+
+    Staff see all audiences. Org members see only ``customer``-Audience Reports
+    (and only reach here for incidents can_view_incident already allows, which
+    excludes TLP:RED for them) — ``internal`` Reports are never listed (#624).
+    """
+    qs = incident.reports.select_related("generated_by", "incident").all()
+    if not user.is_staff:
+        qs = qs.filter(audience=Report.AUDIENCE_CUSTOMER)
+    return qs
+
+
+class IncidentReportListView(APIView):
+    """List an incident's Reports; staff may generate a new one (#619, #624)."""
+
+    def get(self, request, display_id):
+        incident, err = _get_incident_for_user(request, display_id)
+        if err:
+            return err
+        reports = _reports_for_user(incident, request.user)
+        return Response(ReportSerializer(reports, many=True).data)
+
+    def post(self, request, display_id):
+        # Generation is a staff action.
+        err = _require_staff(request)
+        if err:
+            return err
+        incident, err = _get_incident_for_user(request, display_id)
+        if err:
+            return err
+
+        template_id = request.data.get("template_id") or request.data.get("template")
+        if not template_id:
+            return Response({"detail": "template_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            template = ReportTemplate.objects.get(pk=template_id)
+        except (ReportTemplate.DoesNotExist, ValueError, TypeError):
+            return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        from .services.reports import ReportGenerationError, generate_report
+
+        try:
+            report = generate_report(incident, template, actor=request.user)
+        except ReportGenerationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Error generating report for incident=%s", display_id)
+            return Response(
+                {"detail": "Internal error generating report."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
+
+class IncidentReportDownloadView(APIView):
+    """Issue a presigned download URL for a Report PDF, audience-gated (#619, #624)."""
+
+    def get(self, request, display_id, pk):
+        incident, err = _get_incident_for_user(request, display_id)
+        if err:
+            return err
+        try:
+            report = _reports_for_user(incident, request.user).get(pk=pk)
+        except Report.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        from .services.reports import issue_report_download_url
+
+        try:
+            url = issue_report_download_url(report)
+        except Exception:
+            logger.exception("Error generating report download URL for report=%s", pk)
+            return Response(
+                {"detail": "Internal error generating download link."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return Response({"url": url})

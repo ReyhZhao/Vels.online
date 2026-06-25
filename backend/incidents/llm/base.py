@@ -115,6 +115,13 @@ class BaseTriageProvider(ABC):
         """Generate a plain-language closure notification for a non-technical reporter. Returns empty string by default."""
         return ""
 
+    def generate_report_summary(self, grounding: dict) -> str:
+        """Generate an incident Report's executive summary from an audience-filtered
+        grounding (PRD #621). MUST be grounded only on what it is passed — callers
+        feed it ``build_report_grounding`` output, never ``build_incident_grounding``.
+        Returns empty string by default."""
+        return ""
+
     def assist_incident(self, messages: list, grounding: dict) -> AssistantResult:
         """Conversational assistant grounded in an incident's current state. Override in providers that support it."""
         return AssistantResult(assistant_reply="Assistant is not available for this provider.")
