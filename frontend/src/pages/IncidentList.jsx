@@ -6,6 +6,7 @@ import { useOrganization } from '../context/OrgContext';
 import SLAPill from '../components/SLAPill';
 import CreateIncidentModal from '../components/CreateIncidentModal';
 import { OnCallWidgetCompact } from '../components/OnCallWidget';
+import IncidentTrendChart from '../components/IncidentTrendChart';
 
 // Keys that are persisted as user preferences (excludes transient keys like page, q)
 const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'org', 'created_within', 'sort', 'order'];
@@ -684,6 +685,8 @@ export default function IncidentList() {
           <OnCallWidgetCompact />
         </div>
       )}
+
+      <IncidentTrendChart searchParams={searchParams} />
 
       <div className="flex flex-wrap gap-2 items-center">
         <input

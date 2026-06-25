@@ -69,6 +69,8 @@ from .services.delegation import delegate, return_delegation
 from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
 from .services.change_org import change_incident_org
+from .services.incident_queryset import build_incident_queryset
+from .services.incident_trend import compute_incident_trend
 from .services.visibility import can_view_incident, filter_comments_for_user, filter_events_for_user, filter_incidents_for_user
 from .tasks import acquire_triage_lock, enrich_iocs_then_triage, enrich_single_ioc, run_incident_triage
 
@@ -379,29 +381,7 @@ class IncidentListView(ListAPIView):
             _task_count=Count("tasks", distinct=True),
             _contact_count=Count("incident_contacts", distinct=True),
         )
-        qs = filter_incidents_for_user(qs, self.request.user)
-
-        tab = self.request.query_params.get("tab", "all")
-        explicit_states = [
-            c.strip()
-            for v in self.request.query_params.getlist("state")
-            for c in v.split(",") if c.strip()
-        ]
-        if tab == "my_queue":
-            delegated = IncidentDelegation.objects.filter(
-                user=self.request.user, returned_at__isnull=True
-            ).values_list("incident_id", flat=True)
-            qs = qs.filter(Q(assignee=self.request.user) | Q(id__in=delegated))
-            if not explicit_states:
-                qs = qs.exclude(state="closed")
-        elif tab == "unassigned":
-            qs = qs.filter(assignee__isnull=True)
-            if not explicit_states:
-                qs = qs.exclude(state="closed")
-        else:
-            if not explicit_states:
-                qs = qs.exclude(state="closed")
-        return qs
+        return build_incident_queryset(self.request.user, self.request.query_params, base_qs=qs)
 
     def filter_queryset(self, queryset):
         qs = super().filter_queryset(queryset)
@@ -489,6 +469,45 @@ class IncidentListView(ListAPIView):
 
         notify_incident_alert_if_needed(incident)
         return Response(IncidentSerializer(incident).data, status=status.HTTP_201_CREATED)
+
+
+class IncidentTrendView(APIView):
+    """Incidents created over time, bucketed daily and broken down by Subject.
+
+    Read-only companion to ``IncidentListView``. It scopes the population with
+    the same shared builder and the same ``IncidentFilterSet`` as the list, so
+    the chart and the table always describe the same incidents — with two
+    deliberate exceptions:
+
+      * it does **not** apply its own ``subject`` filter, so the chart stays a
+        full Subject breakdown and a working click-to-filter switcher;
+      * it does **not** apply ``created_within``, because the chart owns the
+        time dimension via ``days`` and the time axis must never collapse.
+    """
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("days", OpenApiTypes.INT, description="7 | 30 | 90 (default 30)"),
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    def get(self, request):
+        try:
+            days = int(request.query_params.get("days", 30))
+        except (ValueError, TypeError):
+            days = 30
+        if days not in (7, 30, 90):
+            days = 30
+
+        qs = build_incident_queryset(request.user, request.query_params)
+
+        # Apply the list's field filters, minus the two the chart owns.
+        data = request.query_params.copy()
+        data.pop("subject", None)
+        data.pop("created_within", None)
+        qs = IncidentFilterSet(data=data, queryset=qs, request=request).qs
+
+        return Response(compute_incident_trend(qs, days=days))
 
 
 class AssetListView(ListAPIView):
