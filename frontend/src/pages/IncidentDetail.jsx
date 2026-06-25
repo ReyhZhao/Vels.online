@@ -6,6 +6,7 @@ import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import DelegationPanel from '../components/DelegationPanel';
 import IncidentAttachments from '../components/IncidentAttachments';
+import IncidentReports from '../components/IncidentReports';
 import IncidentComments from '../components/IncidentComments';
 import IncidentTimeline from '../components/IncidentTimeline';
 import IncidentTasks from './IncidentTasks';
@@ -85,6 +86,7 @@ const TABS = [
   { key: 'details',       label: 'Details' },
   { key: 'timeline',      label: 'Timeline' },
   { key: 'attachments',   label: 'Attachments' },
+  { key: 'reports',       label: 'Reports' },
   { key: 'tasks',         label: 'Tasks' },
   { key: 'delegations',   label: 'Delegations' },
   { key: 'assets',        label: 'Assets' },
@@ -1924,6 +1926,9 @@ export default function IncidentDetail() {
           )}
           {activeTab === 'attachments' && (
             <IncidentAttachments incidentId={displayId} />
+          )}
+          {activeTab === 'reports' && (
+            <IncidentReports incidentId={displayId} />
           )}
           {activeTab === 'tasks' && (
             <IncidentTasks

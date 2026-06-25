@@ -257,6 +257,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     <SidebarLink to="/admin/incidents/task-templates" icon={ListChecks} collapsed={collapsed}>
                       Task Templates
                     </SidebarLink>
+                    <SidebarLink to="/admin/incidents/report-templates" icon={FileText} collapsed={collapsed}>
+                      Report Templates
+                    </SidebarLink>
                     <SidebarLink to="/admin/incidents/automations" icon={Zap} collapsed={collapsed}>
                       Automations
                     </SidebarLink>

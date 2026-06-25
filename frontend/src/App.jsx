@@ -14,6 +14,7 @@ import OrgManagement from './pages/admin/OrgManagement';
 import DownloadManagement from './pages/admin/DownloadManagement';
 import SubjectsAdmin from './pages/admin/SubjectsAdmin';
 import TaskTemplatesAdmin from './pages/admin/TaskTemplatesAdmin';
+import ReportTemplatesAdmin from './pages/admin/ReportTemplatesAdmin';
 import AutomationsAdmin from './pages/admin/AutomationsAdmin';
 import WazuhResponsesAdmin from './pages/admin/WazuhResponsesAdmin';
 import SecurityDashboard from './pages/SecurityDashboard';
@@ -79,6 +80,7 @@ function App() {
           <Route path="/admin/signup-requests" element={<SignupRequests />} />
           <Route path="/admin/incidents/subjects" element={<SubjectsAdmin />} />
           <Route path="/admin/incidents/task-templates" element={<TaskTemplatesAdmin />} />
+          <Route path="/admin/incidents/report-templates" element={<ReportTemplatesAdmin />} />
           <Route path="/admin/incidents/automations" element={<AutomationsAdmin />} />
           <Route path="/admin/wazuh-responses" element={<WazuhResponsesAdmin />} />
           <Route path="/admin/incidents/oncall" element={<OnCallCalendarPage />} />
