@@ -1406,10 +1406,22 @@ export default function IncidentDetail() {
             .then(res => {
               setIncident(prev => {
                 if (!prev) return prev;
-                if (res.data.updated_at !== prev.updated_at) {
+                const changed = res.data.updated_at !== prev.updated_at;
+                if (changed) {
                   setTasksRefreshKey(k => k + 1);
                   setTimelineRefreshKey(k => k + 1);
                   setCommentsRefreshKey(k => k + 1);
+                }
+                // Reconcile the optimistic "triage queued" flag with the server.
+                // The flag only exists to bridge the gap between clicking Run
+                // Triage and the backend lock becoming visible. Once the server
+                // confirms triage is running the flag is redundant (the banner is
+                // driven by incident.triage_running); and once triage has finished
+                // (running → not running) or the incident otherwise changed while
+                // we waited, drop the flag so the banner clears without a full
+                // page refresh.
+                if (res.data.triage_running || prev.triage_running || changed) {
+                  setTriageQueued(false);
                 }
                 incidentRef.current = res.data;
                 return res.data;

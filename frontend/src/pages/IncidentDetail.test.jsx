@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -625,6 +625,41 @@ describe('IncidentDetail', () => {
     renderPage();
     await waitFor(() => screen.getByRole('button', { name: /triage running/i }));
     expect(screen.getByRole('button', { name: /triage running/i })).toBeDisabled();
+  });
+
+  it('clears the triage-running banner when triage completes, without a page refresh (#612)', async () => {
+    vi.useFakeTimers();
+    let current = { ...INCIDENT };
+    api.get.mockImplementation((url) => {
+      if (url === '/api/subjects/') return Promise.resolve({ data: SUBJECTS });
+      if (url.endsWith('/tasks/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/comments/')) return Promise.resolve({ data: [] });
+      if (url.includes('/timeline/')) return Promise.resolve({ data: EMPTY_TIMELINE });
+      if (url.endsWith('/attachments/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contact-messages/')) return Promise.resolve({ data: [] });
+      if (url.endsWith('/contacts/')) return Promise.resolve({ data: [] });
+      if (url === '/api/exceptions/') return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: current });
+    });
+    api.post.mockResolvedValue({ data: {} });
+
+    renderPage();
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText('INC-2026-0001')).toBeInTheDocument();
+
+    // Clicking Run Triage optimistically shows the running banner immediately.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /run triage/i })); });
+    expect(screen.getByText('Automated triage is running')).toBeInTheDocument();
+
+    // Triage finishes: the next poll returns the incident no longer running
+    // (with a changed updated_at). The banner must clear on its own — no reload.
+    current = { ...INCIDENT, updated_at: '2026-01-15T12:00:00Z' };
+    await act(() => vi.advanceTimersByTimeAsync(31_000));
+
+    expect(screen.queryByText('Automated triage is running')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /run triage/i })).toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 
   // ── debug triage dropdown ─────────────────────────────────────────────────
