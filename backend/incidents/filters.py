@@ -29,7 +29,7 @@ class IncidentFilterSet(django_filters.FilterSet):
 
     # Simple field lookups
     org = django_filters.CharFilter(field_name="organization__slug", lookup_expr="exact")
-    subject = django_filters.NumberFilter(field_name="subject_id")
+    subject = django_filters.CharFilter(method="filter_subject")
     source_kind = django_filters.CharFilter(field_name="source_kind", lookup_expr="exact")
     title = django_filters.CharFilter(field_name="title", lookup_expr="icontains")
 
@@ -77,6 +77,16 @@ class IncidentFilterSet(django_filters.FilterSet):
             except (ValueError, TypeError):
                 pass
         return qs
+
+    def filter_subject(self, qs, name, value):
+        # `subject=none` is the "Unclassified" drill-down (no Subject yet); a
+        # numeric value is the existing exact Subject match. Single-value only.
+        if value == "none":
+            return qs.filter(subject__isnull=True)
+        try:
+            return qs.filter(subject_id=int(value))
+        except (ValueError, TypeError):
+            return qs
 
     def filter_q(self, qs, name, value):
         return qs.filter(

@@ -6,10 +6,13 @@ vi.mock('../lib/axios', () => ({
   default: { get: vi.fn() },
 }));
 
-// recharts needs layout; stub it so we can assert which series/bars render.
+// recharts needs layout; stub it so we can assert which series/bars render and
+// drive their click handlers. "Other" gets no onClick, so it stays inert.
 vi.mock('recharts', () => {
   const Stub = ({ children }) => <div>{children}</div>;
-  const Bar = ({ name }) => <div data-testid="bar">{name}</div>;
+  const Bar = ({ name, onClick }) => (
+    <button data-testid="bar" onClick={onClick}>{name}</button>
+  );
   return {
     BarChart: Stub, Bar, XAxis: Stub, YAxis: Stub, CartesianGrid: Stub,
     Tooltip: Stub, Legend: Stub, ResponsiveContainer: Stub,
@@ -101,5 +104,49 @@ describe('IncidentTrendChart — read-only chart', () => {
     render(<IncidentTrendChart searchParams={new URLSearchParams()} collapsed={false} onToggleCollapse={onToggle} />);
     await user.click(screen.getByRole('button', { name: /Incident Trend/ }));
     expect(onToggle).toHaveBeenCalled();
+  });
+});
+
+describe('IncidentTrendChart — Subject drill-down', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  function renderDrill(onSelect, activeSubject = null) {
+    return render(
+      <IncidentTrendChart
+        searchParams={new URLSearchParams()}
+        onSelectSubject={onSelect}
+        activeSubject={activeSubject}
+      />,
+    );
+  }
+
+  it('selects a real Subject by id when its segment is clicked', async () => {
+    api.get.mockResolvedValue({ data: TREND });
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    renderDrill(onSelect);
+    await waitFor(() => screen.getByText('Brute Force'));
+    await user.click(screen.getByText('Brute Force'));
+    expect(onSelect).toHaveBeenCalledWith('3');
+  });
+
+  it('selects subject=none when Unclassified is clicked', async () => {
+    api.get.mockResolvedValue({ data: TREND });
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    renderDrill(onSelect);
+    await waitFor(() => screen.getByText('Unclassified'));
+    await user.click(screen.getByText('Unclassified'));
+    expect(onSelect).toHaveBeenCalledWith('none');
+  });
+
+  it('does nothing when the non-interactive Other segment is clicked', async () => {
+    api.get.mockResolvedValue({ data: TREND });
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    renderDrill(onSelect);
+    await waitFor(() => screen.getByText('Other'));
+    await user.click(screen.getByText('Other'));
+    expect(onSelect).not.toHaveBeenCalled();
   });
 });

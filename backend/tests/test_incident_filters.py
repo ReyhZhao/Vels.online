@@ -5,7 +5,7 @@ import pytest
 from django.utils import timezone
 
 from security.models import Organization, OrganizationMembership
-from incidents.models import Incident, IncidentDelegation
+from incidents.models import Incident, IncidentDelegation, Subject
 from incidents.services.delegation import delegate
 
 
@@ -470,6 +470,32 @@ def test_unknown_sort_falls_back_to_default(client, staff, acme):
     result_ids = ids(r)
     # Default is severity desc — critical before low
     assert result_ids.index(critical.id) < result_ids.index(low.id)
+
+
+# ── subject filter (drill-down) ───────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_subject_filter_numeric_matches_that_subject(client, staff, acme):
+    bf = Subject.objects.create(name="Brute Force", slug="bf-test")
+    matched = make_incident(acme, state="in_progress", subject=bf)
+    other = make_incident(acme, state="in_progress")
+    client.force_login(staff)
+    r = client.get(f"/api/incidents/?subject={bf.id}")
+    result_ids = ids(r)
+    assert matched.id in result_ids
+    assert other.id not in result_ids
+
+
+@pytest.mark.django_db
+def test_subject_filter_none_matches_unclassified(client, staff, acme):
+    bf = Subject.objects.create(name="Brute Force", slug="bf-test2")
+    classified = make_incident(acme, state="in_progress", subject=bf)
+    unclassified = make_incident(acme, state="in_progress", subject=None)
+    client.force_login(staff)
+    r = client.get("/api/incidents/?subject=none")
+    result_ids = ids(r)
+    assert unclassified.id in result_ids
+    assert classified.id not in result_ids
 
 
 # ── combinations ─────────────────────────────────────────────────────────────

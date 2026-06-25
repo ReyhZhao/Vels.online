@@ -33,7 +33,18 @@ function shortDate(iso) {
 
 const RANGES = [7, 30, 90];
 
-export default function IncidentTrendChart({ searchParams, collapsed = false, onToggleCollapse }) {
+// The drill-down value a series filters the list down to: real Subjects by id,
+// "Unclassified" via the `subject=none` sentinel, "Other" is non-interactive.
+function selectValue(subject) {
+  if (subject.kind === 'unclassified') return 'none';
+  if (subject.kind === 'real') return String(subject.subject_id);
+  return null; // "Other" — no honest single filter, so non-clickable
+}
+
+export default function IncidentTrendChart({
+  searchParams, collapsed = false, onToggleCollapse,
+  activeSubject = null, onSelectSubject,
+}) {
   const [days, setDays] = useState(30);
   const [buckets, setBuckets] = useState([]);
   const [subjects, setSubjects] = useState([]);
@@ -73,14 +84,29 @@ export default function IncidentTrendChart({ searchParams, collapsed = false, on
     [buckets],
   );
 
-  // Assign a colour to each series; real Subjects index into the palette.
+  // Assign a colour to each series; real Subjects index into the palette. Each
+  // series also carries its drill-down value and whether it is the active one.
   const colored = useMemo(() => {
     let realIndex = 0;
-    return subjects.map(s => ({
-      ...s,
-      color: colorForSubject(s, s.kind === 'real' ? realIndex++ : 0),
-    }));
-  }, [subjects]);
+    return subjects.map(s => {
+      const value = selectValue(s);
+      return {
+        ...s,
+        color: colorForSubject(s, s.kind === 'real' ? realIndex++ : 0),
+        value,
+        clickable: value !== null,
+        active: value !== null && value === activeSubject,
+      };
+    });
+  }, [subjects, activeSubject]);
+
+  // While a Subject is selected, dim the others so the selection reads in
+  // context; the chart still shows the full breakdown (never collapses).
+  const hasSelection = activeSubject != null && colored.some(s => s.active);
+
+  function handleSelect(series) {
+    if (series.clickable && onSelectSubject) onSelectSubject(series.value);
+  }
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -135,9 +161,24 @@ export default function IncidentTrendChart({ searchParams, collapsed = false, on
                   contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '6px' }}
                   labelStyle={{ color: 'var(--foreground)' }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Legend
+                  wrapperStyle={{ fontSize: 12 }}
+                  onClick={(entry) => {
+                    const s = colored.find(c => c.key === entry?.dataKey);
+                    if (s) handleSelect(s);
+                  }}
+                />
                 {colored.map(s => (
-                  <Bar key={s.key} dataKey={s.key} stackId="incidents" name={s.name} fill={s.color} />
+                  <Bar
+                    key={s.key}
+                    dataKey={s.key}
+                    stackId="incidents"
+                    name={s.name}
+                    fill={s.color}
+                    fillOpacity={hasSelection && !s.active ? 0.25 : 1}
+                    cursor={s.clickable ? 'pointer' : 'default'}
+                    onClick={s.clickable ? () => handleSelect(s) : undefined}
+                  />
                 ))}
               </BarChart>
             </ResponsiveContainer>

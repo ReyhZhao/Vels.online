@@ -9,8 +9,9 @@ import { OnCallWidgetCompact } from '../components/OnCallWidget';
 import IncidentTrendChart from '../components/IncidentTrendChart';
 
 // Keys that are persisted as user preferences (excludes transient keys like page, q).
-// `trend` is the trend panel's collapsed/expanded state, persisted like a filter.
-const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'org', 'created_within', 'sort', 'order', 'trend'];
+// `subject` is the trend chart's drill-down filter; `trend` is the panel's
+// collapsed/expanded state — both persisted like a filter.
+const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'org', 'created_within', 'sort', 'order', 'subject', 'trend'];
 
 function getPrefsStorageKey(userId) {
   return `incident_list_prefs_${userId ?? 'anon'}`;
@@ -410,6 +411,7 @@ export default function IncidentList() {
   const [selectAllPages, setSelectAllPages] = useState(false);
   const [bulkAction, setBulkAction]   = useState(null);
   const [staffUsers, setStaffUsers]   = useState([]);
+  const [subjects, setSubjects]       = useState([]);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkError, setBulkError]     = useState(null);
   const [bulkResult, setBulkResult]   = useState(null);
@@ -444,6 +446,15 @@ export default function IncidentList() {
     }
     savePrefs(user?.id, searchParams);
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Subjects power the drill-down chip's label; fetched once.
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/api/subjects/')
+      .then(res => { if (!cancelled) setSubjects(Array.isArray(res.data) ? res.data : []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const fetchIncidents = useCallback(async (params, { silent = false } = {}) => {
     if (!silent) {
@@ -496,6 +507,27 @@ export default function IncidentList() {
       return next;
     });
   }
+
+  // Trend chart drill-down: clicking a Subject sets `?subject=<id>` (or
+  // `subject=none` for Unclassified); re-clicking the same one clears it.
+  const activeSubject = searchParams.get('subject');
+
+  function selectSubject(value) {
+    setSelectAllPages(false);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (!value || activeSubject === value) next.delete('subject');
+      else next.set('subject', value);
+      next.delete('page');
+      return next;
+    });
+  }
+
+  // Resolve the active Subject's display name for the filter chip. `none` is
+  // the Unclassified sentinel; otherwise look it up in the fetched Subjects.
+  const activeSubjectLabel = activeSubject === 'none'
+    ? 'Unclassified'
+    : (subjects.find(s => String(s.id) === activeSubject)?.name ?? `Subject ${activeSubject}`);
 
   // Multi-value state filter. When the URL has no `state` param we show the
   // default (every state except closed); otherwise we reflect the param.
@@ -710,6 +742,8 @@ export default function IncidentList() {
         searchParams={searchParams}
         collapsed={trendCollapsed}
         onToggleCollapse={toggleTrend}
+        activeSubject={activeSubject}
+        onSelectSubject={selectSubject}
       />
 
       <div className="flex flex-wrap gap-2 items-center">
@@ -763,6 +797,17 @@ export default function IncidentList() {
           <option value="7d">Last 7 days</option>
           <option value="30d">Last 30 days</option>
         </select>
+        {activeSubject && (
+          <button
+            type="button"
+            onClick={() => selectSubject(null)}
+            aria-label={`Clear subject filter: ${activeSubjectLabel}`}
+            className="inline-flex items-center gap-1.5 rounded-full border border-transparent bg-blue-100 dark:bg-blue-900/30 px-3 py-1 text-xs font-medium text-blue-800 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
+          >
+            Subject: {activeSubjectLabel}
+            <span aria-hidden="true">✕</span>
+          </button>
+        )}
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
