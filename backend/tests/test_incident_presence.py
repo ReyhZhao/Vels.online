@@ -205,6 +205,23 @@ async def test_presence_stream_emits_roster_snapshot(async_client, staff, incide
 
 
 @pytest.mark.django_db(transaction=True)
+async def test_presence_stream_accepts_event_stream_header(async_client, staff, incident):
+    """Regression (#611): the SSE client sends `Accept: text/event-stream`. DRF content
+    negotiation must accept it rather than reject the request with 406
+    ("Could not satisfy the request Accept header.") before the handler ever runs."""
+    await async_client.aforce_login(staff)
+    response = await async_client.get(
+        f"/api/incidents/{incident.display_id}/presence/",
+        headers={"accept": "text/event-stream"},
+    )
+    assert response.status_code == 200
+    assert response.streaming
+    # Consume the first chunk so the generator's finally can run and drop the actor.
+    async for _chunk in response.streaming_content:
+        break
+
+
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.usefixtures("_bound_presence_loop")
 async def test_presence_stream_drop_actor_on_disconnect(async_client, staff, incident):
     """The viewer is removed from the registry when the stream drains (clean disconnect)."""

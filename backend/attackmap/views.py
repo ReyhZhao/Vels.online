@@ -17,8 +17,11 @@ from adrf.views import APIView as AsyncAPIView
 from asgiref.sync import sync_to_async
 from django.http import StreamingHttpResponse
 from rest_framework import status
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from core.renderers import ServerSentEventRenderer
 
 from . import presence
 from .buffer import AttackBuffer
@@ -53,6 +56,9 @@ class AttackStreamView(AsyncAPIView):
     """Reconnectable SSE tail of the shared attack buffer. Staff-only."""
 
     schema = None
+    # JSON first so the staff-gate error Response serialises as JSON; the SSE
+    # renderer lets content negotiation accept `Accept: text/event-stream`.
+    renderer_classes = [JSONRenderer, ServerSentEventRenderer]
 
     async def get(self, request):
         if not request.user.is_authenticated or not request.user.is_staff:

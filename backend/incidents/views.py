@@ -18,8 +18,11 @@ from rest_framework import serializers as _s
 from rest_framework import status
 from rest_framework.generics import GenericAPIView, ListAPIView
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from core.renderers import ServerSentEventRenderer
 
 from security.models import Organization, OrganizationMembership
 
@@ -2355,6 +2358,9 @@ class IncidentAssistantView(AsyncAPIView):
     """
 
     schema = None  # excluded from OpenAPI schema
+    # JSON first so pre-stream error Responses serialise as JSON; the SSE renderer
+    # lets content negotiation accept an `Accept: text/event-stream` request.
+    renderer_classes = [JSONRenderer, ServerSentEventRenderer]
 
     async def post(self, request, display_id):
         from incidents.llm.base import AssistantConfigError, AssistantError, TriageConfigError
@@ -2540,6 +2546,10 @@ class IncidentPresenceView(AsyncAPIView):
     """
 
     schema = None
+    # JSON first so the activity/lock POST Responses serialise as JSON; the SSE
+    # renderer lets content negotiation accept the roster stream's
+    # `Accept: text/event-stream` (otherwise DRF 406s before the handler runs).
+    renderer_classes = [JSONRenderer, ServerSentEventRenderer]
 
     async def _resolve(self, request, display_id):
         """Return (incident, error_response). Staff-gated + incident-access-gated."""
