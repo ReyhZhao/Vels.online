@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../lib/axios', () => ({
@@ -70,5 +71,35 @@ describe('IncidentTrendChart — read-only chart', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading trend…');
     resolve({ data: TREND });
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+  });
+
+  it('re-fetches with the selected range when the toggle changes', async () => {
+    api.get.mockResolvedValue({ data: TREND });
+    const user = userEvent.setup();
+    renderChart();
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    expect(api.get.mock.calls[0][0]).toContain('days=30'); // default
+
+    await user.click(screen.getByRole('button', { name: '7d' }));
+    await waitFor(() =>
+      expect(api.get.mock.calls.at(-1)[0]).toContain('days=7'));
+  });
+
+  it('hides the chart body and skips fetching while collapsed', async () => {
+    api.get.mockResolvedValue({ data: TREND });
+    render(<IncidentTrendChart searchParams={new URLSearchParams()} collapsed onToggleCollapse={() => {}} />);
+    // Header is present, but the body (and its fetch) are not.
+    expect(screen.getByRole('button', { name: /Incident Trend/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '30d' })).not.toBeInTheDocument();
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it('calls onToggleCollapse when the header is clicked', async () => {
+    api.get.mockResolvedValue({ data: TREND });
+    const onToggle = vi.fn();
+    const user = userEvent.setup();
+    render(<IncidentTrendChart searchParams={new URLSearchParams()} collapsed={false} onToggleCollapse={onToggle} />);
+    await user.click(screen.getByRole('button', { name: /Incident Trend/ }));
+    expect(onToggle).toHaveBeenCalled();
   });
 });

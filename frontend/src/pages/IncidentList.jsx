@@ -8,8 +8,9 @@ import CreateIncidentModal from '../components/CreateIncidentModal';
 import { OnCallWidgetCompact } from '../components/OnCallWidget';
 import IncidentTrendChart from '../components/IncidentTrendChart';
 
-// Keys that are persisted as user preferences (excludes transient keys like page, q)
-const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'org', 'created_within', 'sort', 'order'];
+// Keys that are persisted as user preferences (excludes transient keys like page, q).
+// `trend` is the trend panel's collapsed/expanded state, persisted like a filter.
+const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'org', 'created_within', 'sort', 'order', 'trend'];
 
 function getPrefsStorageKey(userId) {
   return `incident_list_prefs_${userId ?? 'anon'}`;
@@ -74,6 +75,12 @@ const SEVERITY_OPTIONS   = ['critical', 'high', 'medium', 'low', 'info'];
 const TLP_OPTIONS        = ['white', 'green', 'amber', 'red'];
 
 const prettyState = s => s.replace(/_/g, ' ');
+
+// Tailwind's `sm` breakpoint is 640px; below it the list renders mobile cards.
+function isMobileViewport() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia('(max-width: 639px)').matches;
+}
 
 function sameStateSet(a, b) {
   if (a.length !== b.length) return false;
@@ -477,6 +484,19 @@ export default function IncidentList() {
     });
   }
 
+  // Trend panel collapse: a stored preference wins; otherwise default expanded
+  // on desktop and collapsed on mobile so the dense list isn't pushed off-screen.
+  const trendParam = searchParams.get('trend');
+  const trendCollapsed = trendParam ? trendParam === 'collapsed' : isMobileViewport();
+
+  function toggleTrend() {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('trend', trendCollapsed ? 'expanded' : 'collapsed');
+      return next;
+    });
+  }
+
   // Multi-value state filter. When the URL has no `state` param we show the
   // default (every state except closed); otherwise we reflect the param.
   const stateParam = searchParams.get('state');
@@ -686,7 +706,11 @@ export default function IncidentList() {
         </div>
       )}
 
-      <IncidentTrendChart searchParams={searchParams} />
+      <IncidentTrendChart
+        searchParams={searchParams}
+        collapsed={trendCollapsed}
+        onToggleCollapse={toggleTrend}
+      />
 
       <div className="flex flex-wrap gap-2 items-center">
         <input

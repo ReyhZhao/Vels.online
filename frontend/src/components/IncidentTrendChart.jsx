@@ -31,7 +31,10 @@ function shortDate(iso) {
   return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
 }
 
-export default function IncidentTrendChart({ searchParams, days = 30 }) {
+const RANGES = [7, 30, 90];
+
+export default function IncidentTrendChart({ searchParams, collapsed = false, onToggleCollapse }) {
+  const [days, setDays] = useState(30);
   const [buckets, setBuckets] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -48,6 +51,7 @@ export default function IncidentTrendChart({ searchParams, days = 30 }) {
   }, [searchParams]);
 
   useEffect(() => {
+    if (collapsed) return; // don't fetch while the panel is hidden
     let cancelled = false;
     setLoading(true);
     const sp = new URLSearchParams(filterKey);
@@ -61,7 +65,7 @@ export default function IncidentTrendChart({ searchParams, days = 30 }) {
       .catch(() => { if (!cancelled) { setBuckets([]); setSubjects([]); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [filterKey, days]);
+  }, [filterKey, days, collapsed]);
 
   // Flatten each daily bucket's counts onto the row so recharts can stack them.
   const chartData = useMemo(
@@ -79,31 +83,66 @@ export default function IncidentTrendChart({ searchParams, days = 30 }) {
   }, [subjects]);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      {loading ? (
-        <p className="py-12 text-center text-sm text-muted-foreground" role="status">
-          Loading trend…
-        </p>
-      ) : subjects.length === 0 ? (
-        <p className="py-12 text-center text-sm text-muted-foreground">
-          No incidents in this window.
-        </p>
-      ) : (
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" minTickGap={16} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
-            <Tooltip
-              contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '6px' }}
-              labelStyle={{ color: 'var(--foreground)' }}
-            />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            {colored.map(s => (
-              <Bar key={s.key} dataKey={s.key} stackId="incidents" name={s.name} fill={s.color} />
+    <div className="rounded-lg border border-border bg-card">
+      <div className="flex items-center justify-between gap-2 px-4 py-3">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-expanded={!collapsed}
+          aria-controls="incident-trend-body"
+          className="flex items-center gap-2 text-sm font-medium text-foreground hover:text-foreground/80"
+        >
+          <span aria-hidden="true" className="text-muted-foreground">{collapsed ? '▸' : '▾'}</span>
+          Incident Trend
+        </button>
+        {!collapsed && (
+          <div className="flex gap-1">
+            {RANGES.map(d => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                aria-pressed={days === d}
+                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  days === d
+                    ? 'bg-foreground text-background'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                }`}
+              >
+                {d}d
+              </button>
             ))}
-          </BarChart>
-        </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {!collapsed && (
+        <div id="incident-trend-body" className="px-4 pb-4">
+          {loading ? (
+            <p className="py-12 text-center text-sm text-muted-foreground" role="status">
+              Loading trend…
+            </p>
+          ) : subjects.length === 0 ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">
+              No incidents in this window.
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" minTickGap={16} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
+                <Tooltip
+                  contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '6px' }}
+                  labelStyle={{ color: 'var(--foreground)' }}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                {colored.map(s => (
+                  <Bar key={s.key} dataKey={s.key} stackId="incidents" name={s.name} fill={s.color} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
       )}
     </div>
   );
