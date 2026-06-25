@@ -47,25 +47,57 @@ describe('AppSidebar', () => {
 
   // ── existing nav content tests ────────────────────────────────────────────
 
-  it('renders Incidents section with Incidents link for a regular user', () => {
+  it('renders Investigate section with Incidents link for a regular user', () => {
     renderSidebar(regularUser);
 
-    expect(screen.getByRole('button', { name: /incidents/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^investigate$/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /^incidents$/i })).toBeInTheDocument();
   });
 
-  it('hides Subjects and Task Templates in Incidents section for a regular user', () => {
+  it('hides Subjects and Task Templates in Respond section for a regular user', () => {
     renderSidebar(regularUser);
 
     expect(screen.queryByRole('link', { name: /subjects/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /task templates/i })).not.toBeInTheDocument();
   });
 
-  it('renders Subjects and Task Templates in Incidents section for a staff user', () => {
+  it('renders Subjects and Task Templates in Respond section for a staff user', () => {
     renderSidebar(staffUser);
 
     expect(screen.getByRole('link', { name: /subjects/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /task templates/i })).toBeInTheDocument();
+  });
+
+  it('hides Detect and Threat Ops sections for a regular user', () => {
+    renderSidebar(regularUser);
+
+    expect(screen.queryByRole('button', { name: /^detect$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^threat ops$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /correlation rules/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /threat hunting/i })).not.toBeInTheDocument();
+  });
+
+  it('renders Detect and Threat Ops sections for a staff user', () => {
+    renderSidebar(staffUser);
+
+    expect(screen.getByRole('link', { name: /correlation rules/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /search rules/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /threat hunting/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /attack map/i })).toBeInTheDocument();
+  });
+
+  it('renders Environment section with Assets and Contacts', () => {
+    renderSidebar(regularUser);
+
+    expect(screen.getByRole('button', { name: /^environment$/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /assets/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /contacts/i })).toBeInTheDocument();
+  });
+
+  it('renders On-Call link in the Admin section for a staff user', () => {
+    renderSidebar(staffUser);
+
+    expect(screen.getByRole('link', { name: /on-call/i })).toBeInTheDocument();
   });
 
   it('renders Security section items for a regular user', () => {
@@ -76,11 +108,10 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('link', { name: /enroll/i })).toBeInTheDocument();
   });
 
-  it('Incidents link is not inside Security section', () => {
+  it('Investigate and Security are separate sections', () => {
     renderSidebar(regularUser);
 
-    // Incidents section header exists as a button; Security section is separate
-    expect(screen.getByRole('button', { name: /^incidents$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^investigate$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^security$/i })).toBeInTheDocument();
   });
 
@@ -119,12 +150,12 @@ describe('AppSidebar', () => {
   });
 
   it('does not show Subjects or Task Templates in Admin section', () => {
-    // they moved to the Incidents section
+    // they live in the Respond section
     renderSidebar(staffUser);
 
     const adminToggle = screen.getByRole('button', { name: /^admin$/i });
     expect(adminToggle).toBeInTheDocument();
-    // Subjects and Task Templates are present (in Incidents section), but NOT duplicated in Admin
+    // Subjects and Task Templates are present (in Respond section), but NOT duplicated in Admin
     // Verify Admin section does not contain them by checking link count — exactly one of each
     expect(screen.getAllByRole('link', { name: /subjects/i })).toHaveLength(1);
     expect(screen.getAllByRole('link', { name: /task templates/i })).toHaveLength(1);
@@ -160,23 +191,23 @@ describe('AppSidebar', () => {
 
   // ── section collapse / expand ─────────────────────────────────────────────
 
-  it('collapses Incidents section items when toggle is clicked', async () => {
+  it('collapses Investigate section items when toggle is clicked', async () => {
     const user = userEvent.setup();
     renderSidebar(regularUser);
 
     expect(screen.getByRole('link', { name: /^incidents$/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /^incidents$/i }));
+    await user.click(screen.getByRole('button', { name: /^investigate$/i }));
 
     expect(screen.queryByRole('link', { name: /^incidents$/i })).not.toBeInTheDocument();
   });
 
-  it('expands Incidents section again after a second toggle click', async () => {
+  it('expands Investigate section again after a second toggle click', async () => {
     const user = userEvent.setup();
     renderSidebar(regularUser);
 
-    await user.click(screen.getByRole('button', { name: /^incidents$/i }));
-    await user.click(screen.getByRole('button', { name: /^incidents$/i }));
+    await user.click(screen.getByRole('button', { name: /^investigate$/i }));
+    await user.click(screen.getByRole('button', { name: /^investigate$/i }));
 
     expect(screen.getByRole('link', { name: /^incidents$/i })).toBeInTheDocument();
   });
@@ -260,20 +291,20 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('link', { name: /overview/i })).toBeInTheDocument();
   });
 
-  it('restores Incidents section collapsed state from localStorage on mount', () => {
-    store['sidebar:incidents:open'] = 'false';
+  it('restores Investigate section collapsed state from localStorage on mount', () => {
+    store['sidebar:investigate:open'] = 'false';
     renderSidebar(regularUser);
 
     expect(screen.queryByRole('link', { name: /^incidents$/i })).not.toBeInTheDocument();
   });
 
-  it('persists Incidents section state to localStorage when toggled', async () => {
+  it('persists Investigate section state to localStorage when toggled', async () => {
     const user = userEvent.setup();
     renderSidebar(regularUser);
 
-    await user.click(screen.getByRole('button', { name: /^incidents$/i }));
+    await user.click(screen.getByRole('button', { name: /^investigate$/i }));
 
-    expect(JSON.parse(store['sidebar:incidents:open'])).toBe(false);
+    expect(JSON.parse(store['sidebar:investigate:open'])).toBe(false);
   });
 
   it('restores Security section collapsed state from localStorage on mount', () => {

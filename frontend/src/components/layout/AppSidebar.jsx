@@ -100,7 +100,11 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   const isStaff = user?.is_staff;
 
   const [collapsed, setCollapsed] = useState(() => readLS('sidebar:collapsed', false));
-  const [incidentsOpen, setIncidentsOpen] = useState(() => readLS('sidebar:incidents:open', true));
+  const [investigateOpen, setInvestigateOpen] = useState(() => readLS('sidebar:investigate:open', true));
+  const [respondOpen, setRespondOpen] = useState(() => readLS('sidebar:respond:open', true));
+  const [detectOpen, setDetectOpen] = useState(() => readLS('sidebar:detect:open', true));
+  const [threatOpsOpen, setThreatOpsOpen] = useState(() => readLS('sidebar:threatops:open', true));
+  const [environmentOpen, setEnvironmentOpen] = useState(() => readLS('sidebar:environment:open', true));
   const [securityOpen, setSecurityOpen] = useState(() => readLS('sidebar:security:open', true));
   const [ingressOpen, setIngressOpen] = useState(() => readLS('sidebar:ingress:open', true));
   const [blogOpen, setBlogOpen] = useState(() => readLS('sidebar:blog:open', true));
@@ -137,7 +141,11 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
   }, [fetchPendingCount]);
 
   useEffect(() => { writeLS('sidebar:collapsed', collapsed); }, [collapsed]);
-  useEffect(() => { writeLS('sidebar:incidents:open', incidentsOpen); }, [incidentsOpen]);
+  useEffect(() => { writeLS('sidebar:investigate:open', investigateOpen); }, [investigateOpen]);
+  useEffect(() => { writeLS('sidebar:respond:open', respondOpen); }, [respondOpen]);
+  useEffect(() => { writeLS('sidebar:detect:open', detectOpen); }, [detectOpen]);
+  useEffect(() => { writeLS('sidebar:threatops:open', threatOpsOpen); }, [threatOpsOpen]);
+  useEffect(() => { writeLS('sidebar:environment:open', environmentOpen); }, [environmentOpen]);
   useEffect(() => { writeLS('sidebar:security:open', securityOpen); }, [securityOpen]);
   useEffect(() => { writeLS('sidebar:ingress:open', ingressOpen); }, [ingressOpen]);
   useEffect(() => { writeLS('sidebar:blog:open', blogOpen); }, [blogOpen]);
@@ -189,16 +197,13 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
           <div className="space-y-1">
             {showItems && (
               <SectionToggle
-                label="Incidents"
-                open={incidentsOpen}
-                onToggle={() => setIncidentsOpen((o) => !o)}
+                label="Investigate"
+                open={investigateOpen}
+                onToggle={() => setInvestigateOpen((o) => !o)}
               />
             )}
-            {(incidentsOpen || collapsed) && (
+            {(investigateOpen || collapsed) && (
               <>
-                <SidebarLink to="/incidents" icon={AlertTriangle} collapsed={collapsed}>
-                  Incidents
-                </SidebarLink>
                 <NavLink
                   to="/alerts"
                   title={collapsed ? 'Alert Inbox' : undefined}
@@ -224,26 +229,28 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     </>
                   )}
                 </NavLink>
+                <SidebarLink to="/incidents" icon={AlertTriangle} collapsed={collapsed}>
+                  Incidents
+                </SidebarLink>
+              </>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            {showItems && (
+              <SectionToggle
+                label="Respond"
+                open={respondOpen}
+                onToggle={() => setRespondOpen((o) => !o)}
+              />
+            )}
+            {(respondOpen || collapsed) && (
+              <>
                 <SidebarLink to="/tasks" icon={ListChecks} collapsed={collapsed}>
                   Tasks
                 </SidebarLink>
-                <SidebarLink to="/contacts" icon={Users} collapsed={collapsed}>
-                  Contacts
-                </SidebarLink>
-                <SidebarLink to="/assets" icon={HardDrive} collapsed={collapsed}>
-                  Assets
-                </SidebarLink>
                 {isStaff && (
                   <>
-                    <SidebarLink to="/hunting" icon={Search} collapsed={collapsed}>
-                      Threat Hunting
-                    </SidebarLink>
-                    <SidebarLink to="/attack-map" icon={Globe} collapsed={collapsed}>
-                      Attack Map
-                    </SidebarLink>
-                    <SidebarLink to="/admin/incidents/oncall" icon={CalendarClock} collapsed={collapsed}>
-                      On-Call
-                    </SidebarLink>
                     <SidebarLink to="/admin/incidents/subjects" icon={Tag} collapsed={collapsed}>
                       Subjects
                     </SidebarLink>
@@ -256,14 +263,72 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     <SidebarLink to="/admin/wazuh-responses" icon={ShieldCheck} collapsed={collapsed}>
                       Wazuh Responses
                     </SidebarLink>
-                    <SidebarLink to="/admin/correlations/rules" icon={GitBranch} collapsed={collapsed}>
-                      Correlation Rules
-                    </SidebarLink>
-                    <SidebarLink to="/admin/correlations/search-rules" icon={Search} collapsed={collapsed}>
-                      Search Rules
-                    </SidebarLink>
                   </>
                 )}
+              </>
+            )}
+          </div>
+
+          {isStaff && (
+            <div className="space-y-1">
+              {showItems && (
+                <SectionToggle
+                  label="Detect"
+                  open={detectOpen}
+                  onToggle={() => setDetectOpen((o) => !o)}
+                />
+              )}
+              {(detectOpen || collapsed) && (
+                <>
+                  <SidebarLink to="/admin/correlations/rules" icon={GitBranch} collapsed={collapsed}>
+                    Correlation Rules
+                  </SidebarLink>
+                  <SidebarLink to="/admin/correlations/search-rules" icon={Search} collapsed={collapsed}>
+                    Search Rules
+                  </SidebarLink>
+                </>
+              )}
+            </div>
+          )}
+
+          {isStaff && (
+            <div className="space-y-1">
+              {showItems && (
+                <SectionToggle
+                  label="Threat Ops"
+                  open={threatOpsOpen}
+                  onToggle={() => setThreatOpsOpen((o) => !o)}
+                />
+              )}
+              {(threatOpsOpen || collapsed) && (
+                <>
+                  <SidebarLink to="/hunting" icon={Search} collapsed={collapsed}>
+                    Threat Hunting
+                  </SidebarLink>
+                  <SidebarLink to="/attack-map" icon={Globe} collapsed={collapsed}>
+                    Attack Map
+                  </SidebarLink>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-1">
+            {showItems && (
+              <SectionToggle
+                label="Environment"
+                open={environmentOpen}
+                onToggle={() => setEnvironmentOpen((o) => !o)}
+              />
+            )}
+            {(environmentOpen || collapsed) && (
+              <>
+                <SidebarLink to="/assets" icon={HardDrive} collapsed={collapsed}>
+                  Assets
+                </SidebarLink>
+                <SidebarLink to="/contacts" icon={Users} collapsed={collapsed}>
+                  Contacts
+                </SidebarLink>
               </>
             )}
           </div>
@@ -354,6 +419,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
               )}
               {(adminOpen || collapsed) && (
                 <>
+                  <SidebarLink to="/admin/incidents/oncall" icon={CalendarClock} collapsed={collapsed}>
+                    On-Call
+                  </SidebarLink>
                   <SidebarLink to="/admin/status-settings" icon={Server} collapsed={collapsed}>
                     Service Monitor
                   </SidebarLink>
