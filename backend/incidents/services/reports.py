@@ -33,6 +33,14 @@ class ReportGenerationError(Exception):
     """Raised when a Report cannot be generated (e.g. customer report on TLP:RED)."""
 
 
+# User-facing refusal message. Kept as a module constant so the API layer can return
+# it without reading the exception object — that keeps any exception/stack-trace detail
+# from reaching the client (CWE-209) while preserving the same message for the user.
+REPORT_REFUSAL_CUSTOMER_ON_RED = (
+    "A customer report cannot be generated for a TLP:RED incident."
+)
+
+
 def _esc(value) -> str:
     return _html.escape(str(value if value is not None else ""))
 
@@ -192,9 +200,7 @@ def generate_report(incident, template, actor) -> Report:
     audience = template.audience
 
     if audience == ReportTemplate.AUDIENCE_CUSTOMER and incident.tlp == Incident.TLP_RED:
-        raise ReportGenerationError(
-            "A customer report cannot be generated for a TLP:RED incident."
-        )
+        raise ReportGenerationError(REPORT_REFUSAL_CUSTOMER_ON_RED)
 
     # The floor is keyed on the template's Audience, NOT on the (staff) actor — a
     # customer report renders the customer perspective no matter who generates it.

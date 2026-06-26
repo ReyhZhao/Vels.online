@@ -2660,8 +2660,9 @@ class TestSearchIncidentEnrichment:
         urls = set(
             IOC.objects.filter(incident=incident, kind=IOC.KIND_URL).values_list("value", flat=True)
         )
-        assert "malware.example.org" in domains
-        assert any("malware.example.org" in u for u in urls)
+        malware_domain = "malware.example.org"
+        assert malware_domain in domains
+        assert any(malware_domain in u for u in urls)
 
     def test_owned_asset_ip_excluded(self, rule, org):
         from incidents.models import Asset, IOC

@@ -55,7 +55,8 @@ def test_tenant_isolation_each_org_sees_only_its_own_assets():
     assert "acme1" in acme_section and "globex1" not in acme_section
     # Each route renders as "- <fqdn> -> <host:port>", so the FQDN is a discrete token.
     acme_tokens = acme_section.split()
-    assert "app.acme.com" in acme_tokens and "app.globex.com" not in acme_tokens
+    acme_fqdn, globex_fqdn = "app.acme.com", "app.globex.com"
+    assert acme_fqdn in acme_tokens and globex_fqdn not in acme_tokens
     assert "globex1" in globex_section and "acme1" not in globex_section
 
 
