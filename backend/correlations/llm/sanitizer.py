@@ -5,8 +5,10 @@ from correlations.models import (
     FIELD_KIND_ALERT,
     FIELD_KIND_ENTITY,
     FIELD_KIND_SOURCE_REF,
+    OPERATOR_IN,
     SOURCE_REF_CATALOG,
 )
+from correlations.services.matching import parse_in_values
 
 _FIELD_CATALOG = {
     FIELD_KIND_ALERT: frozenset(ALERT_FIELD_CATALOG),
@@ -93,11 +95,17 @@ def sanitize_draft(draft: dict) -> tuple:
                 )
                 continue
 
+            value = str(cond.get("value", ""))
+            # Normalize `in` values to the canonical comma-separated form so the
+            # evaluator parses them cleanly regardless of how the model emitted them (#629).
+            if operator == OPERATOR_IN:
+                value = ", ".join(parse_in_values(value))
+
             sanitized_conditions.append({
                 "field_kind": field_kind,
                 "field_name": field_name,
                 "operator": operator,
-                "value": str(cond.get("value", "")),
+                "value": value,
             })
 
         try:

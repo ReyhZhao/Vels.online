@@ -186,6 +186,65 @@ def test_create_rule_invalid_operator_for_kind(client, staff):
 
 
 @pytest.mark.django_db
+def test_create_rule_in_value_normalized_to_comma_separated(client, staff):
+    # #629: comma-separated `in` values are accepted and stored canonically.
+    payload = {
+        **VALID_PAYLOAD,
+        "legs": [
+            {
+                "count": 1,
+                "display_order": 0,
+                "conditions": [
+                    {
+                        "field_kind": "alert_field",
+                        "field_name": "severity",
+                        "operator": "in",
+                        "value": " critical ,high ",
+                    }
+                ],
+            }
+        ],
+    }
+    client.force_login(staff)
+    r = client.post(
+        "/api/correlations/rules/",
+        data=payload,
+        content_type="application/json",
+    )
+    assert r.status_code == 201
+    assert r.json()["legs"][0]["conditions"][0]["value"] == "critical, high"
+
+
+@pytest.mark.django_db
+def test_create_rule_empty_in_value_rejected(client, staff):
+    # #629: an `in` value with no usable items is rejected at write time.
+    payload = {
+        **VALID_PAYLOAD,
+        "legs": [
+            {
+                "count": 1,
+                "display_order": 0,
+                "conditions": [
+                    {
+                        "field_kind": "alert_field",
+                        "field_name": "severity",
+                        "operator": "in",
+                        "value": " , , ",
+                    }
+                ],
+            }
+        ],
+    }
+    client.force_login(staff)
+    r = client.post(
+        "/api/correlations/rules/",
+        data=payload,
+        content_type="application/json",
+    )
+    assert r.status_code == 400
+
+
+@pytest.mark.django_db
 def test_create_rule_entity_cidr_allowed(client, staff):
     payload = {
         **VALID_PAYLOAD,

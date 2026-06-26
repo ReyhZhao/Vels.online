@@ -12,6 +12,7 @@ from .llm.base import DraftConfigError, DraftError
 from .llm.factory import get_draft_provider
 from .llm.grounding import build_grounding
 from .llm.sanitizer import sanitize_draft
+from .services.matching import parse_in_values
 from .models import (
     ALERT_FIELD_CATALOG,
     ENTITY_CATALOG,
@@ -21,6 +22,7 @@ from .models import (
     OPERATOR_CHOICES,
     OPERATOR_CIDR,
     OPERATOR_GTE,
+    OPERATOR_IN,
     OPERATOR_LTE,
     SEARCH_COUNT_OP_CHOICES,
     SEARCH_COUNT_OP_LTE,
@@ -251,6 +253,17 @@ class _LegConditionSerializer(_s.ModelSerializer):
             raise _s.ValidationError(
                 {"operator": f"'{operator}' is not allowed for field kind '{field_kind}'."}
             )
+
+        # The `in` operator takes a comma-separated list of values (JSON arrays are
+        # also accepted for back-compat). Normalize to a single canonical, clean
+        # comma-separated form so the evaluator never chokes on malformed input (#629).
+        if operator == OPERATOR_IN:
+            items = parse_in_values(data.get("value", ""))
+            if not items:
+                raise _s.ValidationError(
+                    {"value": "The 'in' operator needs at least one comma-separated value."}
+                )
+            data["value"] = ", ".join(items)
 
         return data
 
