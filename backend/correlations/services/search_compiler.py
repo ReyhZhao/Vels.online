@@ -86,10 +86,15 @@ def validate_cidr_value(value: str, field_type: str) -> tuple[bool, str]:
         except ValueError:
             return False, f"'{value}' is not a valid CIDR block or IP address."
         return True, ""
+    # keyword fields are IPv4-only (the painless range check is 32-bit). Build the
+    # user-facing reason here from curated messages rather than echoing the caught
+    # exception's text, so no exception detail can reach the API client (CWE-209).
     try:
-        cidr_to_ipv4_range(value)
-    except ValueError as exc:
-        return False, str(exc)
+        net = ipaddress.ip_network((value or "").strip(), strict=False)
+    except ValueError:
+        return False, f"'{value}' is not a valid CIDR block or IP address."
+    if net.version != 4:
+        return False, f"'{value}' is an IPv6 CIDR; CIDR matching on a keyword field supports IPv4 only."
     return True, ""
 
 

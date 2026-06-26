@@ -79,8 +79,10 @@ def _run_with_timeout(executor, arguments: dict, timeout_s: float) -> ToolResult
         except FutureTimeout:
             return ToolResult(error="tool timed out", summary="timed out")
         except Exception as exc:  # a tool blowing up must not kill the turn
+            # Log the full exception server-side, but keep the client-facing trace
+            # generic so no exception/stack-trace detail is surfaced to users (CWE-209).
             logger.warning("tool executor raised: %s", exc)
-            return ToolResult(error=f"tool error: {exc}", summary="error")
+            return ToolResult(error="tool error", summary="error")
 
 
 def _is_duplicate(name: str, arguments: dict, auto_actions: List[dict]) -> bool:

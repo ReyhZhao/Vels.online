@@ -2861,12 +2861,22 @@ class IncidentReportListView(APIView):
         except (ReportTemplate.DoesNotExist, ValueError, TypeError):
             return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        from .services.reports import ReportGenerationError, generate_report
+        from .services.reports import (
+            REPORT_REFUSAL_CUSTOMER_ON_RED,
+            ReportGenerationError,
+            generate_report,
+        )
 
         try:
             report = generate_report(incident, template, actor=request.user)
-        except ReportGenerationError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except ReportGenerationError:
+            # Return the refusal reason from a controlled constant rather than the
+            # exception text, so no exception/stack-trace detail reaches the client
+            # (CWE-209). New refusal reasons must add their own user-facing constant.
+            return Response(
+                {"detail": REPORT_REFUSAL_CUSTOMER_ON_RED},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except Exception:
             logger.exception("Error generating report for incident=%s", display_id)
             return Response(
