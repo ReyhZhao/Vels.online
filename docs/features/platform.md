@@ -1,6 +1,6 @@
 # Platform
 
-Cross-cutting platform capabilities: [Notifications](#notifications), [Responsive UI & List Conventions](#responsive-ui--list-conventions), the [Status Page](#status-page), the [Blog / Knowledge Base](#blog--knowledge-base), and [Multi-Organisation & Access Control](#multi-organisation--access-control).
+Cross-cutting platform capabilities: [Notifications](#notifications), the [Live Attack Map](#live-attack-map), [Responsive UI & List Conventions](#responsive-ui--list-conventions), the [Status Page](#status-page), the [Blog / Knowledge Base](#blog--knowledge-base), and [Multi-Organisation & Access Control](#multi-organisation--access-control).
 
 ---
 
@@ -13,6 +13,17 @@ Stay informed without polling.
 - Per-user notification preferences to control which events trigger alerts.
 - Email notifications with customisable templates.
 - **Clear all** — the notifications drawer can clear every notification at once instead of dismissing them one by one.
+
+---
+
+## Live Attack Map
+
+A staff-only, cross-org SOC dashboard that animates recent **Attacks** — geo-locatable inbound Wazuh events — in near-real-time, drawn as arcs from the source country to the targeted organisation, with side panels for top source countries, top attack types, and the current rate.
+
+- **Read-model projection, not a new signal** — an Attack is any inbound event at or above a configurable severity floor whose source resolves to a real foreign country (from Wazuh GeoIP enrichment, else a firewall decoder's country field). It visualises existing raw events; it does not create or store new detections, and it sits *outside* the alert→incident pipeline.
+- **Cheap regardless of audience** — a single background producer computes one shared snapshot on a fixed (~10s) cadence and every viewer reads that same copy over SSE, so load on the Wazuh OpenSearch backend stays constant no matter how many staff open the map. The producer is **presence-gated**: with zero viewers it short-circuits before touching OpenSearch, bounding total backend load to a handful of queries per minute and zero when unwatched.
+- **Paints immediately, then tails live** — a capped, time-bounded shared buffer backfills a newly-connected client so the map paints at once, then the client tails new arcs live; client-side arc animation carries the live feel between producer ticks.
+- **Global by design** — the map is deliberately cross-org and staff-only (a tenant cannot see the shared perimeter, which carries no per-org attribution), and it visualises the security domain rather than platform health. v1 is inbound-only; an egress axis and a per-org map are deferred.
 
 ---
 

@@ -1,6 +1,6 @@
 # Incident Response
 
-The full incident lifecycle and the people and AI that work it: [Incident Management](#incident-management), [On-Call Scheduling](#on-call-scheduling), [AI-Powered Triage](#ai-powered-triage), [IOC Enrichment](#ioc-enrichment), the [Incident Assistant](#incident-assistant), [Threat Hunting](#threat-hunting), [Inbound Phishing Ingestion](#inbound-phishing-ingestion), and [Incident Contacts](#incident-contacts).
+The full incident lifecycle and the people and AI that work it: [Incident Management](#incident-management), [Incident Presence](#incident-presence), [On-Call Scheduling](#on-call-scheduling), [AI-Powered Triage](#ai-powered-triage), [IOC Enrichment](#ioc-enrichment), the [Incident Assistant](#incident-assistant), [Threat Hunting](#threat-hunting), [Incident Reports](#incident-reports), [Inbound Phishing Ingestion](#inbound-phishing-ingestion), and [Incident Contacts](#incident-contacts).
 
 See also: [Architecture overview](../architecture.md).
 
@@ -27,10 +27,23 @@ A full lifecycle for security incidents, from detection to closure.
 - **Multi-select state filter** — the incident list state filter is a multi-select that defaults to every state *except* closed, so the active queue is front-and-centre without hiding any one stage.
 - **Org-aware incident table** — the incident list shows the owning organisation column (replacing the TLP column) so MSSP staff can see at a glance which tenant each incident belongs to.
 - **Persistent filter & sort preferences** — each user's chosen filters and sort order are remembered across sessions.
+- **Incident Trend chart** — a collapsible, persistent panel above the incident list plots incidents over time bucketed by **Subject**, with a range toggle (e.g. 7/30/90 days) so analysts can see at a glance which categories of incident are rising. Clicking a Subject series drills the list down to it (including a `subject=none` bucket for untriaged incidents) via a removable filter chip, tying the analytics view back to the working queue. The panel is mobile-aware and remembers its open/closed state.
 - **Route-backed asset links** — linking an ingress [Route](estate-management.md#app-ingress-reverse-proxy--waf) to an incident automatically pulls in the host asset behind it, so the incident carries the real backend even when analysts reason in terms of the public service.
 - **Tab counters** — incident detail tabs (Tasks, Contacts, IOCs, Assets, Attachments, Linked Alerts) show item counts at a glance.
 - **Smart page refresh** — the incident detail page detects when new data is available (triage result, new alert link, comment) and prompts for a reload without forcing a full refresh.
 - **Multi-organisation support** — each organisation has its own incident queue, team, and settings; admins can manage all orgs from one account.
+
+---
+
+## Incident Presence
+
+See who else is on an incident in real time and avoid colliding on the same work. Presence is a lightweight collaboration overlay on the incident detail view, streamed over Server-Sent Events and backed by an ephemeral cache registry (no database writes).
+
+- **Live roster** — each open incident shows who is currently present and what each person is doing: passively **viewing**, **working** a specific task, or **editing** a specific comment. The roster is a full snapshot refreshed every second or two; closing or backgrounding the tab drops you off automatically.
+- **AI actors in the roster** — the incident's AI agents appear as first-class roster members too (e.g. "🤖 Incident Assistant", a Triage Agent re-run), sourced from the agentic orchestrator rather than a browser connection and attributed to the analyst who invoked them, so live AI work is visible alongside human work.
+- **Soft comment-edit lock** — because a comment body is last-write-wins and genuinely clobberable, the first analyst to edit an existing comment holds a soft lock; others get a read-only editor attributed to the holder. The lock self-releases when the tab closes and auto-releases after a few idle minutes, so it prevents the common accidental overwrite without ever deadlocking a comment. Composing a *new* comment is never locked, and working a task is advisory only (two analysts may focus the same task — presence informs the collision, it doesn't prevent it).
+- **Fails open** — presence is a non-critical overlay: if the cache is unavailable it silently no-ops and the page behaves exactly as it did before, and the lock fails open rather than blocking edits.
+- **Staff-only** — customer org members can open an incident but neither see nor emit presence.
 
 ---
 
@@ -83,7 +96,8 @@ Automatically assess every indicator of compromise at incident creation time.
 - **IP addresses** — queried against AbuseIPDB; results include abuse confidence score, total reports, country, and usage type.
 - **Domains and URLs** — queried against VirusTotal; malicious/suspicious vote counts surfaced inline.
 - **Email addresses** — extracted from phishing emails and displayed as a dedicated IOC kind in the IOC tab.
-- **Owned-asset deduplication** — IPs that belong to assets already registered in the organisation's estate are skipped at ingestion time so the IOC tab stays focused on external indicators.
+- **Owned-asset deduplication** — IPs that belong to assets already registered in the organisation's estate are skipped at ingestion time so the IOC tab stays focused on external indicators. Internal IP ranges and the organisation's own owned domains are likewise excluded from automatic extraction so enrichment effort goes to genuinely external indicators.
+- **Analyst-curated IOCs** — analysts can add, edit, and remove IOCs on an incident by hand, correcting a mis-parsed indicator or adding one the automatic extraction missed; manually added IOCs are enriched the same way as extracted ones.
 - Enrichment data is available to the AI triage pipeline immediately, improving the quality of automated assessments.
 - Enriched IOCs display threat intelligence details in the IOC tab without requiring analysts to leave the platform.
 
@@ -133,6 +147,19 @@ Drive an LLM-assisted, cross-org investigation *from a question or a report* —
 - **Recommend-only on live infra** — like the Incident Assistant, a Hunt auto-executes only its own internal, reversible artifacts (notes/findings). It never runs `automated` (Semaphore) or `wazuh_response` actions — it recommends them in prose for an analyst to run through the existing controls.
 - **Hunt console** — a staff-only **Threat Hunting** top-level view lists past and in-progress Hunts (owner, seed, scope, status, findings count, spawned incidents) with **search, sorting, and filtering**; admins can **delete** (including bulk-delete) completed or incomplete Hunts to clean up the list.
 - **Hunt notifications** — the Hunt owner is notified when a long-running Hunt completes or surfaces proposed incidents, so staff don't have to babysit the console.
+
+---
+
+## Incident Reports
+
+Generate a shareable, exportable document about an incident — for a customer or an internal stakeholder — without leaking the incident's internal material. A **Report** is an **immutable, point-in-time snapshot** (a stored PDF): generating one freezes the incident's then-current state so it is always answerable exactly what was shared, and when. The incident changing later never alters an existing Report — you generate a new one.
+
+- **SOC-authored section-catalog templates** — a **Report Template** is an ordered selection from a fixed, server-defined catalog of sections (Executive Summary, Incident Details, Timeline, IOCs, Actions Taken, Recommendations, Asset Impact) plus free-text intro/outro blocks. Authors *choose and order* sections and fill the free text; they never hand-write markup that pulls arbitrary incident fields, so a template cannot be authored that renders internal content.
+- **Audience visibility floor — leak-safe by construction** — Audience is a property of the template. A `customer` template always renders through the exact floor an organisation member would see for that incident (non-internal comments/events only, nothing at TLP:RED, no comments/events at TLP:AMBER) **regardless of which staff member clicks generate**, so a staff-generated customer report cannot leak internal AI triage traces, internal comments, or raw exposure detail. An `internal` template renders full fidelity for SOC management and the post-incident record.
+- **Two disclosure rules beyond the floor** — the **IOCs** section respects a **PAP ceiling** (indicators render only at PAP:WHITE/GREEN, suppressed at AMBER/RED), and the **Asset Impact** section lists linked asset names/roles only and omits all exposure specifics, so a customer report never doubles as an exposure map of the customer's own hosts.
+- **LLM executive summary on filtered grounding** — the Executive Summary is generated by the LLM at render time, grounded **only** on the audience-filtered content (not the full staff-side incident grounding), then frozen into the snapshot like every other section, so a customer summary cannot mention internal findings.
+- **Human-ratified generation** — an analyst generates a Report from the incident detail view at any incident state (an interim update is valid); the [Incident Assistant](#incident-assistant) may *propose* generating one for one-click confirmation. The unattended Triage Agent never generates Reports — a customer-facing deliverable stays a human action.
+- **Delivery** — every Report is staff-downloadable; a `customer`-Audience Report additionally surfaces in the organisation member's own incident view for self-service download. Editing or deleting a template never touches Reports already generated — corrections are new snapshots, and superseded Reports are retained as the audit trail.
 
 ---
 

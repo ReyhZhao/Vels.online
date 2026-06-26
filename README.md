@@ -47,10 +47,10 @@ Vels.online turns multi-source security signals into worked, closed incidents. D
 Capabilities are documented in depth under **[docs/features](docs/features/)**:
 
 - **[Detection & Correlation](docs/features/detection-and-correlation.md)** — the alert ingestion pipeline, the streaming correlation engine, pull-based Scheduled Search Rules over Wazuh OpenSearch, and detection-as-code Rule Tests.
-- **[Incident Response](docs/features/incident-response.md)** — the incident lifecycle, on-call scheduling, two-stage AI triage with an unattended Triage Agent, IOC enrichment, the Incident Assistant, cross-org Threat Hunting, phishing ingestion, and incident contacts.
+- **[Incident Response](docs/features/incident-response.md)** — the incident lifecycle, real-time incident presence, on-call scheduling, two-stage AI triage with an unattended Triage Agent, IOC enrichment, the Incident Assistant, cross-org Threat Hunting, leak-safe snapshot Reports, phishing ingestion, and incident contacts.
 - **[Automation & Response](docs/features/automation-and-response.md)** — Semaphore automations, Wazuh active response, and Wazuh exception-rule management.
 - **[Estate Management](docs/features/estate-management.md)** — fleet/asset visibility with derived internet-facing exposure, vulnerability management, and self-service ingress (reverse proxy & WAF).
-- **[Platform](docs/features/platform.md)** — notifications, responsive list conventions, status page, blog/knowledge base, and multi-organisation access control.
+- **[Platform](docs/features/platform.md)** — notifications, the staff Live Attack Map, responsive list conventions, status page, blog/knowledge base, and multi-organisation access control.
 
 ---
 
