@@ -258,6 +258,17 @@ def test_endpoint_honours_severity_filter(client, staff, acme):
 
 
 @pytest.mark.django_db
+def test_endpoint_honours_closure_reason_filter(client, staff, acme):
+    # #628: the trend honours closure_reason just like the list. closure_reason is
+    # only set on closed incidents, so pin state=closed to expose both.
+    make_incident(acme, state="closed", closure_reason="false_positive")
+    make_incident(acme, state="closed", closure_reason="resolved")
+    client.force_login(staff)
+    r = client.get("/api/incidents/trend/?state=closed&closure_reason=false_positive")
+    assert _totals(r.json()) == 1
+
+
+@pytest.mark.django_db
 def test_endpoint_ignores_its_own_subject_param(client, staff, acme):
     s1 = subject("Phishing")
     s2 = subject("Malware")

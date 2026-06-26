@@ -26,6 +26,7 @@ class IncidentFilterSet(django_filters.FilterSet):
     state = django_filters.CharFilter(method="filter_state")
     severity = django_filters.CharFilter(method="filter_severity")
     tlp = django_filters.CharFilter(method="filter_tlp")
+    closure_reason = django_filters.CharFilter(method="filter_closure_reason")
 
     # Simple field lookups
     org = django_filters.CharFilter(field_name="organization__slug", lookup_expr="exact")
@@ -59,6 +60,10 @@ class IncidentFilterSet(django_filters.FilterSet):
     def filter_tlp(self, qs, name, value):
         values = self._parse_multi("tlp")
         return qs.filter(tlp__in=values) if values else qs
+
+    def filter_closure_reason(self, qs, name, value):
+        values = self._parse_multi("closure_reason")
+        return qs.filter(closure_reason__in=values) if values else qs
 
     def filter_assignee(self, qs, name, value):
         # Tab-level assignee constraints (my_queue/unassigned) are applied in the view

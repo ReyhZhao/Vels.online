@@ -7,7 +7,7 @@ import api from '../lib/axios';
 // Filter params the chart forwards to /trend/. It deliberately omits `subject`
 // (the chart owns the breakdown — see PRD #614) and `created_within` (the chart
 // owns the time dimension), plus transient list params like page/sort/order.
-const CHART_FILTER_KEYS = ['org', 'severity', 'state', 'tlp', 'q', 'tab'];
+const CHART_FILTER_KEYS = ['org', 'severity', 'state', 'tlp', 'closure_reason', 'q', 'tab'];
 
 // Fixed palette assigned by sorted Subject position, so a Subject keeps its
 // colour regardless of which other Subjects are present.

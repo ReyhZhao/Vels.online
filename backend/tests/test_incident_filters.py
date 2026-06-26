@@ -269,6 +269,59 @@ def test_tlp_filter_multi(client, staff, acme):
     assert red.id not in result_ids
 
 
+# ── closure_reason filter (#628) ──────────────────────────────────────────────
+# closure_reason is only populated on closed incidents, and the default state
+# filter excludes `closed`, so these queries pin `state=closed` to compose the
+# two facets (AND across facets) exactly as the UI does.
+
+@pytest.mark.django_db
+def test_closure_reason_filter_single(client, staff, acme):
+    fp = make_incident(acme, state="closed", closure_reason="false_positive")
+    resolved = make_incident(acme, state="closed", closure_reason="resolved")
+    client.force_login(staff)
+    r = client.get("/api/incidents/?state=closed&closure_reason=false_positive")
+    result_ids = ids(r)
+    assert fp.id in result_ids
+    assert resolved.id not in result_ids
+
+
+@pytest.mark.django_db
+def test_closure_reason_filter_multi_comma(client, staff, acme):
+    fp = make_incident(acme, state="closed", closure_reason="false_positive")
+    ni = make_incident(acme, state="closed", closure_reason="no_impact")
+    resolved = make_incident(acme, state="closed", closure_reason="resolved")
+    client.force_login(staff)
+    r = client.get("/api/incidents/?state=closed&closure_reason=false_positive,no_impact")
+    result_ids = ids(r)
+    assert fp.id in result_ids
+    assert ni.id in result_ids
+    assert resolved.id not in result_ids
+
+
+@pytest.mark.django_db
+def test_closure_reason_filter_multi_repeated_param(client, staff, acme):
+    fp = make_incident(acme, state="closed", closure_reason="false_positive")
+    ni = make_incident(acme, state="closed", closure_reason="no_impact")
+    resolved = make_incident(acme, state="closed", closure_reason="resolved")
+    client.force_login(staff)
+    r = client.get("/api/incidents/?state=closed&closure_reason=false_positive&closure_reason=no_impact")
+    result_ids = ids(r)
+    assert fp.id in result_ids
+    assert ni.id in result_ids
+    assert resolved.id not in result_ids
+
+
+@pytest.mark.django_db
+def test_closure_reason_empty_returns_unfiltered(client, staff, acme):
+    fp = make_incident(acme, state="closed", closure_reason="false_positive")
+    resolved = make_incident(acme, state="closed", closure_reason="resolved")
+    client.force_login(staff)
+    r = client.get("/api/incidents/?state=closed")
+    result_ids = ids(r)
+    assert fp.id in result_ids
+    assert resolved.id in result_ids
+
+
 # ── free-text filter ──────────────────────────────────────────────────────────
 
 @pytest.mark.django_db
