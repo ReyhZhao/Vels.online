@@ -61,7 +61,7 @@ function ConditionRow({ cond, index, catalog, onChange, onRemove }) {
       <input
         value={cond.value}
         onChange={e => onChange(index, { ...cond, value: e.target.value })}
-        placeholder="Value"
+        placeholder={cond.operator === 'in' ? 'Comma-separated values' : 'Value'}
         aria-label="Value"
         className="flex-1 min-w-20 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
       />

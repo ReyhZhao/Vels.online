@@ -11,7 +11,7 @@ import IncidentTrendChart from '../components/IncidentTrendChart';
 // Keys that are persisted as user preferences (excludes transient keys like page, q).
 // `subject` is the trend chart's drill-down filter; `trend` is the panel's
 // collapsed/expanded state — both persisted like a filter.
-const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'org', 'created_within', 'sort', 'order', 'subject', 'trend'];
+const PREF_KEYS = ['tab', 'severity', 'state', 'tlp', 'closure_reason', 'org', 'created_within', 'sort', 'order', 'subject', 'trend'];
 
 function getPrefsStorageKey(userId) {
   return `incident_list_prefs_${userId ?? 'anon'}`;
@@ -394,6 +394,70 @@ function StateMultiSelect({ selected, onToggle }) {
   );
 }
 
+// Closure-reason multi-select, modelled on StateMultiSelect. Unlike state, an
+// empty selection is meaningful ("no closure-reason filter"), so nothing is
+// locked and the all-clear summary reads "All closure reasons".
+function ClosureReasonMultiSelect({ selected, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  const selectedSet = new Set(selected);
+  const labelFor = v => CLOSURE_REASONS.find(r => r.value === v)?.label ?? v;
+
+  let summary;
+  if (selected.length === 0) summary = 'All closure reasons';
+  else if (selected.length <= 2) summary = selected.map(labelFor).join(', ');
+  else summary = `${selected.length} closure reasons`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-label="Closure reason filter"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        <span>{summary}</span>
+        <span aria-hidden="true" className="text-muted-foreground">▾</span>
+      </button>
+      {open && (
+        <div
+          role="group"
+          aria-label="Closure reasons"
+          className="absolute z-50 mt-1 min-w-[12rem] rounded-md border border-border bg-card py-1 shadow-lg"
+        >
+          {CLOSURE_REASONS.map(r => (
+            <label
+              key={r.value}
+              className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent"
+            >
+              <input
+                type="checkbox"
+                aria-label={r.value}
+                checked={selectedSet.has(r.value)}
+                onChange={() => onToggle(r.value)}
+                className="rounded border-border"
+              />
+              <span className="text-foreground">{r.label}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function IncidentList() {
   const { user } = useAuth();
   const orgContext = useOrganization();
@@ -559,6 +623,28 @@ export default function IncidentList() {
       current.add(stateValue);
     }
     setStates(STATE_OPTIONS.filter(s => current.has(s)));
+  }
+
+  // Multi-value closure-reason filter. No param means "no filter" (all reasons),
+  // so an empty selection is valid and simply clears the param.
+  const closureReasonParam = searchParams.get('closure_reason');
+  const selectedClosureReasons = closureReasonParam
+    ? closureReasonParam.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+
+  function toggleClosureReason(reason) {
+    const current = new Set(selectedClosureReasons);
+    if (current.has(reason)) current.delete(reason);
+    else current.add(reason);
+    const next = CLOSURE_REASONS.map(r => r.value).filter(v => current.has(v));
+    setSelectAllPages(false);
+    setSearchParams(prev => {
+      const nextParams = new URLSearchParams(prev);
+      if (next.length) nextParams.set('closure_reason', next.join(','));
+      else nextParams.delete('closure_reason');
+      nextParams.delete('page');
+      return nextParams;
+    });
   }
 
   function setTab(tabKey) {
@@ -764,6 +850,7 @@ export default function IncidentList() {
           {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <StateMultiSelect selected={selectedStates} onToggle={toggleState} />
+        <ClosureReasonMultiSelect selected={selectedClosureReasons} onToggle={toggleClosureReason} />
         <select
           value={searchParams.get('tlp') || ''}
           onChange={e => setParam('tlp', e.target.value)}

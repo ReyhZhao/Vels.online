@@ -119,6 +119,51 @@ def test_in_operator_no_match(org):
     assert alert_matches_leg(alert, leg) is False
 
 
+def test_in_operator_comma_separated_match(org):
+    # #629: comma-separated values are the primary input form.
+    alert = _make_alert(org, severity="critical")
+    rule = _make_rule(org)
+    leg = _make_leg(rule)
+    _make_condition(leg, FIELD_KIND_ALERT, "severity", OPERATOR_IN, "critical, high")
+    assert alert_matches_leg(alert, leg) is True
+
+
+def test_in_operator_comma_separated_no_match(org):
+    alert = _make_alert(org, severity="low")
+    rule = _make_rule(org)
+    leg = _make_leg(rule)
+    _make_condition(leg, FIELD_KIND_ALERT, "severity", OPERATOR_IN, "critical, high")
+    assert alert_matches_leg(alert, leg) is False
+
+
+def test_in_operator_comma_separated_single_value(org):
+    alert = _make_alert(org, severity="high")
+    rule = _make_rule(org)
+    leg = _make_leg(rule)
+    _make_condition(leg, FIELD_KIND_ALERT, "severity", OPERATOR_IN, "high")
+    assert alert_matches_leg(alert, leg) is True
+
+
+def test_in_operator_malformed_value_does_not_raise(org):
+    # #629: a malformed `in` value must never abort evaluation; it is a no-match.
+    alert = _make_alert(org, severity="critical")
+    rule = _make_rule(org)
+    leg = _make_leg(rule)
+    _make_condition(leg, FIELD_KIND_ALERT, "severity", OPERATOR_IN, "['critical', 'high']")
+    # Single-quoted "JSON" is invalid; lenient comma-split yields tokens that do
+    # not equal "critical", so this is a clean no-match rather than a crash.
+    assert alert_matches_leg(alert, leg) is False
+
+
+def test_in_operator_json_array_back_compat(org):
+    # Legacy values stored as JSON arrays keep working unchanged.
+    alert = _make_alert(org, severity="high")
+    rule = _make_rule(org)
+    leg = _make_leg(rule)
+    _make_condition(leg, FIELD_KIND_ALERT, "severity", OPERATOR_IN, '["critical", "high"]')
+    assert alert_matches_leg(alert, leg) is True
+
+
 def test_contains_operator_match(org):
     alert = _make_alert(org, title="Brute force login attempt")
     rule = _make_rule(org)

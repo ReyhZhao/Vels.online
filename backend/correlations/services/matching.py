@@ -1,9 +1,44 @@
 import json
+import logging
 from ipaddress import AddressValueError, ip_address, ip_network
 
 from correlations.models import FIELD_KIND_ALERT, FIELD_KIND_ENTITY, FIELD_KIND_SOURCE_REF
 
+logger = logging.getLogger(__name__)
+
 SEVERITY_ORDER = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def parse_in_values(cond_value):
+    """Parse an ``in``-operator condition value into a list of string items.
+
+    Accepts either a comma-separated string (``"nginx, apache"``) or a JSON
+    array of values (``'["nginx", "apache"]'``, kept for back-compat with values
+    saved before comma-separated input was supported). Whitespace around each
+    item is trimmed and empty items are dropped.
+
+    This function never raises: a malformed value yields the best-effort token
+    list (often empty), so a single bad condition can never abort evaluation of
+    its rule. See issue #629.
+    """
+    if cond_value is None:
+        return []
+    raw = cond_value.strip() if isinstance(cond_value, str) else str(cond_value).strip()
+
+    items = None
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            logger.warning("correlations: malformed JSON 'in' value %r; treating as no-match", raw)
+            parsed = None
+        if isinstance(parsed, list):
+            items = parsed
+
+    if items is None:
+        items = raw.split(",")
+
+    return [s for s in (str(item).strip() for item in items) if s]
 
 
 def _field_values(alert, condition):
@@ -30,7 +65,7 @@ def _matches(field_values, operator, cond_value):
         return any(str(v).casefold() == cv for v in field_values)
 
     if operator == "in":
-        targets = {t.casefold() for t in json.loads(cond_value)}
+        targets = {t.casefold() for t in parse_in_values(cond_value)}
         return any(str(v).casefold() in targets for v in field_values)
 
     if operator == "contains":
