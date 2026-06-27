@@ -235,3 +235,162 @@ def test_generate_endpoint_accepts_overrides(client, acme, staff, fake_pdf):
     assert resp.status_code == 201, resp.content
     rep = Report.objects.get(pk=resp.json()["id"])
     assert rep.content["recommendations_text"] == "<ul><li>patch</li></ul>"
+
+
+# ── slice #635: preview scaffold + report_preview module ────────────────────────
+
+
+@pytest.mark.django_db
+def test_preview_renders_readonly_sections_and_editable_defaults(acme, staff):
+    from incidents.services.report_preview import build_report_preview
+
+    inc = make_incident(acme, tlp="green")
+    Comment.objects.create(incident=inc, body="public note", is_internal=False)
+    tmpl = make_template(
+        audience="internal",
+        sections=["incident_details", "executive_summary", "recommendations"],
+        intro_text="<p>intro</p>", recommendations_text="<p>rec default</p>",
+    )
+    data = build_report_preview(inc, tmpl, actor=staff)
+    assert data["refused"] is False
+    assert data["audience"] == "internal"
+    by_kind = {s["kind"]: s for s in data["sections"]}
+    # deterministic section is rendered read-only
+    assert by_kind["incident_details"]["editable"] is False
+    assert "<section" in by_kind["incident_details"]["html"]
+    # editable sections carry no server html
+    assert by_kind["executive_summary"]["editable"] is True
+    assert "html" not in by_kind["recommendations"]
+    # editable defaults pre-filled from the template; summary starts empty (on-demand)
+    assert data["editable"]["intro_text"] == "<p>intro</p>"
+    assert data["editable"]["recommendations_text"] == "<p>rec default</p>"
+    assert data["editable"]["executive_summary"] == ""
+
+
+@pytest.mark.django_db
+def test_preview_customer_floor_excludes_internal_content(acme, staff):
+    from incidents.services.report_preview import build_report_preview
+
+    inc = make_incident(acme, tlp="green")
+    Comment.objects.create(incident=inc, body="SECRET internal", is_internal=True)
+    tmpl = make_template(audience="customer", sections=["timeline"])
+    data = build_report_preview(inc, tmpl, actor=staff)
+    blob = str(data)
+    assert "SECRET internal" not in blob
+
+
+@pytest.mark.django_db
+def test_preview_customer_on_red_is_refused_with_no_body(acme, staff):
+    from incidents.services.report_preview import build_report_preview
+
+    inc = make_incident(acme, tlp="red")
+    tmpl = make_template(audience="customer", sections=["incident_details"])
+    data = build_report_preview(inc, tmpl, actor=staff)
+    assert data["refused"] is True
+    assert "sections" not in data
+    assert data["reason"]
+
+
+@pytest.mark.django_db
+def test_preview_creates_no_artifacts(acme, staff):
+    from incidents.models import IncidentEvent
+    from incidents.services.report_preview import build_report_preview
+
+    inc = make_incident(acme)
+    tmpl = make_template(audience="internal", sections=["incident_details"])
+    before_reports = Report.objects.count()
+    before_events = IncidentEvent.objects.filter(incident=inc).count()
+    build_report_preview(inc, tmpl, actor=staff)
+    assert Report.objects.count() == before_reports
+    assert IncidentEvent.objects.filter(incident=inc).count() == before_events
+
+
+@pytest.mark.django_db
+def test_preview_endpoint_staff_only(client, acme, staff, member):
+    inc = make_incident(acme)
+    tmpl = make_template(audience="internal", sections=["incident_details"])
+    # org member forbidden
+    client.force_login(member)
+    resp = client.get(f"/api/incidents/{inc.display_id}/reports/preview/?template_id={tmpl.id}")
+    assert resp.status_code in (401, 403)
+    # staff ok
+    client.force_login(staff)
+    resp = client.get(f"/api/incidents/{inc.display_id}/reports/preview/?template_id={tmpl.id}")
+    assert resp.status_code == 200
+    assert resp.json()["refused"] is False
+
+
+@pytest.mark.django_db
+def test_preview_endpoint_requires_template_id(client, acme, staff):
+    inc = make_incident(acme)
+    client.force_login(staff)
+    resp = client.get(f"/api/incidents/{inc.display_id}/reports/preview/")
+    assert resp.status_code == 400
+
+
+# ── slice #637: on-demand Executive Summary preview endpoint ─────────────────────
+
+
+@pytest.mark.django_db
+def test_summary_endpoint_returns_prose_and_persists_nothing(client, acme, staff):
+    inc = make_incident(acme)
+    tmpl = make_template(audience="internal", sections=["executive_summary"])
+    client.force_login(staff)
+    before = Report.objects.count()
+    with patch(
+        "incidents.llm.report_summary.generate_report_summary",
+        return_value="<p>AI summary</p>",
+    ):
+        resp = client.post(
+            f"/api/incidents/{inc.display_id}/reports/preview/summary/",
+            {"template_id": tmpl.id}, content_type="application/json",
+        )
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["executive_summary"] == "<p>AI summary</p>"
+    assert Report.objects.count() == before
+
+
+@pytest.mark.django_db
+def test_summary_endpoint_uses_audience_floored_grounding(client, acme, staff):
+    inc = make_incident(acme, tlp="green")
+    Comment.objects.create(incident=inc, body="SECRET internal", is_internal=True)
+    tmpl = make_template(audience="customer", sections=["executive_summary"])
+    client.force_login(staff)
+    captured = {}
+
+    def fake_summary(grounding):
+        captured["grounding"] = grounding
+        return "<p>ok</p>"
+
+    with patch("incidents.llm.report_summary.generate_report_summary", side_effect=fake_summary):
+        resp = client.post(
+            f"/api/incidents/{inc.display_id}/reports/preview/summary/",
+            {"template_id": tmpl.id}, content_type="application/json",
+        )
+    assert resp.status_code == 200
+    bodies = [c["body"] for c in captured["grounding"]["comments"]]
+    assert "SECRET internal" not in bodies
+
+
+@pytest.mark.django_db
+def test_summary_endpoint_customer_on_red_refused(client, acme, staff):
+    inc = make_incident(acme, tlp="red")
+    tmpl = make_template(audience="customer", sections=["executive_summary"])
+    client.force_login(staff)
+    resp = client.post(
+        f"/api/incidents/{inc.display_id}/reports/preview/summary/",
+        {"template_id": tmpl.id}, content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_summary_endpoint_staff_only(client, acme, staff, member):
+    inc = make_incident(acme)
+    tmpl = make_template(audience="internal", sections=["executive_summary"])
+    client.force_login(member)
+    resp = client.post(
+        f"/api/incidents/{inc.display_id}/reports/preview/summary/",
+        {"template_id": tmpl.id}, content_type="application/json",
+    )
+    assert resp.status_code in (401, 403)

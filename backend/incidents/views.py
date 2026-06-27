@@ -2897,6 +2897,77 @@ class IncidentReportListView(APIView):
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
 
 
+def _preview_template_for_request(request, display_id):
+    """Shared staff + incident + template resolution for the preview endpoints.
+
+    Returns ``(incident, template, None)`` on success or ``(None, None, error_response)``.
+    """
+    err = _require_staff(request)
+    if err:
+        return None, None, err
+    incident, err = _get_incident_for_user(request, display_id)
+    if err:
+        return None, None, err
+    template_id = (
+        request.query_params.get("template_id")
+        if request.method == "GET"
+        else request.data.get("template_id")
+    )
+    if not template_id:
+        return None, None, Response(
+            {"detail": "template_id is required."}, status=status.HTTP_400_BAD_REQUEST
+        )
+    try:
+        template = ReportTemplate.objects.get(pk=template_id)
+    except (ReportTemplate.DoesNotExist, ValueError, TypeError):
+        return None, None, Response(
+            {"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND
+        )
+    return incident, template, None
+
+
+class IncidentReportPreviewView(APIView):
+    """Staff-only, non-persisting Report Preview scaffold (#635, PRD #632).
+
+    Returns the read-only sections (rendered through the Audience floor) + editable
+    free-text defaults for the selected template. Creates no Report, PDF, or event.
+    """
+
+    def get(self, request, display_id):
+        incident, template, err = _preview_template_for_request(request, display_id)
+        if err:
+            return err
+        from .services.report_preview import build_report_preview
+
+        return Response(build_report_preview(incident, template, actor=request.user))
+
+
+class IncidentReportPreviewSummaryView(APIView):
+    """Staff-only on-demand Executive Summary for the Preview (#637, PRD #632).
+
+    Fires one LLM call on the audience-filtered grounding and returns the prose.
+    Persists nothing. Refuses a customer summary on a TLP:RED incident (no body).
+    """
+
+    def post(self, request, display_id):
+        incident, template, err = _preview_template_for_request(request, display_id)
+        if err:
+            return err
+        from .services.reports import REPORT_REFUSAL_CUSTOMER_ON_RED
+        from .services.report_grounding import build_report_grounding
+        from .llm.report_summary import generate_report_summary
+
+        audience = template.audience
+        if audience == ReportTemplate.AUDIENCE_CUSTOMER and incident.tlp == Incident.TLP_RED:
+            return Response(
+                {"detail": REPORT_REFUSAL_CUSTOMER_ON_RED},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        grounding = build_report_grounding(incident, audience)
+        summary = generate_report_summary(grounding)
+        return Response({"executive_summary": summary})
+
+
 class IncidentReportDownloadView(APIView):
     """Issue a presigned download URL for a Report PDF, audience-gated (#619, #624)."""
 
