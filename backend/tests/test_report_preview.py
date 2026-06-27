@@ -394,3 +394,65 @@ def test_summary_endpoint_staff_only(client, acme, staff, member):
         {"template_id": tmpl.id}, content_type="application/json",
     )
     assert resp.status_code in (401, 403)
+
+
+# ── #633: cross-incident reports list (menu) ────────────────────────────────────
+
+
+def _make_report(incident, audience="customer", ref="REP-X"):
+    return Report.objects.create(
+        incident=incident, reference_id=ref, template_name="T", audience=audience,
+        tlp=incident.tlp, incident_state=incident.state, s3_key=f"k/{ref}", size_bytes=1,
+    )
+
+
+@pytest.mark.django_db
+def test_global_reports_list_staff_sees_all(client, acme, staff, django_user_model):
+    other = Organization.objects.create(name="Beta", slug="beta", wazuh_group="beta")
+    a = make_incident(acme, n=1)
+    b = make_incident(other, n=2)
+    _make_report(a, audience="customer", ref="REP-1")
+    _make_report(a, audience="internal", ref="REP-2")
+    _make_report(b, audience="customer", ref="REP-3")
+    client.force_login(staff)
+    resp = client.get("/api/incidents/reports/")
+    assert resp.status_code == 200
+    refs = {r["reference_id"] for r in resp.json()}
+    assert refs == {"REP-1", "REP-2", "REP-3"}
+    assert resp.json()[0]["organization_name"] in {"Acme", "Beta"}
+
+
+@pytest.mark.django_db
+def test_global_reports_list_member_sees_only_own_customer_reports(client, acme, member):
+    other = Organization.objects.create(name="Beta", slug="beta", wazuh_group="beta")
+    mine = make_incident(acme, n=1)
+    theirs = make_incident(other, n=2)
+    red = make_incident(acme, n=3, tlp="red")
+    _make_report(mine, audience="customer", ref="REP-MINE")
+    _make_report(mine, audience="internal", ref="REP-INT")
+    _make_report(theirs, audience="customer", ref="REP-OTHER")
+    _make_report(red, audience="customer", ref="REP-RED")
+    client.force_login(member)
+    resp = client.get("/api/incidents/reports/")
+    assert resp.status_code == 200
+    refs = {r["reference_id"] for r in resp.json()}
+    assert refs == {"REP-MINE"}  # no internal, no other org, no TLP:RED
+
+
+@pytest.mark.django_db
+def test_global_reports_list_org_filter(client, acme, staff):
+    other = Organization.objects.create(name="Beta", slug="beta", wazuh_group="beta")
+    a = make_incident(acme, n=1)
+    b = make_incident(other, n=2)
+    _make_report(a, ref="REP-A")
+    _make_report(b, ref="REP-B")
+    client.force_login(staff)
+    resp = client.get(f"/api/incidents/reports/?organization={acme.id}")
+    refs = {r["reference_id"] for r in resp.json()}
+    assert refs == {"REP-A"}
+
+
+@pytest.mark.django_db
+def test_global_reports_list_requires_auth(client):
+    resp = client.get("/api/incidents/reports/")
+    assert resp.status_code in (401, 403)

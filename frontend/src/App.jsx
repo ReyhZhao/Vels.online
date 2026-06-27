@@ -27,6 +27,7 @@ import DashboardPage from './pages/DashboardPage';
 import WorkPackagePage from './pages/WorkPackagePage';
 import RiskAcceptancePage from './pages/RiskAcceptancePage';
 import IncidentList from './pages/IncidentList';
+import ReportsPage from './pages/ReportsPage';
 import IncidentDetail from './pages/IncidentDetail';
 import AlertsPage from './pages/AlertsPage';
 import ExceptionList from './pages/ExceptionList';
@@ -112,6 +113,7 @@ function App() {
 
         <Route path="/incidents" element={<IncidentList />} />
         <Route path="/incidents/:displayId" element={<IncidentDetail />} />
+        <Route path="/reports" element={<ReportsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/tasks" element={<TaskListPage />} />
         <Route path="/exceptions" element={<ExceptionList />} />

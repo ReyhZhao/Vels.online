@@ -2821,6 +2821,33 @@ class ReportTemplateDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class ReportListView(APIView):
+    """Cross-incident Report list for the menu (#633).
+
+    Access-filtered: staff see every Report; an org member sees only ``customer``
+    Reports for incidents they can view (their orgs, excluding TLP:RED) — reusing the
+    same incident-visibility floor as the rest of the app. Optional ``?organization=<id>``
+    narrows to one org (used by the staff "selected customer" view).
+    """
+
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_403_FORBIDDEN)
+        visible = filter_incidents_for_user(Incident.objects.all(), request.user)
+        qs = (
+            Report.objects
+            .select_related("incident", "incident__organization", "generated_by")
+            .filter(incident__in=visible)
+            .order_by("-generated_at")
+        )
+        if not request.user.is_staff:
+            qs = qs.filter(audience=Report.AUDIENCE_CUSTOMER)
+        org_id = request.query_params.get("organization")
+        if org_id:
+            qs = qs.filter(incident__organization_id=org_id)
+        return Response(ReportSerializer(qs, many=True).data)
+
+
 def _reports_for_user(incident, user):
     """Reports an actor may see for an incident.
 
