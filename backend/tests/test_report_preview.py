@@ -124,3 +124,114 @@ def test_executive_summary_is_sanitized_at_render(acme):
     assert "<p>Summary</p>" in html
     assert "steal()" not in html
     assert "<script" not in html
+
+
+# ── slice #638: per-Report overrides at generate ────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_override_freezes_into_report_content(acme, staff, fake_pdf):
+    from incidents.services.reports import generate_report
+
+    inc = make_incident(acme)
+    tmpl = make_template(
+        audience="internal", sections=["recommendations"],
+        intro_text="<p>template intro</p>", recommendations_text="<p>template rec</p>",
+    )
+    report = generate_report(
+        inc, tmpl, actor=staff,
+        overrides={
+            "intro_text": "<p>tailored <strong>intro</strong></p>",
+            "recommendations_text": "<ul><li>do this</li></ul>",
+        },
+    )
+    assert report.content["intro_text"] == "<p>tailored <strong>intro</strong></p>"
+    assert report.content["recommendations_text"] == "<ul><li>do this</li></ul>"
+    # outro not overridden → template default
+    assert report.content["outro_text"] == tmpl.outro_text
+
+
+@pytest.mark.django_db
+def test_supplied_summary_is_verbatim_and_skips_llm(acme, staff, fake_pdf):
+    from incidents.services.reports import generate_report
+
+    inc = make_incident(acme)
+    tmpl = make_template(audience="internal", sections=["executive_summary"])
+    with patch("incidents.services.reports.generate_report_summary") as llm:
+        report = generate_report(
+            inc, tmpl, actor=staff,
+            overrides={"executive_summary": "<p>Analyst-written summary</p>"},
+        )
+    llm.assert_not_called()
+    assert report.executive_summary == "<p>Analyst-written summary</p>"
+
+
+@pytest.mark.django_db
+def test_absent_summary_generates_via_llm(acme, staff, fake_pdf):
+    from incidents.services.reports import generate_report
+
+    inc = make_incident(acme)
+    tmpl = make_template(audience="internal", sections=["executive_summary"])
+    with patch("incidents.services.reports.generate_report_summary",
+               return_value="<p>AI summary</p>") as llm:
+        report = generate_report(inc, tmpl, actor=staff, overrides={})
+    llm.assert_called_once()
+    assert report.executive_summary == "<p>AI summary</p>"
+
+
+@pytest.mark.django_db
+def test_overrides_never_mutate_template(acme, staff, fake_pdf):
+    from incidents.services.reports import generate_report
+
+    inc = make_incident(acme)
+    tmpl = make_template(
+        audience="internal", sections=["recommendations"],
+        intro_text="<p>orig</p>", recommendations_text="<p>orig rec</p>",
+    )
+    generate_report(
+        inc, tmpl, actor=staff,
+        overrides={"intro_text": "<p>changed</p>", "recommendations_text": "<p>changed</p>"},
+    )
+    tmpl.refresh_from_db()
+    assert tmpl.intro_text == "<p>orig</p>"
+    assert tmpl.recommendations_text == "<p>orig rec</p>"
+
+
+@pytest.mark.django_db
+def test_dirty_override_is_sanitized_at_generate(acme, staff, fake_pdf):
+    from incidents.services.reports import generate_report
+
+    inc = make_incident(acme)
+    tmpl = make_template(audience="internal", sections=["incident_details"])
+    report = generate_report(
+        inc, tmpl, actor=staff,
+        overrides={"intro_text": '<p onclick="x">hi</p><script>bad()</script>'},
+    )
+    assert "onclick" not in report.content["intro_text"]
+    assert "bad()" not in report.content["intro_text"]
+    assert "<p>hi</p>" in report.content["intro_text"]
+
+
+@pytest.mark.django_db
+def test_customer_override_on_red_still_refused(acme, staff, fake_pdf):
+    from incidents.services.reports import ReportGenerationError, generate_report
+
+    inc = make_incident(acme, tlp="red")
+    tmpl = make_template(audience="customer", sections=["incident_details"])
+    with pytest.raises(ReportGenerationError):
+        generate_report(inc, tmpl, actor=staff, overrides={"intro_text": "<p>x</p>"})
+
+
+@pytest.mark.django_db
+def test_generate_endpoint_accepts_overrides(client, acme, staff, fake_pdf):
+    inc = make_incident(acme)
+    tmpl = make_template(audience="internal", sections=["recommendations"])
+    client.force_login(staff)
+    resp = client.post(
+        f"/api/incidents/{inc.display_id}/reports/",
+        {"template_id": tmpl.id, "recommendations_text": "<ul><li>patch</li></ul>"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 201, resp.content
+    rep = Report.objects.get(pk=resp.json()["id"])
+    assert rep.content["recommendations_text"] == "<ul><li>patch</li></ul>"

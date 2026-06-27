@@ -2862,13 +2862,24 @@ class IncidentReportListView(APIView):
             return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
 
         from .services.reports import (
+            OVERRIDE_KEYS,
             REPORT_REFUSAL_CUSTOMER_ON_RED,
             ReportGenerationError,
             generate_report,
         )
 
+        # Per-Report free-text overrides (PRD #632) — only string values are honored;
+        # each is sanitized in the service (defense-in-depth over the client).
+        overrides = {
+            k: request.data[k]
+            for k in OVERRIDE_KEYS
+            if isinstance(request.data.get(k), str)
+        }
+
         try:
-            report = generate_report(incident, template, actor=request.user)
+            report = generate_report(
+                incident, template, actor=request.user, overrides=overrides
+            )
         except ReportGenerationError:
             # Return the refusal reason from a controlled constant rather than the
             # exception text, so no exception/stack-trace detail reaches the client

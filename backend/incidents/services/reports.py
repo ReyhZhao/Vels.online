@@ -202,14 +202,35 @@ def render_report_pdf(html: str) -> bytes:
     return HTML(string=html).write_pdf()
 
 
-def generate_report(incident, template, actor) -> Report:
+# The free-text blocks an analyst may override per-Report in the Preview (PRD #632).
+OVERRIDE_KEYS = ("intro_text", "outro_text", "recommendations_text", "executive_summary")
+
+
+def _effective_richtext(overrides, key, default):
+    """A per-Report override (sanitized) when the analyst supplied one, else the default.
+
+    "Supplied" means the key is present with a string value — an empty string is a
+    deliberate clear, not "fall back to the template".
+    """
+    if overrides and isinstance(overrides.get(key), str):
+        return sanitize_report_richtext(overrides[key])
+    return default
+
+
+def generate_report(incident, template, actor, overrides=None) -> Report:
     """Render, store, and freeze an immutable Report of ``incident`` from ``template``.
 
     Enforces the leak-safety rules: a ``customer`` Report always renders through the
     customer Audience floor (independent of ``actor``), and a ``customer`` Report is
     refused on a TLP:RED incident.
+
+    ``overrides`` (PRD #632) may carry per-Report free-text for any of
+    ``OVERRIDE_KEYS``. Each is sanitized and frozen into THIS Report only — the source
+    ``template`` is never mutated. A supplied ``executive_summary`` is used verbatim and
+    the LLM call is skipped (the analyst already vetted it in the Preview).
     """
     audience = template.audience
+    overrides = overrides or {}
 
     if audience == ReportTemplate.AUDIENCE_CUSTOMER and incident.tlp == Incident.TLP_RED:
         raise ReportGenerationError(REPORT_REFUSAL_CUSTOMER_ON_RED)
@@ -218,11 +239,26 @@ def generate_report(incident, template, actor) -> Report:
     # customer report renders the customer perspective no matter who generates it.
     grounding = build_report_grounding(incident, audience)
 
+    # Freeze the effective (override-or-template, sanitized) free-text into the grounding
+    # so the renderers read it; never written back to the template.
+    intro_text = _effective_richtext(overrides, "intro_text", template.intro_text)
+    outro_text = _effective_richtext(overrides, "outro_text", template.outro_text)
+    recommendations_text = _effective_richtext(
+        overrides, "recommendations_text", template.recommendations_text
+    )
+    grounding["intro_text"] = intro_text
+    grounding["outro_text"] = outro_text
+    grounding["recommendations_text"] = recommendations_text
+
     section_kinds = list(template.sections or [])
 
     executive_summary = ""
     if "executive_summary" in section_kinds:
-        executive_summary = generate_report_summary(grounding)
+        if isinstance(overrides.get("executive_summary"), str):
+            # Analyst-vetted prose from the Preview — freeze verbatim, skip the LLM.
+            executive_summary = sanitize_report_richtext(overrides["executive_summary"])
+        else:
+            executive_summary = sanitize_report_richtext(generate_report_summary(grounding))
         # Freeze the prose into the grounding so the section renderer reads it and it
         # is captured in the immutable snapshot — never re-run on later views.
         grounding["executive_summary"] = executive_summary
@@ -252,8 +288,9 @@ def generate_report(incident, template, actor) -> Report:
         incident_state=incident.state,
         executive_summary=executive_summary,
         content={
-            "intro_text": template.intro_text,
-            "outro_text": template.outro_text,
+            "intro_text": intro_text,
+            "outro_text": outro_text,
+            "recommendations_text": recommendations_text,
             "sections": rendered,
         },
         s3_key=key,
