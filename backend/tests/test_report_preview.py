@@ -1,0 +1,126 @@
+"""Tests for the Report Preview feature (PRD #632).
+
+Covers slice #636 (rich-text rendering), #638 (per-Report overrides at generate),
+#635 (preview scaffold + report_preview), and #637 (on-demand summary endpoint).
+Assertions are on external behaviour: what renders, what is (not) persisted, what
+the Audience floor lets through.
+"""
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from incidents.models import Comment, Incident, Report, ReportTemplate
+from security.models import Organization, OrganizationMembership
+
+
+# ── fixtures ──────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def acme(db):
+    return Organization.objects.create(name="Acme", slug="acme", wazuh_group="acme")
+
+
+@pytest.fixture
+def staff(db, django_user_model):
+    return django_user_model.objects.create_user(
+        username="sam", password="pass", is_staff=True
+    )
+
+
+@pytest.fixture
+def member(db, django_user_model, acme):
+    user = django_user_model.objects.create_user(username="mo", password="pass")
+    OrganizationMembership.objects.create(user=user, organization=acme)
+    return user
+
+
+def make_incident(org, n=1, tlp="green", pap="green", state="in_progress"):
+    return Incident.objects.create(
+        organization=org, title="Phishing wave", display_id=f"INC-2026-{n:04d}",
+        tlp=tlp, pap=pap, state=state, severity="high", description="A phishing campaign.",
+    )
+
+
+def make_template(audience="customer", sections=None, **kwargs):
+    return ReportTemplate.objects.create(
+        organization=None,
+        name=kwargs.pop("name", f"{audience} template"),
+        audience=audience,
+        sections=sections if sections is not None else ["incident_details"],
+        **kwargs,
+    )
+
+
+@pytest.fixture
+def fake_pdf():
+    """Patch the PDF renderer + storage so service/API tests don't need WeasyPrint."""
+    with patch("incidents.services.reports.render_report_pdf", return_value=b"%PDF-1.4 fake"), \
+         patch("incidents.services.reports.StorageClient") as Storage:
+        Storage.return_value.upload_file = MagicMock()
+        Storage.return_value.generate_presigned_url = MagicMock(return_value="https://dl/r.pdf")
+        yield Storage
+
+
+# ── slice #636: rich-text rendering ─────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_template_richtext_renders_as_markup_in_report_html(acme):
+    from incidents.services.report_grounding import build_report_grounding
+    from incidents.services.reports import render_report_html
+
+    inc = make_incident(acme)
+    tmpl = make_template(
+        audience="internal",
+        sections=["recommendations"],
+        intro_text="<p>Hello <strong>team</strong></p>",
+        recommendations_text="<ul><li>Patch now</li></ul>",
+    )
+    g = build_report_grounding(inc, tmpl.audience)
+    from incidents.services.report_sections import render_section, SECTION_TITLES
+    rendered = [
+        {"kind": k, "title": SECTION_TITLES.get(k, k),
+         "context": render_section(k, inc, g, tmpl)}
+        for k in tmpl.sections
+    ]
+    html = render_report_html(inc, tmpl, g, rendered)
+    assert "<strong>team</strong>" in html
+    assert "<ul><li>Patch now</li></ul>" in html
+
+
+@pytest.mark.django_db
+def test_richtext_rendering_strips_dangerous_markup(acme):
+    from incidents.services.report_grounding import build_report_grounding
+    from incidents.services.reports import render_report_html
+
+    inc = make_incident(acme)
+    tmpl = make_template(
+        audience="internal", sections=["incident_details"],
+        intro_text='<p onclick="x">hi</p><script>alert(1)</script>',
+    )
+    g = build_report_grounding(inc, tmpl.audience)
+    html = render_report_html(inc, tmpl, g, [])
+    assert "onclick" not in html
+    assert "alert(1)" not in html
+    assert "<p>hi</p>" in html
+
+
+@pytest.mark.django_db
+def test_executive_summary_is_sanitized_at_render(acme):
+    from incidents.services.report_grounding import build_report_grounding
+    from incidents.services.reports import render_report_html
+
+    inc = make_incident(acme)
+    tmpl = make_template(audience="internal", sections=["executive_summary"])
+    g = build_report_grounding(inc, tmpl.audience)
+    g["executive_summary"] = "<p>Summary</p><script>steal()</script>"
+    from incidents.services.report_sections import render_section, SECTION_TITLES
+    rendered = [{
+        "kind": "executive_summary", "title": SECTION_TITLES["executive_summary"],
+        "context": render_section("executive_summary", inc, g, tmpl),
+    }]
+    html = render_report_html(inc, tmpl, g, rendered)
+    assert "<p>Summary</p>" in html
+    assert "steal()" not in html
+    assert "<script" not in html

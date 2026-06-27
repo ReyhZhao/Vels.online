@@ -103,7 +103,11 @@ def _render_asset_impact(incident, grounding, template):
 
 
 def _render_recommendations(incident, grounding, template):
-    return {"text": (template.recommendations_text or "").strip()}
+    # Prefer a per-Report override frozen into the grounding (PRD #632); fall back to
+    # the template default. The renderer in reports.py sanitizes the text.
+    override = grounding.get("recommendations_text")
+    text = override if override is not None else template.recommendations_text
+    return {"text": (text or "").strip()}
 
 
 def _render_executive_summary(incident, grounding, template):

@@ -21,6 +21,7 @@ from ..llm.report_summary import generate_report_summary
 from .events import record_event
 from .identifiers import next_report_reference_id
 from .report_grounding import build_report_grounding
+from .report_sanitize import sanitize_report_richtext
 from .report_sections import SECTION_TITLES, render_section
 
 logger = logging.getLogger(__name__)
@@ -61,9 +62,11 @@ def _render_section_html(section: dict) -> str:
             body += f"<p class='description'>{_esc(ctx['description'])}</p>"
 
     elif kind == "executive_summary":
-        summary = ctx.get("summary", "")
+        # Rich-text: the prose is sanitized (allowlist) and emitted as markup, not
+        # escaped — the sanitizer is the security boundary (PRD #632).
+        summary = sanitize_report_richtext(ctx.get("summary", ""))
         body = (
-            f"<p>{_esc(summary)}</p>" if summary
+            f"<div class='richtext'>{summary}</div>" if summary
             else "<p class='muted'>No summary available.</p>"
         )
 
@@ -124,9 +127,9 @@ def _render_section_html(section: dict) -> str:
             body = "<p class='muted'>No affected assets recorded.</p>"
 
     elif kind == "recommendations":
-        text = ctx.get("text", "")
+        text = sanitize_report_richtext(ctx.get("text", ""))
         body = (
-            f"<p>{_esc(text)}</p>" if text
+            f"<div class='richtext'>{text}</div>" if text
             else "<p class='muted'>No recommendations provided.</p>"
         )
 
@@ -150,7 +153,15 @@ _STYLE = """
   .ts { color: #888; font-size: 9pt; }
   .muted { color: #999; font-style: italic; }
   .description { margin-top: 10px; white-space: pre-wrap; }
-  .intro, .outro { margin: 12px 0; white-space: pre-wrap; }
+  .intro, .outro { margin: 12px 0; }
+  /* Rich-text blocks (intro/outro/recommendations/executive summary). Keep this in
+     sync with the frontend preview stylesheet so the live preview matches the PDF. */
+  .richtext p { margin: 6px 0; }
+  .richtext ul, .richtext ol { padding-left: 22px; margin: 6px 0; }
+  .richtext u { text-decoration: underline; }
+  .richtext .indent-1 { margin-left: 2em; }
+  .richtext .indent-2 { margin-left: 4em; }
+  .richtext .indent-3 { margin-left: 6em; }
 """
 
 
@@ -161,14 +172,15 @@ def render_report_html(incident, template, grounding, sections) -> str:
     """
     org_name = grounding["incident"]["organization"]
     sections_html = "".join(_render_section_html(s) for s in sections)
-    intro = (
-        f"<div class='intro'>{_esc(template.intro_text)}</div>"
-        if template.intro_text else ""
-    )
-    outro = (
-        f"<div class='outro'>{_esc(template.outro_text)}</div>"
-        if template.outro_text else ""
-    )
+    # Intro/outro are rich-text: prefer a per-Report override frozen into the grounding
+    # (PRD #632), falling back to the template default. Either way they are sanitized
+    # (allowlist) and emitted as markup, never escaped.
+    intro_src = grounding.get("intro_text", template.intro_text)
+    outro_src = grounding.get("outro_text", template.outro_text)
+    intro_html = sanitize_report_richtext(intro_src)
+    outro_html = sanitize_report_richtext(outro_src)
+    intro = f"<div class='intro richtext'>{intro_html}</div>" if intro_html else ""
+    outro = f"<div class='outro richtext'>{outro_html}</div>" if outro_html else ""
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{_STYLE}</style></head>
 <body>
