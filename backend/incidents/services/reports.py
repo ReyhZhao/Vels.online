@@ -21,6 +21,7 @@ from ..llm.report_summary import generate_report_summary
 from .events import record_event
 from .identifiers import next_report_reference_id
 from .report_grounding import build_report_grounding
+from .report_sanitize import sanitize_report_richtext
 from .report_sections import SECTION_TITLES, render_section
 
 logger = logging.getLogger(__name__)
@@ -61,9 +62,11 @@ def _render_section_html(section: dict) -> str:
             body += f"<p class='description'>{_esc(ctx['description'])}</p>"
 
     elif kind == "executive_summary":
-        summary = ctx.get("summary", "")
+        # Rich-text: the prose is sanitized (allowlist) and emitted as markup, not
+        # escaped — the sanitizer is the security boundary (PRD #632).
+        summary = sanitize_report_richtext(ctx.get("summary", ""))
         body = (
-            f"<p>{_esc(summary)}</p>" if summary
+            f"<div class='richtext'>{summary}</div>" if summary
             else "<p class='muted'>No summary available.</p>"
         )
 
@@ -124,9 +127,9 @@ def _render_section_html(section: dict) -> str:
             body = "<p class='muted'>No affected assets recorded.</p>"
 
     elif kind == "recommendations":
-        text = ctx.get("text", "")
+        text = sanitize_report_richtext(ctx.get("text", ""))
         body = (
-            f"<p>{_esc(text)}</p>" if text
+            f"<div class='richtext'>{text}</div>" if text
             else "<p class='muted'>No recommendations provided.</p>"
         )
 
@@ -150,7 +153,15 @@ _STYLE = """
   .ts { color: #888; font-size: 9pt; }
   .muted { color: #999; font-style: italic; }
   .description { margin-top: 10px; white-space: pre-wrap; }
-  .intro, .outro { margin: 12px 0; white-space: pre-wrap; }
+  .intro, .outro { margin: 12px 0; }
+  /* Rich-text blocks (intro/outro/recommendations/executive summary). Keep this in
+     sync with the frontend preview stylesheet so the live preview matches the PDF. */
+  .richtext p { margin: 6px 0; }
+  .richtext ul, .richtext ol { padding-left: 22px; margin: 6px 0; }
+  .richtext u { text-decoration: underline; }
+  .richtext .indent-1 { margin-left: 2em; }
+  .richtext .indent-2 { margin-left: 4em; }
+  .richtext .indent-3 { margin-left: 6em; }
 """
 
 
@@ -161,14 +172,15 @@ def render_report_html(incident, template, grounding, sections) -> str:
     """
     org_name = grounding["incident"]["organization"]
     sections_html = "".join(_render_section_html(s) for s in sections)
-    intro = (
-        f"<div class='intro'>{_esc(template.intro_text)}</div>"
-        if template.intro_text else ""
-    )
-    outro = (
-        f"<div class='outro'>{_esc(template.outro_text)}</div>"
-        if template.outro_text else ""
-    )
+    # Intro/outro are rich-text: prefer a per-Report override frozen into the grounding
+    # (PRD #632), falling back to the template default. Either way they are sanitized
+    # (allowlist) and emitted as markup, never escaped.
+    intro_src = grounding.get("intro_text", template.intro_text)
+    outro_src = grounding.get("outro_text", template.outro_text)
+    intro_html = sanitize_report_richtext(intro_src)
+    outro_html = sanitize_report_richtext(outro_src)
+    intro = f"<div class='intro richtext'>{intro_html}</div>" if intro_html else ""
+    outro = f"<div class='outro richtext'>{outro_html}</div>" if outro_html else ""
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{_STYLE}</style></head>
 <body>
@@ -190,14 +202,35 @@ def render_report_pdf(html: str) -> bytes:
     return HTML(string=html).write_pdf()
 
 
-def generate_report(incident, template, actor) -> Report:
+# The free-text blocks an analyst may override per-Report in the Preview (PRD #632).
+OVERRIDE_KEYS = ("intro_text", "outro_text", "recommendations_text", "executive_summary")
+
+
+def _effective_richtext(overrides, key, default):
+    """A per-Report override (sanitized) when the analyst supplied one, else the default.
+
+    "Supplied" means the key is present with a string value — an empty string is a
+    deliberate clear, not "fall back to the template".
+    """
+    if overrides and isinstance(overrides.get(key), str):
+        return sanitize_report_richtext(overrides[key])
+    return default
+
+
+def generate_report(incident, template, actor, overrides=None) -> Report:
     """Render, store, and freeze an immutable Report of ``incident`` from ``template``.
 
     Enforces the leak-safety rules: a ``customer`` Report always renders through the
     customer Audience floor (independent of ``actor``), and a ``customer`` Report is
     refused on a TLP:RED incident.
+
+    ``overrides`` (PRD #632) may carry per-Report free-text for any of
+    ``OVERRIDE_KEYS``. Each is sanitized and frozen into THIS Report only — the source
+    ``template`` is never mutated. A supplied ``executive_summary`` is used verbatim and
+    the LLM call is skipped (the analyst already vetted it in the Preview).
     """
     audience = template.audience
+    overrides = overrides or {}
 
     if audience == ReportTemplate.AUDIENCE_CUSTOMER and incident.tlp == Incident.TLP_RED:
         raise ReportGenerationError(REPORT_REFUSAL_CUSTOMER_ON_RED)
@@ -206,11 +239,26 @@ def generate_report(incident, template, actor) -> Report:
     # customer report renders the customer perspective no matter who generates it.
     grounding = build_report_grounding(incident, audience)
 
+    # Freeze the effective (override-or-template, sanitized) free-text into the grounding
+    # so the renderers read it; never written back to the template.
+    intro_text = _effective_richtext(overrides, "intro_text", template.intro_text)
+    outro_text = _effective_richtext(overrides, "outro_text", template.outro_text)
+    recommendations_text = _effective_richtext(
+        overrides, "recommendations_text", template.recommendations_text
+    )
+    grounding["intro_text"] = intro_text
+    grounding["outro_text"] = outro_text
+    grounding["recommendations_text"] = recommendations_text
+
     section_kinds = list(template.sections or [])
 
     executive_summary = ""
     if "executive_summary" in section_kinds:
-        executive_summary = generate_report_summary(grounding)
+        if isinstance(overrides.get("executive_summary"), str):
+            # Analyst-vetted prose from the Preview — freeze verbatim, skip the LLM.
+            executive_summary = sanitize_report_richtext(overrides["executive_summary"])
+        else:
+            executive_summary = sanitize_report_richtext(generate_report_summary(grounding))
         # Freeze the prose into the grounding so the section renderer reads it and it
         # is captured in the immutable snapshot — never re-run on later views.
         grounding["executive_summary"] = executive_summary
@@ -240,8 +288,9 @@ def generate_report(incident, template, actor) -> Report:
         incident_state=incident.state,
         executive_summary=executive_summary,
         content={
-            "intro_text": template.intro_text,
-            "outro_text": template.outro_text,
+            "intro_text": intro_text,
+            "outro_text": outro_text,
+            "recommendations_text": recommendations_text,
             "sections": rendered,
         },
         s3_key=key,

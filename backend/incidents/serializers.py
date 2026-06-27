@@ -547,12 +547,13 @@ class ReportTemplateSerializer(serializers.ModelSerializer):
 class ReportSerializer(serializers.ModelSerializer):
     generated_by_username = serializers.SerializerMethodField()
     incident_display_id = serializers.SerializerMethodField()
+    organization_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Report
         fields = [
             "id", "reference_id", "template", "template_name", "audience",
-            "tlp", "incident_state", "incident_display_id",
+            "tlp", "incident_state", "incident_display_id", "organization_name",
             "generated_by", "generated_by_username", "generated_at", "size_bytes",
         ]
         read_only_fields = fields
@@ -562,3 +563,6 @@ class ReportSerializer(serializers.ModelSerializer):
 
     def get_incident_display_id(self, obj):
         return obj.incident.display_id
+
+    def get_organization_name(self, obj):
+        return obj.incident.organization.name if obj.incident.organization_id else None

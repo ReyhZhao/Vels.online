@@ -232,6 +232,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                 <SidebarLink to="/incidents" icon={AlertTriangle} collapsed={collapsed}>
                   Incidents
                 </SidebarLink>
+                <SidebarLink to="/reports" icon={FileText} collapsed={collapsed}>
+                  Reports
+                </SidebarLink>
               </>
             )}
           </div>

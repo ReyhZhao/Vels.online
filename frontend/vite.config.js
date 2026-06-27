@@ -54,6 +54,12 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.js',
+      // The main bundle sits just above workbox's 2 MiB default precache limit
+      // (the rich-text editor for Report Preview pushed it over). Raise the cap so
+      // the app shell is still precached.
+      injectManifest: {
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+      },
     }),
   ],
   resolve: {
