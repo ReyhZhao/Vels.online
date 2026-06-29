@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import { usePresence } from '../context/PresenceContext';
+import { TaskPresenceStrip } from '../components/PresenceBanner';
 import IncidentComments from '../components/IncidentComments';
 
 const TASK_STATE_LABELS = {
@@ -401,6 +402,9 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {/* Who else is working this task right now (PRD #605) */}
+          <TaskPresenceStrip taskId={currentTask.id} />
+
           {/* Description */}
           {currentTask.description ? (
             <div className="prose prose-sm dark:prose-invert max-w-none">
