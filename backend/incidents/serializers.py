@@ -170,7 +170,7 @@ class IncidentAssetSerializer(serializers.ModelSerializer):
 class IncidentStubSerializer(serializers.ModelSerializer):
     class Meta:
         model = Incident
-        fields = ["id", "display_id", "title", "state", "severity"]
+        fields = ["id", "display_id", "title", "state", "severity", "created_at"]
 
 
 class IncidentSerializer(serializers.ModelSerializer):
