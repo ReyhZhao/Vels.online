@@ -1641,82 +1641,12 @@ export default function IncidentDetail() {
         </Link>
       </div>
 
-      {/* ── Header card: title + actions ── */}
-      <div className="rounded-lg border border-border bg-card p-6 space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-          <div className="min-w-0">
-            <p className="font-mono text-xs text-muted-foreground">{incident.display_id}</p>
-            <h1 className="mt-1 text-2xl font-semibold text-foreground">{incident.title}</h1>
-          </div>
-          <div className="flex flex-wrap gap-2 shrink-0">
-            {user?.is_staff && nextStates.map(({ state, label }) => (
-              <button
-                key={state}
-                onClick={() => handleActionClick(state)}
-                disabled={transitioning}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 transition-colors ${TRANSITION_BTN_CLASSES[state] ?? 'border border-border bg-background text-foreground hover:bg-accent'}`}
-              >
-                {label}
-              </button>
-            ))}
-            {user?.is_staff && RESOLVE_DROPDOWN_STATES.has(incident.state) && (
-              <ResolveDropdown
-                // "Mark resolved" closes the incident in one click with the implicit
-                // closure reason "resolved" (#489) — no separate close step or prompt.
-                onResolve={() => handleTransition('closed', 'resolved')}
-                onNeedsTuning={() => handleActionClick('needs_tuning')}
-                disabled={transitioning}
-              />
-            )}
-            {user?.is_staff && incident.state !== 'closed' && (
-              <button
-                onClick={handleOpenTransfer}
-                disabled={transitioning || transferring}
-                className="rounded-md border border-slate-400 bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50 transition-colors dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-              >
-                {incident.assignee_username ? 'Transfer' : 'Assign'}
-              </button>
-            )}
-            {user?.is_staff && TRIAGE_STATES.has(incident.state) && (
-              <button
-                onClick={handleOpenChangeOrg}
-                disabled={transitioning || changingOrg}
-                className="rounded-md border border-slate-400 bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50 transition-colors dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-              >
-                Change Org
-              </button>
-            )}
-            {user?.is_staff && incident.source_kind === 'wazuh_event' && incident.state !== 'closed' && (
-              <button
-                onClick={() => setShowExceptionSlideOver(true)}
-                className="rounded-md border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-600 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40"
-              >
-                Create Exception
-              </button>
-            )}
-            {user?.is_staff && incident.state !== 'closed' && (
-              <TriageDropdown
-                onRunTriage={handleTriage}
-                onDebugTriage={() => setShowDebugModal(true)}
-                disabled={triaging || triageQueued || incident.triage_running || transitioning}
-                label={triaging ? 'Triaging…' : (triageQueued || incident.triage_running) ? 'Triage running…' : 'Run Triage'}
-              />
-            )}
-            {user?.is_staff && (
-              <button
-                onClick={() => setShowAssistant(true)}
-                className="rounded-md border border-indigo-400 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition-colors dark:border-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 dark:hover:bg-indigo-900/40"
-              >
-                Ask AI
-              </button>
-            )}
-          </div>
+      {/* ── Header card: title (actions live in the Details tab's Disposition zone) ── */}
+      <div className="rounded-lg border border-border bg-card p-6">
+        <div className="min-w-0">
+          <p className="font-mono text-xs text-muted-foreground">{incident.display_id}</p>
+          <h1 className="mt-1 text-2xl font-semibold text-foreground">{incident.title}</h1>
         </div>
-        {transitionError && <p className="text-sm text-red-600">{transitionError}</p>}
-        {transferError   && <p className="text-sm text-red-600">{transferError}</p>}
-        {changeOrgError  && <p className="text-sm text-red-600">{changeOrgError}</p>}
-        {badgeError      && <p className="text-sm text-red-600">{badgeError}</p>}
-        {triageError     && <p className="text-sm text-red-600">{triageError}</p>}
       </div>
 
       {/* ── Presence banner: who else is on this incident (PRD #605) ── */}
@@ -1784,142 +1714,245 @@ export default function IncidentDetail() {
         <div className="p-6">
           {activeTab === 'details' && (
             <div className="space-y-6">
-              {/* Metadata grid */}
-              <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
-                <Badge
-                  label="State"
-                  value={incident.state.replace('_', ' ')}
-                  badgeClass={STATE_CLASSES[incident.state] ?? ''}
-                  help={FIELD_HELP.State}
-                />
-                <InlineSelect
-                  label="Severity"
-                  value={incident.severity}
-                  options={['critical', 'high', 'medium', 'low', 'info']}
-                  colorClasses={SEVERITY_CLASSES}
-                  onChange={v => handleBadgeChange('severity', v)}
-                  saving={savingBadge}
-                  help={FIELD_HELP.Severity}
-                />
-                <InlineSelect
-                  label="TLP"
-                  value={incident.tlp}
-                  options={['white', 'green', 'amber', 'red']}
-                  colorClasses={TLP_CLASSES}
-                  onChange={v => handleBadgeChange('tlp', v)}
-                  saving={savingBadge}
-                  help={FIELD_HELP.TLP}
-                />
-                <InlineSelect
-                  label="PAP"
-                  value={incident.pap}
-                  options={['white', 'green', 'amber', 'red']}
-                  colorClasses={TLP_CLASSES}
-                  onChange={v => handleBadgeChange('pap', v)}
-                  saving={savingBadge}
-                  help={FIELD_HELP.PAP}
-                />
-                <Field label="Organisation" value={incident.org_slug} />
-                <Field label="Source"       value={incident.source_kind} help={FIELD_HELP.Source} />
-                <Field label="Assignee"     value={incident.assignee_username} />
-                <Field label="Created By"   value={incident.created_by_username} />
-                {incident.closure_reason && (
-                  <Field label="Closure Reason" value={incident.closure_reason.replace('_', ' ')} />
-                )}
-                {incident.duplicate_of_display_id && (
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Duplicate of</span>
-                    <Link
-                      to={`/incidents/${incident.duplicate_of_display_id}`}
-                      className="text-sm font-mono text-primary hover:underline"
-                    >
-                      {incident.duplicate_of_display_id}
-                    </Link>
+              {/* ── Disposition: where you change the incident ── */}
+              <section className="rounded-lg border-2 border-primary/30 bg-primary/5 p-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-primary/15 text-primary text-xs">✎</span>
+                  <div className="space-y-0.5">
+                    <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Disposition</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Changing these reclassifies the incident — each edit saves immediately and is recorded on the timeline.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-5">
+                  <Badge
+                    label="State"
+                    value={incident.state.replace('_', ' ')}
+                    badgeClass={STATE_CLASSES[incident.state] ?? ''}
+                    help={FIELD_HELP.State}
+                  />
+                  <InlineSelect
+                    label="Severity"
+                    value={incident.severity}
+                    options={['critical', 'high', 'medium', 'low', 'info']}
+                    colorClasses={SEVERITY_CLASSES}
+                    onChange={v => handleBadgeChange('severity', v)}
+                    saving={savingBadge}
+                    help={FIELD_HELP.Severity}
+                  />
+                  <InlineSelect
+                    label="TLP"
+                    value={incident.tlp}
+                    options={['white', 'green', 'amber', 'red']}
+                    colorClasses={TLP_CLASSES}
+                    onChange={v => handleBadgeChange('tlp', v)}
+                    saving={savingBadge}
+                    help={FIELD_HELP.TLP}
+                  />
+                  <InlineSelect
+                    label="PAP"
+                    value={incident.pap}
+                    options={['white', 'green', 'amber', 'red']}
+                    colorClasses={TLP_CLASSES}
+                    onChange={v => handleBadgeChange('pap', v)}
+                    saving={savingBadge}
+                    help={FIELD_HELP.PAP}
+                  />
+                  <SubjectDropdown
+                    incident={incident}
+                    subjects={subjects}
+                    onSubjectChange={handleSubjectChange}
+                    saving={savingSubject}
+                  />
+                </div>
+                {subjectError && <p className="text-sm text-red-600">{subjectError}</p>}
+
+                {user?.is_staff && (
+                  <div className="space-y-2 border-t border-primary/20 pt-4">
+                    <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Actions</span>
+                    <div className="flex flex-wrap gap-2">
+                      {nextStates.map(({ state, label }) => (
+                        <button
+                          key={state}
+                          onClick={() => handleActionClick(state)}
+                          disabled={transitioning}
+                          className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 transition-colors ${TRANSITION_BTN_CLASSES[state] ?? 'border border-border bg-background text-foreground hover:bg-accent'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                      {RESOLVE_DROPDOWN_STATES.has(incident.state) && (
+                        <ResolveDropdown
+                          // "Mark resolved" closes the incident in one click with the implicit
+                          // closure reason "resolved" (#489) — no separate close step or prompt.
+                          onResolve={() => handleTransition('closed', 'resolved')}
+                          onNeedsTuning={() => handleActionClick('needs_tuning')}
+                          disabled={transitioning}
+                        />
+                      )}
+                      {incident.state !== 'closed' && (
+                        <button
+                          onClick={handleOpenTransfer}
+                          disabled={transitioning || transferring}
+                          className="rounded-md border border-slate-400 bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50 transition-colors dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                        >
+                          {incident.assignee_username ? 'Transfer' : 'Assign'}
+                        </button>
+                      )}
+                      {TRIAGE_STATES.has(incident.state) && (
+                        <button
+                          onClick={handleOpenChangeOrg}
+                          disabled={transitioning || changingOrg}
+                          className="rounded-md border border-slate-400 bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50 transition-colors dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                        >
+                          Change Org
+                        </button>
+                      )}
+                      {incident.source_kind === 'wazuh_event' && incident.state !== 'closed' && (
+                        <button
+                          onClick={() => setShowExceptionSlideOver(true)}
+                          className="rounded-md border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-600 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40"
+                        >
+                          Create Exception
+                        </button>
+                      )}
+                      {incident.state !== 'closed' && (
+                        <TriageDropdown
+                          onRunTriage={handleTriage}
+                          onDebugTriage={() => setShowDebugModal(true)}
+                          disabled={triaging || triageQueued || incident.triage_running || transitioning}
+                          label={triaging ? 'Triaging…' : (triageQueued || incident.triage_running) ? 'Triage running…' : 'Run Triage'}
+                        />
+                      )}
+                      <button
+                        onClick={() => setShowAssistant(true)}
+                        className="rounded-md border border-indigo-400 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition-colors dark:border-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 dark:hover:bg-indigo-900/40"
+                      >
+                        Ask AI
+                      </button>
+                    </div>
+                    {transitionError && <p className="text-sm text-red-600">{transitionError}</p>}
+                    {transferError   && <p className="text-sm text-red-600">{transferError}</p>}
+                    {changeOrgError  && <p className="text-sm text-red-600">{changeOrgError}</p>}
+                    {badgeError      && <p className="text-sm text-red-600">{badgeError}</p>}
+                    {triageError     && <p className="text-sm text-red-600">{triageError}</p>}
                   </div>
                 )}
-                {incident.response_sla?.applies && (
-                  <div className="flex flex-col gap-1">
-                    <FieldLabel label="Response SLA" help={FIELD_HELP.SLA} />
-                    <SLAPill sla={incident.response_sla} label="Response SLA" />
+              </section>
+
+              {/* ── About (left) + a stacked facts/discussion column (right) ── */}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+                <section className="space-y-4 rounded-lg border border-border bg-card p-6 lg:col-span-2">
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">About this incident</h2>
+                  {incident.description ? (
+                    <div className="prose prose-sm dark:prose-invert max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{incident.description}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground italic">No description provided.</p>
+                  )}
+                  <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+                    <span>Created: {incident.created_at ? new Date(incident.created_at).toLocaleString() : '—'}</span>
+                    <span>Updated: {incident.updated_at ? new Date(incident.updated_at).toLocaleString() : '—'}</span>
                   </div>
-                )}
-                {incident.resolve_sla?.applies && (
-                  <div className="flex flex-col gap-1">
-                    <FieldLabel label="Resolve SLA" help={FIELD_HELP.SLA} />
-                    <SLAPill sla={incident.resolve_sla} label="Resolve SLA" />
-                  </div>
-                )}
-                <SubjectDropdown
-                  incident={incident}
-                  subjects={subjects}
-                  onSubjectChange={handleSubjectChange}
-                  saving={savingSubject}
-                />
+                </section>
+
+                <div className="space-y-6 lg:col-span-1">
+                  <section className="space-y-4 rounded-lg border border-border bg-card p-6">
+                    <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Key facts</h2>
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-1">
+                      <Field label="Organisation" value={incident.org_slug} />
+                      <Field label="Source"       value={incident.source_kind} help={FIELD_HELP.Source} />
+                      <Field label="Assignee"     value={incident.assignee_username} />
+                      <Field label="Created By"   value={incident.created_by_username} />
+                      {incident.closure_reason && (
+                        <Field label="Closure Reason" value={incident.closure_reason.replace('_', ' ')} />
+                      )}
+                      {incident.response_sla?.applies && (
+                        <div className="flex flex-col gap-1">
+                          <FieldLabel label="Response SLA" help={FIELD_HELP.SLA} />
+                          <SLAPill sla={incident.response_sla} label="Response SLA" />
+                        </div>
+                      )}
+                      {incident.resolve_sla?.applies && (
+                        <div className="flex flex-col gap-1">
+                          <FieldLabel label="Resolve SLA" help={FIELD_HELP.SLA} />
+                          <SLAPill sla={incident.resolve_sla} label="Resolve SLA" />
+                        </div>
+                      )}
+                      {incident.duplicate_of_display_id && (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Duplicate of</span>
+                          <Link
+                            to={`/incidents/${incident.duplicate_of_display_id}`}
+                            className="text-sm font-mono text-primary hover:underline"
+                          >
+                            {incident.duplicate_of_display_id}
+                          </Link>
+                        </div>
+                      )}
+                    </dl>
+                  </section>
+
+                  {/* ── Discussion & activity: beside the description, below the facts ── */}
+                  <section className="space-y-4 rounded-lg border border-border bg-card p-6">
+                    <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Discussion &amp; activity</h2>
+                    <div className="space-y-6">
+                      <IncidentComments
+                        incidentId={displayId}
+                        currentUserId={user?.id}
+                        isStaff={user?.is_staff ?? false}
+                        refreshKey={commentsRefreshKey}
+                      />
+                      <ContactMessagesCard displayId={displayId} />
+                    </div>
+                  </section>
+
+                  {/* ── Duplicates: beside the description, below the discussion ── */}
+                  {incident.duplicates?.length > 0 && (
+                    <section className="space-y-3 rounded-lg border border-border bg-card p-6">
+                      <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground">
+                        Duplicates ({incident.duplicates.length})
+                      </h3>
+                      <ul className="space-y-2">
+                        {incident.duplicates.map(dup => (
+                          <li key={dup.id} className="space-y-1.5 rounded-md border border-border bg-background p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <Link
+                                to={`/incidents/${dup.display_id}`}
+                                className="font-mono text-xs font-medium text-primary hover:underline"
+                              >
+                                {dup.display_id}
+                              </Link>
+                              <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${STATE_CLASSES[dup.state] ?? ''}`}>
+                                {dup.state.replace('_', ' ')}
+                              </span>
+                            </div>
+                            <p className="text-sm text-foreground">{dup.title}</p>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                              {dup.severity && (
+                                <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 font-medium ${SEVERITY_CLASSES[dup.severity] ?? ''}`}>
+                                  {dup.severity}
+                                </span>
+                              )}
+                              <span>Created {dup.created_at ? new Date(dup.created_at).toLocaleString() : '—'}</span>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                </div>
               </div>
 
-              {subjectError && <p className="text-sm text-red-600">{subjectError}</p>}
-
-              {/* Duplicates of this incident */}
-              {incident.duplicates?.length > 0 && (
-                <div className="rounded-lg border border-border bg-card p-4 space-y-2">
-                  <h3 className="text-sm font-semibold text-foreground">Duplicates</h3>
-                  <ul className="divide-y divide-border">
-                    {incident.duplicates.map(dup => (
-                      <li key={dup.id} className="flex items-center gap-3 py-2">
-                        <Link
-                          to={`/incidents/${dup.display_id}`}
-                          className="font-mono text-xs text-primary hover:underline shrink-0"
-                        >
-                          {dup.display_id}
-                        </Link>
-                        <span className="flex-1 text-sm text-foreground truncate">{dup.title}</span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATE_CLASSES[dup.state] ?? ''}`}>
-                          {dup.state.replace('_', ' ')}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Other incidents from the same source */}
+              {/* ── Related: linked incidents, exceptions ── */}
               <LinkedIncidents
                 sourceKind={incident.source_kind}
                 sourceRef={incident.source_ref}
                 excludeId={incident.id}
               />
 
-              {/* Description + Activity (comments + contact messages) */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div>
-                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</span>
-                    {incident.description ? (
-                      <div className="mt-1 prose prose-sm dark:prose-invert max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{incident.description}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="mt-1 text-sm text-muted-foreground italic">No description provided.</p>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
-                    <span>Created: {incident.created_at ? new Date(incident.created_at).toLocaleString() : '—'}</span>
-                    <span>Updated: {incident.updated_at ? new Date(incident.updated_at).toLocaleString() : '—'}</span>
-                  </div>
-                </div>
-                {/* Right column: comments and contact messages form the unified activity feed */}
-                <div className="space-y-4">
-                  <IncidentComments
-                    incidentId={displayId}
-                    currentUserId={user?.id}
-                    isStaff={user?.is_staff ?? false}
-                    refreshKey={commentsRefreshKey}
-                  />
-                  <ContactMessagesCard displayId={displayId} />
-                </div>
-              </div>
-
-              {/* Exceptions */}
               <IncidentExceptionsSection displayId={displayId} />
             </div>
           )}
