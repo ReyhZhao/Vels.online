@@ -69,6 +69,9 @@ services:
       - "5173:5173"
     environment:
       VITE_LOGIN_URL: /auth/login/
+      # Presence: exclude yourself from the incident presence banner / task strip.
+      # Default off so a single dev user can see presence; set to "1" for prod behaviour.
+      VITE_PRESENCE_SELF_EXCLUSION: "0"
     depends_on:
       - backend
 
