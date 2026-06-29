@@ -2702,3 +2702,91 @@ class TestSearchIncidentEnrichment:
             IOC.objects.filter(incident=incident, kind=IOC.KIND_IP).values_list("value", flat=True)
         )
         assert "192.0.2.123" in ips  # the folded-in alert's IP was extracted too
+
+
+# ── #644: readable LLM summary replaces the raw source_ref dump ───────────────
+_SEARCH_SUMMARY = "incidents.llm.search_summary.generate_search_incident_summary"
+
+
+@pytest.mark.django_db
+class TestSearchIncidentSummary:
+    def test_description_omits_raw_source_dump(self, rule, org):
+        """#644: the incident description no longer dumps the raw _source JSON; the
+        concise matched-documents list (with the alert id) stays."""
+        from correlations.services.search_evaluator import run
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response()
+
+            incident = run(rule, org)
+
+        assert incident is not None
+        # The raw-dump label and a value that only existed in the raw _source are gone.
+        assert "Raw source data" not in incident.description
+        assert "2026-06-06T10:00:00Z" not in incident.description
+        # The concise matched-documents section is still there.
+        assert "## Matched documents" in incident.description
+        linked = incident.alerts.first()
+        assert linked is not None
+        assert linked.display_id in incident.description
+
+    def test_llm_summary_prepended_to_description(self, rule, org):
+        """When the provider returns prose, it is prepended under a '## Summary' heading."""
+        from correlations.services.search_evaluator import run
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+            patch(_SEARCH_SUMMARY, return_value="Three brute-force attempts on web-01.") as mock_sum,
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response()
+
+            incident = run(rule, org)
+
+        mock_sum.assert_called_once()
+        # The evidence passed to the LLM carries the matched documents.
+        evidence = mock_sum.call_args.args[0]
+        assert evidence["matched_documents"]
+        assert incident.description.lstrip().startswith("## Summary")
+        assert "Three brute-force attempts on web-01." in incident.description
+
+    def test_incident_still_created_when_summary_unavailable(self, rule, org):
+        """A provider failure must not break incident creation — no '## Summary' section,
+        but the incident and its concise description still exist."""
+        from correlations.services.search_evaluator import run
+
+        with (
+            patch(_WAZUH_CLIENT) as MockWazuh,
+            patch(_OS_CLIENT) as MockOS,
+            patch(_EXTRACT_IOCS),
+            patch(_ACQUIRE_LOCK, return_value=False),
+            patch(_SEARCH_SUMMARY, return_value="") as mock_sum,
+        ):
+            MockWazuh.return_value.get_agents.return_value = _FAKE_AGENTS
+            MockOS.return_value._search.return_value = _fake_opensearch_response()
+
+            incident = run(rule, org)
+
+        mock_sum.assert_called_once()
+        assert incident is not None
+        assert "## Summary" not in incident.description
+        assert "## Matched documents" in incident.description
+
+    def test_summary_wrapper_swallows_provider_error(self):
+        """The wrapper returns '' (never raises) when the provider blows up."""
+        from incidents.llm.search_summary import generate_search_incident_summary
+
+        with patch(
+            "incidents.llm.search_summary.get_search_summary_provider",
+            side_effect=RuntimeError("provider down"),
+        ):
+            assert generate_search_incident_summary({"matched_documents": []}) == ""
