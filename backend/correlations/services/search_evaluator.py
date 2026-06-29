@@ -1,5 +1,4 @@
 """End-to-end evaluator for Scheduled Search Rules."""
-import json
 import logging
 from dataclasses import dataclass, field
 
@@ -116,13 +115,57 @@ def _compose_description(rule, alerts, key_value=None, distinct_info=None, novel
         lines.append("")
     lines.append(f"## Matched documents ({len(alerts)})")
     lines.append("")
+    # The raw source document is intentionally NOT dumped here (#644) — it lives on
+    # each linked Alert. We keep a concise, readable list; an LLM-written summary of
+    # the evidence is added separately (see _apply_search_summary).
     for alert in alerts:
-        raw = json.dumps(alert.source_ref, default=str, sort_keys=True)
         lines.append(f"### {alert.display_id}: {alert.title or '(untitled)'}")
         lines.append(f"- Severity: {alert.severity or '—'}")
-        lines.append(f"- Raw source data: {raw}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _build_search_evidence(incident, alerts) -> dict:
+    """Assemble the LLM grounding for a scheduled-search incident summary (#644).
+
+    Carries the matched documents' raw ``source_ref`` so the model can read the raw
+    data and distil it — the raw data the description no longer dumps verbatim.
+    """
+    return {
+        "incident_title": incident.title,
+        "severity": incident.severity,
+        "matched_documents": [
+            {
+                "alert_id": alert.display_id,
+                "title": alert.title,
+                "severity": alert.severity,
+                "source": alert.source_ref,
+            }
+            for alert in alerts
+        ],
+    }
+
+
+def _apply_search_summary(incident, alerts) -> None:
+    """Best-effort: prepend an LLM-written readable summary to the incident description.
+
+    Runs OUTSIDE the incident-write transaction so the network call never holds a DB
+    transaction open, and never raises into the firing path — a missing summary just
+    leaves the concise evidence list as-is. Idempotent: a description that already
+    carries the summary section is left untouched.
+    """
+    from incidents.llm.search_summary import generate_search_incident_summary
+
+    if incident.description and incident.description.lstrip().startswith(_SUMMARY_HEADING):
+        return
+    summary = generate_search_incident_summary(_build_search_evidence(incident, alerts))
+    if not summary:
+        return
+    incident.description = f"{_SUMMARY_HEADING}\n\n{summary}\n\n{incident.description}"
+    incident.save(update_fields=["description", "updated_at"])
+
+
+_SUMMARY_HEADING = "## Summary"
 
 
 def absence_title(rule) -> str:
@@ -363,6 +406,10 @@ def _materialise_and_fire(rule, org, hits, key_value="none", overflow=0, distinc
             incident_id = incident.id
             transaction.on_commit(lambda: enrich_iocs_then_triage.delay(incident_id))
 
+    # Outside the write transaction: replace the (now-removed) raw source dump with a
+    # readable LLM summary of the matched evidence (#644). Best-effort — never blocks
+    # the firing path or holds the transaction open.
+    _apply_search_summary(incident, new_alerts)
     return incident
 
 

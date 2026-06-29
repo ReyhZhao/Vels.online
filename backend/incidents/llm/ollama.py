@@ -18,6 +18,7 @@ from .gemini import (
     CORRELATION_SYSTEM_PROMPT,
     REPORT_SUMMARY_SYSTEM_PROMPT,
     RESIDUAL_GROUPING_SYSTEM_PROMPT,
+    SEARCH_SUMMARY_SYSTEM_PROMPT,
     TASK_SUMMARY_SYSTEM_PROMPT,
     _build_assistant_system_prompt,
     _build_system_prompt,
@@ -221,6 +222,20 @@ class OllamaTriageProvider(BaseTriageProvider):
             return response.message.content.strip()
         except Exception as exc:
             raise TriageError(f"Ollama report summary error: {exc}") from exc
+
+    def generate_search_incident_summary(self, evidence: dict) -> str:
+        prompt = json.dumps(evidence, indent=2, default=str)
+        try:
+            response = self._client.chat(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": SEARCH_SUMMARY_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return response.message.content.strip()
+        except Exception as exc:
+            raise TriageError(f"Ollama search summary error: {exc}") from exc
 
     # ── agentic loop (ADR-0011) ──────────────────────────────────────────────
     def uses_native_web_search(self) -> bool:

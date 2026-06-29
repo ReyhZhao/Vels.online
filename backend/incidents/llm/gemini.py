@@ -153,6 +153,25 @@ Do NOT include a heading, salutation, or sign-off — just the summary prose.
 Return only the summary text. No JSON, no markdown, no code fences.
 """
 
+SEARCH_SUMMARY_SYSTEM_PROMPT = """\
+You are a senior security analyst summarising why a scheduled search detection rule fired.
+
+You are given JSON evidence: the incident title and severity, the rule that fired, and the \
+list of matched documents (each with its alert display id, title, severity, and the raw \
+source document). Write a concise, readable summary (2-5 sentences) for a SOC analyst \
+explaining what the matched documents indicate.
+
+The summary should:
+- State what activity the matched documents represent and on which host or entity
+- Call out anything notable shared across the documents (a common source IP, user, repeated
+  behaviour, or counts) so the analyst grasps the pattern without reading raw data
+- Be specific and factual, drawn strictly from the evidence provided
+
+Never invent facts not present in the evidence. Do NOT include a heading, salutation, or \
+sign-off — just the summary prose.
+Return only the summary text. No JSON, no markdown, no code fences.
+"""
+
 RESIDUAL_GROUPING_SYSTEM_PROMPT = """\
 You are a senior security analyst performing threat detection over a batch of unprocessed security alerts. \
 Each alert has not been linked to an incident by any automated rule. \
@@ -778,6 +797,20 @@ class GeminiTriageProvider(BaseTriageProvider):
             return response.text.strip()
         except Exception as exc:
             raise TriageError(f"Gemini report summary error: {exc}") from exc
+
+    def generate_search_incident_summary(self, evidence: dict) -> str:
+        prompt = json.dumps(evidence, indent=2, default=str)
+        try:
+            response = self._client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=SEARCH_SUMMARY_SYSTEM_PROMPT,
+                ),
+            )
+            return response.text.strip()
+        except Exception as exc:
+            raise TriageError(f"Gemini search summary error: {exc}") from exc
 
 
 def _parse_residual_grouping_result(data: dict) -> ResidualGroupingResult:

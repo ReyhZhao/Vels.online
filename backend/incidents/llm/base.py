@@ -122,6 +122,13 @@ class BaseTriageProvider(ABC):
         Returns empty string by default."""
         return ""
 
+    def generate_search_incident_summary(self, evidence: dict) -> str:
+        """Generate a readable analyst summary of a scheduled-search incident's matched
+        evidence (#644). Grounded ONLY on the evidence passed — the matched documents'
+        raw source data — never inventing findings beyond it. Returns empty string by
+        default so providers that do not implement it degrade gracefully."""
+        return ""
+
     def assist_incident(self, messages: list, grounding: dict) -> AssistantResult:
         """Conversational assistant grounded in an incident's current state. Override in providers that support it."""
         return AssistantResult(assistant_reply="Assistant is not available for this provider.")

@@ -52,3 +52,8 @@ def get_assistant_provider() -> BaseTriageProvider:
 def get_report_summary_provider() -> BaseTriageProvider:
     provider_path = getattr(settings, "REPORT_SUMMARY_LLM_PROVIDER", _DEFAULT_PROVIDER)
     return _load_provider(provider_path)
+
+
+def get_search_summary_provider() -> BaseTriageProvider:
+    provider_path = getattr(settings, "SEARCH_SUMMARY_LLM_PROVIDER", _DEFAULT_PROVIDER)
+    return _load_provider(provider_path)
