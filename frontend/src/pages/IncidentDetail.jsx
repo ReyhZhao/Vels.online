@@ -1112,59 +1112,59 @@ function IncidentDescription({ displayId, description, isStaff, onSaved }) {
     }
   }
 
-  if (editing) {
-    return (
-      <div className="space-y-2">
-        <div className="rounded-md border border-border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring">
-          <MarkdownToolbar textareaRef={textareaRef} value={draft} onChange={setDraft} />
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            rows={8}
-            disabled={saving}
-            aria-label="Incident description"
-            placeholder="Describe this incident…"
-            className="w-full bg-transparent text-sm text-foreground focus:outline-none resize-y disabled:opacity-50"
-          />
-        </div>
-        {error && <p className="text-xs text-red-600">{error}</p>}
-        <div className="flex gap-2">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button
-            onClick={cancelEdit}
-            disabled={saving}
-            className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-2">
-      {description ? (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">About this incident</h2>
+        {isStaff && !editing && (
+          <button
+            onClick={startEdit}
+            className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            Edit
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="space-y-2">
+          <div className="rounded-md border border-border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring">
+            <MarkdownToolbar textareaRef={textareaRef} value={draft} onChange={setDraft} />
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              rows={8}
+              disabled={saving}
+              aria-label="Incident description"
+              placeholder="Describe this incident…"
+              className="w-full bg-transparent text-sm text-foreground focus:outline-none resize-y disabled:opacity-50"
+            />
+          </div>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              onClick={cancelEdit}
+              disabled={saving}
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : description ? (
         <div className="prose prose-sm dark:prose-invert max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{description}</ReactMarkdown>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground italic">No description provided.</p>
-      )}
-      {isStaff && (
-        <button
-          onClick={startEdit}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
-          Edit
-        </button>
       )}
     </div>
   );
@@ -1942,7 +1942,6 @@ export default function IncidentDetail() {
               {/* ── About (left) + a stacked facts/discussion column (right) ── */}
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
                 <section className="space-y-4 rounded-lg border border-border bg-card p-6 lg:col-span-2">
-                  <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">About this incident</h2>
                   <IncidentDescription
                     displayId={displayId}
                     description={incident.description}
