@@ -9,6 +9,7 @@ import IncidentAttachments from '../components/IncidentAttachments';
 import IncidentReports from '../components/IncidentReports';
 import IncidentComments from '../components/IncidentComments';
 import IncidentTimeline from '../components/IncidentTimeline';
+import MarkdownToolbar from '../components/MarkdownToolbar';
 import IncidentTasks from './IncidentTasks';
 import SLAPill from '../components/SLAPill';
 import { HelpTooltip } from '../components/ui/help-tooltip';
@@ -1072,6 +1073,103 @@ function Badge({ label, value, badgeClass, help }) {
   );
 }
 
+// "About this incident" description: read-only Markdown for everyone, with an
+// in-place Markdown editor for staff (#647). Follows the same optimistic
+// save-then-reconcile pattern as the Disposition selects: PATCH the single
+// `description` field, replace incident state from the response, and surface any
+// failure inline while keeping the editor open. The incident PATCH already
+// records an `incident_updated` timeline event, so edits appear on the Timeline.
+function IncidentDescription({ displayId, description, isStaff, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(description ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const textareaRef = useRef(null);
+
+  function startEdit() {
+    setDraft(description ?? '');
+    setError(null);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setError(null);
+    setDraft(description ?? '');
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await api.patch(`/api/incidents/${displayId}/`, { description: draft });
+      onSaved(res.data);
+      setEditing(false);
+    } catch (err) {
+      setError(err.response?.data?.detail || err.response?.data?.description?.[0] || 'Failed to save description.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="space-y-2">
+        <div className="rounded-md border border-border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring">
+          <MarkdownToolbar textareaRef={textareaRef} value={draft} onChange={setDraft} />
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            rows={8}
+            disabled={saving}
+            aria-label="Incident description"
+            placeholder="Describe this incident…"
+            className="w-full bg-transparent text-sm text-foreground focus:outline-none resize-y disabled:opacity-50"
+          />
+        </div>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            onClick={cancelEdit}
+            disabled={saving}
+            className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {description ? (
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{description}</ReactMarkdown>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground italic">No description provided.</p>
+      )}
+      {isStaff && (
+        <button
+          onClick={startEdit}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          Edit
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Field({ label, value, help }) {
   return (
     <div className="flex flex-col gap-1">
@@ -1845,13 +1943,12 @@ export default function IncidentDetail() {
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
                 <section className="space-y-4 rounded-lg border border-border bg-card p-6 lg:col-span-2">
                   <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">About this incident</h2>
-                  {incident.description ? (
-                    <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{incident.description}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic">No description provided.</p>
-                  )}
+                  <IncidentDescription
+                    displayId={displayId}
+                    description={incident.description}
+                    isStaff={user?.is_staff ?? false}
+                    onSaved={setIncident}
+                  />
                   <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
                     <span>Created: {incident.created_at ? new Date(incident.created_at).toLocaleString() : '—'}</span>
                     <span>Updated: {incident.updated_at ? new Date(incident.updated_at).toLocaleString() : '—'}</span>

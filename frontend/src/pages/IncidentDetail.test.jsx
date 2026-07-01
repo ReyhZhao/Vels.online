@@ -572,6 +572,73 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
   });
 
+  // ── editable description (#647) ───────────────────────────────────────────
+
+  it('shows an Edit affordance on the description for staff users', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+  });
+
+  it('hides the description Edit affordance from non-staff users', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: false }, isAuthenticated: true, isLoading: false });
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+  });
+
+  it('PATCHes the description and re-renders it on save (#647)', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    mockGet();
+    api.patch.mockResolvedValue({ data: { ...INCIDENT, description: 'Corrected description.' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const editor = screen.getByLabelText('Incident description');
+    await user.clear(editor);
+    await user.type(editor, 'Corrected description.');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
+      '/api/incidents/INC-2026-0001/',
+      { description: 'Corrected description.' }
+    ));
+    await waitFor(() => screen.getByText('Corrected description.'));
+    expect(screen.queryByLabelText('Incident description')).not.toBeInTheDocument();
+  });
+
+  it('keeps the description editor open and shows an inline error on failed save (#647)', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    mockGet();
+    api.patch.mockRejectedValue({ response: { data: { detail: 'Save blocked.' } } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => screen.getByText('Save blocked.'));
+    expect(screen.getByLabelText('Incident description')).toBeInTheDocument();
+  });
+
+  it('cancelling the description editor restores the original text (#647)', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    mockGet();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const editor = screen.getByLabelText('Incident description');
+    await user.clear(editor);
+    await user.type(editor, 'Some unsaved edit.');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(api.patch).not.toHaveBeenCalled();
+    expect(screen.getByText('Multiple failed logins from unusual IP.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Incident description')).not.toBeInTheDocument();
+  });
+
   // ── IncidentExceptionsSection ─────────────────────────────────────────────
 
   it('exceptions section hidden when no exceptions', async () => {
