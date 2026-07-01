@@ -364,20 +364,27 @@ export default function IncidentComments({ incidentId, taskId, currentUserId, is
 
   // Rerunning triage posts a fresh AI Triage comment that supersedes the previous one
   // (#593). The newest ai_triage comment by created_at is current; older ones are dimmed.
+  // Detection is by timestamp, so it is independent of display order.
   const latestTriageId = comments
     .filter(c => c.kind === 'ai_triage' && !c.deleted_at)
     .reduce((latest, c) => (
       !latest || new Date(c.created_at) >= new Date(latest.created_at) ? c : latest
     ), null)?.id;
 
+  // The API returns comments oldest-first; reverse for display so the feed reads
+  // newest-first (#648). handlePost appends to `comments`, so a freshly posted
+  // comment lands at the end here and thus at the top of the displayed order.
+  const displayedComments = [...comments].reverse();
+
   return (
     <div className="space-y-3">
       {error && <p className="text-xs text-red-600">{error}</p>}
+      <CommentForm onSubmit={handlePost} presenceEnabled={presenceEnabled} />
       {loading ? (
         <p className="text-xs text-muted-foreground">Loading comments…</p>
       ) : comments.length === 0 ? null : (
         <div className="space-y-2">
-          {comments.map(c => (
+          {displayedComments.map(c => (
             <CommentItem
               key={c.id}
               comment={c}
@@ -392,7 +399,6 @@ export default function IncidentComments({ incidentId, taskId, currentUserId, is
           ))}
         </div>
       )}
-      <CommentForm onSubmit={handlePost} presenceEnabled={presenceEnabled} />
     </div>
   );
 }
