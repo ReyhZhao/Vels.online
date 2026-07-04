@@ -187,8 +187,44 @@ class SubjectDetailView(APIView):
         ser = SubjectUpdateSerializer(subject, data=request.data, partial=True)
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
-        ser.save()
+
+        # When the name changes, recompute the slug and guard uniqueness so a
+        # rename collision returns a clean 400 instead of a later 500 or a
+        # silently stale slug.
+        new_name = ser.validated_data.get("name")
+        if new_name and new_name != subject.name:
+            new_slug = slugify(new_name)
+            if Subject.objects.filter(slug=new_slug).exclude(pk=subject.pk).exists():
+                return Response(
+                    {"detail": "A subject with this name already exists."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            subject.slug = new_slug
+
+        ser.save(slug=subject.slug)
         return Response(SubjectSerializer(subject).data)
+
+    def delete(self, request, pk):
+        err = _require_auth(request)
+        if err:
+            return err
+        if not request.user.is_staff:
+            return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
+        subject, err = self._get_subject(pk)
+        if err:
+            return err
+
+        # Task templates cascade off a subject, so a hard delete would silently
+        # destroy them. Block and steer the user to archive/reassign instead.
+        # Incidents reference the subject via SET_NULL, so they are safe.
+        if subject.task_templates.exists():
+            return Response(
+                {"detail": "This subject has task templates; remove them or archive the subject instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        subject.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ── TaskTemplate views ───────────────────────────────────────────────────────

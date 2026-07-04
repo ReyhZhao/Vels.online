@@ -31,6 +31,13 @@ export default function SubjectsAdmin() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
 
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editError, setEditError] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+
   useEffect(() => {
     api.get('/api/subjects/')
       .then(res => setSubjects(res.data))
@@ -61,6 +68,58 @@ export default function SubjectsAdmin() {
       setSubjects(prev => prev.map(s => s.id === subject.id ? res.data : s));
     } catch {
       setError('Failed to update subject.');
+    }
+  }
+
+  function startEdit(subject) {
+    setEditingId(subject.id);
+    setEditName(subject.name);
+    setEditDescription(subject.description || '');
+    setEditError(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditError(null);
+  }
+
+  async function saveEdit(subject) {
+    if (!editName.trim()) {
+      setEditError('Name is required.');
+      return;
+    }
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      const res = await api.patch(`/api/subjects/${subject.id}/`, {
+        name: editName.trim(),
+        description: editDescription.trim(),
+      });
+      setSubjects(prev => prev.map(s => s.id === subject.id ? res.data : s));
+      setEditingId(null);
+    } catch (err) {
+      setEditError(err.response?.data?.detail || 'Failed to update subject.');
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function handleDelete(subject) {
+    if (!window.confirm(`Delete subject "${subject.name}"? This cannot be undone.`)) return;
+    setDeletingId(subject.id);
+    setError(null);
+    try {
+      await api.delete(`/api/subjects/${subject.id}/`);
+      setSubjects(prev => prev.filter(s => s.id !== subject.id));
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        next.delete(subject.id);
+        return next;
+      });
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to delete subject.');
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -244,29 +303,85 @@ export default function SubjectsAdmin() {
           <p className="py-8 text-center text-sm text-muted-foreground">No subjects.</p>
         ) : visible.map(s => (
           <div key={s.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-start gap-2">
+            {editingId === s.id ? (
+              <div className="space-y-2">
                 <input
-                  type="checkbox"
-                  checked={selectedIds.has(s.id)}
-                  onChange={() => toggleSelect(s.id)}
-                  aria-label={`Select ${s.name}`}
-                  className="mt-1 h-4 w-4 rounded border-border"
+                  type="text"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  aria-label="Edit name"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 />
-                <div>
-                  <p className="font-medium text-foreground leading-snug">{s.name}</p>
-                  <p className="font-mono text-xs text-muted-foreground">{s.slug}</p>
+                <input
+                  type="text"
+                  value={editDescription}
+                  onChange={e => setEditDescription(e.target.value)}
+                  placeholder="Description (optional)"
+                  aria-label="Edit description"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                {editError && <p className="text-xs text-red-600">{editError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => saveEdit(s)}
+                    disabled={savingEdit}
+                    className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                  >
+                    {savingEdit ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    onClick={cancelEdit}
+                    disabled={savingEdit}
+                    className="rounded-md px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
-              <StatusBadge archived={s.archived} />
-            </div>
-            {s.description && <p className="text-xs text-muted-foreground">{s.description}</p>}
-            <button
-              onClick={() => handleArchiveToggle(s)}
-              className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
-            >
-              {s.archived ? 'Unarchive' : 'Archive'}
-            </button>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(s.id)}
+                      onChange={() => toggleSelect(s.id)}
+                      aria-label={`Select ${s.name}`}
+                      className="mt-1 h-4 w-4 rounded border-border"
+                    />
+                    <div>
+                      <p className="font-medium text-foreground leading-snug">{s.name}</p>
+                      <p className="font-mono text-xs text-muted-foreground">{s.slug}</p>
+                    </div>
+                  </div>
+                  <StatusBadge archived={s.archived} />
+                </div>
+                {s.description && <p className="text-xs text-muted-foreground">{s.description}</p>}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => handleArchiveToggle(s)}
+                    className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                  >
+                    {s.archived ? 'Unarchive' : 'Archive'}
+                  </button>
+                  <button
+                    onClick={() => startEdit(s)}
+                    aria-label={`Edit ${s.name}`}
+                    className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(s)}
+                    disabled={deletingId === s.id}
+                    aria-label={`Delete ${s.name}`}
+                    className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-900/20 transition-colors"
+                  >
+                    {deletingId === s.id ? 'Deleting…' : 'Delete'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -304,6 +419,52 @@ export default function SubjectsAdmin() {
               </tr>
             ) : (
               visible.map(s => (
+                editingId === s.id ? (
+                  <tr key={s.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 w-8" />
+                    <td className="px-4 py-3" colSpan={3}>
+                      <div className="space-y-2">
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={e => setEditName(e.target.value)}
+                            aria-label="Edit name"
+                            className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                          <input
+                            type="text"
+                            value={editDescription}
+                            onChange={e => setEditDescription(e.target.value)}
+                            placeholder="Description (optional)"
+                            aria-label="Edit description"
+                            className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        </div>
+                        {editError && <p className="text-xs text-red-600">{editError}</p>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3" />
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveEdit(s)}
+                          disabled={savingEdit}
+                          className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                        >
+                          {savingEdit ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          onClick={cancelEdit}
+                          disabled={savingEdit}
+                          className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
                 <tr key={s.id} className="border-b border-border last:border-0">
                   <td className="px-4 py-3 w-8">
                     <input
@@ -319,14 +480,32 @@ export default function SubjectsAdmin() {
                   <td className="px-4 py-3 text-sm text-muted-foreground max-w-xs truncate">{s.description || '—'}</td>
                   <td className="px-4 py-3"><StatusBadge archived={s.archived} /></td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleArchiveToggle(s)}
-                      className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
-                    >
-                      {s.archived ? 'Unarchive' : 'Archive'}
-                    </button>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handleArchiveToggle(s)}
+                        className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                      >
+                        {s.archived ? 'Unarchive' : 'Archive'}
+                      </button>
+                      <button
+                        onClick={() => startEdit(s)}
+                        aria-label={`Edit ${s.name}`}
+                        className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(s)}
+                        disabled={deletingId === s.id}
+                        aria-label={`Delete ${s.name}`}
+                        className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        {deletingId === s.id ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
+                )
               ))
             )}
           </tbody>

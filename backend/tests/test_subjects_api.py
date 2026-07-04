@@ -1,6 +1,6 @@
 import pytest
 from security.models import Organization, OrganizationMembership
-from incidents.models import Incident, Subject
+from incidents.models import Incident, Subject, TaskTemplate
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────
@@ -146,6 +146,80 @@ def test_patch_subject_update_description(admin_client, phishing):
     assert response.status_code == 200
     phishing.refresh_from_db()
     assert phishing.description == "Updated description."
+
+
+@pytest.mark.django_db
+def test_patch_subject_rename_updates_slug(admin_client, phishing):
+    response = admin_client.patch(
+        f"/api/subjects/{phishing.id}/",
+        {"name": "Spear Phishing"},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    phishing.refresh_from_db()
+    assert phishing.name == "Spear Phishing"
+    assert phishing.slug == "spear-phishing"
+
+
+@pytest.mark.django_db
+def test_patch_subject_rename_collision_rejected(admin_client, phishing, malware):
+    response = admin_client.patch(
+        f"/api/subjects/{phishing.id}/",
+        {"name": "Malware"},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    phishing.refresh_from_db()
+    assert phishing.slug == "phishing"  # unchanged
+
+
+# ── DELETE /api/subjects/<id>/ ───────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_delete_subject_requires_staff(client, acme_member, phishing):
+    client.force_login(acme_member)
+    response = client.delete(f"/api/subjects/{phishing.id}/")
+    assert response.status_code == 403
+    assert Subject.objects.filter(pk=phishing.id).exists()
+
+
+@pytest.mark.django_db
+def test_delete_subject_success(admin_client):
+    subject = Subject.objects.create(name="Disposable", slug="disposable")
+    response = admin_client.delete(f"/api/subjects/{subject.id}/")
+    assert response.status_code == 204
+    assert not Subject.objects.filter(pk=subject.id).exists()
+
+
+@pytest.mark.django_db
+def test_delete_subject_blocked_by_task_templates(admin_client, phishing):
+    TaskTemplate.objects.create(name="Phishing playbook", subject=phishing)
+    response = admin_client.delete(f"/api/subjects/{phishing.id}/")
+    assert response.status_code == 409
+    assert Subject.objects.filter(pk=phishing.id).exists()
+
+
+@pytest.mark.django_db
+def test_delete_subject_referenced_by_incident_nulls_fk(admin_client, acme):
+    subject = Subject.objects.create(name="Standalone", slug="standalone")
+    incident = Incident.objects.create(
+        display_id="INC-2026-0100",
+        organization=acme,
+        title="Phishing case",
+        source_kind="wazuh_event",
+        subject=subject,
+    )
+    response = admin_client.delete(f"/api/subjects/{subject.id}/")
+    assert response.status_code == 204
+    incident.refresh_from_db()
+    assert incident.subject is None
+
+
+@pytest.mark.django_db
+def test_delete_subject_not_found(admin_client):
+    response = admin_client.delete("/api/subjects/99999/")
+    assert response.status_code == 404
 
 
 # ── seed migration check ─────────────────────────────────────────────────────

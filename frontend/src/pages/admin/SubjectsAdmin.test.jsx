@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('@/lib/axios', () => ({
-  default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }));
 
 import api from '@/lib/axios';
@@ -136,5 +136,67 @@ describe('SubjectsAdmin', () => {
     await user.click(within(table()).getByLabelText('Select Phishing'));
     await user.click(screen.getByRole('button', { name: 'Archive selected' }));
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/subjects/1/', { archived: true }));
+  });
+
+  it('edits a subject name and description', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    api.patch.mockResolvedValue({ data: { ...SUBJECTS[0], name: 'Spear Phishing', description: 'Targeted.' } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    await user.click(within(table()).getByLabelText('Edit Phishing'));
+    const nameInput = within(table()).getByLabelText('Edit name');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Spear Phishing');
+    await user.click(within(table()).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/subjects/1/', { name: 'Spear Phishing', description: 'Phishing attacks.' }));
+    await waitFor(() => within(table()).getByText('Spear Phishing'));
+  });
+
+  it('shows an inline error when editing collides', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    api.patch.mockRejectedValue({ response: { data: { detail: 'A subject with this name already exists.' } } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    await user.click(within(table()).getByLabelText('Edit Phishing'));
+    const nameInput = within(table()).getByLabelText('Edit name');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Malware');
+    await user.click(within(table()).getByRole('button', { name: 'Save' }));
+    await waitFor(() => within(table()).getByText('A subject with this name already exists.'));
+  });
+
+  it('deletes a subject after confirmation', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    api.delete.mockResolvedValue({ status: 204 });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    await user.click(within(table()).getByLabelText('Delete Phishing'));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/subjects/1/'));
+    await waitFor(() => expect(within(table()).queryByText('Phishing')).not.toBeInTheDocument());
+  });
+
+  it('surfaces a server error when delete is blocked', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    api.delete.mockRejectedValue({ response: { data: { detail: 'This subject has task templates; remove them or archive the subject instead.' } } });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    await user.click(within(table()).getByLabelText('Delete Phishing'));
+    await waitFor(() => screen.getByText('This subject has task templates; remove them or archive the subject instead.'));
+  });
+
+  it('does not delete when confirmation is cancelled', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing'));
+    await user.click(within(table()).getByLabelText('Delete Phishing'));
+    expect(api.delete).not.toHaveBeenCalled();
   });
 });
