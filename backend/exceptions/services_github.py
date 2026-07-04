@@ -1,5 +1,6 @@
 """Push / update an ExceptionRule's XML element in the security-monitoring repo."""
 import base64
+import logging
 import re
 import xml.etree.ElementTree as ET
 from io import StringIO
@@ -9,6 +10,8 @@ from django.conf import settings
 from ruamel.yaml import YAML
 
 from .services_xml import rule_file_path, rule_to_xml
+
+logger = logging.getLogger(__name__)
 
 REPO        = "ReyhZhao/argocd-deployments"
 BRANCH      = "main"
@@ -36,12 +39,35 @@ def _get_file(path: str):
     return content, data["sha"]
 
 
-def _upsert_rule_element(xml_content: str, rule_xml: str, rule_id: int) -> str:
+def _parse_group(xml_content: str, path: str = "") -> ET.Element:
+    """Parse *xml_content* into its <group> root element.
+
+    The exception files this service owns are single-rooted
+    ``<group name="exceptions">`` documents. If the fetched content is empty,
+    whitespace-only, comment-only, or otherwise not parseable as a single root
+    element, fall back to a fresh empty exceptions group rather than letting an
+    ``ET.ParseError`` propagate and 502 the request (issue #650 — e.g. a file
+    whose entire body is wrapped in an XML comment).
+    """
+    stripped = xml_content.strip()
+    if stripped:
+        try:
+            return ET.fromstring(stripped)
+        except ET.ParseError as exc:
+            logger.warning(
+                "Existing exceptions file %r was not parseable (%s); "
+                "replacing it with a fresh empty exceptions group.",
+                path or "<unknown>", exc,
+            )
+    return ET.fromstring(_EMPTY_FILE)
+
+
+def _upsert_rule_element(xml_content: str, rule_xml: str, rule_id: int, path: str = "") -> str:
     """Insert or replace the <rule id="{rule_id}"> element within xml_content."""
     new_elem = ET.fromstring(rule_xml)
 
-    # Strip and re-parse the existing document
-    root = ET.fromstring(xml_content.strip() or _EMPTY_FILE)
+    # Strip and re-parse the existing document (resilient to unparseable content)
+    root = _parse_group(xml_content, path)
 
     # Remove any existing rule with the same ID
     for existing in root.findall(f"rule[@id='{rule_id}']"):
@@ -52,9 +78,9 @@ def _upsert_rule_element(xml_content: str, rule_xml: str, rule_id: int) -> str:
     return ET.tostring(root, encoding="unicode", xml_declaration=False)
 
 
-def _remove_rule_element(xml_content: str, rule_id: int) -> str:
+def _remove_rule_element(xml_content: str, rule_id: int, path: str = "") -> str:
     """Remove the <rule id="{rule_id}"> element from xml_content."""
-    root = ET.fromstring(xml_content.strip() or _EMPTY_FILE)
+    root = _parse_group(xml_content, path)
     for existing in root.findall(f"rule[@id='{rule_id}']"):
         root.remove(existing)
     ET.indent(root, space="  ")
@@ -68,7 +94,7 @@ def remove_rule(rule) -> None:
     if content is None or sha is None:
         return  # File doesn't exist — nothing to remove
 
-    updated = _remove_rule_element(content, rule.wazuh_rule_id)
+    updated = _remove_rule_element(content, rule.wazuh_rule_id, path)
     encoded = base64.b64encode(updated.encode()).decode()
 
     payload = {
@@ -162,7 +188,7 @@ def push_rule(rule) -> None:
     if content is None:
         content = _EMPTY_FILE
 
-    updated = _upsert_rule_element(content, xml_str, rule.wazuh_rule_id)
+    updated = _upsert_rule_element(content, xml_str, rule.wazuh_rule_id, path)
     encoded = base64.b64encode(updated.encode()).decode()
 
     payload = {

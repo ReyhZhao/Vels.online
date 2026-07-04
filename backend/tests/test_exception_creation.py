@@ -1,5 +1,6 @@
 import base64
 import json
+import xml.etree.ElementTree as ET
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -468,3 +469,101 @@ def test_create_links_incident_when_provided(admin_client, acme, pool):
         )
     assert response.status_code == 201
     assert response.json()["incident_display_id"] == "INC-2026-0001"
+
+
+# ── Resilience to unparseable existing files (#650) ──────────────────────────
+
+# The real velsonline_exceptions.xml had its entire body wrapped in an XML
+# comment, so ET.fromstring raised "no element found: line 13, column 12" and
+# every exception push 502'd. The assembler must treat such content as empty.
+COMMENTED_OUT_FILE = """<!-- <group name="exceptions">
+  <rule id="200006" level="0">
+    <description>Suppress netstat change alerts on this development machine.</description>
+    <if_sid>533</if_sid>
+    <field name="agent.name">MacbookPro-M5</field>
+  </rule>
+  <rule id="200013" level="0">
+    <description>Ignore legitimate OneDriveStandaloneUpdater.exe on eddie-pc</description>
+    <if_sid>111202</if_sid>
+    <field name="agent.name">eddie-pc</field>
+  </rule>
+</group> -->"""
+
+
+def test_upsert_into_comment_only_file_does_not_raise():
+    from exceptions.services_github import _upsert_rule_element
+
+    rule_xml = '<rule id="200020" level="0"><description>New</description></rule>'
+    result = _upsert_rule_element(COMMENTED_OUT_FILE, rule_xml, 200020, "velsonline_exceptions.xml")
+
+    # Result must be a valid, single-rooted <group> containing only the new rule
+    root = ET.fromstring(result)
+    assert root.tag == "group"
+    assert [r.get("id") for r in root.findall("rule")] == ["200020"]
+
+
+def test_upsert_into_empty_file_still_works():
+    from exceptions.services_github import _upsert_rule_element
+
+    rule_xml = '<rule id="200021" level="0"><description>New</description></rule>'
+    result = _upsert_rule_element("   \n  ", rule_xml, 200021)
+    root = ET.fromstring(result)
+    assert [r.get("id") for r in root.findall("rule")] == ["200021"]
+
+
+def test_upsert_into_valid_file_preserves_other_rules():
+    from exceptions.services_github import _upsert_rule_element
+
+    existing = (
+        '<group name="exceptions">'
+        '<rule id="200007" level="0"><description>Keep me</description></rule>'
+        '</group>'
+    )
+    rule_xml = '<rule id="200022" level="0"><description>New</description></rule>'
+    result = _upsert_rule_element(existing, rule_xml, 200022)
+    root = ET.fromstring(result)
+    ids = sorted(r.get("id") for r in root.findall("rule"))
+    assert ids == ["200007", "200022"]
+
+
+def test_remove_from_comment_only_file_does_not_raise():
+    from exceptions.services_github import _remove_rule_element
+
+    result = _remove_rule_element(COMMENTED_OUT_FILE, 200006, "velsonline_exceptions.xml")
+    root = ET.fromstring(result)
+    assert root.tag == "group"
+    assert root.findall("rule") == []
+
+
+@pytest.mark.django_db
+def test_push_rule_succeeds_when_existing_file_is_commented_out(acme):
+    """End-to-end: pushing when the org file body is fully commented out must
+    not raise ParseError and must PUT a clean single-rooted group (#650)."""
+    rule = ExceptionRule.objects.create(
+        wazuh_rule_id=200030,
+        trigger_rule_id=5763,
+        description="Recover from commented-out file",
+        scope="org",
+        organisation=acme,
+        status="applied",
+    )
+
+    mock_get = MagicMock(status_code=200)
+    mock_get.json.return_value = {
+        "content": base64.b64encode(COMMENTED_OUT_FILE.encode()).decode(),
+        "sha": "abc123",
+    }
+    mock_get.raise_for_status = MagicMock()
+    mock_put = MagicMock(status_code=200)
+    mock_put.raise_for_status = MagicMock()
+
+    with patch("exceptions.services_github.requests.get", return_value=mock_get), \
+         patch("exceptions.services_github.requests.put", return_value=mock_put) as mock_put_call:
+        from exceptions.services_github import push_rule
+        push_rule(rule)
+
+    payload = mock_put_call.call_args[1]["json"]
+    content_decoded = base64.b64decode(payload["content"]).decode()
+    root = ET.fromstring(content_decoded)  # must parse — no ParseError
+    assert "200030" in content_decoded
+    assert root.tag == "group"
