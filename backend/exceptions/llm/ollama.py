@@ -4,7 +4,7 @@ import ollama
 from django.conf import settings
 
 from .base import BaseLLMProvider, ExceptionFields
-from .gemini import SYSTEM_PROMPT
+from .prompts import SYSTEM_PROMPT
 
 
 class OllamaProvider(BaseLLMProvider):
