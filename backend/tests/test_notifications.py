@@ -1,5 +1,8 @@
+import json
+
 import pytest
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from security.models import Organization, OrganizationMembership
 from incidents.models import Incident, IncidentDelegation
@@ -555,3 +558,28 @@ def test_test_email_smtp_error_returns_500(client, staff):
         res = client.post("/api/admin/test-email/")
     assert res.status_code == 500
     assert "Failed to send test email" in res.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_push_payload_includes_current_unread_count(staff, acme):
+    """The push payload carries the recipient's unread in-app count for the OS badge."""
+    from unittest.mock import patch
+    from notifications.models import PushSubscription
+    from notifications.tasks import send_push_notifications
+
+    incident = make_incident(acme)
+    # Two unread in-app notifications, one already read, and one not shown in-app.
+    Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={}, shown_inapp=True)
+    Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={}, shown_inapp=True)
+    Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={}, shown_inapp=True, read_at=timezone.now())
+    Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={}, shown_inapp=False)
+
+    PushSubscription.objects.create(user=staff, endpoint="https://push.example/abc", p256dh="k", auth="a")
+
+    with patch("pywebpush.webpush") as mock_webpush:
+        send_push_notifications(staff.id, {"title": "Hi", "body": "there", "url": "/dashboard"})
+
+    assert mock_webpush.call_count == 1
+    sent = json.loads(mock_webpush.call_args.kwargs["data"])
+    assert sent["unread_count"] == 2
+    assert sent["title"] == "Hi"

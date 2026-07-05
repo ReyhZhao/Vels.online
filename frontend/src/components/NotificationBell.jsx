@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
+import { syncAppBadge } from '../lib/appBadge';
 import SlideOver from './SlideOver';
 
 function BellIcon({ hasUnread }) {
@@ -103,6 +104,13 @@ export default function NotificationBell() {
     const interval = setInterval(fetchUnreadCount, 30_000);
     return () => clearInterval(interval);
   }, [fetchUnreadCount]);
+
+  // Keep the OS app-icon badge in sync with the authoritative unread count while the
+  // app is open, so foreground reads/dismissals reflect on the icon without waiting
+  // for the next push. Clears at zero. No-op where the Badging API is unavailable.
+  useEffect(() => {
+    syncAppBadge(unreadCount);
+  }, [unreadCount]);
 
   async function handleOpen() {
     setOpen(true);

@@ -57,7 +57,16 @@ def send_digest_email(recipient_id, incident_id):
 @shared_task
 def send_push_notifications(user_id, payload_dict):
     from pywebpush import webpush, WebPushException
-    from .models import PushSubscription
+    from .models import Notification, PushSubscription
+
+    # Carry the recipient's current unread in-app count so the service worker can set
+    # the OS app-icon badge (iOS Badging API needs an absolute value; it never
+    # auto-increments a PWA badge from the push payload). Computed at send time using
+    # the same query as the unread-count endpoint.
+    unread_count = Notification.objects.filter(
+        recipient_id=user_id, read_at__isnull=True, shown_inapp=True
+    ).count()
+    payload_dict = {**payload_dict, "unread_count": unread_count}
 
     subscriptions = PushSubscription.objects.filter(user_id=user_id)
     stale = []

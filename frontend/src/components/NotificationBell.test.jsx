@@ -148,6 +148,27 @@ describe('NotificationBell', () => {
     expect(screen.queryByTestId('unread-badge')).not.toBeInTheDocument();
   });
 
+  it('mirrors the unread count to the OS app-icon badge', async () => {
+    navigator.setAppBadge = vi.fn().mockResolvedValue(undefined);
+    navigator.clearAppBadge = vi.fn().mockResolvedValue(undefined);
+    api.get.mockResolvedValueOnce({ data: { unread_count: 4 } });
+    renderBell();
+    await waitFor(() => expect(navigator.setAppBadge).toHaveBeenCalledWith(4));
+    delete navigator.setAppBadge;
+    delete navigator.clearAppBadge;
+  });
+
+  it('clears the OS app-icon badge when the unread count is zero', async () => {
+    navigator.setAppBadge = vi.fn().mockResolvedValue(undefined);
+    navigator.clearAppBadge = vi.fn().mockResolvedValue(undefined);
+    api.get.mockResolvedValueOnce({ data: { unread_count: 0 } });
+    renderBell();
+    await waitFor(() => expect(navigator.clearAppBadge).toHaveBeenCalled());
+    expect(navigator.setAppBadge).not.toHaveBeenCalled();
+    delete navigator.setAppBadge;
+    delete navigator.clearAppBadge;
+  });
+
   it('hides Clear all when there are no notifications', async () => {
     api.get
       .mockResolvedValueOnce({ data: { unread_count: 0 } })
