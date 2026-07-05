@@ -68,4 +68,39 @@ describe('LinkedIncidents', () => {
     await waitFor(() => expect(container).toBeEmptyDOMElement());
     expect(api.get).not.toHaveBeenCalled();
   });
+
+  it('sends only short scalar keys, dropping blobs and nested objects', async () => {
+    api.get.mockResolvedValue({ data: { results: [] } });
+    render(
+      <MemoryRouter>
+        <LinkedIncidents
+          sourceKind="wazuh_event"
+          sourceRef={{
+            id: '1783079799.54316414',
+            rule_id: '150912',
+            full_log: 'x'.repeat(50000),
+            all_fields: { data: { srcip: '1.2.3.4' } },
+          }}
+        />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    const url = api.get.mock.calls[0][0];
+    const contains = new URL(url, 'https://x').searchParams.get('source_ref_contains');
+    expect(JSON.parse(contains)).toEqual({ id: '1783079799.54316414', rule_id: '150912' });
+    expect(url.length).toBeLessThan(500);
+  });
+
+  it('does not fire a request when no scalar identifiers survive', async () => {
+    const { container } = render(
+      <MemoryRouter>
+        <LinkedIncidents
+          sourceKind="wazuh_event"
+          sourceRef={{ full_log: 'y'.repeat(50000), all_fields: { a: 1 } }}
+        />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    expect(api.get).not.toHaveBeenCalled();
+  });
 });

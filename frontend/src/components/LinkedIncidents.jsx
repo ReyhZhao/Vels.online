@@ -20,19 +20,40 @@ const STATE_CLASSES = {
   closed:      'text-muted-foreground',
 };
 
+// Longest scalar value we'll use as a linking key. Beyond this a value is a
+// blob (a Wazuh alert's full_log / raw message text), not an identifier.
+const MAX_KEY_VALUE_LEN = 120;
+
+// The backend `source_ref_contains` filter AND-matches each entry as a
+// top-level scalar equality, so only short scalar fields are useful linking
+// keys — nested objects/arrays get JSON-exact-matched and never find siblings.
+// Sending the whole source_ref also blows the query string past the proxy's
+// HTTP/2 header limit for Wazuh-event incidents (full_log / all_fields blobs),
+// which resets the shared connection and kills the page's sibling requests.
+function identifyingRef(sourceRef) {
+  const out = {};
+  for (const [k, v] of Object.entries(sourceRef ?? {})) {
+    if (v == null || typeof v === 'object') continue;
+    if (String(v).length > MAX_KEY_VALUE_LEN) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 export default function LinkedIncidents({ sourceKind, sourceRef, excludeId }) {
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!sourceRef || Object.keys(sourceRef).length === 0) {
+    const ref = identifyingRef(sourceRef);
+    if (Object.keys(ref).length === 0) {
       setLoading(false);
       return;
     }
     let cancelled = false;
     const params = new URLSearchParams({
       source_kind: sourceKind,
-      source_ref_contains: JSON.stringify(sourceRef),
+      source_ref_contains: JSON.stringify(ref),
     });
     api.get(`/api/incidents/?${params}`)
       .then(res => { if (!cancelled) setIncidents(res.data.results ?? res.data); })
