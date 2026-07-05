@@ -20,10 +20,23 @@ const EXTENSIONS = [
   Underline,
 ];
 
+/** Strip all HTML tags, looping until stable so a removal can't re-expose a "<...>"
+ *  sequence (guards CodeQL's incomplete-multi-character-sanitization; this is
+ *  blank-detection only — real sanitization is the server-side nh3 pass). */
+function stripTags(html) {
+  let text = html;
+  let prev;
+  do {
+    prev = text;
+    text = text.replace(/<[^>]*>/g, '');
+  } while (text !== prev);
+  return text;
+}
+
 /** True when the editor HTML carries no visible text (TipTap renders empty as "<p></p>"). */
 export function isBlankRichText(html) {
   if (!html) return true;
-  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim() === '';
+  return stripTags(html).replace(/&nbsp;/g, '').trim() === '';
 }
 
 function Btn({ onClick, active, label, children }) {

@@ -19,7 +19,16 @@ vi.mock('./RichTextEditor', () => ({
       onChange={(e) => onChange(e.target.value)}
     />
   ),
-  isBlankRichText: (html) => !html || html.replace(/<[^>]*>/g, '').trim() === '',
+  isBlankRichText: (html) => {
+    if (!html) return true;
+    let text = html;
+    let prev;
+    do {
+      prev = text;
+      text = text.replace(/<[^>]*>/g, '');
+    } while (text !== prev);
+    return text.trim() === '';
+  },
 }));
 
 import api from '../lib/axios';
