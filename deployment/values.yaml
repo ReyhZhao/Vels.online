@@ -1,11 +1,11 @@
 backend:
   image:
     repository: registry.vels.online/vels/backend
-    tag: 0.37.1
+    tag: 0.37.2
 frontend:
   image:
     repository: registry.vels.online/vels/frontend
-    tag: 0.37.1
+    tag: 0.37.2
 imagePullSecrets:
   - name: registry-credentials
 # Operational observability (ADR-0019). Plugs into the cluster's existing Prometheus
