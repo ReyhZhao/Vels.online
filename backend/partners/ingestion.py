@@ -50,6 +50,8 @@ class PartnerIngestionHandler:
         from partners.mapping import map_email_to_incident_fields
         from partners.verification import verify_message_auth
 
+        from partners.matching import find_partner_incident
+
         if not verify_message_auth(getattr(message, "raw_bytes", b"")):
             logger.warning(
                 "inbound_mail: partner: dropped — sender-auth verification failed "
@@ -59,16 +61,31 @@ class PartnerIngestionHandler:
             return "partner:dropped:verification_failed"
 
         fields = map_email_to_incident_fields(connection, message)
-        incident = create_partner_incident(connection, message, fields, sender_address)
+        ext_ref = fields.get("external_reference") or ""
+
+        # Follow-up: a known reference threads onto the existing incident as a comment.
+        # An inbound message NEVER mutates the incident's state (ADR-0032).
+        existing = find_partner_incident(connection, ext_ref)
+        if existing is not None:
+            append_partner_comment(existing, message, connection, sender_address, ext_ref)
+            logger.info(
+                "inbound_mail: partner: matched follow-up onto %s connection=%r ref=%r",
+                existing.display_id, connection.name, ext_ref,
+            )
+            return "partner:matched"
+
+        incident = create_partner_incident(
+            connection, message, fields, sender_address, flagged_no_reference=not ext_ref
+        )
         logger.info(
             "inbound_mail: partner: created %s org=%s connection=%r sender=%r ref=%r",
             incident.display_id, connection.organization.slug, connection.name,
-            sender_address, fields.get("external_reference") or "",
+            sender_address, ext_ref,
         )
         return "partner:created"
 
 
-def create_partner_incident(connection, message, fields, sender_address):
+def create_partner_incident(connection, message, fields, sender_address, flagged_no_reference=False):
     from django.db import transaction
 
     from incidents.models import Incident, Subject
@@ -82,15 +99,26 @@ def create_partner_incident(connection, message, fields, sender_address):
             defaults={"name": connection.VENDOR_ADVISORY_SUBJECT},
         )
 
+    source_ref = {
+        "connection_id": connection.id,
+        "external_reference": fields.get("external_reference") or "",
+        "sender_address": sender_address,
+    }
+    if flagged_no_reference:
+        # A real report is never dropped for lack of a ref — open it, but flag it so
+        # follow-ups can't thread onto it and staff can see it needs a reference.
+        source_ref["flagged_no_reference"] = True
+        logger.warning(
+            "inbound_mail: partner: no External Reference — opening a flagged incident "
+            "connection=%r sender=%r subject=%r",
+            connection.name, sender_address, message.subject,
+        )
+
     with transaction.atomic():
         incident = Incident.objects.create(
             organization=connection.organization,
             source_kind=Incident.SOURCE_PARTNER,
-            source_ref={
-                "connection_id": connection.id,
-                "external_reference": fields.get("external_reference") or "",
-                "sender_address": sender_address,
-            },
+            source_ref=source_ref,
             display_id=next_display_id(),
             title=fields["title"],
             description=fields["description"],
@@ -114,6 +142,41 @@ def create_partner_incident(connection, message, fields, sender_address):
     attach_partner_email(incident, message, sender_address)
     notify_partner_activity(incident, f"New partner incident {incident.display_id}")
     return incident
+
+
+def append_partner_comment(incident, message, connection, sender_address, external_reference):
+    """Thread a partner follow-up onto an existing incident as an external Comment.
+    Never mutates the incident's state (ADR-0032)."""
+    from incidents.models import Comment
+    from incidents.services.events import record_event
+
+    body = (message.body_text or message.subject or "").strip() or "(empty partner message)"
+    Comment.objects.create(
+        incident=incident,
+        author=None,  # synthetic partner author — label carried in metadata
+        body=body,
+        kind=Comment.KIND_USER,
+        origin=Comment.ORIGIN_PARTNER_INBOUND,
+        is_internal=False,
+        metadata={
+            "partner_sender": sender_address,
+            "connection_name": connection.name,
+            "external_reference": external_reference,
+        },
+    )
+    record_event(
+        incident,
+        "partner_message_received",
+        payload={
+            "connection_id": connection.id,
+            "connection_name": connection.name,
+            "sender_address": sender_address,
+            "external_reference": external_reference,
+            "direction": "inbound",
+        },
+    )
+    attach_partner_email(incident, message, sender_address)
+    notify_partner_activity(incident, f"Partner follow-up on {incident.display_id}")
 
 
 def notify_partner_activity(incident, body):

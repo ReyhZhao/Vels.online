@@ -350,6 +350,18 @@ class Comment(models.Model):
         (KIND_AI_TASK_SUMMARY, "AI Task Summary"),
     ]
 
+    # Loop-prevention origin for partner sync (ADR-0033). Only staff-authored external
+    # comments are mirrored to a partner; partner-inbound and AI-authored comments never
+    # echo back out. Existing rows default to "staff".
+    ORIGIN_STAFF = "staff"
+    ORIGIN_PARTNER_INBOUND = "partner_inbound"
+    ORIGIN_AI = "ai"
+    ORIGIN_CHOICES = [
+        (ORIGIN_STAFF, "Staff"),
+        (ORIGIN_PARTNER_INBOUND, "Partner (inbound)"),
+        (ORIGIN_AI, "AI"),
+    ]
+
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="comments")
     task = models.ForeignKey(
         Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="comments"
@@ -359,6 +371,7 @@ class Comment(models.Model):
     )
     body = models.TextField()
     kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=KIND_USER)
+    origin = models.CharField(max_length=20, choices=ORIGIN_CHOICES, default=ORIGIN_STAFF)
     metadata = models.JSONField(null=True, blank=True)
     is_internal = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
