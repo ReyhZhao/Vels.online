@@ -85,6 +85,16 @@ def transition_incident(incident, target_state, actor, closure_reason=None, dupl
     if target_state == "closed":
         from incidents.tasks import notify_contacts_on_close
         notify_contacts_on_close.delay(incident.id)
+        # Bi-directional partner sync (ADR-0033): auto-notify the partner of closure.
+        # No-op for non-partner / inbound-only / TLP:RED incidents.
+        try:
+            from partners.sync import sync_closure_to_partner
+            sync_closure_to_partner(incident)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "partner closure sync failed for %s", incident.display_id
+            )
 
     return incident
 

@@ -2055,6 +2055,13 @@ class IncidentCommentListView(APIView):
             payload={"target_type": "comment", "target_id": comment.id, "is_internal": comment.is_internal},
         )
         notify_comment(incident, comment, actor=request.user)
+        # Bi-directional partner sync (ADR-0033): mirror a staff external comment to the
+        # partner. No-op for non-partner incidents and internal comments.
+        try:
+            from partners.sync import sync_comment_to_partner
+            sync_comment_to_partner(comment)
+        except Exception:
+            logger.exception("partner sync failed for comment %s", comment.id)
         return Response(CommentSerializer(comment, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
