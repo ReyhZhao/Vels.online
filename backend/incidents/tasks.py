@@ -301,6 +301,15 @@ def run_triage_distillation_sweep():
     return len(proposed)
 
 
+@shared_task
+def update_classify_accuracy_metric():
+    """Periodic: recompute and publish the Classify-accuracy gauge (ADR-0030, #665)."""
+    from incidents.memory.corrections import update_classify_accuracy_gauge
+    stats = update_classify_accuracy_gauge()
+    logger.info("update_classify_accuracy_metric: %s", stats)
+    return stats
+
+
 def _ioc_enrichment_annotation(ioc) -> str | None:
     """Return a compact enrichment annotation string for the IOC, or None if unavailable."""
     if ioc.kind == "email":

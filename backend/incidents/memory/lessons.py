@@ -93,6 +93,19 @@ def lessons_brief(lessons) -> str:
     return "\n".join(lines)
 
 
+def apply_contradiction(lesson):
+    """Register that a human resolved against this Lesson (ADR-0030). Slice #665 bumps the
+    counter; slice #666 adds the auto-suspend-at-threshold behaviour."""
+    from django.db.models import F
+    from incidents.models import TriageLesson
+
+    TriageLesson.objects.filter(pk=lesson.pk).update(
+        contradiction_count=F("contradiction_count") + 1
+    )
+    lesson.refresh_from_db(fields=["contradiction_count"])
+    return lesson
+
+
 def record_applied(lessons):
     """Mark Lessons as applied when they are injected into a Work run (audit + ranking)."""
     from incidents.models import TriageLesson
