@@ -156,7 +156,18 @@ def run_incident_triage(self, incident_id: int):
         return
 
     payload = _build_triage_payload(incident)
-    extra_context = incident.organization.triage_prompt_context or ""
+    org_context = incident.organization.triage_prompt_context or ""
+
+    # Precedent retrieval (ADR-0030, slice #660): fold similar resolved same-org
+    # incidents into the Classify context so the disposition can lean on how we
+    # closed near-identical cases before. Best-effort — never blocks triage.
+    precedent_context = ""
+    try:
+        from incidents.memory.precedents import build_precedents, build_precedent_context
+        precedent_context = build_precedent_context(build_precedents(incident))
+    except Exception as exc:
+        logger.warning("run_incident_triage: precedent retrieval failed for %s: %s", incident_id, exc)
+    extra_context = "\n".join(filter(None, [org_context, precedent_context]))
 
     try:
         provider = get_triage_provider()
