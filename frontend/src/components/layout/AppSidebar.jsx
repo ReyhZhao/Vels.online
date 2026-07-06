@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   Tag,
   ListChecks,
+  Lightbulb,
   Zap,
   ChevronLeft,
   ChevronRight,
@@ -262,6 +263,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     </SidebarLink>
                     <SidebarLink to="/admin/incidents/report-templates" icon={FileText} collapsed={collapsed}>
                       Report Templates
+                    </SidebarLink>
+                    <SidebarLink to="/admin/incidents/triage-lessons" icon={Lightbulb} collapsed={collapsed}>
+                      Triage Lessons
                     </SidebarLink>
                     <SidebarLink to="/admin/incidents/automations" icon={Zap} collapsed={collapsed}>
                       Automations

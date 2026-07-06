@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .memory.views import LessonReviewActionView, LessonReviewQueueView
 from .views import (
     ApplyTemplateView,
     IncidentAssetLinkView,
@@ -54,6 +55,8 @@ urlpatterns = [
     path("report-sections/", ReportSectionCatalogView.as_view()),
     path("report-templates/", ReportTemplateListView.as_view()),
     path("report-templates/<int:pk>/", ReportTemplateDetailView.as_view()),
+    path("triage-lessons/", LessonReviewQueueView.as_view()),
+    path("triage-lessons/<int:pk>/<str:action>/", LessonReviewActionView.as_view()),
     path("<str:display_id>/", IncidentDetailView.as_view()),
     path("<str:display_id>/timeline/", IncidentTimelineView.as_view()),
     path("<str:display_id>/transition/", IncidentTransitionView.as_view()),
