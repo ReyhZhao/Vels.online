@@ -10,6 +10,7 @@ Stay informed without polling.
 
 - In-app notification centre for incident assignments, state changes, and comments.
 - Web push notifications (VAPID) so analysts get notified even when the tab is not in focus.
+- **iOS PWA app-icon badge** — when installed as a home-screen app on iOS, the app icon carries a badge showing the unread-notification count, so analysts see outstanding work without opening the app.
 - Per-user notification preferences to control which events trigger alerts.
 - Email notifications with customisable templates.
 - **Clear all** — the notifications drawer can clear every notification at once instead of dismissing them one by one.

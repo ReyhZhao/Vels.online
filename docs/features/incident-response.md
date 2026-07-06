@@ -1,6 +1,6 @@
 # Incident Response
 
-The full incident lifecycle and the people and AI that work it: [Incident Management](#incident-management), [Incident Presence](#incident-presence), [On-Call Scheduling](#on-call-scheduling), [AI-Powered Triage](#ai-powered-triage), [IOC Enrichment](#ioc-enrichment), the [Incident Assistant](#incident-assistant), [Threat Hunting](#threat-hunting), [Incident Reports](#incident-reports), [Inbound Phishing Ingestion](#inbound-phishing-ingestion), and [Incident Contacts](#incident-contacts).
+The full incident lifecycle and the people and AI that work it: [Incident Management](#incident-management), [Incident Presence](#incident-presence), [On-Call Scheduling](#on-call-scheduling), [AI-Powered Triage](#ai-powered-triage), [Self-Learning Triage](#self-learning-triage), [IOC Enrichment](#ioc-enrichment), the [Incident Assistant](#incident-assistant), [Threat Hunting](#threat-hunting), [Incident Reports](#incident-reports), [Inbound Phishing Ingestion](#inbound-phishing-ingestion), and [Incident Contacts](#incident-contacts).
 
 See also: [Architecture overview](../architecture.md).
 
@@ -14,6 +14,11 @@ A full lifecycle for security incidents, from detection to closure.
 - **Severity tiers** — Critical · High · Medium · Low · Info, with SLA tracking displayed in the incident list. Severity auto-escalates when a new linked alert has a higher severity than the current incident.
 - **Structured playbooks** — subject-based task templates automatically apply the right checklist (phishing, malware, vulnerability, etc.) when an incident is created.
 - **Auto-assignment** — claiming an incident via "Start Work" automatically assigns it to you; the incident subject is also auto-populated from the LLM triage recommendation when one arrives.
+- **In-place description editing** — analysts correct or expand an incident's description directly on the detail view without a separate edit page.
+- **Newest-first discussion feed** — the incident discussion shows the most recent activity first with the comment composer pinned to the top, so working an active incident never means scrolling to the bottom to add or read the latest note.
+- **Zoned Details tab** — the incident Details tab is grouped into clear zones (status, classification, linked context) instead of one long field list, so the key facts read at a glance.
+- **Readable summaries for search-rule incidents** — incidents raised by a Scheduled Search Rule carry a human-readable LLM summary of what fired instead of a raw rule dump.
+- **Subjects admin CRUD** — staff can create, edit, and delete incident **Subjects** (and their playbook templates) from the subjects admin, so the classification taxonomy is maintained in-app.
 - **Immutable audit trail** — every state change, comment, delegation, attachment, and alert link is timestamped in a timeline for complete accountability.
 - **Collapsed bulk alert-link events** — when many alerts link to an incident at once (e.g. a Scheduled Search Rule or Threat Hunt materialising dozens of Findings), the timeline coalesces them into a single "*N* alerts linked" entry instead of one row per alert, keeping the timeline readable.
 - **Linked-alert drill-down** — click any alert in the Linked Alerts tab to open its full detail (raw event, ECS entity envelope, enrichment) in place, and filter the linked-alerts list with the same controls as the main `/alerts` inbox.
@@ -86,6 +91,20 @@ Reduce analyst workload on repetitive alert screening. Triage runs in **two stag
 - **Once per incident, fully audited** — guarded by a durable marker so retries and later-linking alerts never re-enter the work phase; every autonomous action is recorded on the timeline as an assistant-initiated (autonomous) event, and the run posts an AI-triage summary comment carrying its tool-trace and a "what remains" note. The staff-only manual triage button is the deliberate human re-trigger.
 - **Background, not streamed** — it runs as a Celery job with hunt-style relaxed caps (no live SSE stream, since nobody is watching at triage time).
 - **Two tuning knobs per org** — `triage_fp_threshold` (auto-close FPs) and `triage_work_threshold` (unlock the agent) are the only levers operators tune; spend rises only on the gated high-confidence path.
+
+---
+
+## Self-Learning Triage
+
+Triage no longer starts every incident cold. It carries the SOC's accumulated judgement forward through two complementary memory mechanisms — **Precedents** and **Triage Lessons** — plus a **Classification Correction** feedback loop, all learned **only** from human-ratified outcomes so the system can never train on its own guesses. See [ADR-0030](../adr/0030-self-learning-triage-memory.md) (the learning model) and [ADR-0031](../adr/0031-cross-org-triage-learning-isolation.md) (the cross-tenant boundary).
+
+- **Precedents at Classify** — before a subject is even chosen, Classify retrieves similar *resolved* incidents — matched by shared entities/IOCs — and surfaces how each was closed: its `closure_reason`, resolution comments, and *final human-ratified* subject/severity. So "this looks like INC-1234, which Dana closed as a false positive because X" lands at the cheapest point in the pipeline, and the model inherits a disposition instead of re-investigating a case the SOC has already seen. Precedents are **strictly per-tenant** — a tenant's raw incidents never surface into another tenant's triage context.
+- **Triage Lessons inform the Triage Agent** — a Lesson is a distilled, reusable disposition heuristic keyed on **Subject** (+ `source_kind`). The matched subject's active Lessons seed the gated Work phase, and a retrieval tool lets the agent dig for more mid-loop. A Lesson **informs** the model's judgement and **never itself authorises an action** — every action still passes the same autonomy gates as before, so a wrong Lesson can change only what the model *believes*, never what it *does*.
+- **Two tiers, mirroring System/Org Rules** — **Org Lessons** are learned and applied within one tenant; **Global Lessons** are SOC-curated, carry no tenant specifics, and apply fleet-wide, so a small tenant inherits the SOC's cross-fleet experience. A Global Lesson is the *sole* cross-tenant channel and carries only generalised prose; its evidence-incident links stay staff-only.
+- **Learned only from human-ratified ground truth** — a Lesson's evidence is incidents a *human* closed plus human Classification Corrections — never the Triage Agent's own unratified `pending_closure` disposition, never Classify's false-positive auto-close, never stale/duplicate auto-closes. This severs the self-reinforcement loop where an agent trains on its own mistakes.
+- **Proposed → staff-approved, with edit-on-approve** — new or strengthened Lessons land `proposed` and are inert until a SOC staff member approves them on a staff-only review queue. A batched **distillation sweep** is the single learning engine: it clusters recent human closes/corrections by subject, requires **≥ 3** corroborating cases for an Org proposal and **≥ 2** distinct orgs for a Global one, and skips patterns already covered by an active Lesson.
+- **Self-correcting, not just self-reinforcing** — a human overturning a Lesson bumps its contradiction count; at 2 it auto-suspends and re-enters the review queue. Lessons decay and archive after 180 days unused, and at most 5 are injected per subject (the sweep consolidates near-duplicates).
+- **Classification Corrections close the loop** — whenever a human overturns Classify's output (changes the subject, overrides severity, reverses the FP/disposition call), the correction is recorded first-class. It powers a **Classify-accuracy metric** (initial-vs-final subject agreement over time) and enriches future Precedents with the corrected outcome, so Classify dampens its overconfidence on shapes the SOC frequently reclassifies.
 
 ---
 
