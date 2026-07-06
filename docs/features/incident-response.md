@@ -206,3 +206,17 @@ Link employees and asset owners to incidents for structured communication.
 - **Asset ownership** — assign assets to contacts; when an incident is created and an asset is linked, the owner contact is automatically associated with the incident.
 - **In-platform Q&A** — analysts can message a contact directly from an incident (role: `notified` or `questioned`); the platform sends the email and ingests replies back into the incident timeline via IMAP polling.
 - **Threaded messaging** — outbound questions and inbound replies are displayed as a conversation thread within the incident detail.
+
+---
+
+## Partner Intake
+
+Bi-directional email **Connections** that let peer CSIRTs and software vendors feed incidents into the platform, and let staff coordinate back — the machine-to-machine sibling of [Incident Contacts](#incident-contacts). See [ADR-0032](../adr/0032-partner-intake-direct-incidents-over-verified-email.md) and [ADR-0033](../adr/0033-partner-sync-mirror-external-comments-tlp-red-gate.md).
+
+- **Connections** — a staff-configured, per-external-organisation email channel: sender address(es) (unique across all Connections), a target **Organization**, a **direction** (inbound-only or bidirectional), an **External Reference** subject regex, and a per-field mapping (severity/TLP/PAP/title/description, each `{regex, value_map, default}`). Two kinds: **CSIRT/peer** (feeds one customer org, usually bidirectional) and **Vendor** (supplier bulletins, inbound-only, feeding the Infrastructure organisation as **Vendor Advisory** incidents). Managed from a staff-only screen at `/admin/partners/connections`.
+- **Direct-incident inbound** — a message from a Connection sender becomes a `source_kind = partner` **Incident** directly (never an Alert, never correlated). The field-mapping engine maps the email onto incident fields (regex → value-map → normalise/enum-match → default); the raw `.eml` and any attachments are stored, and normal Triage Classify runs for its recommendations.
+- **DKIM/SPF verification gate** — inbound is trusted only after the message's `Authentication-Results` shows a DKIM pass and SPF pass. Gated by `PARTNER_INTAKE_VERIFY_AUTH` (default on); a failing sender is dead-lettered to the Intake Inbox, never ingested.
+- **External-Reference matching** — a follow-up quoting the same reference in the subject threads onto the existing incident as an external comment rather than opening a duplicate; a vendor resending the same advisory id dedups. A message with no reference still opens a (flagged) incident. Inbound never changes the incident's state.
+- **Bi-directional sync** — on a bidirectional Connection, staff-authored external comments and closure are automatically mirrored to the partner by email (Subject carries the External Reference). Loop-prevention keeps partner-inbound and AI-authored comments from echoing; internal comments never leave; raising the incident to **TLP:RED** is a one-field kill switch suppressing all outbound.
+- **FP auto-close exemption** — partner incidents are exempt from Triage's unattended false-positive auto-close, so a peer's report is never silently closed (nor a wrong closure auto-announced to the peer).
+- **Intake Inbox** — a staff-only dead-letter surface (`/admin/partners/intake-inbox`) capturing inbound mail that no handler accepted (unknown senders, failed verification, un-routable mail). Each row's **Create Connection** action onboards a newly-seen partner with the sender pre-filled; rows auto-purge after a retention window.
