@@ -230,6 +230,44 @@ def test_triage_task_does_not_auto_close_below_threshold(acme):
 
 
 @pytest.mark.django_db
+def test_partner_incident_is_exempt_from_fp_auto_close(acme):
+    """A partner incident with FP-confidence above threshold stays open (#674, ADR-0032)."""
+    acme.triage_fp_threshold = 0.95
+    acme.save()
+    incident = make_incident(acme, source_kind=Incident.SOURCE_PARTNER)
+    result = _make_triage_result(
+        primary_action="close_as_false_positive",
+        false_positive_confidence=0.99,
+    )
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.state != Incident.STATE_CLOSED
+    assert incident.closure_reason != Incident.CLOSURE_FALSE_POSITIVE
+    # Classify still runs and records its recommendation
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["auto_closed"] is False
+    assert comment.metadata["false_positive_confidence"] == 0.99
+
+
+@pytest.mark.django_db
+def test_non_partner_incident_still_auto_closes_at_same_confidence(acme):
+    """The equivalent non-partner incident with the same FP-confidence still auto-closes."""
+    acme.triage_fp_threshold = 0.95
+    acme.save()
+    incident = make_incident(acme, source_kind="wazuh_event")
+    result = _make_triage_result(
+        primary_action="close_as_false_positive",
+        false_positive_confidence=0.99,
+    )
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.state == Incident.STATE_CLOSED
+    assert incident.closure_reason == Incident.CLOSURE_FALSE_POSITIVE
+
+
+@pytest.mark.django_db
 def test_triage_task_escalates_severity_within_cap(acme):
     # low (1) → critical (4) is 3 levels; capped to 2 → result is high (3)
     incident = make_incident(acme, severity="low")

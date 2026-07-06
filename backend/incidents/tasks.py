@@ -223,7 +223,12 @@ def run_incident_triage(self, incident_id: int):
         logger.warning("run_incident_triage: correlation search failed for %s: %s", incident_id, exc)
 
     threshold = incident.organization.triage_fp_threshold
-    auto_closed = result.false_positive_confidence >= threshold
+    # Partner incidents (ADR-0032) are exempt from unattended false-positive auto-close:
+    # a peer's report is never silently closed, which also stops a bidirectional
+    # Connection from auto-emailing the peer "closed as false positive". Classify still
+    # runs and its recommendations are recorded below; only the auto-close is suppressed.
+    is_partner = incident.source_kind == Incident.SOURCE_PARTNER
+    auto_closed = (not is_partner) and (result.false_positive_confidence >= threshold)
 
     if auto_closed:
         try:
