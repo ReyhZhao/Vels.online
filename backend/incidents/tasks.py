@@ -156,7 +156,18 @@ def run_incident_triage(self, incident_id: int):
         return
 
     payload = _build_triage_payload(incident)
-    extra_context = incident.organization.triage_prompt_context or ""
+    org_context = incident.organization.triage_prompt_context or ""
+
+    # Precedent retrieval (ADR-0030, slice #660): fold similar resolved same-org
+    # incidents into the Classify context so the disposition can lean on how we
+    # closed near-identical cases before. Best-effort — never blocks triage.
+    precedent_context = ""
+    try:
+        from incidents.memory.precedents import build_precedents, build_precedent_context
+        precedent_context = build_precedent_context(build_precedents(incident))
+    except Exception as exc:
+        logger.warning("run_incident_triage: precedent retrieval failed for %s: %s", incident_id, exc)
+    extra_context = "\n".join(filter(None, [org_context, precedent_context]))
 
     try:
         provider = get_triage_provider()
@@ -278,6 +289,34 @@ def run_triage_work_task(incident_id: int):
     """Celery entry for the agentic Triage Work phase (ADR-0024)."""
     from incidents.triage_agent import run_triage_work
     run_triage_work(incident_id)
+
+
+@shared_task
+def run_triage_distillation_sweep():
+    """Periodic batched distillation sweep (ADR-0030): learn Triage Lessons from recent
+    human-ratified closures. Scheduled via the DB beat scheduler; safe to re-run."""
+    from incidents.memory.distillation import run_distillation_sweep
+    proposed = run_distillation_sweep()
+    logger.info("run_triage_distillation_sweep: proposed %d lesson(s)", len(proposed))
+    return len(proposed)
+
+
+@shared_task
+def update_classify_accuracy_metric():
+    """Periodic: recompute and publish the Classify-accuracy gauge (ADR-0030, #665)."""
+    from incidents.memory.corrections import update_classify_accuracy_gauge
+    stats = update_classify_accuracy_gauge()
+    logger.info("update_classify_accuracy_metric: %s", stats)
+    return stats
+
+
+@shared_task
+def decay_stale_triage_lessons():
+    """Periodic: archive active Triage Lessons unused past the decay window (ADR-0030, #666)."""
+    from incidents.memory.lessons import decay_stale_lessons
+    archived = decay_stale_lessons()
+    logger.info("decay_stale_triage_lessons: archived %d lesson(s)", archived)
+    return archived
 
 
 def _ioc_enrichment_annotation(ioc) -> str | None:

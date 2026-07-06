@@ -107,6 +107,17 @@ class BaseTriageProvider(ABC):
         """Parse and summarise automated task output. Override in providers that support it."""
         return TaskSummaryResult()
 
+    def distill_triage_lesson(self, payload: dict) -> dict:
+        """Distil a reusable Triage Lesson from a cluster of resolved incidents (ADR-0030).
+
+        `payload` describes the shared subject/source_kind and the cluster's resolved
+        incidents (titles, closures, resolution comments). Returns
+        ``{"guidance": str, "selector": str}`` — or ``{}`` to propose nothing (the default,
+        so a provider without an implementation never fabricates lessons). For a Global
+        proposal the guidance MUST be generalised and carry no tenant specifics (ADR-0031).
+        """
+        return {}
+
     def group_residual_alerts(self, alerts: list) -> ResidualGroupingResult:
         """Group residual (unlinked, settled) alerts into suspicious clusters. Override in providers that support it."""
         return ResidualGroupingResult()

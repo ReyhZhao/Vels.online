@@ -1373,6 +1373,20 @@ class IncidentDetailView(APIView):
         if "severity" in ser.validated_data:
             notify_severity_bump_if_needed(incident, old_severity)
 
+        # Capture a Classification Correction when a human overturns the agent's Classify
+        # call (ADR-0030, slice #665). Best-effort — never blocks the update.
+        try:
+            from incidents.memory.corrections import capture_classification_correction
+            capture_classification_correction(
+                incident, actor=request.user,
+                new_subject=incident.subject if (
+                    "subject" in ser.validated_data and old_subject != incident.subject) else None,
+                new_severity=incident.severity if (
+                    "severity" in ser.validated_data and old_severity != incident.severity) else None,
+            )
+        except Exception as exc:
+            logger.warning("classification correction capture failed for %s: %s", display_id, exc)
+
         return Response(IncidentSerializer(incident).data)
 
 
