@@ -14,6 +14,10 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 INJECT_CAP = 5
+# Global lifecycle constants (ADR-0030) — a property of the SOC's learning process, tuned
+# centrally, not per-org.
+CONTRADICTION_SUSPEND_THRESHOLD = 2   # human overrides before an active Lesson auto-suspends
+DECAY_DAYS = 180                      # archive an active Lesson unused this long
 
 # Sentinel so a caller can pass organization=None to mean an explicit Global Lesson,
 # distinct from "not specified — default to the incident's org".
@@ -97,17 +101,43 @@ def lessons_brief(lessons) -> str:
     return "\n".join(lines)
 
 
-def apply_contradiction(lesson):
-    """Register that a human resolved against this Lesson (ADR-0030). Slice #665 bumps the
-    counter; slice #666 adds the auto-suspend-at-threshold behaviour."""
-    from django.db.models import F
+def apply_contradiction(lesson, *, threshold=CONTRADICTION_SUSPEND_THRESHOLD):
+    """Register that a human resolved against this Lesson (ADR-0030).
+
+    Bumps ``contradiction_count`` and, when an *active* Lesson reaches the threshold,
+    auto-suspends it (re-entering the review queue) so a drifting heuristic self-corrects
+    instead of compounding.
+    """
     from incidents.models import TriageLesson
 
     TriageLesson.objects.filter(pk=lesson.pk).update(
         contradiction_count=F("contradiction_count") + 1
     )
-    lesson.refresh_from_db(fields=["contradiction_count"])
+    lesson.refresh_from_db(fields=["contradiction_count", "status"])
+    if (lesson.status == TriageLesson.STATUS_ACTIVE
+            and lesson.contradiction_count >= threshold):
+        lesson.status = TriageLesson.STATUS_SUSPENDED
+        lesson.save(update_fields=["status", "updated_at"])
     return lesson
+
+
+def decay_stale_lessons(*, days=DECAY_DAYS):
+    """Archive active Lessons unused for `days` (ADR-0030). Returns the number archived.
+
+    "Unused" is judged by ``last_applied_at`` when set, else ``updated_at`` (a Lesson that
+    has never been applied since it was activated). Recently-applied Lessons stay active.
+    """
+    from datetime import timedelta
+
+    from django.db.models import Q
+    from incidents.models import TriageLesson
+
+    cutoff = timezone.now() - timedelta(days=days)
+    stale = TriageLesson.objects.filter(status=TriageLesson.STATUS_ACTIVE).filter(
+        Q(last_applied_at__lt=cutoff)
+        | Q(last_applied_at__isnull=True, updated_at__lt=cutoff)
+    )
+    return stale.update(status=TriageLesson.STATUS_ARCHIVED)
 
 
 def record_applied(lessons):

@@ -310,6 +310,15 @@ def update_classify_accuracy_metric():
     return stats
 
 
+@shared_task
+def decay_stale_triage_lessons():
+    """Periodic: archive active Triage Lessons unused past the decay window (ADR-0030, #666)."""
+    from incidents.memory.lessons import decay_stale_lessons
+    archived = decay_stale_lessons()
+    logger.info("decay_stale_triage_lessons: archived %d lesson(s)", archived)
+    return archived
+
+
 def _ioc_enrichment_annotation(ioc) -> str | None:
     """Return a compact enrichment annotation string for the IOC, or None if unavailable."""
     if ioc.kind == "email":
