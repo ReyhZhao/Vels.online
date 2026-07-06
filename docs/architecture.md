@@ -135,3 +135,17 @@ For the detail behind each stage, see the [feature docs](features/).
 │       └── context/      # React context (org selection, auth)
 └── deployment/           # Helm chart and Kubernetes manifests
 ```
+
+---
+
+## Periodic tasks
+
+The project runs django_celery_beat's `DatabaseScheduler` with **no static `beat_schedule`**. A `@shared_task` only runs on a schedule if a `PeriodicTask` row exists for it, and those rows are created by **data migrations** (`get_or_create` in `celery_tasks/migrations/…` or an owning app's migration). Nothing in Celery links a task to that seeding, so a task meant to run periodically can silently never run if its seed migration is forgotten (this was bug #677).
+
+**To add a new periodic task:**
+
+1. Write the `@shared_task`.
+2. Add its dotted path to `INTENDED_PERIODIC_TASKS` in `backend/celery_tasks/periodic.py`.
+3. Seed its schedule in a data migration (`PeriodicTask.objects.get_or_create(name=…, defaults={"task": …, "crontab"/"interval": …, "enabled": True})`).
+
+`tests/test_periodic_task_guard.py` enforces this: it fails if any registered task lacks an enabled `PeriodicTask` row, or if any seeded row points at a task Celery doesn't know about (a typo/rename). Tasks whose rows are created **dynamically at runtime** (e.g. `correlations.tasks.run_scheduled_search_rule`, seeded per Scheduled Search Rule) are deliberately **not** listed in the registry.
