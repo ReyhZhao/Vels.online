@@ -81,6 +81,9 @@ class Incident(models.Model):
     SOURCE_CORRELATION = "correlation"
     SOURCE_SCHEDULED_SEARCH = "scheduled_search"
     SOURCE_THREAT_HUNT = "threat_hunt"
+    # Entered directly over email through a configured partner Connection (ADR-0032):
+    # a peer CSIRT detection or a supplier bulletin. Never an Alert, never correlated.
+    SOURCE_PARTNER = "partner"
     SOURCE_CHOICES = [
         (SOURCE_MANUAL, "Manual"),
         (SOURCE_API, "API"),
@@ -93,6 +96,7 @@ class Incident(models.Model):
         (SOURCE_CORRELATION, "Correlation Rule"),
         (SOURCE_SCHEDULED_SEARCH, "Scheduled Search Rule"),
         (SOURCE_THREAT_HUNT, "Threat Hunt"),
+        (SOURCE_PARTNER, "Partner"),
     ]
 
     SEVERITY_CRITICAL = "critical"

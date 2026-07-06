@@ -1960,6 +1960,19 @@ export default function IncidentDetail() {
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-1">
                       <Field label="Organisation" value={incident.org_slug} />
                       <Field label="Source"       value={incident.source_kind} help={FIELD_HELP.Source} />
+                      {incident.source_kind === 'partner' && (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Partner</span>
+                          <span className="inline-flex w-fit items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+                            Partner Connection
+                          </span>
+                          {incident.source_ref?.external_reference && (
+                            <span className="mt-1 font-mono text-xs text-muted-foreground" title="Partner's External Reference">
+                              Ref: {incident.source_ref.external_reference}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <Field label="Assignee"     value={incident.assignee_username} />
                       <Field label="Created By"   value={incident.created_by_username} />
                       {incident.closure_reason && (

@@ -3,11 +3,13 @@ import logging
 import os
 
 from .handlers import ContactReplyHandler, PhishingIngestionHandler, _extract_token
+from partners.ingestion import PartnerIngestionHandler, find_connection_for_sender
 
 logger = logging.getLogger(__name__)
 
 _contact_handler = ContactReplyHandler()
 _phishing_handler = PhishingIngestionHandler()
+_partner_handler = PartnerIngestionHandler()
 
 
 def _bare_soc_address():
@@ -24,7 +26,8 @@ def route_inbound_message(message):
     """
     Route a NormalisedMessage to the appropriate handler.
     Returns an outcome string for stats tracking:
-      "contact_reply", "phishing:created", "phishing:dedup",
+      "contact_reply", "partner:created",
+      "phishing:created", "phishing:dedup",
       "phishing:dropped:<reason>", "dropped:unrecognised_to"
     """
     # Token extraction uses the raw To value — parseaddr mangles colon-delimited tokens.
@@ -36,6 +39,18 @@ def route_inbound_message(message):
         )
         _contact_handler.handle(message)
         return "contact_reply"
+
+    # Partner intake (ADR-0032): a message from a configured Connection sender becomes a
+    # Partner Incident directly. Checked after the +token ContactReply path but BEFORE
+    # the phishing handler. Loop-safe: our own outbound From is soc@, which matches no
+    # Connection sender.
+    connection, sender_address = find_connection_for_sender(message.from_address)
+    if connection is not None:
+        logger.debug(
+            "inbound_mail: routing to PartnerIngestionHandler from=%r connection=%r subject=%r",
+            message.from_address, connection.name, message.subject,
+        )
+        return _partner_handler.handle(message, connection, sender_address)
 
     # For bare-address comparison, parse out any display name ("SOC <soc@vels.online>").
     bare_soc = _bare_soc_address().lower()
