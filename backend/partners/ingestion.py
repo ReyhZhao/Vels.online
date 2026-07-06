@@ -44,8 +44,19 @@ class PartnerIngestionHandler:
     def handle(self, message, connection, sender_address):
         """Ingest a claimed partner message. Returns an outcome string for stats.
 
-        Slice 2: always creates a new Partner Incident."""
+        A message that fails DKIM/SPF verification is rejected and logged, never
+        ingested (ADR-0032) — a spoofed From cannot inject incidents. Slice 2 otherwise
+        always creates a new Partner Incident."""
         from partners.mapping import map_email_to_incident_fields
+        from partners.verification import verify_message_auth
+
+        if not verify_message_auth(getattr(message, "raw_bytes", b"")):
+            logger.warning(
+                "inbound_mail: partner: dropped — sender-auth verification failed "
+                "from=%r connection=%r subject=%r",
+                sender_address, connection.name, message.subject,
+            )
+            return "partner:dropped:verification_failed"
 
         fields = map_email_to_incident_fields(connection, message)
         incident = create_partner_incident(connection, message, fields, sender_address)

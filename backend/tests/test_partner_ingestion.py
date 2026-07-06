@@ -19,6 +19,9 @@ def acme(db):
 @pytest.fixture(autouse=True)
 def _soc_mailbox(monkeypatch):
     monkeypatch.setenv("INBOUND_IMAP_USER", "soc@vels.online")
+    # These tests exercise ingestion/mapping, not the DKIM/SPF gate (slice 3) — turn it
+    # off so raw_bytes without Authentication-Results still ingest.
+    monkeypatch.setenv("PARTNER_INTAKE_VERIFY_AUTH", "0")
 
 
 @pytest.fixture(autouse=True)
