@@ -291,6 +291,16 @@ def run_triage_work_task(incident_id: int):
     run_triage_work(incident_id)
 
 
+@shared_task
+def run_triage_distillation_sweep():
+    """Periodic batched distillation sweep (ADR-0030): learn Triage Lessons from recent
+    human-ratified closures. Scheduled via the DB beat scheduler; safe to re-run."""
+    from incidents.memory.distillation import run_distillation_sweep
+    proposed = run_distillation_sweep()
+    logger.info("run_triage_distillation_sweep: proposed %d lesson(s)", len(proposed))
+    return len(proposed)
+
+
 def _ioc_enrichment_annotation(ioc) -> str | None:
     """Return a compact enrichment annotation string for the IOC, or None if unavailable."""
     if ioc.kind == "email":
