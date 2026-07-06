@@ -42,12 +42,12 @@ The platform is built around a Wazuh-integrated SOC workflow: detections flow in
 
 ## What it does
 
-Vels.online turns multi-source security signals into worked, closed incidents. Detections land as **Alerts**, the pipeline filters noise and correlates related signals, and the ones that matter become **Incidents** that flow through IOC enrichment, two-stage AI triage — a cheap classify plus a confidence-gated **Triage Agent** that works the playbook unattended — on-call routing, and an agentic Incident Assistant. See the [architecture overview](docs/architecture.md) for the full picture.
+Vels.online turns multi-source security signals into worked, closed incidents. Detections land as **Alerts**, the pipeline filters noise and correlates related signals, and the ones that matter become **Incidents** that flow through IOC enrichment, two-stage AI triage — a cheap classify plus a confidence-gated **Triage Agent** that works the playbook unattended — on-call routing, and an agentic Incident Assistant. Triage is **self-learning**: retrieved **Precedents** and distilled, staff-approved **Triage Lessons** carry the SOC's past dispositions forward, learned only from human-ratified outcomes. See the [architecture overview](docs/architecture.md) for the full picture.
 
 Capabilities are documented in depth under **[docs/features](docs/features/)**:
 
 - **[Detection & Correlation](docs/features/detection-and-correlation.md)** — the alert ingestion pipeline, the streaming correlation engine, pull-based Scheduled Search Rules over Wazuh OpenSearch, and detection-as-code Rule Tests.
-- **[Incident Response](docs/features/incident-response.md)** — the incident lifecycle, real-time incident presence, on-call scheduling, two-stage AI triage with an unattended Triage Agent, IOC enrichment, the Incident Assistant, cross-org Threat Hunting, leak-safe snapshot Reports, phishing ingestion, and incident contacts.
+- **[Incident Response](docs/features/incident-response.md)** — the incident lifecycle, real-time incident presence, on-call scheduling, two-stage AI triage with an unattended Triage Agent, self-learning triage (Precedents + distilled Triage Lessons), IOC enrichment, the Incident Assistant, cross-org Threat Hunting, leak-safe snapshot Reports, phishing ingestion, and incident contacts.
 - **[Automation & Response](docs/features/automation-and-response.md)** — Semaphore automations, Wazuh active response, and Wazuh exception-rule management.
 - **[Estate Management](docs/features/estate-management.md)** — fleet/asset visibility with derived internet-facing exposure, vulnerability management, and self-service ingress (reverse proxy & WAF).
 - **[Platform](docs/features/platform.md)** — notifications, the staff Live Attack Map, responsive list conventions, status page, blog/knowledge base, and multi-organisation access control.
