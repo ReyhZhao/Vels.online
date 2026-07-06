@@ -1,8 +1,8 @@
 from rest_framework import generics
 from rest_framework.permissions import IsAdminUser
 
-from .models import Connection
-from .serializers import ConnectionSerializer
+from .models import Connection, IntakeInboxMessage
+from .serializers import ConnectionSerializer, IntakeInboxMessageSerializer
 
 
 class ConnectionListCreateView(generics.ListCreateAPIView):
@@ -28,3 +28,20 @@ class ConnectionDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = (
         Connection.objects.all().select_related("organization").prefetch_related("senders")
     )
+
+
+class IntakeInboxListView(generics.ListAPIView):
+    """Staff-only Intake Inbox: inbound mail that reached the SOC mailbox but no handler
+    accepted (ADR-0032). Non-staff receive 403."""
+
+    permission_classes = [IsAdminUser]
+    serializer_class = IntakeInboxMessageSerializer
+    queryset = IntakeInboxMessage.objects.all()
+
+
+class IntakeInboxDetailView(generics.RetrieveDestroyAPIView):
+    """Staff can dismiss a handled Intake Inbox row."""
+
+    permission_classes = [IsAdminUser]
+    serializer_class = IntakeInboxMessageSerializer
+    queryset = IntakeInboxMessage.objects.all()

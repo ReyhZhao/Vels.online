@@ -79,3 +79,25 @@ class ConnectionSender(models.Model):
 
     def __str__(self):
         return self.address
+
+
+class IntakeInboxMessage(models.Model):
+    """A staff-only dead-letter row for an inbound email that reached the SOC mailbox but
+    no handler accepted — an unknown sender, a Connection sender that failed DKIM/SPF, or
+    otherwise un-routable mail (incl. misfired phishing forwards). Carries bounded
+    metadata only (no raw-message storage in v1); its primary action is "Create
+    Connection" pre-filling the sender. Auto-purged after a retention window (CONTEXT.md
+    → Intake Inbox)."""
+
+    sender = models.CharField(max_length=320, blank=True, default="")
+    subject = models.CharField(max_length=500, blank=True, default="")
+    drop_reason = models.CharField(max_length=100, blank=True, default="")
+    body_excerpt = models.TextField(blank=True, default="")
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-received_at"]
+        indexes = [models.Index(fields=["received_at"], name="intake_received_idx")]
+
+    def __str__(self):
+        return f"{self.sender} — {self.drop_reason}"

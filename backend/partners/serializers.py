@@ -2,7 +2,7 @@ import re
 
 from rest_framework import serializers
 
-from .models import Connection, ConnectionSender
+from .models import Connection, ConnectionSender, IntakeInboxMessage
 
 
 class ConnectionSerializer(serializers.ModelSerializer):
@@ -117,3 +117,10 @@ class ConnectionSerializer(serializers.ModelSerializer):
                 [ConnectionSender(connection=instance, address=a) for a in addresses]
             )
         return instance
+
+
+class IntakeInboxMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IntakeInboxMessage
+        fields = ["id", "sender", "subject", "drop_reason", "body_excerpt", "received_at"]
+        read_only_fields = fields

@@ -35,6 +35,7 @@ import {
   GitBranch,
   Search,
   Handshake,
+  Inbox,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -276,6 +277,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     </SidebarLink>
                     <SidebarLink to="/admin/partners/connections" icon={Handshake} collapsed={collapsed}>
                       Partner Connections
+                    </SidebarLink>
+                    <SidebarLink to="/admin/partners/intake-inbox" icon={Inbox} collapsed={collapsed}>
+                      Intake Inbox
                     </SidebarLink>
                   </>
                 )}

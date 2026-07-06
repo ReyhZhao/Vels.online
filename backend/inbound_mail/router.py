@@ -50,7 +50,7 @@ def route_inbound_message(message):
             "inbound_mail: routing to PartnerIngestionHandler from=%r connection=%r subject=%r",
             message.from_address, connection.name, message.subject,
         )
-        return _partner_handler.handle(message, connection, sender_address)
+        return _capture_intake(message, _partner_handler.handle(message, connection, sender_address))
 
     # For bare-address comparison, parse out any display name ("SOC <soc@vels.online>").
     bare_soc = _bare_soc_address().lower()
@@ -60,10 +60,19 @@ def route_inbound_message(message):
             "inbound_mail: routing to PhishingIngestionHandler from=%r subject=%r",
             message.from_address, message.subject,
         )
-        return _phishing_handler.handle(message)
+        return _capture_intake(message, _phishing_handler.handle(message))
 
     logger.warning(
         "inbound_mail: unrecognised To address — from=%r to=%r to_parsed=%r subject=%r bare_soc=%r",
         message.from_address, message.to_address, to_parsed, message.subject, bare_soc,
     )
-    return "dropped:unrecognised_to"
+    return _capture_intake(message, "dropped:unrecognised_to")
+
+
+def _capture_intake(message, outcome):
+    """Land every terminal-drop outcome in the staff Intake Inbox (ADR-0032)."""
+    from partners.intake import is_terminal_drop, record_intake_drop
+
+    if is_terminal_drop(outcome):
+        record_intake_drop(message, outcome)
+    return outcome
