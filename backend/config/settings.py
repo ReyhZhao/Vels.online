@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     "django_celery_beat",
     "celery_tasks",
     "oncall",
+    "partners",
 ]
 
 SITE_ID = 1

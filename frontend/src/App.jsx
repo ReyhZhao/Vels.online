@@ -18,6 +18,7 @@ import ReportTemplatesAdmin from './pages/admin/ReportTemplatesAdmin';
 import TriageLessonsReview from './pages/admin/TriageLessonsReview';
 import AutomationsAdmin from './pages/admin/AutomationsAdmin';
 import WazuhResponsesAdmin from './pages/admin/WazuhResponsesAdmin';
+import PartnerConnections from './pages/admin/PartnerConnections';
 import SecurityDashboard from './pages/SecurityDashboard';
 import VulnerabilityDashboard from './pages/VulnerabilityDashboard';
 import CveDetail from './pages/CveDetail';
@@ -86,6 +87,7 @@ function App() {
           <Route path="/admin/incidents/triage-lessons" element={<TriageLessonsReview />} />
           <Route path="/admin/incidents/automations" element={<AutomationsAdmin />} />
           <Route path="/admin/wazuh-responses" element={<WazuhResponsesAdmin />} />
+          <Route path="/admin/partners/connections" element={<PartnerConnections />} />
           <Route path="/admin/incidents/oncall" element={<OnCallCalendarPage />} />
           <Route path="/admin/correlations/rules" element={<CorrelationRulesAdmin />} />
           <Route path="/admin/correlations/search-rules" element={<SearchRulesAdmin />} />

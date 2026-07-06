@@ -34,6 +34,7 @@ import {
   Users,
   GitBranch,
   Search,
+  Handshake,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -272,6 +273,9 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
                     </SidebarLink>
                     <SidebarLink to="/admin/wazuh-responses" icon={ShieldCheck} collapsed={collapsed}>
                       Wazuh Responses
+                    </SidebarLink>
+                    <SidebarLink to="/admin/partners/connections" icon={Handshake} collapsed={collapsed}>
+                      Partner Connections
                     </SidebarLink>
                   </>
                 )}
