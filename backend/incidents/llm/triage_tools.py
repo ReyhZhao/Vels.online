@@ -260,6 +260,52 @@ def _mark_threat_contained(incident, on_contained):
     )
 
 
+def _lookup_lessons(incident):
+    def executor(args):
+        from incidents.memory.lessons import select_lessons, serialize_lesson
+        lessons = select_lessons(incident, cap=20)
+        rows = [serialize_lesson(l) for l in lessons]
+        return ToolResult(content=rows, summary=f"{len(rows)} triage lessons", count=len(rows))
+    return ToolSpec(
+        name="lookup_lessons",
+        description="Retrieve the Triage Lessons the SOC has learned for THIS incident's subject "
+                    "(org-specific and fleet-wide). They are priors that inform judgement, not "
+                    "authorities — they never justify an action by themselves.",
+        parameters={"type": "object", "properties": {}},
+        executor=executor,
+    )
+
+
+def _propose_lesson(incident):
+    def executor(args):
+        from incidents.memory.lessons import propose_lesson
+        from incidents.models import TriageLesson
+        guidance = ((args or {}).get("guidance") or "").strip()
+        if not guidance:
+            return ToolResult(error="guidance is required", summary="empty guidance")
+        if incident.subject_id is None:
+            return ToolResult(error="incident has no subject; cannot propose a lesson",
+                              summary="no subject")
+        lesson = propose_lesson(
+            incident, guidance=guidance,
+            selector=((args or {}).get("selector") or "").strip(),
+            provenance=TriageLesson.PROV_AGENT, evidence=[incident],
+        )
+        return ToolResult(content={"lesson_id": lesson.id, "status": lesson.status},
+                          summary="proposed a triage lesson (awaits staff approval)")
+    return ToolSpec(
+        name="propose_lesson", is_write=True,
+        description="Propose a reusable Triage Lesson when you notice a repeatable pattern in how "
+                    "incidents like this should be handled. It is INERT until a SOC staff member "
+                    "approves it — proposing one changes nothing about this incident.",
+        parameters={"type": "object", "properties": {
+            "guidance": {"type": "string", "description": "The reusable lesson (what to do / believe)."},
+            "selector": {"type": "string", "description": "Optional: when this lesson applies."}},
+            "required": ["guidance"]},
+        executor=executor,
+    )
+
+
 def build_triage_read_tools(incident, grounding, *, include_web_search=True,
                             os_client=None, wazuh_client=None):
     """Read-only tool set for the Triage Agent, scoped to the incident's org.
@@ -271,6 +317,7 @@ def build_triage_read_tools(incident, grounding, *, include_web_search=True,
         _lookup_incidents(incident),
         _query_alerts(incident),
         _lookup_assets(incident),
+        _lookup_lessons(incident),
         _host_inventory(incident, None, os_client=os_client, wazuh_client=wazuh_client),
     ]
 
@@ -307,6 +354,7 @@ def build_triage_tools(incident, grounding, *, include_web_search=True, read_onl
         _run_task(incident),
         _send_contact_message(incident),
         _escalate(incident),
+        _propose_lesson(incident),
         _mark_threat_contained(incident, on_contained or (lambda: None)),
     ]
     for t in write_tools:

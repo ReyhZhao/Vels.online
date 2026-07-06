@@ -660,3 +660,121 @@ class Report(models.Model):
 
     def __str__(self):
         return f"{self.reference_id} ({self.incident.display_id})"
+
+
+class TriageLesson(models.Model):
+    """A distilled, reusable disposition heuristic the Triage pipeline learns and applies
+    (ADR-0030). Keyed on Subject (+ optional source_kind); it *informs* the model's
+    judgement and never itself authorizes an action. Two tiers mirror System/Org Rule:
+    organization set => Org Lesson (one tenant); organization null => Global Lesson
+    (SOC-curated, scrubbed, fleet-wide — the only cross-tenant channel, ADR-0031).
+    """
+
+    STATUS_PROPOSED = "proposed"
+    STATUS_ACTIVE = "active"
+    STATUS_SUSPENDED = "suspended"
+    STATUS_ARCHIVED = "archived"
+    STATUS_CHOICES = [
+        (STATUS_PROPOSED, "Proposed"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_SUSPENDED, "Suspended"),
+        (STATUS_ARCHIVED, "Archived"),
+    ]
+
+    PROV_DISTILLED = "distilled_from_human_close"
+    PROV_AGENT = "agent_proposed"
+    PROV_STAFF = "staff_authored"
+    PROVENANCE_CHOICES = [
+        (PROV_DISTILLED, "Distilled from human close"),
+        (PROV_AGENT, "Agent proposed"),
+        (PROV_STAFF, "Staff authored"),
+    ]
+
+    # organization null => Global Lesson (fleet-wide); set => Org Lesson (one tenant).
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="triage_lessons",
+    )
+    subject = models.ForeignKey(
+        Subject, on_delete=models.CASCADE, related_name="triage_lessons"
+    )
+    # "" => applies to any source_kind for the subject; else narrows to that origin.
+    source_kind = models.CharField(max_length=20, blank=True, default="")
+    # Free-text applicability the model interprets ("applies when source.ip is internal").
+    selector = models.TextField(blank=True, default="")
+    guidance = models.TextField()
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_PROPOSED)
+    provenance = models.CharField(max_length=32, choices=PROVENANCE_CHOICES)
+    # The resolved Incidents that justify this Lesson (audit + grounding). Staff-only on
+    # a Global Lesson — never surfaced to a tenant (ADR-0031).
+    evidence = models.ManyToManyField(
+        Incident, blank=True, related_name="justified_triage_lessons"
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_triage_lessons",
+    )
+    approved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="approved_triage_lessons",
+    )
+    applied_count = models.PositiveIntegerField(default=0)
+    last_applied_at = models.DateTimeField(null=True, blank=True)
+    contradiction_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["subject", "status"], name="lesson_subject_status"),
+            models.Index(fields=["organization", "status"], name="lesson_org_status"),
+        ]
+
+    @property
+    def is_global(self) -> bool:
+        return self.organization_id is None
+
+    def __str__(self):
+        tier = "Global" if self.is_global else f"Org:{self.organization_id}"
+        return f"TriageLesson[{tier}/{self.subject_id}] {self.status}"
+
+
+class ClassificationCorrection(models.Model):
+    """A human overturning the Triage Classify phase's output on an Incident (ADR-0030) —
+    changing its Subject, overriding severity, or reversing the FP/disposition call. The
+    strongest self-learning signal: it powers the Classify-accuracy metric, enriches
+    Precedents, feeds the distillation sweep, and contradicts the Lesson/Precedent that
+    drove the wrong call.
+    """
+
+    incident = models.ForeignKey(
+        Incident, on_delete=models.CASCADE, related_name="classification_corrections"
+    )
+    # The agent's original Classify call and the human's final call. Nullable members so a
+    # correction can capture a subject-only, severity-only, or disposition-only change.
+    agent_subject = models.ForeignKey(
+        Subject, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    human_subject = models.ForeignKey(
+        Subject, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    agent_severity = models.CharField(max_length=10, blank=True, default="")
+    human_severity = models.CharField(max_length=10, blank=True, default="")
+    # e.g. "false_positive" -> "true_positive": the human reversed the disposition.
+    agent_disposition = models.CharField(max_length=32, blank=True, default="")
+    human_disposition = models.CharField(max_length=32, blank=True, default="")
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="classification_corrections",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["incident", "created_at"], name="correction_incident_ts"),
+        ]
+
+    def __str__(self):
+        return f"Correction on {self.incident_id} by {self.actor_id}"

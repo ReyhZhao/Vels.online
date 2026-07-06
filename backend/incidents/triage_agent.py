@@ -57,7 +57,7 @@ def _final_narrative(research) -> str:
     return ""
 
 
-def _user_brief(grounding) -> str:
+def _user_brief(grounding, lessons_block="") -> str:
     import json
     inc = grounding.get("incident", {})
     brief = {
@@ -68,10 +68,13 @@ def _user_brief(grounding) -> str:
         "tasks": grounding.get("tasks", []),
         "available_templates": grounding.get("available_templates", []),
     }
-    return (
+    parts = [
         "Work this incident. Here is its current state:\n\n"
         + json.dumps(brief, indent=2, default=str)
-    )
+    ]
+    if lessons_block:
+        parts.append("\n\n" + lessons_block)
+    return "".join(parts)
 
 
 def _ensure_assigned(incident):
@@ -89,7 +92,8 @@ def _ensure_assigned(incident):
                  payload={"assignee_id": analyst.id, "via": "triage_agent"})
 
 
-def _handoff(incident, *, target_state, narrative, tool_trace, stop_reason, error=False):
+def _handoff(incident, *, target_state, narrative, tool_trace, stop_reason, error=False,
+             applied_lesson_ids=None):
     """Post the run summary, ensure on-call ownership, and land the incident's state."""
     from incidents.models import Comment
     from incidents.services.transitions import ALLOWED_TRANSITIONS, transition_incident
@@ -112,6 +116,7 @@ def _handoff(incident, *, target_state, narrative, tool_trace, stop_reason, erro
             "tool_trace": tool_trace,
             "stop_reason": stop_reason,
             "error": error,
+            "applied_lesson_ids": applied_lesson_ids or [],
         },
     )
 
@@ -168,6 +173,18 @@ def run_triage_work(incident_id, *, provider=None, os_client=None, wazuh_client=
     grounding = build_incident_grounding(incident)
     uses_native = getattr(provider, "uses_native_web_search", lambda: False)()
 
+    # Inject the matched Subject's active Triage Lessons into the Work seed (ADR-0030,
+    # slice #661). Best-effort — a memory failure never blocks the run.
+    lessons_block = ""
+    applied_lessons = []
+    try:
+        from incidents.memory.lessons import select_lessons, lessons_brief, record_applied
+        applied_lessons = select_lessons(incident)
+        lessons_block = lessons_brief(applied_lessons)
+        record_applied(applied_lessons)
+    except Exception as exc:
+        logger.warning("triage_agent: lesson selection failed for %s: %s", incident_id, exc)
+
     try:
         from incidents.llm.triage_tools import build_triage_tools
         from incidents.presence_bridge import ai_presence, TRIAGE_AGENT_NAME
@@ -183,7 +200,7 @@ def run_triage_work(incident_id, *, provider=None, os_client=None, wazuh_client=
             research = run_research_phase(
                 provider, tools,
                 [{"role": "system", "content": TRIAGE_AGENT_SYS_PROMPT},
-                 {"role": "user", "content": _user_brief(grounding)}],
+                 {"role": "user", "content": _user_brief(grounding, lessons_block)}],
                 caps or triage_agent_caps(),
                 on_event=ai.on_event,
             )
@@ -198,6 +215,7 @@ def run_triage_work(incident_id, *, provider=None, os_client=None, wazuh_client=
             narrative=_final_narrative(research),
             tool_trace=research.tool_trace,
             stop_reason=research.stop_reason,
+            applied_lesson_ids=[l.id for l in applied_lessons],
         )
     except Exception as exc:
         logger.warning("triage_agent: work phase failed for %s: %s", incident_id, exc)

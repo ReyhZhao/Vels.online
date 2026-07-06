@@ -21,6 +21,9 @@ TRIAGE_AGENT_WRITE_ACTIONS = frozenset({
     "send_contact_message",
     "escalate",
     "mark_threat_contained",
+    # Proposes a Triage Lesson (ADR-0030): inert until a staff member approves it, so it
+    # is the lowest-risk write — it changes nothing about the incident or infrastructure.
+    "propose_lesson",
 })
 
 # Never executed by the agent — closing a real worked incident and silencing future
