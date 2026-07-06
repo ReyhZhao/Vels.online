@@ -136,3 +136,61 @@ def test_source_kind_splits_clusters(acme, brute, human):
         make_closed(acme, brute, actor=human, source_kind="scheduled_search")
     # 2 + 2, neither cluster reaches N=3.
     assert run_distillation_sweep(provider=FakeDistiller()) == []
+
+
+# ── Global Lesson promotion (K>=2 orgs) — slice #664 ────────────────────────────
+
+
+@pytest.fixture
+def globex(db):
+    return Organization.objects.create(name="Globex", slug="globex", wazuh_group="globex")
+
+
+class ScopeAwareDistiller:
+    """Returns tenant-specific guidance for org clusters and generalised prose for global."""
+    def distill_triage_lesson(self, payload):
+        if payload.get("scope") == "global":
+            return {"guidance": "generalised: treat internal-source brute force as low severity",
+                    "selector": "internal source"}
+        return {"guidance": "org-specific guidance", "selector": ""}
+
+
+@pytest.mark.django_db
+def test_global_promotion_across_k_orgs(acme, globex, brute, human):
+    # 2 in acme + 2 in globex: neither org reaches N=3, but 2 orgs => Global.
+    for _ in range(2):
+        make_closed(acme, brute, actor=human)
+    for _ in range(2):
+        make_closed(globex, brute, actor=human)
+
+    proposed = run_distillation_sweep(provider=ScopeAwareDistiller())
+    globals_ = [l for l in proposed if l.is_global]
+    assert len(globals_) == 1
+    g = globals_[0]
+    assert g.organization_id is None
+    assert g.status == "proposed"
+    assert "generalised" in g.guidance
+    # evidence spans both tenants (staff-only links)
+    assert g.evidence.count() == 4
+
+
+@pytest.mark.django_db
+def test_single_org_does_not_promote_global(acme, brute, human):
+    # 2 incidents, one org: below N for org-tier and below K orgs for global.
+    for _ in range(2):
+        make_closed(acme, brute, actor=human)
+    proposed = run_distillation_sweep(provider=ScopeAwareDistiller())
+    assert proposed == []
+
+
+@pytest.mark.django_db
+def test_global_covering_lesson_suppresses(acme, globex, brute, human):
+    for _ in range(2):
+        make_closed(acme, brute, actor=human)
+    for _ in range(2):
+        make_closed(globex, brute, actor=human)
+    TriageLesson.objects.create(organization=None, subject=brute, source_kind="wazuh_event",
+                                guidance="already global", status="active",
+                                provenance="staff_authored")
+    proposed = run_distillation_sweep(provider=ScopeAwareDistiller())
+    assert [l for l in proposed if l.is_global] == []

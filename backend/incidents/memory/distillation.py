@@ -98,7 +98,8 @@ def _has_covering_lesson(organization_id, subject_id, source_kind):
     ).exists()
 
 
-def run_distillation_sweep(*, provider=None, since=None, min_evidence=MIN_EVIDENCE):
+def run_distillation_sweep(*, provider=None, since=None, min_evidence=MIN_EVIDENCE,
+                           min_orgs=MIN_ORGS_FOR_GLOBAL):
     """Cluster eligible evidence and propose Org Lessons. Returns the proposed Lessons.
 
     Idempotent across runs via the covering-lesson guard: a cluster already carrying an
@@ -137,6 +138,56 @@ def run_distillation_sweep(*, provider=None, since=None, min_evidence=MIN_EVIDEN
             incidents[0], guidance=guidance, selector=(draft.get("selector") or "").strip(),
             source_kind=source_kind, provenance=TriageLesson.PROV_DISTILLED,
             organization=incidents[0].organization, evidence=incidents,
+        )
+        proposed.append(lesson)
+
+    proposed.extend(_propose_global_lessons(provider, since=since,
+                                            min_orgs=min_orgs, min_evidence=min_evidence))
+    return proposed
+
+
+def _propose_global_lessons(provider, *, since=None, min_orgs=MIN_ORGS_FOR_GLOBAL,
+                            min_evidence=MIN_EVIDENCE):
+    """Promote a cross-org recurring pattern to a scrubbed, generalised Global Lesson (#664).
+
+    Cluster eligible incidents by (subject, source_kind) ACROSS orgs; when the pattern spans
+    >= K distinct orgs (and enough total cases), ask the distiller for a GENERALISED lesson
+    carrying no tenant specifics (ADR-0031) and propose it as a Global Lesson (org=None).
+    The human scrub at approval — not this step — is the isolation guarantee; evidence links
+    stay staff-only.
+    """
+    from incidents.memory.lessons import propose_lesson
+    from incidents.models import TriageLesson
+
+    clusters = defaultdict(list)
+    for inc in eligible_incidents(since=since):
+        clusters[(inc.subject_id, inc.source_kind)].append(inc)
+
+    proposed = []
+    for (subject_id, source_kind), incidents in clusters.items():
+        org_ids = {inc.organization_id for inc in incidents}
+        if len(org_ids) < min_orgs or len(incidents) < min_evidence:
+            continue
+        if _has_covering_lesson(None, subject_id, source_kind):
+            continue
+        subject = incidents[0].subject
+        payload = _cluster_payload(subject, source_kind, incidents)
+        # Signal the distiller to generalise/scrub for a fleet-wide lesson.
+        payload["scope"] = "global"
+        payload["org_count"] = len(org_ids)
+        try:
+            draft = provider.distill_triage_lesson(payload) or {}
+        except Exception as exc:
+            logger.warning("distillation: global distiller failed for subject %s: %s",
+                           subject_id, exc)
+            continue
+        guidance = (draft.get("guidance") or "").strip()
+        if not guidance:
+            continue
+        lesson = propose_lesson(
+            incidents[0], guidance=guidance, selector=(draft.get("selector") or "").strip(),
+            source_kind=source_kind, provenance=TriageLesson.PROV_DISTILLED,
+            organization=None, evidence=incidents,  # explicit Global (org=None)
         )
         proposed.append(lesson)
     return proposed

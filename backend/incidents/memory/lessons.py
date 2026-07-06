@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 INJECT_CAP = 5
 
+# Sentinel so a caller can pass organization=None to mean an explicit Global Lesson,
+# distinct from "not specified — default to the incident's org".
+_UNSET = object()
+
 
 def select_lessons(incident, *, cap=INJECT_CAP):
     """Return active Triage Lessons that apply to `incident`, most-relevant first, capped.
@@ -122,19 +126,21 @@ def record_applied(lessons):
 
 
 def propose_lesson(incident, *, guidance, selector="", source_kind="",
-                   provenance, organization=None, created_by=None, evidence=None):
+                   provenance, organization=_UNSET, created_by=None, evidence=None):
     """Create a `proposed` Triage Lesson (inert until a staff member approves it).
 
     Used by the agent's `propose_lesson` tool (provenance=agent_proposed) and by the
     distillation sweep (provenance=distilled_from_human_close). Org-tier by default
-    (the incident's organisation); a Global proposal passes organization=None.
+    (the incident's organisation); pass ``organization=None`` for an explicit Global
+    proposal (#664), or a specific Organization to override.
     """
     from incidents.models import TriageLesson
 
     if incident.subject_id is None:
         raise ValueError("cannot propose a lesson for an incident with no subject")
+    org = incident.organization if organization is _UNSET else organization
     lesson = TriageLesson.objects.create(
-        organization=organization if organization is not None else incident.organization,
+        organization=org,
         subject_id=incident.subject_id,
         source_kind=source_kind or (incident.source_kind or ""),
         selector=selector or "",
