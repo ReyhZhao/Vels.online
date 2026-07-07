@@ -1,40 +1,44 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Globe, Siren, CalendarClock, Telescope, Package } from 'lucide-react';
+import {
+  Shield, Globe, Siren, CalendarClock, Telescope, Package, RefreshCw, Inbox, UserX, CheckCheck,
+} from 'lucide-react';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
 import { useAuth } from '../context/AuthContext';
+import { OnCallWidgetCompact } from '../components/OnCallWidget';
+import StatTile from '../components/dashboard/StatTile';
+import ChartCard from '../components/dashboard/ChartCard';
+import BreakdownBars from '../components/dashboard/BreakdownBars';
+import IncidentTrendCard from '../components/dashboard/IncidentTrendCard';
+import VulnTrendCard from '../components/dashboard/VulnTrendCard';
+import AlertVolumeCard from '../components/dashboard/AlertVolumeCard';
+import RecentIncidents from '../components/dashboard/RecentIncidents';
+import {
+  SEVERITY_COLORS, SEVERITY_ORDER, SEVERITY_LABELS, INCIDENT_STATES, CATEGORICAL,
+} from '../components/dashboard/palette';
 
-function ServiceCard({ icon: Icon, title, description, to }) {
+const RANGES = [7, 30, 90];
+
+const SERVICES = [
+  { icon: Shield, title: 'Security', description: 'Vulnerability and agent monitoring', to: '/security' },
+  { icon: Globe, title: 'Ingress', description: 'Reverse proxy and WAF routes', to: '/routes' },
+  { icon: Siren, title: 'Incidents', description: 'Security incident management', to: '/incidents' },
+  { icon: Package, title: 'Work Package', description: 'Prioritised remediation work', to: '/security/work-package' },
+  { icon: CalendarClock, title: 'On-Call', description: 'On-call schedule and shifts', to: '/admin/incidents/oncall', staffOnly: true },
+  { icon: Telescope, title: 'Threat Hunting', description: 'LLM-assisted threat hunts', to: '/hunting', staffOnly: true },
+];
+
+function QueueTile({ icon: Icon, label, value, to }) {
   return (
     <Link
       to={to}
-      className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5 transition-colors hover:bg-accent"
+      className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:bg-accent/60"
     >
-      <Icon className="h-6 w-6 text-muted-foreground" />
-      <div>
-        <p className="text-sm font-semibold text-foreground">{title}</p>
-        {description && (
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-        )}
-      </div>
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="flex-1 text-sm text-muted-foreground">{label}</span>
+      <span className="text-lg font-semibold text-foreground">{value ?? '—'}</span>
     </Link>
-  );
-}
-
-
-function SummaryWidget({ label, value, isLoading }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="mt-1 text-3xl font-bold text-foreground">
-        {isLoading ? (
-          <span className="text-base text-muted-foreground" aria-label="loading">Loading…</span>
-        ) : (
-          value ?? '—'
-        )}
-      </p>
-    </div>
   );
 }
 
@@ -44,135 +48,255 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const isStaff = !!user?.is_staff;
 
+  const [days, setDays] = useState(30);
+
+  // /api/dashboard/overview/ — incidents, alerts, routes (+ staff queues)
+  const [overview, setOverview] = useState(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewError, setOverviewError] = useState(false);
+
+  // /api/security/dashboard/ — Wazuh-backed agents / vulnerabilities / events
   const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
 
-  const [routeCount, setRouteCount] = useState(null);
-  const [routesLoading, setRoutesLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [incidentCount, setIncidentCount] = useState(null);
-  const [incidentsLoading, setIncidentsLoading] = useState(false);
+  const fetchAll = useCallback((slug) => {
+    setOverviewLoading(true);
+    setOverviewError(false);
+    api.get('/api/dashboard/overview/', { params: { org: slug } })
+      .then(res => setOverview(res.data))
+      .catch(() => { setOverview(null); setOverviewError(true); })
+      .finally(() => setOverviewLoading(false));
 
-  useEffect(() => {
-    if (!selectedOrg) return;
-    setLoading(true);
-    setError(false);
-    api
-      .get(`/api/security/dashboard/?org=${selectedOrg.slug}`)
-      .then((res) => setStats(res.data))
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  }, [selectedOrg]);
-
-  useEffect(() => {
-    if (!selectedOrg) return;
-    setRoutesLoading(true);
-    api
-      .get('/api/ingress/routes/', { params: { org: selectedOrg.slug } })
-      .then((res) => setRouteCount(res.data.length))
-      .catch(() => setRouteCount(null))
-      .finally(() => setRoutesLoading(false));
-  }, [selectedOrg]);
+    setStatsLoading(true);
+    api.get(`/api/security/dashboard/?org=${slug}`)
+      .then(res => setStats(res.data))
+      .catch(() => setStats(null))
+      .finally(() => setStatsLoading(false));
+  }, []);
 
   useEffect(() => {
     if (!selectedOrg) return;
-    setIncidentsLoading(true);
-    api
-      .get('/api/incidents/', { params: { org: selectedOrg.slug, page_size: 1, state: 'new,triaged,in_progress,on_hold,needs_tuning,pending_closure' } })
-      .then((res) => setIncidentCount(res.data.count))
-      .catch(() => setIncidentCount(null))
-      .finally(() => setIncidentsLoading(false));
-  }, [selectedOrg]);
+    fetchAll(selectedOrg.slug);
+  }, [selectedOrg, fetchAll]);
 
-  const vulnCount =
-    stats?.vulnerabilities != null
-      ? Object.values(stats.vulnerabilities).reduce((a, b) => a + b, 0)
-      : null;
+  async function handleRefresh() {
+    if (!selectedOrg || refreshing) return;
+    setRefreshing(true);
+    try {
+      await api.post('/api/security/dashboard/refresh/', { org: selectedOrg.slug });
+    } catch {
+      // cache clear is best-effort; still refetch
+    }
+    fetchAll(selectedOrg.slug);
+    setRefreshing(false);
+  }
+
+  if (!selectedOrg) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
+        <p className="mt-4 text-sm text-muted-foreground">No organisation selected.</p>
+      </div>
+    );
+  }
+
+  const inc = overview?.incidents;
+  const alerts = overview?.alerts;
+  const routes = overview?.routes;
+  const staff = overview?.staff;
+
+  const vulnTotal = stats?.vulnerabilities != null
+    ? Object.values(stats.vulnerabilities).reduce((a, b) => a + b, 0)
+    : null;
+  const criticalVulns = stats?.vulnerabilities?.critical ?? 0;
+
+  const severityItems = SEVERITY_ORDER.map(key => ({
+    key,
+    label: SEVERITY_LABELS[key],
+    count: inc?.by_severity?.[key] ?? 0,
+    color: SEVERITY_COLORS[key],
+    to: `/incidents?severity=${key}`,
+  }));
+
+  // One series, one hue: the rows are already labeled, so color would only
+  // repeat what the bar length says.
+  const stateItems = INCIDENT_STATES.map(s => ({
+    key: s.key,
+    label: s.label,
+    count: inc?.by_state?.[s.key] ?? 0,
+    color: CATEGORICAL[0],
+    to: `/incidents?state=${s.key}`,
+  }));
+
+  const openBreakdownTable = {
+    columns: [
+      { key: 'group', label: 'Breakdown' },
+      { key: 'label', label: 'Category' },
+      { key: 'count', label: 'Open', align: 'right' },
+    ],
+    rows: [
+      ...severityItems.map(({ label, count }) => ({ group: 'Severity', label, count })),
+      ...stateItems.map(({ label, count }) => ({ group: 'State', label, count })),
+    ],
+  };
 
   return (
-    <div className="space-y-8 p-6">
-      <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
-
-      <section aria-label="Services">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Services
-        </h2>
-        <div
-          className="grid gap-4"
-          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}
-        >
-          <ServiceCard
-            icon={Shield}
-            title="Security"
-            description="Vulnerability and agent monitoring"
-            to="/security"
-          />
-          <ServiceCard
-            icon={Globe}
-            title="Ingress"
-            description="Reverse proxy and WAF routes"
-            to="/routes"
-          />
-          <ServiceCard
-            icon={Siren}
-            title="Incidents"
-            description="Security incident management"
-            to="/incidents"
-          />
-          {isStaff && (
-            <ServiceCard
-              icon={CalendarClock}
-              title="On-Call"
-              description="On-call schedule and shifts"
-              to="/admin/incidents/oncall"
-            />
-          )}
-          {isStaff && (
-            <ServiceCard
-              icon={Telescope}
-              title="Threat Hunting"
-              description="LLM-assisted threat hunts"
-              to="/hunting"
-            />
-          )}
-          <ServiceCard
-            icon={Package}
-            title="Work Package"
-            description="Prioritised remediation work"
-            to="/security/work-package"
-          />
+    <div className="space-y-6 p-6">
+      {/* Header + the one filter row that scopes the trend charts below */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">{selectedOrg.name}</p>
         </div>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1 rounded-md border border-border bg-card p-0.5" role="group" aria-label="Trend range">
+            {RANGES.map(d => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                aria-pressed={days === d}
+                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                  days === d
+                    ? 'bg-foreground text-background'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                }`}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {overviewError && (
+        <p className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          Failed to load dashboard data — some panels may be empty.
+        </p>
+      )}
+
+      {/* KPI row */}
+      <section aria-label="Key metrics" className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+        <StatTile
+          label="Open incidents"
+          value={inc?.open_total}
+          isLoading={overviewLoading}
+          delta={inc ? `+${inc.created_7d} / −${inc.closed_7d}` : null}
+          sub="opened / closed, 7d"
+          to="/incidents"
+        />
+        <StatTile
+          label="New alerts"
+          value={alerts?.new_total}
+          isLoading={overviewLoading}
+          sub={alerts ? `${alerts.last_24h} in last 24h` : null}
+          trend={alerts?.daily_7d?.map(d => d.count)}
+          to="/alerts"
+        />
+        <StatTile
+          label="Vulnerabilities"
+          value={vulnTotal}
+          isLoading={statsLoading}
+          delta={criticalVulns > 0 ? `${criticalVulns} critical` : null}
+          deltaGood={criticalVulns === 0 ? null : false}
+          to="/security/vulnerabilities"
+        />
+        <StatTile
+          label="Agents active"
+          value={stats ? `${stats.active_count}/${stats.agent_count}` : null}
+          isLoading={statsLoading}
+          delta={stats && stats.active_count < stats.agent_count
+            ? `${stats.agent_count - stats.active_count} disconnected`
+            : null}
+          deltaGood={stats ? stats.active_count === stats.agent_count : null}
+          to="/security"
+        />
+        <StatTile
+          label="Routes"
+          value={routes?.total}
+          isLoading={overviewLoading}
+          delta={routes?.by_status?.error ? `${routes.by_status.error} in error` : null}
+          deltaGood={routes ? routes.by_status.error === 0 : null}
+          sub={routes ? `${routes.by_status.active} active` : null}
+          to="/routes"
+        />
+        <StatTile
+          label="Events (24h)"
+          value={stats?.events_24h}
+          isLoading={statsLoading}
+          to="/security"
+        />
       </section>
 
-      <section aria-label="Summary">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Summary
-        </h2>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <SummaryWidget
-            label="Vulnerabilities"
-            value={error ? '—' : vulnCount}
-            isLoading={loading}
-          />
-          <SummaryWidget
-            label="Agents"
-            value={error ? '—' : stats?.agent_count ?? null}
-            isLoading={loading}
-          />
-          <SummaryWidget
-            label="Routes"
-            value={routeCount}
-            isLoading={routesLoading}
-          />
-          <SummaryWidget
-            label="Open Incidents"
-            value={incidentCount}
-            isLoading={incidentsLoading}
-          />
+      {/* Staff work queues */}
+      {isStaff && (
+        <section aria-label="Staff queues" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <OnCallWidgetCompact />
+          <QueueTile icon={Inbox} label="Needs triage" value={staff?.needs_triage} to="/incidents?state=new" />
+          <QueueTile icon={CheckCheck} label="Pending closure" value={staff?.pending_closure} to="/incidents?state=pending_closure" />
+          <QueueTile icon={UserX} label="Unassigned" value={staff?.unassigned_open} to="/incidents?tab=unassigned" />
+        </section>
+      )}
+
+      {/* Charts */}
+      <section aria-label="Trends" className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <IncidentTrendCard orgSlug={selectedOrg.slug} days={days} />
         </div>
+        <ChartCard title="Open incidents" to="/incidents" table={openBreakdownTable}>
+          <div className="space-y-4">
+            <div>
+              <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">By severity</p>
+              <BreakdownBars items={severityItems} ariaLabel="Open incidents by severity" />
+            </div>
+            <div>
+              <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">By state</p>
+              <BreakdownBars items={stateItems} ariaLabel="Open incidents by state" />
+            </div>
+          </div>
+        </ChartCard>
+
+        <div className="lg:col-span-2">
+          <VulnTrendCard orgSlug={selectedOrg.slug} days={days} />
+        </div>
+        <AlertVolumeCard daily={alerts?.daily_7d} loading={overviewLoading} />
       </section>
 
+      <section aria-label="Activity" className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <RecentIncidents incidents={inc?.recent} loading={overviewLoading} />
+        </div>
+
+        {/* Services quick links */}
+        <div className="rounded-lg border border-border bg-card">
+          <h3 className="px-4 pt-3 pb-1 text-sm font-medium text-foreground">Services</h3>
+          <ul className="px-2 pb-2 pt-1">
+            {SERVICES.filter(s => isStaff || !s.staffOnly).map(({ icon: Icon, title, description, to }) => (
+              <li key={to}>
+                <Link
+                  to={to}
+                  className="flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-accent/60"
+                >
+                  <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="min-w-0">
+                    <span className="block text-sm text-foreground">{title}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{description}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
     </div>
   );
 }
