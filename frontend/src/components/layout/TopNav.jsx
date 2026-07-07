@@ -1,10 +1,11 @@
 import { Link, NavLink } from 'react-router-dom';
+import { Menu } from 'lucide-react';
 import StatusIndicator from './StatusIndicator';
 import { useAuth } from '../../context/AuthContext';
 import NotificationBell from '../NotificationBell';
 import api from '../../lib/axios';
 
-function TopNav() {
+function TopNav({ onMenuClick }) {
   const { user, isAuthenticated } = useAuth();
 
   async function handleLogout() {
@@ -15,12 +16,23 @@ function TopNav() {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <Link
-          to="/"
-          className="text-lg font-semibold tracking-tight text-foreground hover:text-primary transition-colors"
-        >
-          vels.online
-        </Link>
+        <div className="flex items-center gap-2">
+          {onMenuClick && (
+            <button
+              onClick={onMenuClick}
+              aria-label="Toggle menu"
+              className="md:hidden -ml-1.5 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            >
+              <Menu className="h-5 w-5" aria-hidden="true" />
+            </button>
+          )}
+          <Link
+            to="/"
+            className="text-lg font-semibold tracking-tight text-foreground hover:text-primary transition-colors"
+          >
+            vels.online
+          </Link>
+        </div>
         <nav className="flex items-center gap-6">
           <NavLink
             to="/blog"

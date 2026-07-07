@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
-export function useSwipeGesture(ref, onSwipeRight, { threshold = 50, maxVerticalDrift = 75 } = {}) {
-  const callbackRef = useRef(onSwipeRight);
+export function useSwipeGesture(ref, onSwipe, { threshold = 50, maxVerticalDrift = 75, direction = 'right' } = {}) {
+  const callbackRef = useRef(onSwipe);
   useLayoutEffect(() => {
-    callbackRef.current = onSwipeRight;
+    callbackRef.current = onSwipe;
   });
 
   useEffect(() => {
@@ -21,7 +21,8 @@ export function useSwipeGesture(ref, onSwipeRight, { threshold = 50, maxVertical
     function onTouchEnd(e) {
       const dx = e.changedTouches[0].clientX - startX;
       const dy = Math.abs(e.changedTouches[0].clientY - startY);
-      if (dx >= threshold && dy <= maxVerticalDrift) {
+      const passed = direction === 'left' ? dx <= -threshold : dx >= threshold;
+      if (passed && dy <= maxVerticalDrift) {
         callbackRef.current();
       }
     }
@@ -33,5 +34,5 @@ export function useSwipeGesture(ref, onSwipeRight, { threshold = 50, maxVertical
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchend', onTouchEnd);
     };
-  }, [ref, threshold, maxVerticalDrift]);
+  }, [ref, threshold, maxVerticalDrift, direction]);
 }

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -13,6 +13,11 @@ vi.mock('../ReportIssueModal', () => ({
     open ? <div data-testid="report-modal"><button onClick={onClose}>close-modal</button></div> : null,
 }));
 
+vi.mock('@/lib/axios', () => ({
+  default: { get: vi.fn(), post: vi.fn() },
+}));
+
+import api from '@/lib/axios';
 import AppSidebar from './AppSidebar';
 
 let store = {};
@@ -22,11 +27,25 @@ const mockStorage = {
   removeItem: (key) => { delete store[key]; },
 };
 
-function renderSidebar(user, initialPath = '/security') {
+// api.get responder for the useNavCounts endpoints.
+function mockCounts({ alerts = 0, incidents = 0, tasksNew = 0, tasksInProgress = 0, signups = 0 } = {}) {
+  api.get.mockImplementation((url, opts) => {
+    const params = opts?.params ?? {};
+    if (url === '/api/alerts/') return Promise.resolve({ data: { count: alerts } });
+    if (url === '/api/incidents/') return Promise.resolve({ data: { count: incidents } });
+    if (url === '/api/tasks/') {
+      return Promise.resolve({ data: { count: params.state === 'new' ? tasksNew : tasksInProgress } });
+    }
+    if (url === '/api/signups/pending-count/') return Promise.resolve({ data: { count: signups } });
+    return Promise.resolve({ data: {} });
+  });
+}
+
+function renderSidebar(user, initialPath = '/security', props = {}) {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <AuthContext.Provider value={{ user, isAuthenticated: true, isLoading: false }}>
-        <AppSidebar />
+        <AppSidebar {...props} />
       </AuthContext.Provider>
     </MemoryRouter>
   );
@@ -39,13 +58,15 @@ describe('AppSidebar', () => {
   beforeEach(() => {
     store = {};
     vi.stubGlobal('localStorage', mockStorage);
+    mockCounts();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
-  // ── existing nav content tests ────────────────────────────────────────────
+  // ── nav content ────────────────────────────────────────────────────────────
 
   it('renders Investigate section with Incidents link for a regular user', () => {
     renderSidebar(regularUser);
@@ -140,23 +161,9 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('link', { name: /downloads/i })).toBeInTheDocument();
   });
 
-  it('Blog section does not contain Admin-only items', () => {
+  it('does not duplicate Subjects or Task Templates across sections', () => {
     renderSidebar(staffUser);
 
-    const blogToggle = screen.getByRole('button', { name: /^blog$/i });
-    expect(blogToggle).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /service monitor/i })).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: /^posts$/i })).toHaveLength(1);
-  });
-
-  it('does not show Subjects or Task Templates in Admin section', () => {
-    // they live in the Respond section
-    renderSidebar(staffUser);
-
-    const adminToggle = screen.getByRole('button', { name: /^admin$/i });
-    expect(adminToggle).toBeInTheDocument();
-    // Subjects and Task Templates are present (in Respond section), but NOT duplicated in Admin
-    // Verify Admin section does not contain them by checking link count — exactly one of each
     expect(screen.getAllByRole('link', { name: /subjects/i })).toHaveLength(1);
     expect(screen.getAllByRole('link', { name: /task templates/i })).toHaveLength(1);
   });
@@ -189,6 +196,82 @@ describe('AppSidebar', () => {
     expect(overviewLink).not.toHaveClass('bg-accent');
   });
 
+  // ── count badges (insights) ─────────────────────────────────────────────────
+
+  it('shows new-alert count badge on the Alert Inbox link', async () => {
+    mockCounts({ alerts: 7 });
+    renderSidebar(regularUser);
+
+    const link = screen.getByRole('link', { name: /alert inbox/i });
+    expect(await within(link).findByText('7')).toBeInTheDocument();
+  });
+
+  it('shows open-incident count badge on the Incidents link', async () => {
+    mockCounts({ incidents: 4 });
+    renderSidebar(regularUser);
+
+    const link = screen.getByRole('link', { name: /^incidents/i });
+    expect(await within(link).findByText('4')).toBeInTheDocument();
+  });
+
+  it('shows my open tasks badge on the Tasks link (new + in progress)', async () => {
+    mockCounts({ tasksNew: 2, tasksInProgress: 3 });
+    renderSidebar(regularUser);
+
+    const link = screen.getByRole('link', { name: /^tasks/i });
+    expect(await within(link).findByText('5')).toBeInTheDocument();
+  });
+
+  it('shows pending signups badge on the Signup Requests link for staff', async () => {
+    mockCounts({ signups: 6 });
+    renderSidebar(staffUser);
+
+    const link = screen.getByRole('link', { name: /signup requests/i });
+    expect(await within(link).findByText('6')).toBeInTheDocument();
+  });
+
+  it('does not fetch pending signups for a regular user', async () => {
+    mockCounts({ alerts: 1 });
+    renderSidebar(regularUser);
+    await screen.findByText('1');
+
+    expect(api.get).not.toHaveBeenCalledWith('/api/signups/pending-count/', undefined);
+  });
+
+  it('caps badge counts at 99+', async () => {
+    mockCounts({ alerts: 250 });
+    renderSidebar(regularUser);
+
+    expect(await screen.findByText('99+')).toBeInTheDocument();
+  });
+
+  it('shows no badge when a count is zero', async () => {
+    mockCounts({ incidents: 0, alerts: 3 });
+    renderSidebar(regularUser);
+    await screen.findByText('3');
+
+    const link = screen.getByRole('link', { name: /^incidents$/i });
+    expect(within(link).queryByText('0')).not.toBeInTheDocument();
+  });
+
+  it('rolls badge counts up onto a closed section header', async () => {
+    store['sidebar:investigate:open'] = 'false';
+    mockCounts({ alerts: 3, incidents: 2 });
+    renderSidebar(regularUser);
+
+    const toggle = screen.getByRole('button', { name: /investigate/i });
+    expect(await within(toggle).findByText('5')).toBeInTheDocument();
+  });
+
+  it('does not show a rollup badge on an open section header', async () => {
+    mockCounts({ alerts: 3, incidents: 2 });
+    renderSidebar(regularUser);
+    await screen.findByText('3');
+
+    const toggle = screen.getByRole('button', { name: /^investigate$/i });
+    expect(within(toggle).queryByText('5')).not.toBeInTheDocument();
+  });
+
   // ── section collapse / expand ─────────────────────────────────────────────
 
   it('collapses Investigate section items when toggle is clicked', async () => {
@@ -218,7 +301,7 @@ describe('AppSidebar', () => {
 
     expect(screen.getByRole('link', { name: /overview/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /security/i }));
+    await user.click(screen.getByRole('button', { name: /^security$/i }));
 
     expect(screen.queryByRole('link', { name: /overview/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /vulnerabilities/i })).not.toBeInTheDocument();
@@ -228,8 +311,8 @@ describe('AppSidebar', () => {
     const user = userEvent.setup();
     renderSidebar(regularUser);
 
-    await user.click(screen.getByRole('button', { name: /security/i }));
-    await user.click(screen.getByRole('button', { name: /security/i }));
+    await user.click(screen.getByRole('button', { name: /^security$/i }));
+    await user.click(screen.getByRole('button', { name: /^security$/i }));
 
     expect(screen.getByRole('link', { name: /overview/i })).toBeInTheDocument();
   });
@@ -256,6 +339,77 @@ describe('AppSidebar', () => {
     expect(screen.queryByRole('link', { name: /service monitor/i })).not.toBeInTheDocument();
   });
 
+  it('renders Account as a collapsible section', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    expect(screen.getByRole('link', { name: /notifications/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^account$/i }));
+
+    expect(screen.queryByRole('link', { name: /notifications/i })).not.toBeInTheDocument();
+  });
+
+  // ── quick filter ──────────────────────────────────────────────────────────
+
+  it('renders a menu filter input', () => {
+    renderSidebar(regularUser);
+    expect(screen.getByRole('textbox', { name: /filter menu/i })).toBeInTheDocument();
+  });
+
+  it('filters nav items by label', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    await user.type(screen.getByRole('textbox', { name: /filter menu/i }), 'vuln');
+
+    expect(screen.getByRole('link', { name: /vulnerabilities/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^incidents$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /dashboard/i })).not.toBeInTheDocument();
+  });
+
+  it('filter reveals matching items inside a closed section', async () => {
+    store['sidebar:investigate:open'] = 'false';
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    expect(screen.queryByRole('link', { name: /^incidents$/i })).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox', { name: /filter menu/i }), 'incident');
+
+    expect(screen.getByRole('link', { name: /^incidents$/i })).toBeInTheDocument();
+  });
+
+  it('hides sections with no matching items while filtering', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    await user.type(screen.getByRole('textbox', { name: /filter menu/i }), 'assets');
+
+    expect(screen.queryByRole('button', { name: /^investigate$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^environment$/i })).toBeInTheDocument();
+  });
+
+  it('shows an empty state when nothing matches the filter', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    await user.type(screen.getByRole('textbox', { name: /filter menu/i }), 'zzzz');
+
+    expect(screen.getByText(/no menu items match/i)).toBeInTheDocument();
+  });
+
+  it('clear button resets the filter', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    await user.type(screen.getByRole('textbox', { name: /filter menu/i }), 'vuln');
+    await user.click(screen.getByRole('button', { name: /clear filter/i }));
+
+    expect(screen.getByRole('link', { name: /^incidents$/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /filter menu/i })).toHaveValue('');
+  });
+
   // ── icon-only mode ────────────────────────────────────────────────────────
 
   it('hides text labels when sidebar is collapsed to icon-only mode', async () => {
@@ -278,6 +432,28 @@ describe('AppSidebar', () => {
     await user.click(screen.getByRole('button', { name: /expand sidebar/i }));
 
     expect(screen.getByText('Overview')).toBeInTheDocument();
+  });
+
+  it('hides the filter input in icon-only mode', async () => {
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+
+    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }));
+
+    expect(screen.queryByRole('textbox', { name: /filter menu/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a dot indicator on badge links in icon-only mode', async () => {
+    mockCounts({ alerts: 5 });
+    const user = userEvent.setup();
+    renderSidebar(regularUser);
+    await screen.findByText('5');
+
+    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }));
+
+    const link = screen.getByRole('link', { name: /alert inbox/i });
+    expect(within(link).queryByText('5')).not.toBeInTheDocument();
+    expect(link.querySelector('.rounded-full')).not.toBeNull();
   });
 
   // ── localStorage persistence ──────────────────────────────────────────────
@@ -341,36 +517,88 @@ describe('AppSidebar', () => {
     const user = userEvent.setup();
     renderSidebar(regularUser);
 
-    await user.click(screen.getByRole('button', { name: /security/i }));
+    await user.click(screen.getByRole('button', { name: /^security$/i }));
 
     expect(JSON.parse(store['sidebar:security:open'])).toBe(false);
   });
 
-  // ── mobile positioning ────────────────────────────────────────────────────
+  // ── mobile drawer ─────────────────────────────────────────────────────────
 
-  it('mobile-open aside starts at top-28 not at the top of the viewport', () => {
-    const { container } = render(
-      <MemoryRouter>
-        <AuthContext.Provider value={{ user: regularUser, isAuthenticated: true, isLoading: false }}>
-          <AppSidebar mobileOpen onMobileClose={() => {}} />
-        </AuthContext.Provider>
-      </MemoryRouter>
-    );
+  it('mobile-open drawer covers the full viewport height', () => {
+    const { container } = renderSidebar(regularUser, '/security', { mobileOpen: true, onMobileClose: () => {} });
     const aside = container.querySelector('aside');
-    expect(aside.className).toContain('top-28');
-    expect(aside.className).not.toContain('inset-y-0');
+    expect(aside.className).toContain('inset-y-0');
+    expect(aside.className).toContain('w-72');
   });
 
   it('backdrop covers full viewport when mobile sidebar is open', () => {
-    const { container } = render(
-      <MemoryRouter>
-        <AuthContext.Provider value={{ user: regularUser, isAuthenticated: true, isLoading: false }}>
-          <AppSidebar mobileOpen onMobileClose={() => {}} />
-        </AuthContext.Provider>
-      </MemoryRouter>
-    );
+    const { container } = renderSidebar(regularUser, '/security', { mobileOpen: true, onMobileClose: () => {} });
     const backdrop = container.querySelector('[aria-hidden="true"]');
     expect(backdrop.className).toContain('inset-0');
+  });
+
+  it('clicking the backdrop closes the mobile drawer', async () => {
+    const onMobileClose = vi.fn();
+    const user = userEvent.setup();
+    const { container } = renderSidebar(regularUser, '/security', { mobileOpen: true, onMobileClose });
+
+    await user.click(container.querySelector('[aria-hidden="true"]'));
+
+    expect(onMobileClose).toHaveBeenCalled();
+  });
+
+  it('shows a close button in the mobile drawer that closes it', async () => {
+    const onMobileClose = vi.fn();
+    const user = userEvent.setup();
+    renderSidebar(regularUser, '/security', { mobileOpen: true, onMobileClose });
+
+    await user.click(screen.getByRole('button', { name: /close menu/i }));
+
+    expect(onMobileClose).toHaveBeenCalled();
+  });
+
+  it('closes the mobile drawer when a nav link is clicked', async () => {
+    const onMobileClose = vi.fn();
+    const user = userEvent.setup();
+    renderSidebar(regularUser, '/security', { mobileOpen: true, onMobileClose });
+
+    await user.click(screen.getByRole('link', { name: /^incidents$/i }));
+
+    expect(onMobileClose).toHaveBeenCalled();
+  });
+
+  it('closes the mobile drawer on Escape', async () => {
+    const onMobileClose = vi.fn();
+    const user = userEvent.setup();
+    renderSidebar(regularUser, '/security', { mobileOpen: true, onMobileClose });
+
+    await user.keyboard('{Escape}');
+
+    expect(onMobileClose).toHaveBeenCalled();
+  });
+
+  it('does not close on Escape when the drawer is not open', async () => {
+    const onMobileClose = vi.fn();
+    const user = userEvent.setup();
+    renderSidebar(regularUser, '/security', { mobileOpen: false, onMobileClose });
+
+    await user.keyboard('{Escape}');
+
+    expect(onMobileClose).not.toHaveBeenCalled();
+  });
+
+  it('mobile drawer always shows labels even when desktop icon-only mode is saved', () => {
+    store['sidebar:collapsed'] = 'true';
+    renderSidebar(regularUser, '/security', { mobileOpen: true, onMobileClose: () => {} });
+
+    expect(screen.getByText('Overview')).toBeInTheDocument();
+    expect(screen.getByTestId('org-switcher')).toBeInTheDocument();
+  });
+
+  it('does not render the desktop collapse toggle in the mobile drawer', () => {
+    renderSidebar(regularUser, '/security', { mobileOpen: true, onMobileClose: () => {} });
+
+    expect(screen.queryByRole('button', { name: /collapse sidebar/i })).not.toBeInTheDocument();
   });
 
   // ── OrgSwitcher + Report Issue in sidebar ─────────────────────────────────
