@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     EmailTemplateDetailView,
     EmailTemplateListView,
+    ExpoPushTokenView,
     NotificationClearAllView,
     NotificationDeleteView,
     NotificationListView,
@@ -27,5 +28,6 @@ urlpatterns = [
     path("email-templates/<str:name>/", EmailTemplateDetailView.as_view()),
     path("push/vapid-public-key/", PushVapidKeyView.as_view()),
     path("push/subscribe/", PushSubscribeView.as_view()),
+    path("push/expo-token/", ExpoPushTokenView.as_view()),
     path("push/test/", TestPushView.as_view()),
 ]

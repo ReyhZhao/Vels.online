@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 from .email import send_html_email
 from .email_defaults import DEFAULT_TEMPLATES
-from .models import EmailTemplate, Notification, NotificationPreferences, PushSubscription
+from .models import EmailTemplate, ExpoPushToken, Notification, NotificationPreferences, PushSubscription
 from .serializers import EmailTemplateSerializer, NotificationPreferencesSerializer, NotificationSerializer
 
 
@@ -138,7 +138,9 @@ class TestPushView(APIView):
     def post(self, request):
         if not request.user.is_staff:
             return Response({"detail": "Staff only."}, status=status.HTTP_403_FORBIDDEN)
-        if not PushSubscription.objects.filter(user=request.user).exists():
+        has_web = PushSubscription.objects.filter(user=request.user).exists()
+        has_mobile = ExpoPushToken.objects.filter(user=request.user).exists()
+        if not has_web and not has_mobile:
             return Response(
                 {"detail": "No push subscriptions found. Enable push notifications first."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -173,6 +175,30 @@ class PushSubscribeView(APIView):
     def delete(self, request):
         endpoint = request.data.get("endpoint", "")
         PushSubscription.objects.filter(user=request.user, endpoint=endpoint).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ExpoPushTokenView(APIView):
+    """Register/deregister a mobile device's Expo push token (native app)."""
+
+    def post(self, request):
+        token = request.data.get("token", "")
+        platform = request.data.get("platform", "")
+        if not token:
+            return Response({"detail": "token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if platform not in ("ios", "android"):
+            return Response({"detail": "platform must be 'ios' or 'android'."}, status=status.HTTP_400_BAD_REQUEST)
+        # update_or_create on token: a device handed to another user re-binds
+        # its token to the new session's user instead of duplicating.
+        _, created = ExpoPushToken.objects.update_or_create(
+            token=token,
+            defaults={"user": request.user, "platform": platform},
+        )
+        return Response(status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    def delete(self, request):
+        token = request.data.get("token", "")
+        ExpoPushToken.objects.filter(user=request.user, token=token).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

@@ -583,3 +583,146 @@ def test_push_payload_includes_current_unread_count(staff, acme):
     sent = json.loads(mock_webpush.call_args.kwargs["data"])
     assert sent["unread_count"] == 2
     assert sent["title"] == "Hi"
+
+
+# ── Expo push tokens (mobile app) ────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_expo_token_register_creates_row(client, staff):
+    from notifications.models import ExpoPushToken
+
+    client.force_login(staff)
+    res = client.post(
+        "/api/me/push/expo-token/",
+        {"token": "ExponentPushToken[abc]", "platform": "ios"},
+        content_type="application/json",
+    )
+    assert res.status_code == 201
+    row = ExpoPushToken.objects.get(token="ExponentPushToken[abc]")
+    assert row.user == staff
+    assert row.platform == "ios"
+
+
+@pytest.mark.django_db
+def test_expo_token_register_is_idempotent(client, staff):
+    from notifications.models import ExpoPushToken
+
+    client.force_login(staff)
+    for _ in range(2):
+        res = client.post(
+            "/api/me/push/expo-token/",
+            {"token": "ExponentPushToken[abc]", "platform": "android"},
+            content_type="application/json",
+        )
+    assert res.status_code == 200
+    assert ExpoPushToken.objects.filter(token="ExponentPushToken[abc]").count() == 1
+
+
+@pytest.mark.django_db
+def test_expo_token_rebinds_to_new_user(client, staff, staff2):
+    """A device signed into a different account re-binds its token, never duplicates."""
+    from notifications.models import ExpoPushToken
+
+    client.force_login(staff)
+    client.post(
+        "/api/me/push/expo-token/",
+        {"token": "ExponentPushToken[abc]", "platform": "ios"},
+        content_type="application/json",
+    )
+    client.force_login(staff2)
+    client.post(
+        "/api/me/push/expo-token/",
+        {"token": "ExponentPushToken[abc]", "platform": "ios"},
+        content_type="application/json",
+    )
+    row = ExpoPushToken.objects.get(token="ExponentPushToken[abc]")
+    assert row.user == staff2
+
+
+@pytest.mark.django_db
+def test_expo_token_register_validates_input(client, staff):
+    client.force_login(staff)
+    assert client.post(
+        "/api/me/push/expo-token/", {"platform": "ios"}, content_type="application/json"
+    ).status_code == 400
+    assert client.post(
+        "/api/me/push/expo-token/",
+        {"token": "t", "platform": "windows"},
+        content_type="application/json",
+    ).status_code == 400
+
+
+@pytest.mark.django_db
+def test_expo_token_delete_removes_row(client, staff):
+    from notifications.models import ExpoPushToken
+
+    ExpoPushToken.objects.create(user=staff, token="ExponentPushToken[abc]", platform="ios")
+    client.force_login(staff)
+    res = client.delete(
+        "/api/me/push/expo-token/",
+        {"token": "ExponentPushToken[abc]"},
+        content_type="application/json",
+    )
+    assert res.status_code == 204
+    assert not ExpoPushToken.objects.exists()
+
+
+@pytest.mark.django_db
+def test_push_task_sends_to_expo_devices(staff, acme):
+    """Mobile devices get the push via the Expo push API with the OS badge count."""
+    from unittest.mock import MagicMock, patch
+    from notifications.models import ExpoPushToken
+    from notifications.tasks import EXPO_PUSH_URL, send_push_notifications
+
+    incident = make_incident(acme)
+    Notification.objects.create(recipient=staff, kind="comment", incident=incident, payload={}, shown_inapp=True)
+    ExpoPushToken.objects.create(user=staff, token="ExponentPushToken[abc]", platform="android")
+
+    response = MagicMock()
+    response.json.return_value = {"data": [{"status": "ok"}]}
+    with patch("requests.post", return_value=response) as mock_post:
+        send_push_notifications(staff.id, {"title": "Hi", "body": "there", "url": "/incidents/INC-1"})
+
+    assert mock_post.call_count == 1
+    url = mock_post.call_args.args[0]
+    messages = mock_post.call_args.kwargs["json"]
+    assert url == EXPO_PUSH_URL
+    assert messages[0]["to"] == "ExponentPushToken[abc]"
+    assert messages[0]["title"] == "Hi"
+    assert messages[0]["data"]["url"] == "/incidents/INC-1"
+    assert messages[0]["badge"] == 1
+
+
+@pytest.mark.django_db
+def test_push_task_drops_unregistered_expo_tokens(staff, acme):
+    from unittest.mock import MagicMock, patch
+    from notifications.models import ExpoPushToken
+    from notifications.tasks import send_push_notifications
+
+    ExpoPushToken.objects.create(user=staff, token="ExponentPushToken[gone]", platform="ios")
+    ExpoPushToken.objects.create(user=staff, token="ExponentPushToken[ok]", platform="ios")
+
+    response = MagicMock()
+    response.json.return_value = {"data": [
+        {"status": "error", "details": {"error": "DeviceNotRegistered"}},
+        {"status": "ok"},
+    ]}
+    with patch("requests.post", return_value=response):
+        send_push_notifications(staff.id, {"title": "Hi", "body": "", "url": "/"})
+
+    tokens = set(ExpoPushToken.objects.values_list("token", flat=True))
+    assert tokens == {"ExponentPushToken[ok]"}
+
+
+@pytest.mark.django_db
+def test_test_push_accepts_mobile_only_subscription(client, staff):
+    """The staff test-push endpoint works when the user only has a mobile device."""
+    from unittest.mock import patch
+    from notifications.models import ExpoPushToken
+
+    ExpoPushToken.objects.create(user=staff, token="ExponentPushToken[abc]", platform="ios")
+    client.force_login(staff)
+    with patch("notifications.tasks.send_push_notifications.delay") as mock_delay:
+        res = client.post("/api/me/push/test/")
+    assert res.status_code == 200
+    assert mock_delay.call_count == 1

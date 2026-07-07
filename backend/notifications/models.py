@@ -69,6 +69,24 @@ class PushSubscription(models.Model):
         return f"PushSubscription({self.user}, {self.endpoint[:40]}…)"
 
 
+class ExpoPushToken(models.Model):
+    """A mobile device registered for native push via Expo's push service.
+
+    The native-app sibling of PushSubscription (which is Web Push / VAPID):
+    one row per device token, re-registered idempotently on every sign-in.
+    """
+
+    PLATFORM_CHOICES = [("ios", "iOS"), ("android", "Android")]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="expo_push_tokens")
+    token = models.CharField(max_length=200, unique=True)
+    platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"ExpoPushToken({self.user}, {self.platform}, {self.token[:24]}…)"
+
+
 class Notification(models.Model):
     KIND_ASSIGNMENT = "assignment"
     KIND_DELEGATION = "delegation"

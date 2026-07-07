@@ -40,6 +40,15 @@ spec:
                 name: backend
                 port:
                   number: 8000
+          # OTA update bundle for the React Native staff app (expo-updates
+          # clients poll {host}/mobile-updates/metadata.json).
+          - path: /mobile-updates/
+            pathType: Prefix
+            backend:
+              service:
+                name: mobile
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:

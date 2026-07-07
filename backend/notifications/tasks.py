@@ -54,6 +54,9 @@ def send_digest_email(recipient_id, incident_id):
     Notification.objects.bulk_update(notifications, ["email_sent_at"])
 
 
+EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+
+
 @shared_task
 def send_push_notifications(user_id, payload_dict):
     from pywebpush import webpush, WebPushException
@@ -86,6 +89,48 @@ def send_push_notifications(user_id, payload_dict):
                 stale.append(sub.pk)
     if stale:
         PushSubscription.objects.filter(pk__in=stale).delete()
+
+    _send_expo_push(user_id, payload_dict, unread_count)
+
+
+def _send_expo_push(user_id, payload_dict, unread_count):
+    """Deliver the same push to the user's registered mobile devices (Expo push API)."""
+    import requests
+    from .models import ExpoPushToken
+
+    tokens = list(ExpoPushToken.objects.filter(user_id=user_id))
+    if not tokens:
+        return
+
+    messages = [
+        {
+            "to": t.token,
+            "title": payload_dict.get("title", "Vels Online"),
+            "body": payload_dict.get("body", ""),
+            "data": {"url": payload_dict.get("url", "/dashboard")},
+            "badge": unread_count,
+            "sound": "default",
+        }
+        for t in tokens
+    ]
+    try:
+        response = requests.post(EXPO_PUSH_URL, json=messages, timeout=10)
+        tickets = response.json().get("data", [])
+    except Exception:
+        # Expo push is best-effort — web push and in-app delivery already happened.
+        return
+
+    # Expo answers one ticket per message, in order. DeviceNotRegistered means the
+    # app was uninstalled or the token rotated: drop the row like stale web-push.
+    stale = [
+        tokens[i].pk
+        for i, ticket in enumerate(tickets)
+        if i < len(tokens)
+        and isinstance(ticket, dict)
+        and ticket.get("details", {}).get("error") == "DeviceNotRegistered"
+    ]
+    if stale:
+        ExpoPushToken.objects.filter(pk__in=stale).delete()
 
 
 @shared_task

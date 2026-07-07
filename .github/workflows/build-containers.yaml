@@ -57,6 +57,27 @@ jobs:
       - name: Run tests
         run: npm test
 
+  test-mobile:
+    name: Test Mobile
+    runs-on: ubuntu-latest
+    permissions: {}
+    defaults:
+      run:
+        working-directory: ./mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
   build-backend:
     name: Backend
     runs-on: ubuntu-latest
@@ -136,10 +157,49 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: VITE_TURNSTILE_SITE_KEY=${{ secrets.VITE_TURNSTILE_SITE_KEY }}
 
+  build-mobile:
+    name: Mobile
+    runs-on: ubuntu-latest
+    needs: [test-mobile]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to private registry
+        uses: docker/login-action@v3
+        with:
+          registry: registry.vels.online
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: registry.vels.online/vels/mobile
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./mobile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   update-chart-values:
     name: Update chart image tags
     runs-on: ubuntu-latest
-    needs: [build-backend, build-frontend]
+    needs: [build-backend, build-frontend, build-mobile]
     permissions:
       contents: write
     steps:
@@ -156,6 +216,7 @@ jobs:
         run: |
           yq e ".backend.image.tag = \"${{ steps.version.outputs.tag }}\"" -i deployment/values.yaml
           yq e ".frontend.image.tag = \"${{ steps.version.outputs.tag }}\"" -i deployment/values.yaml
+          yq e ".mobile.image.tag = \"${{ steps.version.outputs.tag }}\"" -i deployment/values.yaml
 
       - name: Commit updated values
         run: |

@@ -56,6 +56,17 @@ services:
       valkey:
         condition: service_healthy
 
+  # OTA update server for the React Native staff app: serves the exported Expo
+  # update bundle (iOS + Android Hermes bundles + metadata.json), same image as
+  # CI builds. Day-to-day mobile dev runs Metro on the host (`cd mobile && npm
+  # start`) — this container is for verifying the shipped bundle.
+  mobile:
+    platform: linux/amd64
+    image: mobile:latest
+    build: ./mobile
+    ports:
+      - "8090:80"
+
   frontend:
     platform: linux/amd64
     image: frontend:latest
