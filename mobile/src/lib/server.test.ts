@@ -14,6 +14,12 @@ describe('normalizeServerUrl', () => {
     expect(normalizeServerUrl('http://localhost:8000')).toBe('http://localhost:8000');
   });
 
+  it('defaults local addresses to http:// — the dev backend has no TLS', () => {
+    expect(normalizeServerUrl('localhost:8000')).toBe('http://localhost:8000');
+    expect(normalizeServerUrl('127.0.0.1:8000')).toBe('http://127.0.0.1:8000');
+    expect(normalizeServerUrl('eddies-mac.local:8000')).toBe('http://eddies-mac.local:8000');
+  });
+
   it('strips trailing slashes', () => {
     expect(normalizeServerUrl('https://vels.online///')).toBe('https://vels.online');
   });

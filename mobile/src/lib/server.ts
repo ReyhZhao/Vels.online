@@ -6,12 +6,18 @@ export const DEFAULT_SERVER_URL = 'https://vels.online';
 
 let currentServerUrl: string = DEFAULT_SERVER_URL;
 
-/** Trim whitespace, default to https://, strip trailing slashes. */
+/**
+ * Trim whitespace, add a scheme when missing, strip trailing slashes.
+ * Bare local addresses (localhost, 127.0.0.1, *.local) get http:// — the dev
+ * backend has no TLS; everything else defaults to https://.
+ */
 export function normalizeServerUrl(input: string): string {
   let url = (input || '').trim();
   if (!url) return DEFAULT_SERVER_URL;
   if (!/^https?:\/\//i.test(url)) {
-    url = `https://${url}`;
+    const host = url.split('/')[0].split(':')[0].toLowerCase();
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+    url = `${isLocal ? 'http' : 'https'}://${url}`;
   }
   return url.replace(/\/+$/, '');
 }

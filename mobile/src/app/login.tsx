@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
+import api from '@/lib/api';
 import { registerForPushNotifications } from '@/notifications/push';
 import { Button } from '@/components/Button';
 import { getServerUrl, saveServerUrl } from '@/lib/server';
@@ -47,11 +48,18 @@ export default function LoginScreen() {
     setChecking(true);
     try {
       await saveServerUrl(serverInput);
-      // An existing session (or DEV_AUTO_LOGIN in local dev) skips the SSO round-trip.
+      // Probe the API directly so we can tell "reachable but signed out"
+      // (→ SSO WebView) apart from "unreachable" (→ error, no WebView).
+      // An existing session (or DEV_AUTO_LOGIN in local dev) skips SSO.
+      await api.get('/api/me/');
       if (await completeIfAuthenticated()) return;
-      setShowWebView(true);
-    } catch {
-      setError('Could not reach the server. Check the URL and try again.');
+      setError('Signed-in check failed. Please try again.');
+    } catch (err: any) {
+      if (err?.response?.status === 401 || err?.response?.status === 403) {
+        setShowWebView(true);
+      } else {
+        setError('Could not reach the server. Check the URL and try again.');
+      }
     } finally {
       setChecking(false);
     }
