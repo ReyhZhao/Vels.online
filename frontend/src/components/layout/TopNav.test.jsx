@@ -19,10 +19,10 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../lib/axios';
 import TopNav from './TopNav';
 
-function renderTopNav(initialPath = '/') {
+function renderTopNav(initialPath = '/', props = {}) {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
-      <TopNav />
+      <TopNav {...props} />
     </MemoryRouter>
   );
 }
@@ -140,6 +140,33 @@ describe('TopNav', () => {
     });
     renderTopNav();
     expect(screen.queryByRole('button', { name: /report issue/i })).not.toBeInTheDocument();
+  });
+
+  // ── mobile menu button ────────────────────────────────────────────────────
+
+  it('renders a menu button when onMenuClick is provided', () => {
+    renderTopNav('/', { onMenuClick: vi.fn() });
+    expect(screen.getByRole('button', { name: /toggle menu/i })).toBeInTheDocument();
+  });
+
+  it('does not render a menu button without onMenuClick (public pages)', () => {
+    renderTopNav();
+    expect(screen.queryByRole('button', { name: /toggle menu/i })).not.toBeInTheDocument();
+  });
+
+  it('calls onMenuClick when the menu button is clicked', async () => {
+    const onMenuClick = vi.fn();
+    const user = userEvent.setup();
+    renderTopNav('/', { onMenuClick });
+
+    await user.click(screen.getByRole('button', { name: /toggle menu/i }));
+
+    expect(onMenuClick).toHaveBeenCalledOnce();
+  });
+
+  it('menu button is hidden on desktop via md:hidden', () => {
+    renderTopNav('/', { onMenuClick: vi.fn() });
+    expect(screen.getByRole('button', { name: /toggle menu/i }).className).toContain('md:hidden');
   });
 
   // ── responsive visibility ─────────────────────────────────────────────────

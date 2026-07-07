@@ -1,45 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import OrgSwitcher from '../OrgSwitcher';
 import ReportIssueModal from '../ReportIssueModal';
 import {
-  LayoutDashboard,
-  FileText,
-  FilePlus,
-  HardDrive,
-  Server,
-  Shield,
-  Download,
-  ShieldCheck,
-  Bug,
-  Activity,
-  UserPlus,
-  BarChart2,
-  ClipboardList,
-  ShieldOff,
-  AlertTriangle,
-  Tag,
-  ListChecks,
-  Lightbulb,
-  Zap,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
-  Filter,
-  Bell,
-  Globe,
-  History,
-  CalendarClock,
-  Mail,
-  Users,
-  GitBranch,
   Search,
-  Handshake,
-  Inbox,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../context/AuthContext';
-import api from '@/lib/axios';
+import { useNavCounts } from '../../hooks/useNavCounts';
+import { useSwipeGesture } from '../../hooks/useSwipeGesture';
+import { DASHBOARD_LINK, NAV_SECTIONS } from './navConfig';
 import { VERSION_LABEL, VERSION_DETAIL, GIT_SHA } from '@/lib/version';
 
 function readLS(key, fallback) {
@@ -59,36 +33,100 @@ function writeLS(key, value) {
   }
 }
 
-function SidebarLink({ to, end, icon: Icon, collapsed, children }) {
+function formatCount(count) {
+  return count > 99 ? '99+' : String(count);
+}
+
+function CountBadge({ count, tone = 'default' }) {
+  return (
+    <span
+      className={cn(
+        'ml-auto rounded-full px-1.5 py-0.5 text-xs font-semibold',
+        tone === 'info' ? 'bg-blue-600 text-white' : 'bg-primary text-primary-foreground'
+      )}
+    >
+      {formatCount(count)}
+    </span>
+  );
+}
+
+function SidebarLink({ to, end, icon: Icon, label, iconOnly, count = 0, badgeTone, onNavigate }) {
   return (
     <NavLink
       to={to}
       end={end}
-      title={collapsed ? String(children) : undefined}
+      onClick={onNavigate}
+      title={iconOnly ? label : undefined}
       className={({ isActive }) =>
         cn(
-          'flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
-          collapsed ? 'justify-center px-2 gap-0' : 'gap-3',
+          'flex items-center rounded-md px-3 py-2.5 md:py-2 text-sm font-medium transition-colors',
+          iconOnly ? 'justify-center px-2 gap-0' : 'gap-3',
           isActive
             ? 'bg-accent text-accent-foreground'
             : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
         )
       }
     >
-      {Icon && <Icon className="h-4 w-4 shrink-0" />}
-      {!collapsed && children}
+      {Icon && (
+        <span className="relative shrink-0">
+          <Icon className="h-4 w-4" aria-hidden="true" />
+          {iconOnly && count > 0 && (
+            <span
+              className={cn(
+                'absolute -right-1.5 -top-1.5 h-2 w-2 rounded-full',
+                badgeTone === 'info' ? 'bg-blue-600' : 'bg-primary'
+              )}
+              aria-hidden="true"
+            />
+          )}
+        </span>
+      )}
+      {!iconOnly && (
+        <>
+          <span className="truncate">{label}</span>
+          {count > 0 && <CountBadge count={count} tone={badgeTone} />}
+        </>
+      )}
     </NavLink>
   );
 }
 
-function SectionToggle({ label, open, onToggle }) {
+function DisabledItem({ icon: Icon, label, hint, iconOnly }) {
+  return (
+    <div
+      className={cn(
+        'flex items-center rounded-md px-3 py-2.5 md:py-2 text-sm text-muted-foreground/50 cursor-default select-none',
+        iconOnly ? 'justify-center px-2' : 'gap-3'
+      )}
+      title={iconOnly ? `${label} (coming soon)` : undefined}
+      aria-disabled="true"
+    >
+      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+      {!iconOnly && (
+        <>
+          <span>{label}</span>
+          {hint && <span className="ml-auto text-xs">{hint}</span>}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SectionToggle({ label, open, onToggle, count = 0 }) {
   return (
     <button
       onClick={onToggle}
       aria-expanded={open}
-      className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+      className="flex w-full items-center justify-between rounded-md px-3 py-2.5 md:py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
     >
-      <span>{label}</span>
+      <span className="flex items-center gap-2">
+        <span>{label}</span>
+        {!open && count > 0 && (
+          <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground normal-case tracking-normal">
+            {formatCount(count)}
+          </span>
+        )}
+      </span>
       {open ? (
         <ChevronDown className="h-3 w-3" aria-hidden="true" />
       ) : (
@@ -101,60 +139,76 @@ function SectionToggle({ label, open, onToggle }) {
 function AppSidebar({ mobileOpen = false, onMobileClose }) {
   const { user } = useAuth();
   const isStaff = user?.is_staff;
+  const counts = useNavCounts(isStaff);
+  const asideRef = useRef(null);
 
   const [collapsed, setCollapsed] = useState(() => readLS('sidebar:collapsed', false));
-  const [investigateOpen, setInvestigateOpen] = useState(() => readLS('sidebar:investigate:open', true));
-  const [respondOpen, setRespondOpen] = useState(() => readLS('sidebar:respond:open', true));
-  const [detectOpen, setDetectOpen] = useState(() => readLS('sidebar:detect:open', true));
-  const [threatOpsOpen, setThreatOpsOpen] = useState(() => readLS('sidebar:threatops:open', true));
-  const [environmentOpen, setEnvironmentOpen] = useState(() => readLS('sidebar:environment:open', true));
-  const [securityOpen, setSecurityOpen] = useState(() => readLS('sidebar:security:open', true));
-  const [ingressOpen, setIngressOpen] = useState(() => readLS('sidebar:ingress:open', true));
-  const [blogOpen, setBlogOpen] = useState(() => readLS('sidebar:blog:open', true));
-  const [adminOpen, setAdminOpen] = useState(() => readLS('sidebar:admin:open', true));
+  const [openSections, setOpenSections] = useState(() => {
+    const initial = {};
+    for (const section of NAV_SECTIONS) {
+      initial[section.id] = readLS(`sidebar:${section.id}:open`, true);
+    }
+    return initial;
+  });
+  const [filter, setFilter] = useState('');
   const [reportOpen, setReportOpen] = useState(false);
-  const [pendingSignups, setPendingSignups] = useState(0);
-  const [newAlertCount, setNewAlertCount] = useState(0);
 
-  const fetchNewAlertCount = useCallback(() => {
-    api
-      .get('/api/alerts/', { params: { state: 'new', per_page: 1 } })
-      .then((res) => setNewAlertCount(res.data.count ?? 0))
-      .catch(() => {});
-  }, []);
-
-  const fetchPendingCount = useCallback(() => {
-    if (!isStaff) return;
-    api
-      .get('/api/signups/pending-count/')
-      .then((res) => setPendingSignups(res.data.count ?? 0))
-      .catch(() => {});
-  }, [isStaff]);
-
-  useEffect(() => {
-    fetchPendingCount();
-    fetchNewAlertCount();
-    const interval = setInterval(fetchNewAlertCount, 60000);
-    return () => clearInterval(interval);
-  }, [fetchPendingCount, fetchNewAlertCount]);
-
-  useEffect(() => {
-    window.addEventListener('signuprequest:changed', fetchPendingCount);
-    return () => window.removeEventListener('signuprequest:changed', fetchPendingCount);
-  }, [fetchPendingCount]);
+  // The drawer always shows full labels; icon-only mode is desktop-only.
+  const iconOnly = collapsed && !mobileOpen;
 
   useEffect(() => { writeLS('sidebar:collapsed', collapsed); }, [collapsed]);
-  useEffect(() => { writeLS('sidebar:investigate:open', investigateOpen); }, [investigateOpen]);
-  useEffect(() => { writeLS('sidebar:respond:open', respondOpen); }, [respondOpen]);
-  useEffect(() => { writeLS('sidebar:detect:open', detectOpen); }, [detectOpen]);
-  useEffect(() => { writeLS('sidebar:threatops:open', threatOpsOpen); }, [threatOpsOpen]);
-  useEffect(() => { writeLS('sidebar:environment:open', environmentOpen); }, [environmentOpen]);
-  useEffect(() => { writeLS('sidebar:security:open', securityOpen); }, [securityOpen]);
-  useEffect(() => { writeLS('sidebar:ingress:open', ingressOpen); }, [ingressOpen]);
-  useEffect(() => { writeLS('sidebar:blog:open', blogOpen); }, [blogOpen]);
-  useEffect(() => { writeLS('sidebar:admin:open', adminOpen); }, [adminOpen]);
 
-  const showItems = !collapsed;
+  const toggleSection = useCallback((id) => {
+    setOpenSections((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      writeLS(`sidebar:${id}:open`, next[id]);
+      return next;
+    });
+  }, []);
+
+  // Close the mobile drawer when a destination is chosen.
+  const handleNavigate = useCallback(() => {
+    if (mobileOpen) onMobileClose?.();
+  }, [mobileOpen, onMobileClose]);
+
+  // Escape closes the mobile drawer.
+  useEffect(() => {
+    if (!mobileOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onMobileClose?.();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileOpen, onMobileClose]);
+
+  // Swipe left on the drawer closes it.
+  useSwipeGesture(
+    asideRef,
+    useCallback(() => {
+      if (mobileOpen) onMobileClose?.();
+    }, [mobileOpen, onMobileClose]),
+    { direction: 'left' }
+  );
+
+  const query = filter.trim().toLowerCase();
+  const filtering = query.length > 0;
+
+  const visibleSections = NAV_SECTIONS
+    .filter((section) => !section.staffOnly || isStaff)
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(
+        (item) =>
+          (!item.staffOnly || isStaff) &&
+          (!filtering || item.label.toLowerCase().includes(query))
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
+
+  const dashboardVisible = !filtering || DASHBOARD_LINK.label.toLowerCase().includes(query);
+
+  const itemCount = (item) => (item.badge ? counts[item.badge] ?? 0 : 0);
+  const sectionCount = (section) => section.items.reduce((sum, item) => sum + itemCount(item), 0);
 
   return (
     <>
@@ -162,363 +216,126 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
 
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+          className="fixed inset-0 z-[60] bg-black/40 md:hidden"
           onClick={onMobileClose}
           aria-hidden="true"
         />
       )}
 
       <aside
+        ref={asideRef}
         className={cn(
           'flex-col border-r border-border bg-card transition-all duration-200',
           mobileOpen
-            ? 'fixed top-28 bottom-0 left-0 z-50 w-56 flex'
+            ? 'fixed inset-y-0 left-0 z-[70] flex w-72 max-w-[85vw] shadow-xl'
             : cn('hidden md:flex', collapsed ? 'w-14' : 'w-56')
         )}
       >
         <div className="flex h-16 shrink-0 items-center border-b border-border px-4 gap-2">
-          {!collapsed && <OrgSwitcher />}
-          <button
-            onClick={() => setCollapsed((c) => !c)}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          >
-            {collapsed ? (
-              <ChevronRight className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-            )}
-          </button>
+          {!iconOnly && <OrgSwitcher />}
+          {mobileOpen ? (
+            <button
+              onClick={onMobileClose}
+              aria-label="Close menu"
+              className="ml-auto rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              onClick={() => setCollapsed((c) => !c)}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            >
+              {collapsed ? (
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          )}
         </div>
 
-        <nav className="flex flex-col gap-2 p-3 flex-1 overflow-y-auto no-scrollbar">
-
-          <SidebarLink to="/dashboard" end icon={LayoutDashboard} collapsed={collapsed}>
-            Dashboard
-          </SidebarLink>
-
-          <div className="space-y-1">
-            {showItems && (
-              <SectionToggle
-                label="Investigate"
-                open={investigateOpen}
-                onToggle={() => setInvestigateOpen((o) => !o)}
+        {!iconOnly && (
+          <div className="shrink-0 px-3 pt-3">
+            <div className="relative">
+              <Search
+                className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+                aria-hidden="true"
               />
-            )}
-            {(investigateOpen || collapsed) && (
-              <>
-                <NavLink
-                  to="/alerts"
-                  title={collapsed ? 'Alert Inbox' : undefined}
-                  className={({ isActive }) =>
-                    cn(
-                      'flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                      collapsed ? 'justify-center px-2 gap-0' : 'gap-3',
-                      isActive
-                        ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                    )
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && filter) {
+                    e.stopPropagation();
+                    setFilter('');
                   }
+                }}
+                placeholder="Filter menu…"
+                aria-label="Filter menu"
+                className="w-full rounded-md border border-border bg-background py-1.5 pl-8 pr-7 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              {filtering && (
+                <button
+                  onClick={() => setFilter('')}
+                  aria-label="Clear filter"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
                 >
-                  <Bell className="h-4 w-4 shrink-0" />
-                  {!collapsed && (
-                    <>
-                      <span>Alert Inbox</span>
-                      {newAlertCount > 0 && (
-                        <span className="ml-auto rounded-full bg-blue-600 px-1.5 py-0.5 text-xs font-semibold text-white">
-                          {newAlertCount}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </NavLink>
-                <SidebarLink to="/incidents" icon={AlertTriangle} collapsed={collapsed}>
-                  Incidents
-                </SidebarLink>
-                <SidebarLink to="/reports" icon={FileText} collapsed={collapsed}>
-                  Reports
-                </SidebarLink>
-              </>
-            )}
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              )}
+            </div>
           </div>
+        )}
 
-          <div className="space-y-1">
-            {showItems && (
-              <SectionToggle
-                label="Respond"
-                open={respondOpen}
-                onToggle={() => setRespondOpen((o) => !o)}
-              />
-            )}
-            {(respondOpen || collapsed) && (
-              <>
-                <SidebarLink to="/tasks" icon={ListChecks} collapsed={collapsed}>
-                  Tasks
-                </SidebarLink>
-                {isStaff && (
-                  <>
-                    <SidebarLink to="/admin/incidents/subjects" icon={Tag} collapsed={collapsed}>
-                      Subjects
-                    </SidebarLink>
-                    <SidebarLink to="/admin/incidents/task-templates" icon={ListChecks} collapsed={collapsed}>
-                      Task Templates
-                    </SidebarLink>
-                    <SidebarLink to="/admin/incidents/report-templates" icon={FileText} collapsed={collapsed}>
-                      Report Templates
-                    </SidebarLink>
-                    <SidebarLink to="/admin/incidents/triage-lessons" icon={Lightbulb} collapsed={collapsed}>
-                      Triage Lessons
-                    </SidebarLink>
-                    <SidebarLink to="/admin/incidents/automations" icon={Zap} collapsed={collapsed}>
-                      Automations
-                    </SidebarLink>
-                    <SidebarLink to="/admin/wazuh-responses" icon={ShieldCheck} collapsed={collapsed}>
-                      Wazuh Responses
-                    </SidebarLink>
-                    <SidebarLink to="/admin/partners/connections" icon={Handshake} collapsed={collapsed}>
-                      Partner Connections
-                    </SidebarLink>
-                    <SidebarLink to="/admin/partners/intake-inbox" icon={Inbox} collapsed={collapsed}>
-                      Intake Inbox
-                    </SidebarLink>
-                  </>
+        <nav aria-label="Primary" className="flex flex-col gap-2 p-3 flex-1 overflow-y-auto no-scrollbar">
+          {dashboardVisible && (
+            <SidebarLink
+              {...DASHBOARD_LINK}
+              iconOnly={iconOnly}
+              onNavigate={handleNavigate}
+            />
+          )}
+
+          {visibleSections.map((section) => {
+            const open = filtering || openSections[section.id];
+            return (
+              <div key={section.id} className="space-y-1">
+                {!iconOnly && (
+                  <SectionToggle
+                    label={section.label}
+                    open={open}
+                    onToggle={() => toggleSection(section.id)}
+                    count={sectionCount(section)}
+                  />
                 )}
-              </>
-            )}
-          </div>
+                {(open || iconOnly) &&
+                  section.items.map((item) =>
+                    item.disabled ? (
+                      <DisabledItem key={item.label} {...item} iconOnly={iconOnly} />
+                    ) : (
+                      <SidebarLink
+                        key={item.to}
+                        {...item}
+                        iconOnly={iconOnly}
+                        count={itemCount(item)}
+                        onNavigate={handleNavigate}
+                      />
+                    )
+                  )}
+              </div>
+            );
+          })}
 
-          {isStaff && (
-            <div className="space-y-1">
-              {showItems && (
-                <SectionToggle
-                  label="Detect"
-                  open={detectOpen}
-                  onToggle={() => setDetectOpen((o) => !o)}
-                />
-              )}
-              {(detectOpen || collapsed) && (
-                <>
-                  <SidebarLink to="/admin/correlations/rules" icon={GitBranch} collapsed={collapsed}>
-                    Correlation Rules
-                  </SidebarLink>
-                  <SidebarLink to="/admin/correlations/search-rules" icon={Search} collapsed={collapsed}>
-                    Search Rules
-                  </SidebarLink>
-                </>
-              )}
-            </div>
+          {filtering && !dashboardVisible && visibleSections.length === 0 && (
+            <p className="px-3 py-2 text-sm text-muted-foreground">No menu items match.</p>
           )}
-
-          {isStaff && (
-            <div className="space-y-1">
-              {showItems && (
-                <SectionToggle
-                  label="Threat Ops"
-                  open={threatOpsOpen}
-                  onToggle={() => setThreatOpsOpen((o) => !o)}
-                />
-              )}
-              {(threatOpsOpen || collapsed) && (
-                <>
-                  <SidebarLink to="/hunting" icon={Search} collapsed={collapsed}>
-                    Threat Hunting
-                  </SidebarLink>
-                  <SidebarLink to="/attack-map" icon={Globe} collapsed={collapsed}>
-                    Attack Map
-                  </SidebarLink>
-                </>
-              )}
-            </div>
-          )}
-
-          <div className="space-y-1">
-            {showItems && (
-              <SectionToggle
-                label="Environment"
-                open={environmentOpen}
-                onToggle={() => setEnvironmentOpen((o) => !o)}
-              />
-            )}
-            {(environmentOpen || collapsed) && (
-              <>
-                <SidebarLink to="/assets" icon={HardDrive} collapsed={collapsed}>
-                  Assets
-                </SidebarLink>
-                <SidebarLink to="/contacts" icon={Users} collapsed={collapsed}>
-                  Contacts
-                </SidebarLink>
-              </>
-            )}
-          </div>
-
-          <div className="space-y-1">
-            {showItems && (
-              <SectionToggle
-                label="Security"
-                open={securityOpen}
-                onToggle={() => setSecurityOpen((o) => !o)}
-              />
-            )}
-            {(securityOpen || collapsed) && (
-              <>
-                <SidebarLink to="/security" end icon={ShieldCheck} collapsed={collapsed}>
-                  Overview
-                </SidebarLink>
-                <SidebarLink to="/security/vulnerabilities" icon={Bug} collapsed={collapsed}>
-                  Vulnerabilities
-                </SidebarLink>
-                <SidebarLink to="/security/events" icon={Activity} collapsed={collapsed}>
-                  Events
-                </SidebarLink>
-                <SidebarLink to="/security/work-package" icon={ClipboardList} collapsed={collapsed}>
-                  Work Package
-                </SidebarLink>
-                <SidebarLink to="/security/risk-acceptances" icon={ShieldOff} collapsed={collapsed}>
-                  Accepted Risks
-                </SidebarLink>
-                <SidebarLink to="/exceptions" icon={Filter} collapsed={collapsed}>
-                  Exception Rules
-                </SidebarLink>
-                <SidebarLink to="/security/enroll" icon={UserPlus} collapsed={collapsed}>
-                  Enroll
-                </SidebarLink>
-              </>
-            )}
-          </div>
-
-          <div className="space-y-1">
-            {showItems && (
-              <SectionToggle
-                label="App Ingress"
-                open={ingressOpen}
-                onToggle={() => setIngressOpen((o) => !o)}
-              />
-            )}
-            {(ingressOpen || collapsed) && (
-              <SidebarLink to="/routes" icon={Globe} collapsed={collapsed}>
-                Routes
-              </SidebarLink>
-            )}
-          </div>
-
-          {isStaff && (
-            <div className="space-y-1">
-              {showItems && (
-                <SectionToggle
-                  label="Blog"
-                  open={blogOpen}
-                  onToggle={() => setBlogOpen((o) => !o)}
-                />
-              )}
-              {(blogOpen || collapsed) && (
-                <>
-                  <SidebarLink to="/admin" end icon={FileText} collapsed={collapsed}>
-                    Blog Administration
-                  </SidebarLink>
-                  <SidebarLink to="/admin/posts" icon={FileText} collapsed={collapsed}>
-                    Posts
-                  </SidebarLink>
-                  <SidebarLink to="/admin/posts/new" icon={FilePlus} collapsed={collapsed}>
-                    New Post
-                  </SidebarLink>
-                </>
-              )}
-            </div>
-          )}
-
-          {isStaff && (
-            <div className="space-y-1">
-              {showItems && (
-                <SectionToggle
-                  label="Admin"
-                  open={adminOpen}
-                  onToggle={() => setAdminOpen((o) => !o)}
-                />
-              )}
-              {(adminOpen || collapsed) && (
-                <>
-                  <SidebarLink to="/admin/incidents/oncall" icon={CalendarClock} collapsed={collapsed}>
-                    On-Call
-                  </SidebarLink>
-                  <SidebarLink to="/admin/status-settings" icon={Server} collapsed={collapsed}>
-                    Service Monitor
-                  </SidebarLink>
-                  <SidebarLink to="/admin/security/organizations" icon={Shield} collapsed={collapsed}>
-                    Organisations
-                  </SidebarLink>
-                  <SidebarLink to="/admin/security/downloads" icon={Download} collapsed={collapsed}>
-                    Downloads
-                  </SidebarLink>
-                  <NavLink
-                    to="/admin/signup-requests"
-                    title={collapsed ? 'Signup Requests' : undefined}
-                    className={({ isActive }) =>
-                      cn(
-                        'flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                        collapsed ? 'justify-center px-2 gap-0' : 'gap-3',
-                        isActive
-                          ? 'bg-accent text-accent-foreground'
-                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                      )
-                    }
-                  >
-                    <UserPlus className="h-4 w-4 shrink-0" />
-                    {!collapsed && (
-                      <>
-                        <span>Signup Requests</span>
-                        {pendingSignups > 0 && (
-                          <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 text-xs font-semibold text-primary-foreground">
-                            {pendingSignups}
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </NavLink>
-                  <SidebarLink to="/admin/tasks/history" icon={History} collapsed={collapsed}>
-                    Task History
-                  </SidebarLink>
-                  <SidebarLink to="/admin/tasks/scheduled" icon={CalendarClock} collapsed={collapsed}>
-                    Scheduled Tasks
-                  </SidebarLink>
-                  <SidebarLink to="/admin/email-templates" icon={Mail} collapsed={collapsed}>
-                    Email Templates
-                  </SidebarLink>
-                  <div
-                    className={cn(
-                      'flex items-center rounded-md px-3 py-2 text-sm text-muted-foreground/50 cursor-default select-none',
-                      collapsed ? 'justify-center px-2' : 'gap-3'
-                    )}
-                    title={collapsed ? 'Analytics (coming soon)' : undefined}
-                    aria-disabled="true"
-                  >
-                    <BarChart2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-                    {!collapsed && (
-                      <>
-                        <span>Analytics</span>
-                        <span className="ml-auto text-xs">Soon</span>
-                      </>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          <div className="space-y-1">
-            {showItems && (
-              <span className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Account
-              </span>
-            )}
-            <SidebarLink to="/account/notifications" icon={Bell} collapsed={collapsed}>
-              Notifications
-            </SidebarLink>
-          </div>
         </nav>
 
         {isStaff && (
           <div className="shrink-0 border-t border-border p-3 space-y-2">
-            {!collapsed && (
+            {!iconOnly && (
               <button
                 onClick={() => setReportOpen(true)}
                 className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors text-left"
@@ -532,10 +349,10 @@ function AppSidebar({ mobileOpen = false, onMobileClose }) {
               aria-label={VERSION_DETAIL}
               className={cn(
                 'select-none text-[10px] leading-tight text-muted-foreground/50',
-                collapsed ? 'text-center' : 'px-1'
+                iconOnly ? 'text-center' : 'px-1'
               )}
             >
-              {collapsed ? GIT_SHA.slice(0, 4) : VERSION_LABEL}
+              {iconOnly ? GIT_SHA.slice(0, 4) : VERSION_LABEL}
             </p>
           </div>
         )}

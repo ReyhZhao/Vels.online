@@ -71,4 +71,27 @@ describe('useSwipeGesture', () => {
     fireSwipe(el, 0, 0, 60, 75);
     expect(cb).toHaveBeenCalledOnce();
   });
+
+  // ── direction: 'left' ────────────────────────────────────────────────────
+
+  it('fires callback on leftward swipe when direction is left', () => {
+    const cb = vi.fn();
+    renderHook(() => useSwipeGesture(makeRef(el), cb, { direction: 'left' }));
+    fireSwipe(el, 100, 0, 30, 0);
+    expect(cb).toHaveBeenCalledOnce();
+  });
+
+  it('does not fire on rightward swipe when direction is left', () => {
+    const cb = vi.fn();
+    renderHook(() => useSwipeGesture(makeRef(el), cb, { direction: 'left' }));
+    fireSwipe(el, 0, 0, 60, 0);
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it('does not fire leftward below threshold when direction is left', () => {
+    const cb = vi.fn();
+    renderHook(() => useSwipeGesture(makeRef(el), cb, { direction: 'left' }));
+    fireSwipe(el, 100, 0, 60, 0);
+    expect(cb).not.toHaveBeenCalled();
+  });
 });
