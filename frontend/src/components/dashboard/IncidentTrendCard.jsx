@@ -37,7 +37,10 @@ export default function IncidentTrendCard({ orgSlug, days }) {
     if (!orgSlug) return;
     let cancelled = false;
     setLoading(true);
-    api.get('/api/incidents/trend/', { params: { org: orgSlug, days } })
+    // The dashboard trend reflects every incident regardless of state
+    // (including closed), unlike the incident-list chart which honours the
+    // active list filters and defaults to excluding closed.
+    api.get('/api/incidents/trend/', { params: { org: orgSlug, days, include_closed: 1 } })
       .then(res => { if (!cancelled) setData({ buckets: res.data.buckets || [], subjects: res.data.subjects || [] }); })
       .catch(() => { if (!cancelled) setData({ buckets: [], subjects: [] }); })
       .finally(() => { if (!cancelled) setLoading(false); });
