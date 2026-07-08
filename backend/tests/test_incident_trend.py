@@ -330,3 +330,23 @@ def test_builder_excludes_closed_by_default(member, acme):
     from django.http import QueryDict
     qs = build_incident_queryset(member, QueryDict(""))
     assert qs.count() == 1
+
+
+@pytest.mark.django_db
+def test_builder_include_closed_keeps_closed(member, acme):
+    make_incident(acme, state="new")
+    make_incident(acme, state="closed")
+    from django.http import QueryDict
+    qs = build_incident_queryset(member, QueryDict("include_closed=1"))
+    assert qs.count() == 2
+
+
+@pytest.mark.django_db
+def test_endpoint_include_closed_counts_all_states(client, staff, acme):
+    # The dashboard trend passes include_closed=1 so it reflects every incident
+    # regardless of state; without it the closed one is dropped (default rule).
+    make_incident(acme, state="new")
+    make_incident(acme, state="closed")
+    client.force_login(staff)
+    assert _totals(client.get("/api/incidents/trend/").json()) == 1
+    assert _totals(client.get("/api/incidents/trend/?include_closed=1").json()) == 2

@@ -19,6 +19,11 @@ def build_incident_queryset(user, query_params, base_qs=None):
       * the ``tab`` constraint (``all`` / ``my_queue`` / ``unassigned``),
       * the implicit "exclude closed when no explicit ``state``" rule.
 
+    The implicit exclusion can be turned off with ``include_closed`` (truthy),
+    which lets a caller populate over every state without having to enumerate
+    them via ``state``. The dashboard trend chart uses this so it reflects all
+    incidents regardless of state.
+
     It deliberately does **not** apply the ``IncidentFilterSet`` field filters
     (severity / state / q / org / …) — those are layered on afterwards by the
     list view's filter backend or the trend endpoint, so both callers share the
@@ -35,20 +40,17 @@ def build_incident_queryset(user, query_params, base_qs=None):
         for v in query_params.getlist("state")
         for c in v.split(",") if c.strip()
     ]
+    include_closed = query_params.get("include_closed") in ("1", "true", "True")
 
     if tab == "my_queue":
         delegated = IncidentDelegation.objects.filter(
             user=user, returned_at__isnull=True
         ).values_list("incident_id", flat=True)
         qs = qs.filter(Q(assignee=user) | Q(id__in=delegated))
-        if not explicit_states:
-            qs = qs.exclude(state="closed")
     elif tab == "unassigned":
         qs = qs.filter(assignee__isnull=True)
-        if not explicit_states:
-            qs = qs.exclude(state="closed")
-    else:
-        if not explicit_states:
-            qs = qs.exclude(state="closed")
+
+    if not explicit_states and not include_closed:
+        qs = qs.exclude(state="closed")
 
     return qs
