@@ -2421,9 +2421,12 @@ def _build_research_sys_prompt(grounding: dict) -> str:
         "add_task_comment(task_id, text) to record your findings as a staff-only note "
         "on that task. Recording findings ONLY happens when you actually call "
         "add_task_comment — you must call it for every task you intend to work; do not "
-        "just describe what you would write. Never run or close a task, and you cannot "
-        "run automated or wazuh_response tasks. Work as many manual tasks as the budget "
-        "allows. Stop once you have what you need."
+        "just describe what you would write. add_task_comment is the ONLY way to record "
+        "per-task work: do NOT use add_internal_comment to write up what you did on a task "
+        "(that tool is for incident-wide notes only, not for per-task findings). Never run "
+        "or close a task, and you cannot run automated or wazuh_response tasks; never write "
+        "that a task is completed, closed, or done — a human ratifies completion. Work as "
+        "many manual tasks as the budget allows. Stop once you have what you need."
     )
 
 

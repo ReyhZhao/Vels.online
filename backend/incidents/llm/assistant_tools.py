@@ -207,9 +207,12 @@ def _add_internal_comment(incident, user):
         return ToolResult(content={"ok": True}, summary="added internal comment")
     return ToolSpec(
         name="add_internal_comment", is_write=True,
-        description="Add a staff-only internal comment to this incident.",
+        description="Add a staff-only internal comment about the incident AS A WHOLE (an "
+                    "incident-wide observation or note). Do NOT use this to record findings or "
+                    "progress on a specific task — those must go on the task itself via "
+                    "add_task_comment(task_id, text). Never write that a task is completed/closed/done.",
         parameters={"type": "object", "properties": {
-            "text": {"type": "string", "description": "The comment body."}}, "required": ["text"]},
+            "text": {"type": "string", "description": "The incident-wide comment body."}}, "required": ["text"]},
         executor=executor,
     )
 
@@ -296,10 +299,13 @@ def _add_task_comment(incident, user):
                           summary=f"added findings to task '{task.title}'")
     return ToolSpec(
         name="add_task_comment", is_write=True,
-        description="Record your research findings as a staff-only internal comment on one of this "
-                    "incident's MANUAL tasks. Use this to work a manual task: after researching it, "
-                    "write up what you found here. Only works on manual tasks; it cannot run, close, "
-                    "or comment on automated/wazuh_response tasks.",
+        description="Record your research findings on ONE specific MANUAL task of this incident. This "
+                    "is the ONLY correct way to work a manual task: after researching it, call this "
+                    "with the task's task_id and write up what you found — the note is attached to the "
+                    "task and advances it to in_progress. Do NOT record per-task work with "
+                    "add_internal_comment (that is for incident-wide notes only). Only works on manual "
+                    "tasks; it cannot run, close, or comment on automated/wazuh_response tasks, and you "
+                    "must never claim the task is completed/closed/done — a human ratifies completion.",
         parameters={"type": "object", "properties": {
             "task_id": {"type": "integer", "description": "Id of the manual task (from the task list in context)."},
             "text": {"type": "string", "description": "The findings to record on the task."}},

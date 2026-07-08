@@ -359,6 +359,22 @@ def test_task_workable_by_assistant_predicate(staff, incident, org_a):
     assert task_workable_by_assistant(None, incident) is False
 
 
+# ── tool descriptions steer per-task work to add_task_comment (#680) ──────────
+
+def test_tool_descriptions_steer_per_task_work_to_add_task_comment(staff, incident):
+    """Regression (#680): the model was recording per-task findings as incident-wide
+    add_internal_comment calls, so they landed on the incident instead of the task. The
+    two comment tools' descriptions must make the correct choice unambiguous."""
+    tools = build_incident_tools(incident, staff, _grounding(incident))
+    internal = _tool(tools, "add_internal_comment").description.lower()
+    task_c = _tool(tools, "add_task_comment").description.lower()
+    # add_internal_comment must disclaim per-task use and point at the task tool.
+    assert "add_task_comment" in internal
+    assert "task" in internal
+    # add_task_comment must present itself as the way to record per-task work.
+    assert "task" in task_c
+
+
 # ── action authority split ──────────────────────────────────────────────────
 
 def test_action_authority_split():

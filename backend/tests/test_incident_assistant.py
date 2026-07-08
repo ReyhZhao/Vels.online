@@ -1027,6 +1027,18 @@ def test_research_prompt_lists_manual_tasks_with_ids_and_tool_instruction(db, in
     assert "Check sender domain reputation" in prompt
 
 
+def test_research_prompt_steers_per_task_work_away_from_incident_comment(db, incident):
+    """Regression (#680): per-task findings must go on the task via add_task_comment,
+    never as an incident-wide add_internal_comment, and the model must not claim a task
+    is completed/closed/done."""
+    from incidents.views import _build_research_sys_prompt
+    Task.objects.create(incident=incident, title="Draft incident summary",
+                        task_type=Task.TYPE_MANUAL, state="new")
+    prompt = _build_research_sys_prompt(build_incident_grounding(incident)).lower()
+    assert "add_internal_comment" in prompt      # names the wrong tool to steer away from it
+    assert "completed" in prompt                 # forbids claiming completion
+
+
 def test_research_prompt_excludes_non_manual_tasks_from_workable_list(db, incident):
     from incidents.views import _build_research_sys_prompt
     manual = Task.objects.create(incident=incident, title="Manual step",

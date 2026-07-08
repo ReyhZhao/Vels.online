@@ -135,3 +135,9 @@ async def test_incident_assistant_records_findings_on_manual_task(async_client, 
         lambda: Comment.objects.filter(task=task, is_internal=True).first())()
     assert comment is not None, "no task-scoped findings comment was persisted"
     assert "Domain registered 2 days ago" in comment.body
+
+    # Regression (#680): per-task work must NOT leak into an incident-wide (task-less)
+    # comment — those show on the incident thread instead of the task.
+    leaked = await sync_to_async(
+        lambda: Comment.objects.filter(incident=incident, task__isnull=True).count())()
+    assert leaked == 0, "per-task findings leaked into an incident-level comment"
