@@ -172,10 +172,12 @@ describe('DashboardPage', () => {
     mockEndpoints({ overview: STAFF_OVERVIEW });
     renderPage({ isStaff: true });
 
-    const triage = await screen.findByRole('link', { name: /needs triage/i });
-    expect(triage).toHaveAttribute('href', '/incidents?state=new');
-    expect(screen.getByRole('link', { name: /unassigned 5/i })).toHaveAttribute('href', '/incidents?tab=unassigned');
-    expect(screen.getByRole('link', { name: /pending closure/i })).toHaveAttribute('href', '/incidents?state=pending_closure');
+    // Wait on count-bearing names so the assertions resolve against the
+    // populated render, not the initial `value ?? '—'` placeholder (the counts
+    // can land a commit after the labels on a slow/loaded runner).
+    expect(await screen.findByRole('link', { name: /needs triage 2/i })).toHaveAttribute('href', '/incidents?state=new');
+    expect(await screen.findByRole('link', { name: /unassigned 5/i })).toHaveAttribute('href', '/incidents?tab=unassigned');
+    expect(await screen.findByRole('link', { name: /pending closure 0/i })).toHaveAttribute('href', '/incidents?state=pending_closure');
   });
 
   it('refetches trends when the range changes', async () => {
