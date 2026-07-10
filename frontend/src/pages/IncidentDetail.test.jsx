@@ -639,6 +639,39 @@ describe('IncidentDetail', () => {
     expect(screen.queryByLabelText('Incident description')).not.toBeInTheDocument();
   });
 
+  // ── collapsible long description (#693) ───────────────────────────────────
+
+  const LONG_INCIDENT = {
+    ...INCIDENT,
+    description: Array.from({ length: 120 }, (_, i) => `Marker${i + 1}`).join('\n\n'),
+  };
+
+  it('collapses a long description and shows a "Show all" toggle (#693)', async () => {
+    mockGet(LONG_INCIDENT);
+    renderPage();
+    await waitFor(() => screen.getByText('Marker1'));
+    // Content past the collapse threshold is hidden until expanded.
+    expect(screen.queryByText('Marker60')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Show all/ })).toBeInTheDocument();
+  });
+
+  it('expands a long description when "Show all" is clicked (#693)', async () => {
+    mockGet(LONG_INCIDENT);
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByText('Marker1'));
+    await user.click(screen.getByRole('button', { name: /Show all/ }));
+    await waitFor(() => screen.getByText('Marker120'));
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
+  });
+
+  it('shows no collapse toggle for a short description (#693)', async () => {
+    mockGet();
+    renderPage();
+    await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
+    expect(screen.queryByRole('button', { name: /Show all|Show less/ })).not.toBeInTheDocument();
+  });
+
   // ── IncidentExceptionsSection ─────────────────────────────────────────────
 
   it('exceptions section hidden when no exceptions', async () => {

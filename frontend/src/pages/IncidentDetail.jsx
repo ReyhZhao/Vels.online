@@ -1079,12 +1079,24 @@ function Badge({ label, value, badgeClass, help }) {
 // `description` field, replace incident state from the response, and surface any
 // failure inline while keeping the editor open. The incident PATCH already
 // records an `incident_updated` timeline event, so edits appear on the Timeline.
+// Long descriptions are collapsed to this many lines by default (#693); a
+// "Show all" toggle reveals the rest. Applies only to the read-only rendered
+// view — the staff editor always shows the full draft.
+const DESCRIPTION_COLLAPSE_LINES = 100;
+
 function IncidentDescription({ displayId, description, isStaff, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(description ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [expanded, setExpanded] = useState(false);
   const textareaRef = useRef(null);
+
+  const lines = (description ?? '').split('\n');
+  const isLong = lines.length > DESCRIPTION_COLLAPSE_LINES;
+  const shownDescription = isLong && !expanded
+    ? lines.slice(0, DESCRIPTION_COLLAPSE_LINES).join('\n')
+    : description;
 
   function startEdit() {
     setDraft(description ?? '');
@@ -1160,8 +1172,19 @@ function IncidentDescription({ displayId, description, isStaff, onSaved }) {
           </div>
         </div>
       ) : description ? (
-        <div className="prose prose-sm dark:prose-invert max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{description}</ReactMarkdown>
+        <div className="space-y-2">
+          <div className={`prose prose-sm dark:prose-invert max-w-none ${isLong && !expanded ? 'relative after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-12 after:bg-gradient-to-t after:from-card after:to-transparent' : ''}`}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{shownDescription}</ReactMarkdown>
+          </div>
+          {isLong && (
+            <button
+              onClick={() => setExpanded(e => !e)}
+              className="text-xs font-medium text-primary hover:underline"
+              aria-expanded={expanded}
+            >
+              {expanded ? 'Show less' : `Show all (${lines.length} lines)`}
+            </button>
+          )}
         </div>
       ) : (
         <p className="text-sm text-muted-foreground italic">No description provided.</p>
@@ -1939,8 +1962,8 @@ export default function IncidentDetail() {
                 )}
               </section>
 
-              {/* ── About (left) + a stacked facts/discussion column (right) ── */}
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+              {/* ── About (left, narrower) + a wider facts/discussion column (right) (#693) ── */}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-5 lg:items-start">
                 <section className="space-y-4 rounded-lg border border-border bg-card p-6 lg:col-span-2">
                   <IncidentDescription
                     displayId={displayId}
@@ -1954,10 +1977,10 @@ export default function IncidentDetail() {
                   </div>
                 </section>
 
-                <div className="space-y-6 lg:col-span-1">
+                <div className="space-y-6 lg:col-span-3">
                   <section className="space-y-4 rounded-lg border border-border bg-card p-6">
                     <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Key facts</h2>
-                    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-1">
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-2">
                       <Field label="Organisation" value={incident.org_slug} />
                       <Field label="Source"       value={incident.source_kind} help={FIELD_HELP.Source} />
                       {incident.source_kind === 'partner' && (
