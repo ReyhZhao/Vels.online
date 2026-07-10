@@ -26,13 +26,15 @@ def test_sets_forwarded_proto_https_in_production(factory):
 
 
 @override_settings(DEBUG=True)
-def test_does_not_override_proto_in_debug(factory):
+def test_sets_forwarded_proto_unconditionally_even_in_debug(factory):
+    # Decoupled from DEBUG (#684): the header is set regardless so HSTS/Secure
+    # cookies and allauth https:// callbacks work once prod runs DEBUG=False.
     request = factory.get("/")
     request.META.pop("HTTP_X_FORWARDED_PROTO", None)
 
     make_middleware()(request)
 
-    assert "HTTP_X_FORWARDED_PROTO" not in request.META
+    assert request.META["HTTP_X_FORWARDED_PROTO"] == "https"
 
 
 @override_settings(DEBUG=False)

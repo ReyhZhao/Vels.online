@@ -10,9 +10,9 @@ class DevAutoLoginMiddleware:
 
     SAFETY: this is gated solely on settings.DEV_AUTO_LOGIN, which is fed by the
     DEV_AUTO_LOGIN env var set *only* in docker-compose.yaml. It deliberately does
-    NOT key off DEBUG, because production runs with DEBUG=True. When the flag is
-    off, MiddlewareNotUsed drops the class from the middleware stack entirely, so
-    there is no live code path in any environment that doesn't opt in.
+    NOT key off DEBUG. When the flag is off, MiddlewareNotUsed drops the class from
+    the middleware stack entirely, so there is no live code path in any environment
+    that doesn't opt in.
 
     Works for DRF too: login() sets request.user on the underlying request, which
     SessionAuthentication reads back, so IsAuthenticated endpoints see the admin.
@@ -40,19 +40,20 @@ class DevAutoLoginMiddleware:
 
 class ForceHttpsMiddleware:
     """
-    Ensure Django treats every request as HTTPS in production.
+    Ensure Django treats every request as HTTPS.
 
     BunkerWeb terminates TLS but may not always forward X-Forwarded-Proto,
     which causes allauth's request.build_absolute_uri() to produce http://
     callback URLs that Authentik rejects. This middleware sets the header
-    unconditionally when DEBUG=False so SecurityMiddleware's
-    SECURE_PROXY_SSL_HEADER check always succeeds.
+    unconditionally so SecurityMiddleware's SECURE_PROXY_SSL_HEADER check
+    always succeeds (and HSTS is emitted) regardless of DEBUG. Local plain-HTTP
+    dev is unaffected: allauth already builds https:// URLs via
+    ACCOUNT_DEFAULT_HTTP_PROTOCOL, and dev does not rely on the forwarded header.
     """
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        if not settings.DEBUG:
-            request.META["HTTP_X_FORWARDED_PROTO"] = "https"
+        request.META["HTTP_X_FORWARDED_PROTO"] = "https"
         return self.get_response(request)

@@ -39,4 +39,4 @@ spec:
             - name: CSRF_TRUSTED_ORIGINS
               value: "https://vels.online"
             - name: DEBUG
-              value: "True"
+              value: "False"

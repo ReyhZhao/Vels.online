@@ -38,7 +38,7 @@ spec:
                   key: fqdn-uri
 
             - name: DEBUG
-              value: "True"
+              value: "False"
 
             - name: CSRF_TRUSTED_ORIGINS
               value: "https://vels.online"
@@ -64,7 +64,7 @@ spec:
             - name: CSRF_TRUSTED_ORIGINS
               value: "https://vels.online"
             - name: DEBUG
-              value: "True"
+              value: "False"
             {{- if .Values.monitoring.enabled }}
             # gunicorn runs multiple workers; prometheus_client multiprocess mode
             # writes per-process samples here for the metrics sidecar to aggregate
