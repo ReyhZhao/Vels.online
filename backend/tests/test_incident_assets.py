@@ -251,6 +251,24 @@ def test_incident_asset_link_duplicate_rejected(client, staff, acme):
     assert response.status_code == 400
 
 
+@pytest.mark.django_db
+def test_incident_asset_link_cross_tenant_rejected(client, acme_member, acme, contoso):
+    # Member of org A, incident in org A, asset owned by org B → must be rejected
+    # with the same not-found response as a missing asset, creating no link and
+    # leaking no foreign asset detail (#687).
+    inc = make_incident(acme)
+    foreign = Asset.objects.create(organization=contoso, kind="host", name="secret", agent_name="secret")
+    client.force_login(acme_member)
+    response = client.post(
+        f"/api/incidents/{inc.display_id}/assets/",
+        {"asset": foreign.id},
+        content_type="application/json",
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Asset not found."}
+    assert not IncidentAsset.objects.filter(incident=inc, asset=foreign).exists()
+
+
 # ── DELETE /api/incidents/{id}/assets/{asset_id}/ ────────────────────────────
 
 

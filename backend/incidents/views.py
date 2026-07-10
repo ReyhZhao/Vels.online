@@ -809,6 +809,12 @@ class IncidentAssetLinkView(APIView):
         except Asset.DoesNotExist:
             return Response({"detail": "Asset not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        # Cross-tenant guard (#687): the asset must belong to the incident's
+        # organisation. Return the same not-found response as a missing asset so
+        # the endpoint does not confirm the existence of another org's assets.
+        if asset.organization_id != incident.organization_id:
+            return Response({"detail": "Asset not found."}, status=status.HTTP_404_NOT_FOUND)
+
         if IncidentAsset.objects.filter(incident=incident, asset=asset).exists():
             return Response({"detail": "Asset already linked to this incident."}, status=status.HTTP_400_BAD_REQUEST)
 
