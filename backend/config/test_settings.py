@@ -1,4 +1,11 @@
-from config.settings import *  # noqa: F401, F403
+import os
+
+# Provide an explicit test key before importing production settings, which now
+# refuse to boot without a SECRET_KEY outside a dev context (#685). Using
+# setdefault lets an explicit env var still win.
+os.environ.setdefault("SECRET_KEY", "test-insecure-key")
+
+from config.settings import *  # noqa: E402, F401, F403
 
 DATABASES = {
     "default": {

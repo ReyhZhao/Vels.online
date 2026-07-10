@@ -2,10 +2,9 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-SECRET_KEY = os.environ.get("SECRET_KEY", "12345")
 
 ONCALL_ROUTING = os.environ.get("ONCALL_ROUTING", "always")
 
@@ -14,8 +13,27 @@ DEBUG = os.environ.get("DEBUG", "False") == "True"
 # Local-dev only: skip interactive login and auto-authenticate as the admin
 # superuser (see config.middleware.DevAutoLoginMiddleware). Set ONLY in
 # docker-compose.yaml — never in the deployment/ Helm manifests. Intentionally
-# independent of DEBUG, since prod also runs with DEBUG=True.
+# independent of DEBUG: production runs with DEBUG=False, and auto-login must
+# stay off there regardless.
 DEV_AUTO_LOGIN = os.environ.get("DEV_AUTO_LOGIN", "False") == "True"
+
+# A recognized local/dev context: either Django debug is on or the docker-compose
+# auto-login flag is set. Used to relax hard security requirements (a real
+# SECRET_KEY, Secure cookies) that must never be relaxed in production.
+_IS_DEV_CONTEXT = DEBUG or DEV_AUTO_LOGIN
+
+# Never fall back to a weak, publicly-known key in production. Outside a dev
+# context a missing SECRET_KEY is a fatal misconfiguration rather than a silent
+# default (#685); in dev we boot with an explicit, clearly-insecure placeholder.
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    if _IS_DEV_CONTEXT:
+        SECRET_KEY = "dev-insecure-key"
+    else:
+        raise ImproperlyConfigured(
+            "SECRET_KEY environment variable is not set. Refusing to boot with an "
+            "insecure fallback key outside a local/dev context."
+        )
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",")
 
@@ -243,8 +261,23 @@ SOCIALACCOUNT_PROVIDERS = {
 
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
+# CSRF_COOKIE_HTTPONLY stays False: the SPA reads the token for the double-submit
+# pattern. Do not flip this.
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
+
+# ── Transport security (#688) ────────────────────────────────────────────────
+# TLS terminates at BunkerWeb; ForceHttpsMiddleware marks proxied requests HTTPS
+# so Django emits HSTS. Flag cookies Secure in production only, so plain-HTTP
+# docker-compose dev keeps authenticating. SECURE_SSL_REDIRECT is deliberately
+# left off — BunkerWeb already handles HTTP→HTTPS.
+SESSION_COOKIE_SECURE = not _IS_DEV_CONTEXT
+CSRF_COOKIE_SECURE = not _IS_DEV_CONTEXT
+SECURE_CONTENT_TYPE_NOSNIFF = True
+if not _IS_DEV_CONTEXT:
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
