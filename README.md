@@ -1,6 +1,6 @@
 # Vels.online
 
-**Vels.online** is an open-source Managed Security Service Provider (MSSP) platform. It gives security teams a unified workspace to monitor infrastructure, respond to incidents, manage vulnerabilities, publish services safely to the internet, and automate repetitive operational work — all from a single multi-tenant application.
+**Vels.online** is a source-available Managed Security Service Provider (MSSP) platform. It gives security teams a unified workspace to monitor infrastructure, respond to incidents, manage vulnerabilities, publish services safely to the internet, and automate repetitive operational work — all from a single multi-tenant application.
 
 The platform is built around a Wazuh-integrated SOC workflow: detections flow in from Wazuh agents (and other sources) as **Alerts**, get triaged (manually or by an LLM), and are worked to resolution through structured playbooks. Everything is scoped per organisation so an MSSP can manage multiple customers from one deployment.
 
@@ -93,4 +93,8 @@ Pull requests are welcome. Please open an issue first to discuss significant cha
 
 ## License
 
-[MIT](LICENSE)
+Source-available under the [Elastic License 2.0](LICENSE.txt) (ELv2). You may
+use, copy, modify, and redistribute the software, with three limitations: you
+may not provide it to others as a hosted or managed service, you may not
+circumvent license-key functionality, and you must preserve licensing notices.
+See [LICENSE.txt](LICENSE.txt) for the full terms.
