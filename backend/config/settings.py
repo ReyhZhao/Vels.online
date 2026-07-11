@@ -196,7 +196,9 @@ DEFAULT_FROM_EMAIL  = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@vels.online"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",
+        # Service-account-aware token auth (#696): enforces the per-account source-IP
+        # allowlist and records last-used time/IP. A drop-in for the stock class.
+        "security.authentication.ServiceAccountTokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [

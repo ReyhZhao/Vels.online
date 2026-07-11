@@ -292,7 +292,17 @@ class ServiceAccountSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ServiceAccount
-        fields = ["id", "name", "description", "orgs", "created_by_username", "created_at"]
+        fields = [
+            "id",
+            "name",
+            "description",
+            "orgs",
+            "allowed_ips",
+            "last_used_at",
+            "last_used_ip",
+            "created_by_username",
+            "created_at",
+        ]
 
     def get_orgs(self, obj):
         return [{"slug": o.slug, "name": o.name} for o in obj.orgs]

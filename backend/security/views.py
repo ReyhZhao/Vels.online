@@ -421,6 +421,32 @@ def _validate_org_slugs(org_slugs):
     return orgs, None
 
 
+def _validate_allowed_ips(value):
+    """Normalise a service account's source-IP allowlist (#696), or return an error.
+
+    Accepts individual IPs and CIDR ranges (IPv4/IPv6), normalising each to its
+    network form — mirroring the org internal-ranges validation. Returns
+    ``(cleaned_list, None)`` or ``(None, error_response)``.
+    """
+    import ipaddress
+
+    if not isinstance(value, list):
+        return None, Response({"detail": "allowed_ips must be a list."}, status=400)
+    cleaned = []
+    for entry in value:
+        entry = (entry or "").strip()
+        if not entry:
+            continue
+        try:
+            # strict=False so a host-bit-set CIDR like 10.0.0.5/24 is accepted and
+            # normalised to its network address.
+            network = ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            return None, Response({"detail": f"Invalid IP or CIDR range: {entry!r}"}, status=400)
+        cleaned.append(str(network))
+    return cleaned, None
+
+
 class ServiceAccountListView(APIView):
     """Staff-only management of service accounts (PRD #694).
 
@@ -445,8 +471,15 @@ class ServiceAccountListView(APIView):
         orgs, err = _validate_org_slugs(request.data.get("org_slugs") or [])
         if err:
             return err
+        allowed_ips, err = _validate_allowed_ips(request.data.get("allowed_ips") or [])
+        if err:
+            return err
         account = ServiceAccount.create(
-            name=name, description=description, orgs=orgs, created_by=request.user
+            name=name,
+            description=description,
+            orgs=orgs,
+            allowed_ips=allowed_ips,
+            created_by=request.user,
         )
         data = ServiceAccountSerializer(account).data
         # The full token is surfaced once, at creation. It is never redisplayed by
@@ -471,6 +504,11 @@ class ServiceAccountDetailView(APIView):
             account.name = name
         if "description" in request.data:
             account.description = (request.data.get("description") or "").strip()
+        if "allowed_ips" in request.data:
+            allowed_ips, err = _validate_allowed_ips(request.data.get("allowed_ips") or [])
+            if err:
+                return err
+            account.allowed_ips = allowed_ips
         account.save()
         if "org_slugs" in request.data:
             orgs, err = _validate_org_slugs(request.data.get("org_slugs") or [])

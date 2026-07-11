@@ -206,3 +206,163 @@ def test_service_account_absent_from_staff_user_picker(admin_client, acme):
     assert resp.status_code == 200
     usernames = [u.get("username") for u in resp.json()]
     assert account.user.username not in usernames
+
+
+# ── auditing: last-used time/IP (#696) ────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_last_used_recorded_on_authenticated_request(admin_client, client, acme):
+    account = ServiceAccount.create(name="svc", orgs=[acme])
+    auth = f"Token {account.token.key}"
+
+    assert account.last_used_at is None
+    resp = client.get(
+        "/api/security/organizations/", HTTP_AUTHORIZATION=auth, HTTP_X_FORWARDED_FOR="203.0.113.7"
+    )
+    assert resp.status_code == 200
+
+    account.refresh_from_db()
+    assert account.last_used_at is not None
+    assert account.last_used_ip == "203.0.113.7"
+
+    # Surfaced by the staff management API for auditing.
+    row = next(r for r in admin_client.get("/api/security/service-accounts/").json() if r["id"] == account.pk)
+    assert row["last_used_ip"] == "203.0.113.7"
+    assert row["last_used_at"] is not None
+
+
+@pytest.mark.django_db
+def test_client_ip_taken_from_rightmost_forwarded_for(client, acme):
+    """Behind one trusted proxy, the real client is the rightmost XFF entry — the one
+    the proxy appended. The leftmost value is caller-supplied and must be ignored."""
+    account = ServiceAccount.create(name="svc", orgs=[acme])
+    auth = f"Token {account.token.key}"
+
+    resp = client.get(
+        "/api/security/organizations/",
+        HTTP_AUTHORIZATION=auth,
+        HTTP_X_FORWARDED_FOR="1.1.1.1, 203.0.113.7",
+    )
+    assert resp.status_code == 200
+    account.refresh_from_db()
+    assert account.last_used_ip == "203.0.113.7"
+
+
+# ── source-IP allowlist (#696) ────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_allowlist_permits_matching_ip_and_denies_others(client, acme):
+    account = ServiceAccount.create(name="svc", orgs=[acme], allowed_ips=["203.0.113.0/24"])
+    auth = f"Token {account.token.key}"
+
+    # In range → authenticates.
+    assert client.get(
+        "/api/security/organizations/", HTTP_AUTHORIZATION=auth, HTTP_X_FORWARDED_FOR="203.0.113.9"
+    ).status_code == 200
+
+    # Out of range → rejected at auth time.
+    assert client.get(
+        "/api/security/organizations/", HTTP_AUTHORIZATION=auth, HTTP_X_FORWARDED_FOR="198.51.100.4"
+    ).status_code == 401
+
+
+@pytest.mark.django_db
+def test_rejected_attempt_does_not_update_last_used(client, acme):
+    account = ServiceAccount.create(name="svc", orgs=[acme], allowed_ips=["203.0.113.0/24"])
+    auth = f"Token {account.token.key}"
+
+    resp = client.get(
+        "/api/security/organizations/", HTTP_AUTHORIZATION=auth, HTTP_X_FORWARDED_FOR="198.51.100.4"
+    )
+    assert resp.status_code == 401
+    account.refresh_from_db()
+    assert account.last_used_at is None
+    assert account.last_used_ip is None
+
+
+@pytest.mark.django_db
+def test_spoofed_leftmost_forwarded_for_cannot_bypass_allowlist(client, acme):
+    """A caller pre-setting a forged leftmost XFF cannot slip past the allowlist: the
+    trusted value is the rightmost (proxy-appended) one."""
+    account = ServiceAccount.create(name="svc", orgs=[acme], allowed_ips=["203.0.113.0/24"])
+    auth = f"Token {account.token.key}"
+
+    # Caller forges an in-range leftmost value; the proxy appends the real, out-of-range IP.
+    assert client.get(
+        "/api/security/organizations/",
+        HTTP_AUTHORIZATION=auth,
+        HTTP_X_FORWARDED_FOR="203.0.113.9, 198.51.100.4",
+    ).status_code == 401
+
+
+@pytest.mark.django_db
+def test_empty_allowlist_is_unrestricted(client, acme):
+    account = ServiceAccount.create(name="svc", orgs=[acme], allowed_ips=[])
+    auth = f"Token {account.token.key}"
+    assert client.get(
+        "/api/security/organizations/", HTTP_AUTHORIZATION=auth, HTTP_X_FORWARDED_FOR="198.51.100.4"
+    ).status_code == 200
+
+
+@pytest.mark.django_db
+def test_allowlist_supports_ipv6(client, acme):
+    account = ServiceAccount.create(name="svc", orgs=[acme], allowed_ips=["2001:db8::/32"])
+    auth = f"Token {account.token.key}"
+    assert client.get(
+        "/api/security/organizations/", HTTP_AUTHORIZATION=auth, HTTP_X_FORWARDED_FOR="2001:db8::1"
+    ).status_code == 200
+    assert client.get(
+        "/api/security/organizations/", HTTP_AUTHORIZATION=auth, HTTP_X_FORWARDED_FOR="2001:dead::1"
+    ).status_code == 401
+
+
+# ── managing the allowlist through the API (#696) ─────────────────────────────
+
+
+@pytest.mark.django_db
+def test_create_with_allowlist_normalises_and_persists(admin_client, acme):
+    resp = _post(
+        admin_client,
+        "/api/security/service-accounts/",
+        {"name": "svc", "org_slugs": ["acme"], "allowed_ips": ["203.0.113.5/24", "10.0.0.1"]},
+    )
+    assert resp.status_code == 201
+    # Host-bit-set CIDR is normalised to its network address.
+    assert resp.json()["allowed_ips"] == ["203.0.113.0/24", "10.0.0.1/32"]
+
+
+@pytest.mark.django_db
+def test_create_rejects_invalid_allowlist_entry(admin_client, acme):
+    resp = _post(
+        admin_client,
+        "/api/security/service-accounts/",
+        {"name": "svc", "org_slugs": ["acme"], "allowed_ips": ["not-an-ip"]},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_patch_updates_allowlist(admin_client, acme):
+    account = ServiceAccount.create(name="svc", orgs=[acme])
+    resp = _patch(
+        admin_client,
+        f"/api/security/service-accounts/{account.pk}/",
+        {"allowed_ips": ["192.0.2.0/24"]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["allowed_ips"] == ["192.0.2.0/24"]
+    account.refresh_from_db()
+    assert account.allowed_ips == ["192.0.2.0/24"]
+
+
+@pytest.mark.django_db
+def test_patch_rejects_invalid_allowlist_entry(admin_client, acme):
+    account = ServiceAccount.create(name="svc", orgs=[acme])
+    resp = _patch(
+        admin_client,
+        f"/api/security/service-accounts/{account.pk}/",
+        {"allowed_ips": ["999.999.999.999"]},
+    )
+    assert resp.status_code == 400

@@ -90,4 +90,63 @@ describe('ServiceAccountsAdmin', () => {
 
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/security/service-accounts/1/'));
   });
+
+  it('shows last-used info and the IP allowlist, with sensible empty states', async () => {
+    mockGet([
+      { ...ACCOUNTS[0], last_used_at: null, last_used_ip: null, allowed_ips: [] },
+      {
+        id: 2,
+        name: 'Locked down',
+        orgs: [],
+        created_by_username: 'alice',
+        created_at: '2026-01-15T10:00:00Z',
+        last_used_at: '2026-02-01T09:30:00Z',
+        last_used_ip: '203.0.113.7',
+        allowed_ips: ['203.0.113.0/24'],
+      },
+    ]);
+    render(<ServiceAccountsAdmin />);
+    await waitFor(() => screen.getByText('Locked down'));
+
+    // Never-used + unrestricted account.
+    expect(screen.getByText('Never used')).toBeInTheDocument();
+    expect(screen.getByText('Any IP')).toBeInTheDocument();
+
+    // Used + restricted account.
+    expect(screen.getByText(/from 203\.0\.113\.7/)).toBeInTheDocument();
+    expect(screen.getByText('203.0.113.0/24')).toBeInTheDocument();
+  });
+
+  it('edits the IP allowlist and sends the parsed entries', async () => {
+    mockGet([{ ...ACCOUNTS[0], allowed_ips: [], last_used_at: null, last_used_ip: null }]);
+    api.patch.mockResolvedValue({ data: {} });
+    render(<ServiceAccountsAdmin />);
+    await waitFor(() => screen.getByText('CI pipeline'));
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit/i }));
+    fireEvent.change(screen.getByLabelText('IP allowlist'), {
+      target: { value: '203.0.113.0/24\n10.0.0.1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith(
+        '/api/security/service-accounts/1/',
+        expect.objectContaining({ allowed_ips: ['203.0.113.0/24', '10.0.0.1'] }),
+      ),
+    );
+  });
+
+  it('surfaces a server-side allowlist validation error', async () => {
+    mockGet([{ ...ACCOUNTS[0], allowed_ips: [], last_used_at: null, last_used_ip: null }]);
+    api.patch.mockRejectedValue({ response: { data: { detail: "Invalid IP or CIDR range: 'nope'" } } });
+    render(<ServiceAccountsAdmin />);
+    await waitFor(() => screen.getByText('CI pipeline'));
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit/i }));
+    fireEvent.change(screen.getByLabelText('IP allowlist'), { target: { value: 'nope' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => screen.getByText(/Invalid IP or CIDR range/i));
+  });
 });

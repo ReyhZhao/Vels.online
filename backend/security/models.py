@@ -144,6 +144,18 @@ class ServiceAccount(models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # Auditing (#696): the most recent time the account's token authenticated a
+    # request, and the client IP it came from. Only the latest use is kept — not a
+    # full history. Recorded by ServiceAccountTokenAuthentication on every accepted
+    # request (write-throttled; see record_use).
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    last_used_ip = models.GenericIPAddressField(null=True, blank=True)
+    # Optional source-IP allowlist (#696): CIDR ranges / individual IPs the token may
+    # be used from. Empty = unrestricted. When non-empty, a request whose (proxy-
+    # derived) client IP is not covered is rejected at authentication time — and its
+    # last-used fields are left untouched. Fails closed: a set allowlist with an
+    # undeterminable client IP is denied.
+    allowed_ips = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["name"]
@@ -152,7 +164,7 @@ class ServiceAccount(models.Model):
         return f"ServiceAccount({self.name})"
 
     @classmethod
-    def create(cls, *, name, description="", orgs=(), created_by=None):
+    def create(cls, *, name, description="", orgs=(), allowed_ips=(), created_by=None):
         """Provision the backing user, its org grants, and its token in one step."""
         import uuid
 
@@ -165,11 +177,57 @@ class ServiceAccount(models.Model):
         user.set_unusable_password()
         user.save(update_fields=["password"])
         account = cls.objects.create(
-            user=user, name=name, description=description, created_by=created_by
+            user=user,
+            name=name,
+            description=description,
+            allowed_ips=list(allowed_ips),
+            created_by=created_by,
         )
         account.set_orgs(orgs)
         Token.objects.create(user=user)
         return account
+
+    def is_ip_allowed(self, ip):
+        """True if ``ip`` may use this account's token.
+
+        An empty allowlist permits everything. A non-empty allowlist fails closed:
+        an unparseable/absent ``ip`` is denied. Malformed stored entries are skipped
+        defensively (the write path validates, but a row could be edited out-of-band).
+        """
+        import ipaddress
+
+        ranges = self.allowed_ips or []
+        if not ranges:
+            return True
+        try:
+            addr = ipaddress.ip_address((ip or "").strip())
+        except ValueError:
+            return False
+        for entry in ranges:
+            try:
+                if addr in ipaddress.ip_network((entry or "").strip(), strict=False):
+                    return True
+            except ValueError:
+                continue
+        return False
+
+    def record_use(self, ip):
+        """Stamp last-used time/IP for an accepted request.
+
+        Write-throttled: an identical IP seen again within a minute is skipped, so a
+        chatty token doesn't amplify into a DB write per request. A changed IP always
+        records immediately, keeping the audit trail's source visibility crisp.
+        """
+        now = timezone.now()
+        if (
+            self.last_used_at is not None
+            and self.last_used_ip == ip
+            and (now - self.last_used_at).total_seconds() < 60
+        ):
+            return
+        self.last_used_at = now
+        self.last_used_ip = ip
+        self.save(update_fields=["last_used_at", "last_used_ip"])
 
     def set_orgs(self, orgs):
         """Replace the account's org grants (memberships) with exactly ``orgs``."""
