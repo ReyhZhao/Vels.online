@@ -1,12 +1,13 @@
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../lib/parseSSE', () => ({ streamSSE: vi.fn() }));
 import { streamSSE } from '../lib/parseSSE';
-import useAttackStream from './useAttackStream';
+import useAttackStream, { BACKFILL_GRACE_MS, MAX_INTERVAL_MS } from './useAttackStream';
 
 describe('useAttackStream', () => {
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.useRealTimers());
 
   it('connects with after=-1 and backfills arcs + stats, then tails', async () => {
     streamSSE.mockImplementation((url, opts, onEvent) => {
@@ -41,6 +42,46 @@ describe('useAttackStream', () => {
     await waitFor(() => expect(streamSSE).toHaveBeenCalledTimes(2));
     // The reconnect resumes from the last seq seen, not the whole buffer.
     expect(streamSSE.mock.calls[1][0]).toContain('after=5');
+  });
+
+  it('flushes the cold-join backfill burst at once, preserving order (#698)', async () => {
+    // A backfill of many arcs arrives in one burst right after connect; it should paint
+    // as recent history immediately, not drip out slowly.
+    streamSSE.mockImplementation((url, opts, onEvent) => {
+      for (let seq = 0; seq < 40; seq += 1) onEvent({ event: 'arc', data: { seq, level: 5 } });
+      return new Promise(() => {});
+    });
+    const { result } = renderHook(() => useAttackStream());
+    await waitFor(() => expect(result.current.events).toHaveLength(40));
+    expect(result.current.events.map((e) => e.seq)).toEqual([...Array(40).keys()]);
+  });
+
+  it('drips live arcs one at a time in seq order after the backfill window (#698)', async () => {
+    vi.useFakeTimers();
+    let emit;
+    streamSSE.mockImplementation((url, opts, onEvent) => {
+      emit = onEvent;
+      return new Promise(() => {}); // stay open
+    });
+    const { result } = renderHook(() => useAttackStream());
+
+    // Let the post-connect backfill grace window elapse (no backfill emitted here).
+    await act(async () => { await vi.advanceTimersByTimeAsync(BACKFILL_GRACE_MS + 50); });
+
+    // A producer tick delivers a burst of 4 live arcs at once.
+    act(() => {
+      [10, 11, 12, 13].forEach((seq) => emit({ event: 'arc', data: { seq, level: 5 } }));
+    });
+
+    // The burst does NOT land on one frame: the first arc drips out, the rest follow.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.events.map((e) => e.seq)).toEqual([10]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(MAX_INTERVAL_MS); });
+    expect(result.current.events).toHaveLength(2);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(MAX_INTERVAL_MS * 3); });
+    expect(result.current.events.map((e) => e.seq)).toEqual([10, 11, 12, 13]);
   });
 
   it('aborts the stream on unmount', async () => {
