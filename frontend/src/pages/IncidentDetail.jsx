@@ -1173,7 +1173,7 @@ function IncidentDescription({ displayId, description, isStaff, onSaved }) {
         </div>
       ) : description ? (
         <div className="space-y-2">
-          <div className={`prose prose-sm dark:prose-invert max-w-none ${isLong && !expanded ? 'relative after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-12 after:bg-gradient-to-t after:from-card after:to-transparent' : ''}`}>
+          <div className={`prose prose-sm dark:prose-invert max-w-none break-words [overflow-wrap:anywhere] [&_pre]:overflow-x-auto [&_table]:block [&_table]:overflow-x-auto ${isLong && !expanded ? 'relative after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-12 after:bg-gradient-to-t after:from-card after:to-transparent' : ''}`}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{shownDescription}</ReactMarkdown>
           </div>
           {isLong && (
@@ -1964,7 +1964,7 @@ export default function IncidentDetail() {
 
               {/* ── About (left, narrower) + a wider facts/discussion column (right) (#693) ── */}
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-5 lg:items-start">
-                <section className="space-y-4 rounded-lg border border-border bg-card p-6 lg:col-span-2">
+                <section className="min-w-0 space-y-4 rounded-lg border border-border bg-card p-6 lg:col-span-2">
                   <IncidentDescription
                     displayId={displayId}
                     description={incident.description}
@@ -1977,7 +1977,7 @@ export default function IncidentDetail() {
                   </div>
                 </section>
 
-                <div className="space-y-6 lg:col-span-3">
+                <div className="min-w-0 space-y-6 lg:col-span-3">
                   <section className="space-y-4 rounded-lg border border-border bg-card p-6">
                     <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Key facts</h2>
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-2">

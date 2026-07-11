@@ -120,6 +120,18 @@ describe('IncidentDetail', () => {
     await waitFor(() => screen.getByText('Multiple failed logins from unusual IP.'));
   });
 
+  it('wraps a long unbroken description token so it cannot force horizontal scroll (#695)', async () => {
+    const longToken = 'https://example.com/' + 'a'.repeat(240);
+    mockGet({ ...INCIDENT, description: longToken });
+    renderPage();
+    const rendered = await screen.findByText(longToken);
+    // The markdown/prose container must carry word-breaking so a long
+    // unbroken token wraps within its column instead of overflowing the page.
+    const prose = rendered.closest('.prose');
+    expect(prose).not.toBeNull();
+    expect(prose.className).toContain('break-words');
+  });
+
   it('shows help affordances for the header fields (#589)', async () => {
     mockGet({
       ...INCIDENT,
