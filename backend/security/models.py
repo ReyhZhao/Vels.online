@@ -124,6 +124,82 @@ class OrganizationMembership(models.Model):
         return f"{self.user} → {self.organization}"
 
 
+class ServiceAccount(models.Model):
+    """A non-human API principal (PRD #694): lets an admin connect external services
+    without borrowing a person's account.
+
+    Backed by a dedicated, non-interactive ``User`` (``is_staff=False`` /
+    ``is_superuser=False``, unusable password, never provisioned via SSO) so it can
+    never log in interactively and can never hold cross-org / staff-only SOC powers.
+    Its org access is granted *solely* through ``OrganizationMembership`` rows, so the
+    existing membership gate (``_resolve_org``) scopes its token automatically — no new
+    enforcement path. It authenticates with a single DRF auth token
+    (``rest_framework.authtoken``), one per account.
+    """
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="service_account")
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"ServiceAccount({self.name})"
+
+    @classmethod
+    def create(cls, *, name, description="", orgs=(), created_by=None):
+        """Provision the backing user, its org grants, and its token in one step."""
+        import uuid
+
+        from rest_framework.authtoken.models import Token
+
+        username = f"svc-{uuid.uuid4().hex[:20]}"
+        user = User.objects.create(
+            username=username, is_active=True, is_staff=False, is_superuser=False
+        )
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+        account = cls.objects.create(
+            user=user, name=name, description=description, created_by=created_by
+        )
+        account.set_orgs(orgs)
+        Token.objects.create(user=user)
+        return account
+
+    def set_orgs(self, orgs):
+        """Replace the account's org grants (memberships) with exactly ``orgs``."""
+        desired = {o.pk: o for o in orgs}
+        existing = {m.organization_id: m for m in self.user.org_memberships.all()}
+        for org_id, membership in existing.items():
+            if org_id not in desired:
+                membership.delete()
+        for org_id, org in desired.items():
+            if org_id not in existing:
+                OrganizationMembership.objects.create(user=self.user, organization=org)
+
+    @property
+    def orgs(self):
+        return Organization.objects.filter(memberships__user=self.user).order_by("name")
+
+    @property
+    def token(self):
+        from rest_framework.authtoken.models import Token
+
+        return Token.objects.filter(user=self.user).first()
+
+    def rotate_token(self):
+        """Invalidate the current token and issue a fresh one."""
+        from rest_framework.authtoken.models import Token
+
+        Token.objects.filter(user=self.user).delete()
+        return Token.objects.create(user=self.user)
+
+
 class OrgInvitation(models.Model):
     ROLE_MEMBER = "member"
     ROLE_STAFF = "staff"

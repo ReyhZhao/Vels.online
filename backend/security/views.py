@@ -13,7 +13,7 @@ from signups.authentik import AuthentikAPIError, AuthentikClient
 logger = logging.getLogger(__name__)
 
 from django.db.models import Count, Q
-from security.models import Download, OrgInvitation, Organization, OrganizationMembership, RiskAcceptance, VulnerabilitySnapshot, WorkPackage, WorkPackageItem
+from security.models import Download, OrgInvitation, Organization, OrganizationMembership, RiskAcceptance, ServiceAccount, VulnerabilitySnapshot, WorkPackage, WorkPackageItem
 from security.serializers import (
     AgentSerializer,
     CveDetailSerializer,
@@ -25,6 +25,7 @@ from security.serializers import (
     PaginatedEventsSerializer,
     PaginatedVulnerabilitiesSerializer,
     RiskAcceptanceSerializer,
+    ServiceAccountSerializer,
     VulnerabilitySnapshotSerializer,
     WorkPackageArchiveListSerializer,
     WorkPackageItemSerializer,
@@ -406,6 +407,101 @@ class OrgInviteView(APIView):
             },
             status=201,
         )
+
+
+def _validate_org_slugs(org_slugs):
+    """Resolve a list of org slugs to Organizations, or return (None, error_response)."""
+    if not isinstance(org_slugs, list):
+        return None, Response({"detail": "org_slugs must be a list."}, status=400)
+    orgs = list(Organization.objects.filter(slug__in=org_slugs))
+    found = {o.slug for o in orgs}
+    missing = [s for s in org_slugs if s not in found]
+    if missing:
+        return None, Response({"detail": f"Unknown organisation(s): {', '.join(missing)}."}, status=400)
+    return orgs, None
+
+
+class ServiceAccountListView(APIView):
+    """Staff-only management of service accounts (PRD #694).
+
+    GET  — list all service accounts (name, granted orgs, creator, created-at).
+    POST — create one from {name, description?, org_slugs: [...]}, returning the
+           token exactly once.
+    """
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response(status=403)
+        accounts = ServiceAccount.objects.select_related("created_by").all()
+        return Response(ServiceAccountSerializer(accounts, many=True).data)
+
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response(status=403)
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            return Response({"detail": "name is required."}, status=400)
+        description = (request.data.get("description") or "").strip()
+        orgs, err = _validate_org_slugs(request.data.get("org_slugs") or [])
+        if err:
+            return err
+        account = ServiceAccount.create(
+            name=name, description=description, orgs=orgs, created_by=request.user
+        )
+        data = ServiceAccountSerializer(account).data
+        # The full token is surfaced once, at creation. It is never redisplayed by
+        # the list endpoint — rotate to obtain a fresh value if it is lost.
+        data["token"] = account.token.key
+        return Response(data, status=201)
+
+
+class ServiceAccountDetailView(APIView):
+    """Staff-only edit (name/description/org grants) and revoke of a service account."""
+
+    def patch(self, request, pk):
+        if not request.user.is_staff:
+            return Response(status=403)
+        account = ServiceAccount.objects.filter(pk=pk).first()
+        if account is None:
+            return Response(status=404)
+        if "name" in request.data:
+            name = (request.data.get("name") or "").strip()
+            if not name:
+                return Response({"detail": "name is required."}, status=400)
+            account.name = name
+        if "description" in request.data:
+            account.description = (request.data.get("description") or "").strip()
+        account.save()
+        if "org_slugs" in request.data:
+            orgs, err = _validate_org_slugs(request.data.get("org_slugs") or [])
+            if err:
+                return err
+            account.set_orgs(orgs)
+        return Response(ServiceAccountSerializer(account).data)
+
+    def delete(self, request, pk):
+        if not request.user.is_staff:
+            return Response(status=403)
+        account = ServiceAccount.objects.filter(pk=pk).first()
+        if account is None:
+            return Response(status=404)
+        # Deleting the backing user cascades to the account, its memberships, and its
+        # token — so the token stops authenticating immediately.
+        account.user.delete()
+        return Response(status=204)
+
+
+class ServiceAccountRotateTokenView(APIView):
+    """Staff-only token rotation: invalidate the old token, return a new one once."""
+
+    def post(self, request, pk):
+        if not request.user.is_staff:
+            return Response(status=403)
+        account = ServiceAccount.objects.filter(pk=pk).first()
+        if account is None:
+            return Response(status=404)
+        token = account.rotate_token()
+        return Response({"token": token.key})
 
 
 class AgentListView(APIView):

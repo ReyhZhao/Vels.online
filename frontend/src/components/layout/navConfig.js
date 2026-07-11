@@ -29,6 +29,7 @@ import {
   Search,
   Handshake,
   Inbox,
+  KeyRound,
 } from 'lucide-react';
 
 // Top-level link rendered above the sections.
@@ -130,6 +131,7 @@ export const NAV_SECTIONS = [
       { to: '/admin/incidents/oncall', icon: CalendarClock, label: 'On-Call' },
       { to: '/admin/status-settings', icon: Server, label: 'Service Monitor' },
       { to: '/admin/security/organizations', icon: Shield, label: 'Organisations' },
+      { to: '/admin/security/service-accounts', icon: KeyRound, label: 'Service Accounts' },
       { to: '/admin/security/downloads', icon: Download, label: 'Downloads' },
       { to: '/admin/signup-requests', icon: UserPlus, label: 'Signup Requests', badge: 'pendingSignups' },
       { to: '/admin/tasks/history', icon: History, label: 'Task History' },

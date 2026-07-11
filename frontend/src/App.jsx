@@ -11,6 +11,7 @@ import AdminPostList from './pages/AdminPostList';
 import AdminPostForm from './pages/AdminPostForm';
 import StatusSettings from './pages/admin/StatusSettings';
 import OrgManagement from './pages/admin/OrgManagement';
+import ServiceAccountsAdmin from './pages/admin/ServiceAccountsAdmin';
 import DownloadManagement from './pages/admin/DownloadManagement';
 import SubjectsAdmin from './pages/admin/SubjectsAdmin';
 import TaskTemplatesAdmin from './pages/admin/TaskTemplatesAdmin';
@@ -80,6 +81,7 @@ function App() {
           <Route path="/admin/posts/:slug/edit" element={<AdminPostForm />} />
           <Route path="/admin/status-settings" element={<StatusSettings />} />
           <Route path="/admin/security/organizations" element={<OrgManagement />} />
+          <Route path="/admin/security/service-accounts" element={<ServiceAccountsAdmin />} />
           <Route path="/admin/security/downloads" element={<DownloadManagement />} />
           <Route path="/admin/signup-requests" element={<SignupRequests />} />
           <Route path="/admin/incidents/subjects" element={<SubjectsAdmin />} />

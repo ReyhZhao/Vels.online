@@ -3,7 +3,14 @@ import re
 
 from rest_framework import serializers
 
-from .models import Download, Organization, RiskAcceptance, WorkPackage, WorkPackageItem
+from .models import (
+    Download,
+    Organization,
+    RiskAcceptance,
+    ServiceAccount,
+    WorkPackage,
+    WorkPackageItem,
+)
 
 # A syntactically valid domain label: alphanumerics and hyphens, not starting or
 # ending with a hyphen, up to 63 chars. A domain is one or more such labels joined
@@ -277,3 +284,18 @@ class RiskAcceptanceSerializer(serializers.ModelSerializer):
     class Meta:
         model = RiskAcceptance
         fields = ["id", "org_slug", "cve_id", "accepted_by", "accepted_at", "note", "severity", "cvss_score"]
+
+
+class ServiceAccountSerializer(serializers.ModelSerializer):
+    orgs = serializers.SerializerMethodField()
+    created_by_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ServiceAccount
+        fields = ["id", "name", "description", "orgs", "created_by_username", "created_at"]
+
+    def get_orgs(self, obj):
+        return [{"slug": o.slug, "name": o.name} for o in obj.orgs]
+
+    def get_created_by_username(self, obj):
+        return obj.created_by.username if obj.created_by else None
