@@ -47,8 +47,8 @@ metadata:
 spec:
   retentionPolicy: "14d"
   configuration:
-    destinationPath: s3://cnpg-backup/
-    endpointURL: http://minio.minio:9000
+    destinationPath: s3://vels-cnpg-backups/
+    endpointURL: https://s3.eu-central-1.wasabisys.com
     s3Credentials:
       accessKeyId:
         name: minio
