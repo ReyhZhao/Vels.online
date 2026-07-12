@@ -64,6 +64,13 @@ class Organization(models.Model):
     is_infrastructure = models.BooleanField(default=False)
     max_routes = models.PositiveIntegerField(null=True, blank=True)
     triage_fp_threshold = models.FloatField(default=0.95)
+    # Lower FP-confidence floor that applies *only* when the Classify model explicitly
+    # recommends closing (primary_action == "close_as_false_positive"). Trusting the
+    # model's own disposition lets an incident it flags as junk auto-close below the
+    # blanket triage_fp_threshold, while the floor still guards against a low-confidence
+    # close recommendation (ADR-0024, #699). Kept below triage_fp_threshold; if raised
+    # above it the recommendation-gated path simply becomes redundant, never unsafe.
+    triage_fp_close_bar = models.FloatField(default=0.80)
     # Minimum disposition_confidence (ADR-0024) the Classify phase must report before
     # the agentic Triage Work phase is allowed to run unattended. Conservative default
     # (high bar) so autonomy stays off until an operator deliberately tunes it down.
