@@ -106,6 +106,33 @@ Triage no longer starts every incident cold. It carries the SOC's accumulated ju
 - **Self-correcting, not just self-reinforcing** — a human overturning a Lesson bumps its contradiction count; at 2 it auto-suspends and re-enters the review queue. Lessons decay and archive after 180 days unused, and at most 5 are injected per subject (the sweep consolidates near-duplicates).
 - **Classification Corrections close the loop** — whenever a human overturns Classify's output (changes the subject, overrides severity, reverses the FP/disposition call), the correction is recorded first-class. It powers a **Classify-accuracy metric** (initial-vs-final subject agreement over time) and enriches future Precedents with the corrected outcome, so Classify dampens its overconfidence on shapes the SOC frequently reclassifies.
 
+### What qualifies as a learned Lesson
+
+The sweep never proposes a Lesson from a single case or a hunch. For a pattern to become a *proposed* Lesson, every one of these has to line up:
+
+1. **The evidence is human-ratified.** Only incidents a *human* closed, plus human Classification Corrections, count. The Triage Agent's own unratified `pending_closure`, Classify's false-positive auto-close, and stale/duplicate auto-closes are all excluded — the system never learns from a machine's disposition.
+2. **The incident carries a Subject and a real closure.** The Subject (+ `source_kind`) is the cluster key; incidents with no subject, no closure reason, or a duplicate closure aren't evidence.
+3. **It happened recently.** Evidence is drawn from a rolling ~90-day window, so the SOC's *current* judgement drives what's learned.
+4. **Enough corroborating cases cluster together.** An **Org Lesson** needs **≥ 3** human-ratified cases sharing the same Subject + `source_kind` within one tenant. A **Global Lesson** additionally needs that pattern to span **≥ 2 distinct tenants** before it can generalise fleet-wide.
+5. **No active Lesson already covers it.** If an active or already-proposed Lesson matches that Subject + `source_kind`, the cluster is left alone rather than duplicated.
+6. **The distiller produces usable guidance.** The LLM is asked to distil the cluster into a reusable heuristic; if it returns nothing usable, no Lesson is proposed.
+
+Clearing all six yields a **`proposed`** Lesson — still inert until a SOC staff member approves it (edit-on-approve) on the review queue.
+
+### Watching the learning — the *Recent sweeps* panel
+
+The distillation sweep runs unattended in the background, so a run that proposes nothing used to be indistinguishable from one that never ran. The **Triage Lessons** review page (staff-only) now carries a **Recent sweeps** panel that makes each run inspectable: for every run it shows how many incidents were **eligible**, how many candidate **clusters** it examined, and how many Lessons it **proposed** (and how many of those were Global). Expanding a run reveals the per-cluster decision, so you can see exactly why a Subject did or didn't produce a Lesson:
+
+| State | Meaning |
+| --- | --- |
+| **Proposed** | The cluster cleared every gate; a new `proposed` Lesson is waiting in the review queue. |
+| **Too few cases** | Fewer than the required corroborating human-ratified cases (**< 3** for an Org Lesson, or fewer than 2 tenants for a Global one). Nothing proposed — the pattern hasn't recurred enough yet. |
+| **Already covered** | An active or proposed Lesson already matches this Subject + `source_kind`, so the sweep left it alone to avoid duplicates. |
+| **No guidance** | The cluster met the thresholds, but the distiller returned nothing usable to turn into a heuristic. |
+| **Distiller error** | The LLM call for this cluster failed; it's skipped this run and retried on the next sweep. |
+
+Because this panel only *reports* what the sweep considered, it never changes what gets learned — and, like all Lesson evidence, a Global Lesson's underlying incident links stay staff-only ([ADR-0031](../adr/0031-cross-org-triage-learning-isolation.md)).
+
 ---
 
 ## IOC Enrichment
