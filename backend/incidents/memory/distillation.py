@@ -99,22 +99,58 @@ def _has_covering_lesson(organization_id, subject_id, source_kind):
     ).exists()
 
 
-def _record_outcome(outcomes, *, tier, subject, source_kind, organization, incidents, outcome):
+def _record_outcome(outcomes, *, tier, subject, source_kind, organization, incidents, outcome,
+                    prompt=None, response=None, error=None):
     """Append one cluster decision to an observability collector, if one is supplied (#697).
 
-    Records only the cluster key and the decision reason — never raw incident bodies — so
-    the run summary stays a lightweight, staff-only audit of what the sweep considered.
+    Beyond the cluster key + decision reason, when the distiller actually ran for a cluster
+    we also record the ``prompt`` (the payload handed to the distiller), its raw ``response``,
+    and any ``error`` — the LLM I/O needed to troubleshoot why a cluster did or didn't yield
+    a Lesson. These carry raw incident text (and, for Global clusters, cross-tenant text), so
+    the whole run record stays behind the staff-only review surface (ADR-0031), exactly like
+    a Lesson's evidence links. Skipped clusters (too few cases / already covered) never invoke
+    the distiller, so they carry no LLM I/O.
     """
     if outcomes is None:
         return
-    outcomes.append({
+    entry = {
         "tier": tier,
         "organization": organization.slug if organization is not None else None,
         "subject": subject.name if subject is not None else None,
         "source_kind": source_kind,
         "evidence_count": len(incidents),
         "outcome": outcome,
-    })
+    }
+    if prompt is not None:
+        entry["prompt"] = prompt
+    if response is not None:
+        entry["response"] = response
+    if error is not None:
+        entry["error"] = error
+    outcomes.append(entry)
+
+
+def _run_distiller(provider, payload, subject_id, record):
+    """Call the distiller for one cluster, capturing LLM I/O for troubleshooting (#697).
+
+    On success returns the raw draft dict; the caller then records the proposed / empty-
+    guidance outcome together with the prompt + response. On failure records the distiller-
+    error outcome — with the prompt and the error string — and returns ``None``. The full
+    payload/response are DEBUG-logged only (they carry raw, possibly cross-tenant incident
+    text); the error is logged with a traceback so a failing distiller is visible in the
+    worker log without turning on DEBUG.
+    """
+    from incidents.models import DistillationRun
+
+    logger.debug("distillation: distiller prompt for subject %s: %s", subject_id, payload)
+    try:
+        draft = provider.distill_triage_lesson(payload) or {}
+    except Exception as exc:
+        logger.exception("distillation: distiller failed for subject %s", subject_id)
+        record(DistillationRun.OUTCOME_DISTILLER_ERROR, prompt=payload, error=str(exc))
+        return None
+    logger.debug("distillation: distiller response for subject %s: %s", subject_id, draft)
+    return draft
 
 
 def run_distillation_sweep(*, provider=None, since=None, min_evidence=MIN_EVIDENCE,
@@ -142,26 +178,22 @@ def run_distillation_sweep(*, provider=None, since=None, min_evidence=MIN_EVIDEN
     proposed = []
     for (org_id, subject_id, source_kind), incidents in clusters.items():
         subject = incidents[0].subject
-        record = lambda outcome: _record_outcome(  # noqa: E731 — local closure over the key
+        record = lambda outcome, **io: _record_outcome(  # noqa: E731 — local closure over the key
             outcomes, tier="org", subject=subject, source_kind=source_kind,
-            organization=incidents[0].organization, incidents=incidents, outcome=outcome)
+            organization=incidents[0].organization, incidents=incidents, outcome=outcome, **io)
         if len(incidents) < min_evidence:
             record(DistillationRun.OUTCOME_INSUFFICIENT_EVIDENCE)
             continue
         if _has_covering_lesson(org_id, subject_id, source_kind):
             record(DistillationRun.OUTCOME_COVERING_LESSON)
             continue
-        try:
-            draft = provider.distill_triage_lesson(
-                _cluster_payload(subject, source_kind, incidents)
-            ) or {}
-        except Exception as exc:
-            logger.warning("distillation: distiller failed for subject %s: %s", subject_id, exc)
-            record(DistillationRun.OUTCOME_DISTILLER_ERROR)
-            continue
+        payload = _cluster_payload(subject, source_kind, incidents)
+        draft = _run_distiller(provider, payload, subject_id, record)
+        if draft is None:
+            continue  # distiller error — already recorded with the prompt + error
         guidance = (draft.get("guidance") or "").strip()
         if not guidance:
-            record(DistillationRun.OUTCOME_EMPTY_GUIDANCE)
+            record(DistillationRun.OUTCOME_EMPTY_GUIDANCE, prompt=payload, response=draft)
             continue
         lesson = propose_lesson(
             incidents[0], guidance=guidance, selector=(draft.get("selector") or "").strip(),
@@ -169,7 +201,7 @@ def run_distillation_sweep(*, provider=None, since=None, min_evidence=MIN_EVIDEN
             organization=incidents[0].organization, evidence=incidents,
         )
         proposed.append(lesson)
-        record(DistillationRun.OUTCOME_PROPOSED)
+        record(DistillationRun.OUTCOME_PROPOSED, prompt=payload, response=draft)
 
     proposed.extend(_propose_global_lessons(provider, since=since, min_orgs=min_orgs,
                                             min_evidence=min_evidence, outcomes=outcomes))
@@ -201,9 +233,9 @@ def _propose_global_lessons(provider, *, since=None, min_orgs=MIN_ORGS_FOR_GLOBA
         if len(org_ids) < min_orgs:
             continue
         subject = incidents[0].subject
-        record = lambda outcome: _record_outcome(  # noqa: E731 — local closure over the key
+        record = lambda outcome, **io: _record_outcome(  # noqa: E731 — local closure over the key
             outcomes, tier="global", subject=subject, source_kind=source_kind,
-            organization=None, incidents=incidents, outcome=outcome)
+            organization=None, incidents=incidents, outcome=outcome, **io)
         if len(incidents) < min_evidence:
             record(DistillationRun.OUTCOME_INSUFFICIENT_EVIDENCE)
             continue
@@ -214,16 +246,12 @@ def _propose_global_lessons(provider, *, since=None, min_orgs=MIN_ORGS_FOR_GLOBA
         # Signal the distiller to generalise/scrub for a fleet-wide lesson.
         payload["scope"] = "global"
         payload["org_count"] = len(org_ids)
-        try:
-            draft = provider.distill_triage_lesson(payload) or {}
-        except Exception as exc:
-            logger.warning("distillation: global distiller failed for subject %s: %s",
-                           subject_id, exc)
-            record(DistillationRun.OUTCOME_DISTILLER_ERROR)
-            continue
+        draft = _run_distiller(provider, payload, subject_id, record)
+        if draft is None:
+            continue  # distiller error — already recorded with the prompt + error
         guidance = (draft.get("guidance") or "").strip()
         if not guidance:
-            record(DistillationRun.OUTCOME_EMPTY_GUIDANCE)
+            record(DistillationRun.OUTCOME_EMPTY_GUIDANCE, prompt=payload, response=draft)
             continue
         lesson = propose_lesson(
             incidents[0], guidance=guidance, selector=(draft.get("selector") or "").strip(),
@@ -231,7 +259,7 @@ def _propose_global_lessons(provider, *, since=None, min_orgs=MIN_ORGS_FOR_GLOBA
             organization=None, evidence=incidents,  # explicit Global (org=None)
         )
         proposed.append(lesson)
-        record(DistillationRun.OUTCOME_PROPOSED)
+        record(DistillationRun.OUTCOME_PROPOSED, prompt=payload, response=draft)
     return proposed
 
 

@@ -805,9 +805,12 @@ class DistillationRun(models.Model):
     for clusters that clear the evidence bar, carry no covering lesson, and yield non-empty
     distiller guidance — every other cluster is skipped silently. Staff had no way to see
     what a background run considered or why it proposed nothing. Each run persists its
-    per-cluster decisions here so the Triage Lessons review surface can show them. Purely
-    observational: writing this record never changes what gets learned. Rows are pruned to
-    the most recent few hundred, like other throwaway run data.
+    per-cluster decisions here so the Triage Lessons review surface can show them. For any
+    cluster the distiller actually ran on, the per-cluster record also carries the distiller
+    prompt, its raw response, and any error, so a bad Lesson (or a silent failure) can be
+    troubleshot from the LLM I/O. Purely observational: writing this record never changes
+    what gets learned. Rows are pruned to the most recent few hundred, like other throwaway
+    run data.
     """
 
     # Closed set of per-cluster decision reasons recorded in ``clusters``.
@@ -824,7 +827,8 @@ class DistillationRun(models.Model):
     proposed_count = models.IntegerField(default=0)
     proposed_global_count = models.IntegerField(default=0)
     # Per-cluster decisions: [{tier, organization, subject, source_kind, evidence_count,
-    # outcome}]. Staff-only, like every other Triage Lesson evidence surface.
+    # outcome, and — when the distiller ran — prompt, response, error}]. Staff-only, like
+    # every other Triage Lesson evidence surface (the prompt/response carry raw incident text).
     clusters = models.JSONField(default=list, blank=True)
 
     class Meta:

@@ -21,6 +21,52 @@ function fmtTs(iso) {
   return new Date(iso).toLocaleString();
 }
 
+function fmtJson(v) {
+  if (typeof v === 'string') return v;
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+// Staff-only LLM I/O for a cluster the distiller ran on — the prompt sent, its raw
+// response, and any error — so a bad or missing Lesson can be troubleshot (#697).
+function ClusterIO({ cluster }) {
+  const { prompt, response, error } = cluster;
+  if (prompt === undefined && response === undefined && error === undefined) return null;
+  return (
+    <div className="mt-1">
+      {error !== undefined && (
+        <p className="break-words text-red-600 dark:text-red-400">Distiller error: {error}</p>
+      )}
+      {(prompt !== undefined || response !== undefined) && (
+        <details className="mt-0.5">
+          <summary className="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+            LLM input / output
+          </summary>
+          {prompt !== undefined && (
+            <div className="mt-1">
+              <p className="font-medium text-gray-500">Prompt (sent to distiller)</p>
+              <pre className="mt-0.5 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-100 p-2 text-[11px] dark:bg-gray-800">
+                {fmtJson(prompt)}
+              </pre>
+            </div>
+          )}
+          {response !== undefined && (
+            <div className="mt-1">
+              <p className="font-medium text-gray-500">Response</p>
+              <pre className="mt-0.5 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-100 p-2 text-[11px] dark:bg-gray-800">
+                {fmtJson(response)}
+              </pre>
+            </div>
+          )}
+        </details>
+      )}
+    </div>
+  );
+}
+
 // Read-only observability into what the background distillation sweep considered on each
 // run and why it did or did not propose lessons — so a zero-proposal sweep isn't invisible.
 function RecentSweeps({ runs, error }) {
@@ -66,14 +112,17 @@ function RecentSweeps({ runs, error }) {
                       {run.clusters.map((c, i) => {
                         const meta = OUTCOME_META[c.outcome] || { label: c.outcome, cls: 'bg-gray-100 text-gray-600' };
                         return (
-                          <li key={i} className="flex flex-wrap items-center gap-2 text-xs">
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${meta.cls}`}>
-                              {meta.label}
-                            </span>
-                            <span className="text-gray-600 dark:text-gray-300">{c.subject}</span>
-                            <span className="text-gray-400">
-                              · {c.tier}{c.organization ? ` · ${c.organization}` : ''} · {c.source_kind || 'any'} · {c.evidence_count} case{c.evidence_count === 1 ? '' : 's'}
-                            </span>
+                          <li key={i} className="text-xs">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${meta.cls}`}>
+                                {meta.label}
+                              </span>
+                              <span className="text-gray-600 dark:text-gray-300">{c.subject}</span>
+                              <span className="text-gray-400">
+                                · {c.tier}{c.organization ? ` · ${c.organization}` : ''} · {c.source_kind || 'any'} · {c.evidence_count} case{c.evidence_count === 1 ? '' : 's'}
+                              </span>
+                            </div>
+                            <ClusterIO cluster={c} />
                           </li>
                         );
                       })}

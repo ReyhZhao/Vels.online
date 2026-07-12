@@ -21,8 +21,18 @@ const RUN = {
   id: 7, started_at: '2026-07-11T09:00:00Z', finished_at: '2026-07-11T09:00:01Z',
   eligible_count: 5, cluster_count: 2, proposed_count: 1, proposed_global_count: 0,
   clusters: [
-    { tier: 'org', organization: 'acme', subject: 'Brute Force', source_kind: 'wazuh_event', evidence_count: 3, outcome: 'proposed' },
+    {
+      tier: 'org', organization: 'acme', subject: 'Brute Force', source_kind: 'wazuh_event',
+      evidence_count: 3, outcome: 'proposed',
+      prompt: { subject: 'Brute Force', incidents: [{ title: 'Brute force 0' }] },
+      response: { guidance: 'distilled-io-marker-guidance', selector: 'internal source ip' },
+    },
     { tier: 'org', organization: 'acme', subject: 'Port Scan', source_kind: 'wazuh_event', evidence_count: 2, outcome: 'skipped_insufficient_evidence' },
+    {
+      tier: 'org', organization: 'acme', subject: 'Malware', source_kind: 'wazuh_event',
+      evidence_count: 3, outcome: 'distiller_error',
+      prompt: { subject: 'Malware', incidents: [] }, error: 'model timeout',
+    },
   ],
 };
 
@@ -59,6 +69,24 @@ describe('TriageLessonsReview — recent sweeps (#697)', () => {
     expect(await screen.findByText('Proposed')).toBeInTheDocument();
     expect(screen.getByText('Too few cases')).toBeInTheDocument();
     expect(screen.getByText('Port Scan')).toBeInTheDocument();
+  });
+
+  it('exposes the distiller LLM I/O and errors for troubleshooting (#697)', async () => {
+    mockApi();
+    render(<TriageLessonsReview />);
+    await waitFor(() => expect(screen.getByText(/Recent sweeps/)).toBeInTheDocument());
+    await userEvent.click(screen.getByText(/Recent sweeps/));
+    await userEvent.click(await screen.findByText(/1 proposed/));
+
+    // The proposed cluster exposes an LLM input/output disclosure with prompt + response.
+    const io = await screen.findAllByText('LLM input / output');
+    expect(io.length).toBeGreaterThan(0);
+    await userEvent.click(io[0]);
+    expect(screen.getAllByText(/Prompt \(sent to distiller\)/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/distilled-io-marker-guidance/)).toBeInTheDocument();
+
+    // A distiller error surfaces its message inline.
+    expect(screen.getByText(/Distiller error: model timeout/)).toBeInTheDocument();
   });
 
   it('surfaces a sweep-fetch failure without breaking the page', async () => {

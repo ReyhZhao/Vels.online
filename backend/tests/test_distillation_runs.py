@@ -66,6 +66,44 @@ def test_run_records_a_proposed_cluster(acme, brute, human):
     assert proposed_cluster["organization"] == "acme"
     assert proposed_cluster["subject"] == brute.name
     assert proposed_cluster["evidence_count"] == 3
+    # LLM I/O is captured for troubleshooting: the prompt handed to the distiller and its
+    # raw response (#697).
+    assert proposed_cluster["prompt"]["subject"] == brute.name
+    assert len(proposed_cluster["prompt"]["incidents"]) == 3
+    assert proposed_cluster["response"]["guidance"] == "verify the source is not our scanner"
+
+
+class BoomDistiller:
+    """Raises for every cluster — stands in for a distiller/LLM failure."""
+    def distill_triage_lesson(self, payload):
+        raise RuntimeError("model timeout")
+
+
+@pytest.mark.django_db
+def test_distiller_error_is_recorded_with_prompt_and_message(acme, brute, human):
+    for _ in range(3):
+        make_closed(acme, brute, actor=human)
+    run = run_and_record_sweep(provider=BoomDistiller())
+
+    assert run.proposed_count == 0
+    cluster = run.clusters[0]
+    assert cluster["outcome"] == DistillationRun.OUTCOME_DISTILLER_ERROR
+    assert cluster["error"] == "model timeout"
+    # The prompt is retained so the failing call can be reproduced; there is no response.
+    assert cluster["prompt"]["subject"] == brute.name
+    assert "response" not in cluster
+
+
+@pytest.mark.django_db
+def test_skipped_clusters_carry_no_llm_io(acme, brute, human):
+    # Two cases → below threshold → distiller never runs → no prompt/response/error stored.
+    make_closed(acme, brute, actor=human)
+    make_closed(acme, brute, actor=human)
+    run = run_and_record_sweep(provider=FakeDistiller())
+
+    cluster = run.clusters[0]
+    assert cluster["outcome"] == DistillationRun.OUTCOME_INSUFFICIENT_EVIDENCE
+    assert "prompt" not in cluster and "response" not in cluster and "error" not in cluster
 
 
 @pytest.mark.django_db

@@ -131,7 +131,9 @@ The distillation sweep runs unattended in the background, so a run that proposes
 | **No guidance** | The cluster met the thresholds, but the distiller returned nothing usable to turn into a heuristic. |
 | **Distiller error** | The LLM call for this cluster failed; it's skipped this run and retried on the next sweep. |
 
-Because this panel only *reports* what the sweep considered, it never changes what gets learned — and, like all Lesson evidence, a Global Lesson's underlying incident links stay staff-only ([ADR-0031](../adr/0031-cross-org-triage-learning-isolation.md)).
+For any cluster the distiller actually ran on — **Proposed**, **No guidance**, or **Distiller error** — the row also exposes the **LLM input / output**: the exact prompt handed to the distiller, its raw response, and (on failure) the error message. That makes it possible to see *why* a cluster produced a weak Lesson or no Lesson at all, and to reproduce a failing call. Skipped clusters (**Too few cases**, **Already covered**) never invoke the distiller, so they carry no LLM I/O. The same prompt/response are also emitted to the worker log at `DEBUG` level, and distiller failures are logged with a traceback at all times.
+
+Because this panel only *reports* what the sweep considered, it never changes what gets learned. The prompt/response carry raw incident text — and, for a Global cluster, text drawn from more than one tenant — so the whole surface stays staff-only, exactly like a Lesson's evidence links ([ADR-0031](../adr/0031-cross-org-triage-learning-isolation.md)).
 
 ---
 
