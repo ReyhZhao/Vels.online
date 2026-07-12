@@ -39,6 +39,16 @@ def get_triage_provider() -> BaseTriageProvider:
     return _load_provider(provider_path)
 
 
+def get_distiller_provider() -> BaseTriageProvider:
+    """Provider for the batched Triage Lesson distillation sweep (ADR-0030).
+
+    Defaults to the triage provider (see settings) so distillation and per-alert classify
+    share a model unless ``DISTILL_LLM_PROVIDER`` is set to point distillation elsewhere.
+    """
+    provider_path = getattr(settings, "DISTILL_LLM_PROVIDER", _DEFAULT_PROVIDER)
+    return _load_provider(provider_path)
+
+
 def get_closure_provider() -> BaseTriageProvider:
     provider_path = getattr(settings, "CLOSURE_LLM_PROVIDER", _DEFAULT_PROVIDER)
     return _load_provider(provider_path)
