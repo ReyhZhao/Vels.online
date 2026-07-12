@@ -163,12 +163,12 @@ def run_distillation_sweep(*, provider=None, since=None, min_evidence=MIN_EVIDEN
     When ``outcomes`` is a list, each cluster's decision (proposed / why-skipped) is
     appended to it for observability (#697). This never affects what gets proposed.
     """
-    from incidents.llm.factory import get_triage_provider
+    from incidents.llm.factory import get_distiller_provider
     from incidents.memory.lessons import propose_lesson
     from incidents.models import DistillationRun, TriageLesson
 
     if provider is None:
-        provider = get_triage_provider()
+        provider = get_distiller_provider()
 
     # Cluster by (org, subject, source_kind) — Org-tier proposals live within one tenant.
     clusters = defaultdict(list)

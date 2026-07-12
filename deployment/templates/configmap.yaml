@@ -20,3 +20,6 @@ data:
   CORRELATION_LLM_PROVIDER: correlations.llm.ollama.OllamaDraftProvider
   CLOSURE_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
   INCIDENT_ASSISTANT_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
+  # Triage Lesson distillation sweep (ADR-0030) — a low-volume batch reasoning job; can be
+  # pointed at a stronger model than per-alert classify.
+  DISTILL_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider

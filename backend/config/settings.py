@@ -289,6 +289,13 @@ TRIAGE_LLM_PROVIDER = os.environ.get(
     "TRIAGE_LLM_PROVIDER",
     "incidents.llm.gemini.GeminiTriageProvider",
 )
+# The batched Triage Lesson distillation sweep (ADR-0030) — a low-volume reasoning job,
+# so it can point at a stronger model than per-alert classify. Defaults to the triage
+# provider, so behaviour is unchanged until this is set explicitly.
+DISTILL_LLM_PROVIDER = os.environ.get(
+    "DISTILL_LLM_PROVIDER",
+    TRIAGE_LLM_PROVIDER,
+)
 CORRELATION_LLM_PROVIDER = os.environ.get(
     "CORRELATION_LLM_PROVIDER",
     "correlations.llm.gemini.GeminiDraftProvider",

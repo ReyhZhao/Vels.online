@@ -16,6 +16,7 @@ from .base import (
 from .gemini import (
     _parse_assistant_envelope,
     _parse_correlation_result,
+    _parse_distilled_lesson,
     _parse_residual_grouping_result,
     _parse_result,
     _parse_task_summary_result,
@@ -23,6 +24,7 @@ from .gemini import (
 from .prompts import (
     CLOSURE_MESSAGE_SYSTEM_PROMPT,
     CORRELATION_SYSTEM_PROMPT,
+    LESSON_DISTILL_SYSTEM_PROMPT,
     REPORT_SUMMARY_SYSTEM_PROMPT,
     RESIDUAL_GROUPING_SYSTEM_PROMPT,
     SEARCH_SUMMARY_SYSTEM_PROMPT,
@@ -168,6 +170,32 @@ class OllamaTriageProvider(BaseTriageProvider):
             raise TriageError(f"Ollama returned non-JSON for task summary: {text[:200]}") from exc
 
         return _parse_task_summary_result(data, provider="ollama")
+
+    def distill_triage_lesson(self, payload: dict) -> dict:
+        prompt = json.dumps(payload, indent=2)
+        try:
+            response = self._client.chat(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": LESSON_DISTILL_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                format="json",
+            )
+            text = response.message.content.strip()
+        except Exception as exc:
+            raise TriageError(f"Ollama lesson distillation error: {exc}") from exc
+
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise TriageError(f"Ollama returned non-JSON for lesson distillation: {text[:200]}") from exc
+
+        return _parse_distilled_lesson(data)
 
     def group_residual_alerts(self, alerts: list) -> ResidualGroupingResult:
         if not alerts:

@@ -22,6 +22,7 @@ from .base import (
 from .prompts import (
     CLOSURE_MESSAGE_SYSTEM_PROMPT,
     CORRELATION_SYSTEM_PROMPT,
+    LESSON_DISTILL_SYSTEM_PROMPT,
     REPORT_SUMMARY_SYSTEM_PROMPT,
     RESIDUAL_GROUPING_SYSTEM_PROMPT,
     SEARCH_SUMMARY_SYSTEM_PROMPT,
@@ -432,6 +433,31 @@ class GeminiTriageProvider(BaseTriageProvider):
 
         return _parse_task_summary_result(data, provider="gemini")
 
+    def distill_triage_lesson(self, payload: dict) -> dict:
+        prompt = json.dumps(payload, indent=2)
+        try:
+            response = self._client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config=self._types.GenerateContentConfig(
+                    system_instruction=LESSON_DISTILL_SYSTEM_PROMPT,
+                ),
+            )
+            text = response.text.strip()
+        except Exception as exc:
+            raise TriageError(f"Gemini lesson distillation error: {exc}") from exc
+
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(lines[1:-1])
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise TriageError(f"Gemini returned non-JSON for lesson distillation: {text[:200]}") from exc
+
+        return _parse_distilled_lesson(data)
+
     # ── agentic loop (ADR-0011) ──────────────────────────────────────────────
     def uses_native_web_search(self) -> bool:
         return True
@@ -562,6 +588,23 @@ def _parse_task_summary_result(data: dict, provider: str) -> TaskSummaryResult:
     if status not in ("success", "warning", "error"):
         status = "success"
     return TaskSummaryResult(summary=summary, findings=findings, status=status, provider=provider)
+
+
+def _parse_distilled_lesson(data: dict) -> dict:
+    """Normalise a distiller response to the ``{"guidance", "selector"}`` contract.
+
+    Only these two keys are meaningful downstream; anything else the model returns is
+    dropped. Non-string values degrade to empty so a malformed response proposes nothing
+    rather than raising. Shared by the Gemini and Ollama providers.
+    """
+    if not isinstance(data, dict):
+        return {"guidance": "", "selector": ""}
+    guidance = data.get("guidance", "")
+    selector = data.get("selector", "")
+    return {
+        "guidance": guidance.strip() if isinstance(guidance, str) else "",
+        "selector": selector.strip() if isinstance(selector, str) else "",
+    }
 
 
 def _parse_correlation_result(data: dict) -> CorrelationResult:
