@@ -267,6 +267,109 @@ def test_non_partner_incident_still_auto_closes_at_same_confidence(acme):
     assert incident.closure_reason == Incident.CLOSURE_FALSE_POSITIVE
 
 
+# ── recommendation-gated false-positive close (#699, ADR-0024) ────────────────
+
+
+@pytest.mark.django_db
+def test_recommendation_gated_close_between_bars(acme):
+    """Model recommends close, FP confidence between close_bar and threshold → auto-closes."""
+    acme.triage_fp_threshold = 0.95
+    acme.triage_fp_close_bar = 0.80
+    acme.save()
+    incident = make_incident(acme)
+    result = _make_triage_result(
+        primary_action="close_as_false_positive",
+        false_positive_confidence=0.87,
+    )
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.state == Incident.STATE_CLOSED
+    assert incident.closure_reason == Incident.CLOSURE_FALSE_POSITIVE
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["auto_closed"] is True
+    assert comment.metadata["auto_close_reason"] == "recommendation"
+
+
+@pytest.mark.django_db
+def test_threshold_close_records_threshold_reason(acme):
+    """High FP confidence alone auto-closes and is recorded as the threshold path."""
+    acme.triage_fp_threshold = 0.95
+    acme.triage_fp_close_bar = 0.80
+    acme.save()
+    incident = make_incident(acme)
+    result = _make_triage_result(
+        primary_action="monitor",
+        false_positive_confidence=0.97,
+    )
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.state == Incident.STATE_CLOSED
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["auto_close_reason"] == "threshold"
+
+
+@pytest.mark.django_db
+def test_no_close_when_recommendation_absent_below_threshold(acme):
+    """FP clears close_bar but the model did not recommend closing → stays open."""
+    acme.triage_fp_threshold = 0.95
+    acme.triage_fp_close_bar = 0.80
+    acme.save()
+    incident = make_incident(acme)
+    result = _make_triage_result(
+        primary_action="assign_to_analyst",
+        false_positive_confidence=0.87,
+    )
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.state == Incident.STATE_TRIAGED
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["auto_closed"] is False
+    assert comment.metadata["auto_close_reason"] is None
+
+
+@pytest.mark.django_db
+def test_no_close_when_recommendation_below_close_bar(acme):
+    """Model recommends closing but FP is below the close_bar floor → stays open."""
+    acme.triage_fp_threshold = 0.95
+    acme.triage_fp_close_bar = 0.80
+    acme.save()
+    incident = make_incident(acme)
+    result = _make_triage_result(
+        primary_action="close_as_false_positive",
+        false_positive_confidence=0.70,
+    )
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.state == Incident.STATE_TRIAGED
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["auto_closed"] is False
+    assert comment.metadata["auto_close_reason"] is None
+
+
+@pytest.mark.django_db
+def test_partner_exempt_from_recommendation_gated_close(acme):
+    """A partner incident is not auto-closed even via the recommendation-gated path."""
+    acme.triage_fp_threshold = 0.95
+    acme.triage_fp_close_bar = 0.80
+    acme.save()
+    incident = make_incident(acme, source_kind=Incident.SOURCE_PARTNER)
+    result = _make_triage_result(
+        primary_action="close_as_false_positive",
+        false_positive_confidence=0.87,
+    )
+    _run_task(incident.id, provider_result=result)
+
+    incident.refresh_from_db()
+    assert incident.state != Incident.STATE_CLOSED
+    comment = Comment.objects.get(incident=incident, kind=Comment.KIND_AI_TRIAGE)
+    assert comment.metadata["auto_closed"] is False
+    assert comment.metadata["auto_close_reason"] is None
+
+
 @pytest.mark.django_db
 def test_triage_task_escalates_severity_within_cap(acme):
     # low (1) → critical (4) is 3 levels; capped to 2 → result is high (3)

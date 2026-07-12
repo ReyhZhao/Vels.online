@@ -222,13 +222,31 @@ def run_incident_triage(self, incident_id: int):
     except Exception as exc:
         logger.warning("run_incident_triage: correlation search failed for %s: %s", incident_id, exc)
 
-    threshold = incident.organization.triage_fp_threshold
+    org = incident.organization
+    threshold = org.triage_fp_threshold
+    close_bar = org.triage_fp_close_bar
     # Partner incidents (ADR-0032) are exempt from unattended false-positive auto-close:
     # a peer's report is never silently closed, which also stops a bidirectional
     # Connection from auto-emailing the peer "closed as false positive". Classify still
     # runs and its recommendations are recorded below; only the auto-close is suppressed.
     is_partner = incident.source_kind == Incident.SOURCE_PARTNER
-    auto_closed = (not is_partner) and (result.false_positive_confidence >= threshold)
+    # Two paths to an unattended false-positive close (ADR-0024, #699):
+    #   - "threshold": high FP confidence alone, regardless of the recommended action;
+    #   - "recommendation": the model explicitly recommends closing as a false positive
+    #     and clears the lower close_bar. Trusting the model's own disposition lets a
+    #     clearly-junk incident close below the blanket threshold while a floor still
+    #     guards against a low-confidence recommendation.
+    fp = result.false_positive_confidence
+    recommends_close = result.primary_action == "close_as_false_positive"
+    if is_partner:
+        auto_close_reason = None
+    elif fp >= threshold:
+        auto_close_reason = "threshold"
+    elif recommends_close and fp >= close_bar:
+        auto_close_reason = "recommendation"
+    else:
+        auto_close_reason = None
+    auto_closed = auto_close_reason is not None
 
     if auto_closed:
         try:
@@ -236,6 +254,7 @@ def run_incident_triage(self, incident_id: int):
         except Exception as exc:
             logger.warning("run_incident_triage: auto-close failed for %s: %s", incident_id, exc)
             auto_closed = False
+            auto_close_reason = None
 
     if not auto_closed and "triaged" in ALLOWED_TRANSITIONS.get(incident.state, set()):
         try:
@@ -275,6 +294,9 @@ def run_incident_triage(self, incident_id: int):
             "provider": result.provider,
             "incident_severity_at_triage": payload["severity"],
             "auto_closed": auto_closed,
+            # Which gate drove the outcome, so a closure — or a deliberate non-closure
+            # despite a close recommendation — is auditable rather than silent (#699).
+            "auto_close_reason": auto_close_reason,
             "related_incident_ids": related_incident_ids,
             "correlation_summary": correlation_summary,
         },

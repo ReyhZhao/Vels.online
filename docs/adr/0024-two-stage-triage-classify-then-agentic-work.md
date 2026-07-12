@@ -6,7 +6,7 @@ Today **Triage** ([CONTEXT.md](../../CONTEXT.md) → Triage) is a single, unatte
 
 Split Triage into two phases.
 
-- **Classify (always runs).** The existing single-shot call, unchanged in spirit but extended to emit a new **disposition confidence** alongside the existing **false-positive confidence** (and severity/subject/action recommendations). High false-positive confidence (≥ the org's `triage_fp_threshold`) still auto-closes; nothing else about the cheap path changes. One model call per Incident in the common case.
+- **Classify (always runs).** The existing single-shot call, unchanged in spirit but extended to emit a new **disposition confidence** alongside the existing **false-positive confidence** (and severity/subject/action recommendations). It auto-closes as a false positive by **either** of two paths: high false-positive confidence alone (≥ the org's `triage_fp_threshold`, regardless of the recommended action), **or** the model explicitly recommending closure (`primary_action == close_as_false_positive`) with false-positive confidence at or above a lower per-org floor, `triage_fp_close_bar`. The floor lets an incident the model itself judges to be junk close below the blanket threshold, while still guarding against a low-confidence close recommendation. Nothing else about the cheap path changes; one model call per Incident in the common case.
 - **Work (gated).** A new agentic phase runs **only** when `disposition_confidence ≥ org.triage_work_threshold` **and** the Classify phase matched a **subject** (so a **playbook** exists). It reuses the shared agentic orchestrator (`assistants/orchestrator.run_research_phase`, ADR-0011) — the same loop behind the **Incident Assistant** and **Hunt** — to research and then act on the Incident. Its authority and action ceiling are the subject of [ADR-0025](0025-triage-agent-unattended-autonomy-boundary.md).
 
 Supporting shape:
@@ -25,7 +25,7 @@ Supporting shape:
 
 ## Consequences
 
-- The Classify prompt/parser gains a `disposition_confidence` field; `Organization` gains a `triage_work_threshold` knob beside `triage_fp_threshold`.
+- The Classify prompt/parser gains a `disposition_confidence` field; `Organization` gains a `triage_work_threshold` knob beside `triage_fp_threshold`, plus a `triage_fp_close_bar` floor (default below `triage_fp_threshold`) for the recommendation-gated close. The AI-triage comment records which gate drove the outcome (`auto_close_reason`: `threshold` / `recommendation` / null) so a closure — or a deliberate non-closure despite a close recommendation — is auditable rather than silent.
 - A durable per-Incident "work has run" marker is required (a flag/timestamp), distinct from the transient cache lock that already serialises triage.
 - Latency and LLM spend rise **only on the gated path**; the low-confidence majority is unchanged. Spend now scales with the count of high-confidence, subject-matched incidents.
 - The Work phase is unattended and *acts* — its authority, the destructive-action guards, and how it hands off are deliberately deferred to [ADR-0025](0025-triage-agent-unattended-autonomy-boundary.md) so the execution model and the authority model can be reasoned about separately (as ADR-0011 and ADR-0012 are for the assistant).
