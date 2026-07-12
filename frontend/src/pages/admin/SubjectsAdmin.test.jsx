@@ -11,8 +11,17 @@ import api from '@/lib/axios';
 import SubjectsAdmin from './SubjectsAdmin';
 
 const SUBJECTS = [
-  { id: 1, name: 'Phishing', slug: 'phishing', description: 'Phishing attacks.', archived: false, created_at: '2026-01-01T00:00:00Z' },
-  { id: 2, name: 'Malware', slug: 'malware', description: 'Malware infections.', archived: true, created_at: '2026-01-01T00:00:00Z' },
+  { id: 1, name: 'Phishing', slug: 'phishing', description: 'Phishing attacks.', archived: false, created_at: '2026-01-01T00:00:00Z', correction_count: 0 },
+  { id: 2, name: 'Malware', slug: 'malware', description: 'Malware infections.', archived: true, created_at: '2026-01-01T00:00:00Z', correction_count: 2 },
+];
+
+const CORRECTIONS = [
+  {
+    id: 10, incident_display_id: 'INC-2026-0007', incident_title: 'Suspicious executable', organization_slug: 'acme',
+    agent_subject_name: 'Brute Force', human_subject_name: 'Malware',
+    agent_severity: '', human_severity: '', agent_disposition: '', human_disposition: '',
+    actor_username: 'eddie', created_at: '2026-07-11T09:00:00Z',
+  },
 ];
 
 function renderPage() {
@@ -198,5 +207,70 @@ describe('SubjectsAdmin', () => {
     await waitFor(() => within(table()).getByText('Phishing'));
     await user.click(within(table()).getByLabelText('Delete Phishing'));
     expect(api.delete).not.toHaveBeenCalled();
+  });
+
+  // ── Classification Corrections (ADR-0030) ──────────────────────────────────
+  function mockWithCorrections() {
+    api.get.mockImplementation((url) => {
+      if (url.includes('/corrections/')) return Promise.resolve({ data: CORRECTIONS });
+      return Promise.resolve({ data: SUBJECTS });
+    });
+  }
+
+  it('shows a correction count badge and no toggle for subjects with none', async () => {
+    api.get.mockResolvedValue({ data: SUBJECTS });
+    renderPage();
+    await waitFor(() => within(table()).getByText('Malware'));
+    // Malware has 2 corrections → a toggle button; Phishing has 0 → none.
+    expect(within(table()).getByLabelText('Show corrections for Malware')).toBeInTheDocument();
+    expect(within(table()).queryByLabelText('Show corrections for Phishing')).not.toBeInTheDocument();
+  });
+
+  it('lazily fetches and renders corrections on expand', async () => {
+    mockWithCorrections();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Malware'));
+
+    expect(api.get).not.toHaveBeenCalledWith('/api/subjects/2/corrections/');
+    await user.click(within(table()).getByLabelText('Show corrections for Malware'));
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/subjects/2/corrections/'));
+    expect(await within(table()).findByText('INC-2026-0007')).toBeInTheDocument();
+    // The subject delta (agent → human) is rendered.
+    expect(within(table()).getByText('Brute Force')).toBeInTheDocument();
+    expect(within(table()).getAllByText('Malware').length).toBeGreaterThan(1);
+    expect(within(table()).getByText(/by eddie/)).toBeInTheDocument();
+  });
+
+  it('surfaces a corrections-fetch error inline', async () => {
+    api.get.mockImplementation((url) => {
+      if (url.includes('/corrections/')) return Promise.reject(new Error('boom'));
+      return Promise.resolve({ data: SUBJECTS });
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Malware'));
+    await user.click(within(table()).getByLabelText('Show corrections for Malware'));
+    expect(await within(table()).findByText('Failed to load corrections.')).toBeInTheDocument();
+  });
+
+  it('collapses the panel and does not refetch on re-expand', async () => {
+    mockWithCorrections();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Malware'));
+
+    await user.click(within(table()).getByLabelText('Show corrections for Malware'));
+    await within(table()).findByText('INC-2026-0007');
+    const fetchCalls = api.get.mock.calls.filter(([u]) => u.includes('/corrections/')).length;
+
+    await user.click(within(table()).getByLabelText('Hide corrections for Malware'));
+    await waitFor(() => expect(within(table()).queryByText('INC-2026-0007')).not.toBeInTheDocument());
+
+    await user.click(within(table()).getByLabelText('Show corrections for Malware'));
+    await within(table()).findByText('INC-2026-0007');
+    // Re-expanding reuses the cached result — no second fetch.
+    expect(api.get.mock.calls.filter(([u]) => u.includes('/corrections/')).length).toBe(fetchCalls);
   });
 });

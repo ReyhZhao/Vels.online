@@ -134,12 +134,38 @@ def _require_auth(request):
 
 # ── Subject views ────────────────────────────────────────────────────────────
 
+def _annotate_correction_counts(subjects):
+    """Set ``_correction_count`` on each Subject: how many Classification Corrections
+    touch it, as the agent's (wrong) Classify call or the human's fix (ADR-0030).
+
+    Two grouped aggregate queries (agent side + human side) merged in Python, so this is
+    O(1) queries regardless of how many subjects are listed — never N+1. A correction that
+    changed one subject to another counts for both, which is what we want: it is evidence
+    about the model's handling of each.
+    """
+    from django.db.models import Count
+
+    from incidents.models import ClassificationCorrection
+
+    counts = {}
+    for field in ("agent_subject_id", "human_subject_id"):
+        rows = (ClassificationCorrection.objects
+                .filter(**{f"{field}__isnull": False})
+                .values(field).annotate(n=Count("id")))
+        for row in rows:
+            counts[row[field]] = counts.get(row[field], 0) + row["n"]
+    for subject in subjects:
+        subject._correction_count = counts.get(subject.id, 0)
+
+
 class SubjectListView(APIView):
     def get(self, request):
         err = _require_auth(request)
         if err:
             return err
-        qs = Subject.objects.all()
+        qs = list(Subject.objects.all())
+        if request.user.is_staff:
+            _annotate_correction_counts(qs)
         return Response(SubjectSerializer(qs, many=True).data)
 
     def post(self, request):

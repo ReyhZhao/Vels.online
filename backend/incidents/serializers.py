@@ -35,10 +35,18 @@ class IOCWriteSerializer(serializers.ModelSerializer):
 
 
 class SubjectSerializer(serializers.ModelSerializer):
+    # Number of Classification Corrections touching this subject (ADR-0030) — a
+    # Classify-accuracy troubleshooting signal. Only populated for staff, on the list
+    # endpoint; null otherwise so tenants never see cross-org correction volume.
+    correction_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Subject
-        fields = ["id", "name", "slug", "description", "archived", "created_at"]
-        read_only_fields = ["id", "slug", "created_at"]
+        fields = ["id", "name", "slug", "description", "archived", "created_at", "correction_count"]
+        read_only_fields = ["id", "slug", "created_at", "correction_count"]
+
+    def get_correction_count(self, obj):
+        return getattr(obj, "_correction_count", None)
 
 
 class SubjectCreateSerializer(serializers.ModelSerializer):

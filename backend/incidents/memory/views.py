@@ -4,12 +4,13 @@ Tenants are entirely outside this surface — every endpoint is staff-guarded, c
 with Triage/Hunt/Attack-Map. A Global Lesson's evidence links are staff-only here and are
 never surfaced to a tenant anywhere.
 """
+from django.db.models import Q
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from incidents.memory import review
-from incidents.models import DistillationRun, Subject, TriageLesson
+from incidents.models import ClassificationCorrection, DistillationRun, Subject, TriageLesson
 from incidents.views import _require_staff
 from security.models import Organization
 
@@ -107,6 +108,60 @@ class DistillationRunListView(APIView):
             limit = self._DEFAULT_LIMIT
         runs = DistillationRun.objects.all()[:limit]
         return Response(DistillationRunSerializer(runs, many=True).data)
+
+
+class ClassificationCorrectionSerializer(serializers.ModelSerializer):
+    """A human overturning the Classify call, flattened for the subject troubleshooting view.
+
+    Carries cross-org incident references, so — like every other correction/lesson evidence
+    surface — it is only ever served staff-only (ADR-0031)."""
+
+    incident_display_id = serializers.CharField(source="incident.display_id", read_only=True)
+    incident_title = serializers.CharField(source="incident.title", read_only=True)
+    organization_slug = serializers.CharField(source="incident.organization.slug", read_only=True)
+    agent_subject_name = serializers.CharField(source="agent_subject.name", read_only=True, default=None)
+    human_subject_name = serializers.CharField(source="human_subject.name", read_only=True, default=None)
+    actor_username = serializers.CharField(source="actor.username", read_only=True, default=None)
+
+    class Meta:
+        model = ClassificationCorrection
+        fields = [
+            "id", "incident_display_id", "incident_title", "organization_slug",
+            "agent_subject_name", "human_subject_name",
+            "agent_severity", "human_severity",
+            "agent_disposition", "human_disposition",
+            "actor_username", "created_at",
+        ]
+        read_only_fields = fields
+
+
+class SubjectCorrectionsView(APIView):
+    """Classification Corrections that touch one Subject — a Classify-accuracy troubleshooting
+    surface (ADR-0030). Staff-only.
+
+    Returns every correction where the Subject was either the agent's (wrong) Classify call
+    or the human's fix — i.e. cases where the model over-applied the Subject or missed it —
+    newest first. Corrections reference incidents across tenants, so this stays staff-only,
+    consistent with the Triage Lesson evidence surfaces."""
+
+    _DEFAULT_LIMIT = 50
+
+    def get(self, request, pk):
+        err = _require_staff(request)
+        if err:
+            return err
+        try:
+            limit = min(int(request.query_params.get("limit", self._DEFAULT_LIMIT)), 200)
+        except (TypeError, ValueError):
+            limit = self._DEFAULT_LIMIT
+        qs = (
+            ClassificationCorrection.objects
+            .filter(Q(agent_subject_id=pk) | Q(human_subject_id=pk))
+            .select_related("incident", "incident__organization", "agent_subject",
+                            "human_subject", "actor")
+            .order_by("-created_at")[:limit]
+        )
+        return Response(ClassificationCorrectionSerializer(qs, many=True).data)
 
 
 class LessonReviewActionView(APIView):
