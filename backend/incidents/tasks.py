@@ -300,10 +300,19 @@ def run_triage_work_task(incident_id: int):
 def run_triage_distillation_sweep():
     """Periodic batched distillation sweep (ADR-0030): learn Triage Lessons from recent
     human-ratified closures. Scheduled via the DB beat scheduler; safe to re-run."""
-    from incidents.memory.distillation import run_distillation_sweep
-    proposed = run_distillation_sweep()
-    logger.info("run_triage_distillation_sweep: proposed %d lesson(s)", len(proposed))
-    return len(proposed)
+    from incidents.memory.distillation import run_and_record_sweep
+    run = run_and_record_sweep()
+    logger.info(
+        "run_triage_distillation_sweep: examined %d cluster(s) from %d eligible incident(s), "
+        "proposed %d lesson(s) (%d global)",
+        run.cluster_count, run.eligible_count, run.proposed_count, run.proposed_global_count,
+    )
+    return {
+        "eligible": run.eligible_count,
+        "clusters": run.cluster_count,
+        "proposed": run.proposed_count,
+        "proposed_global": run.proposed_global_count,
+    }
 
 
 @shared_task

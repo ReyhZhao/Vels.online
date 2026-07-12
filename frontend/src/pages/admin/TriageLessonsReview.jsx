@@ -7,6 +7,88 @@ import api from '@/lib/axios';
 
 const STATUSES = ['proposed', 'active', 'suspended', 'archived', 'all'];
 
+// Human labels + styling for the closed set of per-cluster sweep decisions (#697).
+const OUTCOME_META = {
+  proposed: { label: 'Proposed', cls: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' },
+  skipped_insufficient_evidence: { label: 'Too few cases', cls: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+  skipped_covering_lesson: { label: 'Already covered', cls: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+  skipped_empty_guidance: { label: 'No guidance', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+  distiller_error: { label: 'Distiller error', cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+};
+
+function fmtTs(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString();
+}
+
+// Read-only observability into what the background distillation sweep considered on each
+// run and why it did or did not propose lessons — so a zero-proposal sweep isn't invisible.
+function RecentSweeps({ runs, error }) {
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+
+  return (
+    <div className="mb-5 rounded border dark:border-gray-700">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+      >
+        <span>Recent sweeps {runs.length > 0 && `(${runs.length})`}</span>
+        <span className="text-gray-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="border-t px-3 py-2 dark:border-gray-700">
+          {error && <div className="text-sm text-red-600">{error}</div>}
+          {!error && runs.length === 0 && (
+            <div className="text-sm text-gray-500">No sweeps recorded yet.</div>
+          )}
+          <ul className="space-y-2">
+            {runs.map((run) => (
+              <li key={run.id} className="rounded border p-2 text-sm dark:border-gray-700">
+                <button
+                  onClick={() => setExpanded((id) => (id === run.id ? null : run.id))}
+                  className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-left"
+                >
+                  <span className="text-gray-500">{fmtTs(run.started_at)}</span>
+                  <span>·</span>
+                  <span>{run.eligible_count} eligible</span>
+                  <span>→ {run.cluster_count} cluster{run.cluster_count === 1 ? '' : 's'}</span>
+                  <span className="font-medium">
+                    → {run.proposed_count} proposed
+                    {run.proposed_global_count > 0 && ` (${run.proposed_global_count} global)`}
+                  </span>
+                </button>
+                {expanded === run.id && (
+                  run.clusters.length === 0 ? (
+                    <p className="mt-2 text-xs text-gray-500">No candidate clusters this run.</p>
+                  ) : (
+                    <ul className="mt-2 space-y-1">
+                      {run.clusters.map((c, i) => {
+                        const meta = OUTCOME_META[c.outcome] || { label: c.outcome, cls: 'bg-gray-100 text-gray-600' };
+                        return (
+                          <li key={i} className="flex flex-wrap items-center gap-2 text-xs">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${meta.cls}`}>
+                              {meta.label}
+                            </span>
+                            <span className="text-gray-600 dark:text-gray-300">{c.subject}</span>
+                            <span className="text-gray-400">
+                              · {c.tier}{c.organization ? ` · ${c.organization}` : ''} · {c.source_kind || 'any'} · {c.evidence_count} case{c.evidence_count === 1 ? '' : 's'}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TierBadge({ tier }) {
   const cls = tier === 'global'
     ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
@@ -23,6 +105,8 @@ export default function TriageLessonsReview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const [runs, setRuns] = useState([]);
+  const [runsError, setRunsError] = useState(null);
   const [statusFilter, setStatusFilter] = useState('proposed');
   const [search, setSearch] = useState('');
   const [sortOrder, setSortOrder] = useState('desc');
@@ -39,6 +123,12 @@ export default function TriageLessonsReview() {
   }
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [statusFilter]);
+
+  useEffect(() => {
+    api.get('/api/incidents/triage-lessons/runs/')
+      .then((r) => setRuns(r.data))
+      .catch(() => setRunsError('Failed to load recent sweeps.'));
+  }, []);
 
   const visible = useMemo(() => {
     let rows = [...lessons];
@@ -75,6 +165,8 @@ export default function TriageLessonsReview() {
         Review what the Triage pipeline has learned. Approving a lesson activates it;
         editing on approve lets you scrub a global lesson before it goes fleet-wide.
       </p>
+
+      <RecentSweeps runs={runs} error={runsError} />
 
       <div className="flex flex-col sm:flex-row gap-2 sm:items-center mb-4">
         <input

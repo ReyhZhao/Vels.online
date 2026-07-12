@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from incidents.memory import review
-from incidents.models import Subject, TriageLesson
+from incidents.models import DistillationRun, Subject, TriageLesson
 from incidents.views import _require_staff
 from security.models import Organization
 
@@ -76,6 +76,37 @@ class LessonReviewQueueView(APIView):
             selector=(request.data.get("selector") or "").strip(),
         )
         return Response(TriageLessonSerializer(lesson).data, status=status.HTTP_201_CREATED)
+
+
+class DistillationRunSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DistillationRun
+        fields = [
+            "id", "started_at", "finished_at", "eligible_count", "cluster_count",
+            "proposed_count", "proposed_global_count", "clusters",
+        ]
+        read_only_fields = fields
+
+
+class DistillationRunListView(APIView):
+    """Recent distillation-sweep run summaries for the review surface (#697). Staff-only.
+
+    Read-only observability into what the background sweep considered and why it did or did
+    not propose Lessons. The per-cluster `clusters` breakdown is staff-only, consistent with
+    every other Triage Lesson evidence surface (ADR-0031)."""
+
+    _DEFAULT_LIMIT = 20
+
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        try:
+            limit = min(int(request.query_params.get("limit", self._DEFAULT_LIMIT)), 100)
+        except (TypeError, ValueError):
+            limit = self._DEFAULT_LIMIT
+        runs = DistillationRun.objects.all()[:limit]
+        return Response(DistillationRunSerializer(runs, many=True).data)
 
 
 class LessonReviewActionView(APIView):

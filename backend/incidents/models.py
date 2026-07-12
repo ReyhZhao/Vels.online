@@ -1,6 +1,7 @@
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 
 from automations.models import Automation, WazuhActiveResponse
@@ -795,3 +796,39 @@ class ClassificationCorrection(models.Model):
 
     def __str__(self):
         return f"Correction on {self.incident_id} by {self.actor_id}"
+
+
+class DistillationRun(models.Model):
+    """An inspectable record of one distillation sweep (ADR-0030, #697).
+
+    The sweep clusters recent human-ratified incidents and proposes Triage Lessons only
+    for clusters that clear the evidence bar, carry no covering lesson, and yield non-empty
+    distiller guidance — every other cluster is skipped silently. Staff had no way to see
+    what a background run considered or why it proposed nothing. Each run persists its
+    per-cluster decisions here so the Triage Lessons review surface can show them. Purely
+    observational: writing this record never changes what gets learned. Rows are pruned to
+    the most recent few hundred, like other throwaway run data.
+    """
+
+    # Closed set of per-cluster decision reasons recorded in ``clusters``.
+    OUTCOME_PROPOSED = "proposed"
+    OUTCOME_INSUFFICIENT_EVIDENCE = "skipped_insufficient_evidence"
+    OUTCOME_COVERING_LESSON = "skipped_covering_lesson"
+    OUTCOME_EMPTY_GUIDANCE = "skipped_empty_guidance"
+    OUTCOME_DISTILLER_ERROR = "distiller_error"
+
+    started_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    eligible_count = models.IntegerField(default=0)
+    cluster_count = models.IntegerField(default=0)
+    proposed_count = models.IntegerField(default=0)
+    proposed_global_count = models.IntegerField(default=0)
+    # Per-cluster decisions: [{tier, organization, subject, source_kind, evidence_count,
+    # outcome}]. Staff-only, like every other Triage Lesson evidence surface.
+    clusters = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"DistillationRun {self.pk} ({self.proposed_count} proposed)"
