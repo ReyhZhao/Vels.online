@@ -1,8 +1,11 @@
+import logging
 import re
 
 from rest_framework import serializers
 
 from .models import Connection, ConnectionSender, IntakeInboxMessage
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionSerializer(serializers.ModelSerializer):
@@ -65,7 +68,10 @@ class ConnectionSerializer(serializers.ModelSerializer):
             try:
                 re.compile(value)
             except re.error as exc:
-                raise serializers.ValidationError(f"Invalid regex: {exc}")
+                # Log the detailed compile error for operators; return a generic
+                # message so exception internals aren't echoed back (CWE-209).
+                logger.warning("Invalid external_reference_regex submitted: %s", exc)
+                raise serializers.ValidationError("Invalid regular expression.")
         return value
 
     def validate_field_mappings(self, value):
@@ -84,7 +90,12 @@ class ConnectionSerializer(serializers.ModelSerializer):
                 try:
                     re.compile(regex)
                 except re.error as exc:
-                    raise serializers.ValidationError(f"{field}: invalid regex: {exc}")
+                    # `field` is a validated MAPPED_FIELDS key (safe to echo); the
+                    # exception detail is logged, not returned to the caller (CWE-209).
+                    logger.warning("Invalid field mapping regex for %s: %s", field, exc)
+                    raise serializers.ValidationError(
+                        f"{field}: invalid regular expression."
+                    )
             value_map = cfg.get("value_map") or {}
             if not isinstance(value_map, dict):
                 raise serializers.ValidationError(f"{field}: value_map must be an object.")

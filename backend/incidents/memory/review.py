@@ -12,7 +12,15 @@ _EDITABLE_FIELDS = ("guidance", "selector", "source_kind")
 
 
 class LessonReviewError(Exception):
-    """Raised on an invalid review transition (e.g. approving an archived Lesson)."""
+    """Raised on an invalid review transition (e.g. approving an archived Lesson).
+
+    ``code`` is a stable, safe identifier the API layer maps to a caller-facing
+    message, so the exception text (kept for logs) is never echoed to clients.
+    """
+
+    def __init__(self, message, *, code="invalid_transition"):
+        super().__init__(message)
+        self.code = code
 
 
 def _apply_edits(lesson, edits):
@@ -32,7 +40,9 @@ def approve_lesson(lesson, *, staff, edits=None):
     from incidents.models import TriageLesson
 
     if lesson.status not in (TriageLesson.STATUS_PROPOSED, TriageLesson.STATUS_SUSPENDED):
-        raise LessonReviewError(f"cannot approve a lesson in status '{lesson.status}'")
+        raise LessonReviewError(
+            f"cannot approve a lesson in status '{lesson.status}'", code="not_approvable"
+        )
     _apply_edits(lesson, edits)
     lesson.status = TriageLesson.STATUS_ACTIVE
     lesson.approved_by = staff
@@ -47,7 +57,9 @@ def reject_lesson(lesson, *, staff):
     from incidents.models import TriageLesson
 
     if lesson.status == TriageLesson.STATUS_ACTIVE:
-        raise LessonReviewError("cannot reject an active lesson; suspend it instead")
+        raise LessonReviewError(
+            "cannot reject an active lesson; suspend it instead", code="reject_active"
+        )
     lesson.status = TriageLesson.STATUS_ARCHIVED
     lesson.save(update_fields=["status", "updated_at"])
     return lesson
