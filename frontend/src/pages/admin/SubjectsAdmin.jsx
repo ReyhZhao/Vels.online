@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
+import { Link } from 'react-router-dom';
 import api from '@/lib/axios';
 
 const SORT_COLUMNS = {
@@ -12,6 +13,63 @@ function StatusBadge({ archived }) {
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${archived ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
       {archived ? 'Archived' : 'Active'}
     </span>
+  );
+}
+
+function fmtDate(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString();
+}
+
+// One "agent → human" change, rendered only when the two sides actually differ.
+function Delta({ label, from, to }) {
+  if (!from && !to) return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="rounded bg-red-50 px-1 text-red-700 line-through dark:bg-red-900/20 dark:text-red-300">{from || '—'}</span>
+      <span aria-hidden="true" className="text-muted-foreground">→</span>
+      <span className="rounded bg-green-50 px-1 text-green-700 dark:bg-green-900/20 dark:text-green-300">{to || '—'}</span>
+    </span>
+  );
+}
+
+// The lazily-loaded list of Classification Corrections touching a subject.
+function CorrectionsPanel({ state }) {
+  if (!state || state.loading) {
+    return <p className="py-2 text-xs text-muted-foreground">Loading corrections…</p>;
+  }
+  if (state.error) {
+    return <p className="py-2 text-xs text-red-600">{state.error}</p>;
+  }
+  if (state.items.length === 0) {
+    return <p className="py-2 text-xs text-muted-foreground">No classification corrections for this subject yet.</p>;
+  }
+  return (
+    <ul className="space-y-2">
+      {state.items.map(c => (
+        <li key={c.id} className="rounded-md border border-border bg-background px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <Link to={`/incidents/${c.incident_display_id}`} className="font-mono text-xs text-primary hover:underline">
+              {c.incident_display_id}
+            </Link>
+            {c.organization_slug && (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{c.organization_slug}</span>
+            )}
+            <span className="text-xs text-muted-foreground truncate max-w-xs">{c.incident_title}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <Delta label="Subject" from={c.agent_subject_name} to={c.human_subject_name} />
+            <Delta label="Severity" from={c.agent_severity} to={c.human_severity} />
+            <Delta label="Disposition" from={c.agent_disposition} to={c.human_disposition} />
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {c.actor_username ? `by ${c.actor_username}` : 'by an analyst'} · {fmtDate(c.created_at)}
+          </p>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -37,6 +95,26 @@ export default function SubjectsAdmin() {
   const [editError, setEditError] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+
+  // Classification Corrections, lazily fetched per subject on first expand (ADR-0030).
+  const [expandedId, setExpandedId] = useState(null);
+  const [corrections, setCorrections] = useState({});  // { [subjectId]: {loading, error, items} }
+
+  async function toggleCorrections(subject) {
+    if (expandedId === subject.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(subject.id);
+    if (corrections[subject.id]) return;  // already fetched
+    setCorrections(prev => ({ ...prev, [subject.id]: { loading: true, error: null, items: [] } }));
+    try {
+      const res = await api.get(`/api/subjects/${subject.id}/corrections/`);
+      setCorrections(prev => ({ ...prev, [subject.id]: { loading: false, error: null, items: res.data } }));
+    } catch {
+      setCorrections(prev => ({ ...prev, [subject.id]: { loading: false, error: 'Failed to load corrections.', items: [] } }));
+    }
+  }
 
   useEffect(() => {
     api.get('/api/subjects/')
@@ -379,7 +457,18 @@ export default function SubjectsAdmin() {
                   >
                     {deletingId === s.id ? 'Deleting…' : 'Delete'}
                   </button>
+                  {s.correction_count > 0 && (
+                    <button
+                      onClick={() => toggleCorrections(s)}
+                      aria-expanded={expandedId === s.id}
+                      aria-label={`${expandedId === s.id ? 'Hide' : 'Show'} corrections for ${s.name}`}
+                      className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                    >
+                      Corrections ({s.correction_count})
+                    </button>
+                  )}
                 </div>
+                {expandedId === s.id && <CorrectionsPanel state={corrections[s.id]} />}
               </>
             )}
           </div>
@@ -405,17 +494,18 @@ export default function SubjectsAdmin() {
               <SortHeader field="slug" />
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Description</th>
               <SortHeader field="status" />
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Corrections</th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td>
               </tr>
             ) : visible.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No subjects.</td>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No subjects.</td>
               </tr>
             ) : (
               visible.map(s => (
@@ -445,6 +535,7 @@ export default function SubjectsAdmin() {
                       </div>
                     </td>
                     <td className="px-4 py-3" />
+                    <td className="px-4 py-3" />
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <button
@@ -465,7 +556,8 @@ export default function SubjectsAdmin() {
                     </td>
                   </tr>
                 ) : (
-                <tr key={s.id} className="border-b border-border last:border-0">
+                <Fragment key={s.id}>
+                <tr className="border-b border-border last:border-0">
                   <td className="px-4 py-3 w-8">
                     <input
                       type="checkbox"
@@ -479,6 +571,23 @@ export default function SubjectsAdmin() {
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.slug}</td>
                   <td className="px-4 py-3 text-sm text-muted-foreground max-w-xs truncate">{s.description || '—'}</td>
                   <td className="px-4 py-3"><StatusBadge archived={s.archived} /></td>
+                  <td className="px-4 py-3">
+                    {s.correction_count == null ? (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    ) : s.correction_count === 0 ? (
+                      <span className="text-xs text-muted-foreground">0</span>
+                    ) : (
+                      <button
+                        onClick={() => toggleCorrections(s)}
+                        aria-expanded={expandedId === s.id}
+                        aria-label={`${expandedId === s.id ? 'Hide' : 'Show'} corrections for ${s.name}`}
+                        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+                      >
+                        <span aria-hidden="true">{expandedId === s.id ? '▾' : '▸'}</span>
+                        {s.correction_count}
+                      </button>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1">
                       <button
@@ -505,6 +614,15 @@ export default function SubjectsAdmin() {
                     </div>
                   </td>
                 </tr>
+                {expandedId === s.id && (
+                  <tr className="border-b border-border last:border-0 bg-muted/30">
+                    <td className="px-4 py-3" />
+                    <td colSpan={6} className="px-4 py-3">
+                      <CorrectionsPanel state={corrections[s.id]} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
                 )
               ))
             )}
