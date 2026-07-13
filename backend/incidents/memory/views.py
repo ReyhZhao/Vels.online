@@ -4,6 +4,8 @@ Tenants are entirely outside this surface — every endpoint is staff-guarded, c
 with Triage/Hunt/Attack-Map. A Global Lesson's evidence links are staff-only here and are
 never surfaced to a tenant anywhere.
 """
+import logging
+
 from django.db.models import Q
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -13,6 +15,17 @@ from incidents.memory import review
 from incidents.models import ClassificationCorrection, DistillationRun, Subject, TriageLesson
 from incidents.views import _require_staff
 from security.models import Organization
+
+logger = logging.getLogger(__name__)
+
+# Safe, caller-facing messages for review transition errors, keyed by the
+# exception's stable ``code``. Mapping through this dict keeps internal exception
+# text out of the HTTP response (CWE-209) while still giving a useful message.
+_REVIEW_ERROR_MESSAGES = {
+    "not_approvable": "This lesson can't be approved in its current status.",
+    "reject_active": "Cannot reject an active lesson; suspend it instead.",
+    "invalid_transition": "This review action isn't allowed for this lesson.",
+}
 
 
 class TriageLessonSerializer(serializers.ModelSerializer):
@@ -189,5 +202,9 @@ class LessonReviewActionView(APIView):
             else:
                 review.suspend_lesson(lesson, staff=request.user)
         except review.LessonReviewError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+            logger.warning("Lesson %s review action %r rejected: %s", pk, action, exc)
+            detail = _REVIEW_ERROR_MESSAGES.get(
+                exc.code, _REVIEW_ERROR_MESSAGES["invalid_transition"]
+            )
+            return Response({"detail": detail}, status=status.HTTP_409_CONFLICT)
         return Response(TriageLessonSerializer(lesson).data)
