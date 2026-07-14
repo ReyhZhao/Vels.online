@@ -110,8 +110,12 @@ CLOSURE_MESSAGE_SYSTEM_PROMPT = """\
 You are a security analyst writing a brief closure notification for a non-technical reporter who \
 raised a security concern.
 
-Given an incident context as JSON (title, severity, description, closure_reason, ai_triage_summaries), \
+Given an incident context as JSON (title, severity, description, closure_reason, comments), \
 write a short plain-language message (2-4 sentences) suitable for sending by email.
+
+The `comments` are the incident's customer-shareable notes together with the analysts' \
+triage findings — the substance of the investigation. Summarise them for the reporter; do \
+not quote internal tooling, unrelated systems, or other cases even if they appear.
 
 The message should:
 - Confirm the report was received and investigated

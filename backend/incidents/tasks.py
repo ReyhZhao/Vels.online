@@ -35,10 +35,34 @@ def get_triage_lock_started_at(incident_id: int) -> str | None:
     return cache.get(_TRIAGE_LOCK_KEY.format(incident_id))
 
 
+def _closure_summary_grounding(incident) -> list[str]:
+    """Comment bodies feeding the closure summary (ADR-0034).
+
+    Non-internal comments (any kind) plus AI-triage comments — triage being a named
+    exception to the internal filter because it is the investigation narrative. Every
+    other internal comment (analyst notes, internal task summaries) is excluded.
+    """
+    from django.db.models import Q
+    from incidents.models import Comment
+
+    return list(
+        Comment.objects.filter(incident=incident, deleted_at__isnull=True)
+        .filter(Q(is_internal=False) | Q(kind=Comment.KIND_AI_TRIAGE))
+        .order_by("created_at")
+        .values_list("body", flat=True)
+    )
+
+
 @shared_task
 def notify_contacts_on_close(incident_id: int):
-    """Send an LLM-generated closure notification to all IncidentContacts for a closed incident."""
-    from incidents.models import Comment, Incident
+    """Send a TLP-tiered closure notification to a closed incident's contacts (ADR-0034).
+
+    RED: send nothing (the customer cannot see the incident at all). AMBER: a bare
+    "resolved" notice (incident id/title/description + closure reason, no summary).
+    WHITE/GREEN: a full LLM-generated summary built from the incident's non-internal
+    comments plus its AI-triage comments.
+    """
+    from incidents.models import Incident
     from contacts.services import send_contact_message
 
     try:
@@ -46,37 +70,38 @@ def notify_contacts_on_close(incident_id: int):
     except Incident.DoesNotExist:
         return
 
+    # RED: no notification at all — the customer floor hides the incident entirely.
+    if incident.tlp == Incident.TLP_RED:
+        return
+
     incident_contacts = list(incident.incident_contacts.select_related("contact").all())
     if not incident_contacts:
         return
 
-    ai_summaries = list(
-        Comment.objects.filter(incident=incident, kind=Comment.KIND_AI_TRIAGE)
-        .order_by("created_at")
-        .values_list("body", flat=True)
-    )
-    incident_context = {
-        "title": incident.title,
-        "severity": incident.severity,
-        "description": incident.description or "",
-        "closure_reason": incident.closure_reason or "",
-        "ai_triage_summaries": ai_summaries,
-    }
-
-    try:
-        provider = get_closure_provider()
-        message_body = provider.generate_closure_message(incident_context)
-    except Exception as exc:
-        logger.warning(
-            "notify_contacts_on_close: LLM call failed for incident %s: %s", incident_id, exc
-        )
-        return
-
-    if not message_body:
-        logger.warning(
-            "notify_contacts_on_close: LLM returned empty message for incident %s", incident_id
-        )
-        return
+    # AMBER: incident fields are within the customer floor but comment-derived content is
+    # not — send a bare notice with no summary. WHITE/GREEN: generate the LLM summary.
+    message_body = ""
+    if incident.tlp in (Incident.TLP_WHITE, Incident.TLP_GREEN):
+        incident_context = {
+            "title": incident.title,
+            "severity": incident.severity,
+            "description": incident.description or "",
+            "closure_reason": incident.closure_reason or "",
+            "comments": _closure_summary_grounding(incident),
+        }
+        try:
+            provider = get_closure_provider()
+            message_body = provider.generate_closure_message(incident_context)
+        except Exception as exc:
+            logger.warning(
+                "notify_contacts_on_close: LLM call failed for incident %s: %s", incident_id, exc
+            )
+            return
+        if not message_body:
+            logger.warning(
+                "notify_contacts_on_close: LLM returned empty message for incident %s", incident_id
+            )
+            return
 
     for ic in incident_contacts:
         try:

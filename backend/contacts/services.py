@@ -28,6 +28,8 @@ def send_contact_message(incident, contact, role, body):
         "display_id": incident.display_id,
         "title": incident.title,
         "severity": incident.severity,
+        "description": incident.description or "",
+        "closure_reason": getattr(incident, "closure_reason", "") or "",
         "message": body,
         "frontend_url": getattr(settings, "FRONTEND_URL", "").rstrip("/"),
     }

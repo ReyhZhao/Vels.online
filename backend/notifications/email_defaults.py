@@ -129,20 +129,27 @@ _INCIDENT_DIGEST_BODY = (
 )
 
 # ---------------------------------------------------------------------------
-# contact_notified
-# Context: contact_name, display_id, title, severity, frontend_url
+# contact_notified  (closure notification — ADR-0034)
+# Context: contact_name, display_id, title, description, closure_reason, message, frontend_url
+#   message present  → full closure summary (WHITE/GREEN incidents)
+#   message empty    → bare "resolved" notice (AMBER incidents)
+# Leads with incident id + description; the summary is the focus, not a generic card.
 # ---------------------------------------------------------------------------
 _CONTACT_NOTIFIED_BODY = (
-    "<h1>Security incident notification</h1>"
+    "<h1>Security incident update</h1>"
     "<p>Hi {{ contact_name }},</p>"
-    "<p>We wanted to keep you informed about a security incident that may be relevant to you.</p>"
     "<div class=\"incident-card\">"
     "<p class=\"incident-id\">{{ display_id }}</p>"
     "<p class=\"incident-title\">{{ title }}</p>"
-    "<p class=\"meta\">Severity: <span class=\"badge badge-{{ severity }}\">{{ severity }}</span></p>"
+    "{% if description %}<p class=\"meta\">{{ description }}</p>{% endif %}"
     "</div>"
-    "<p style=\"font-size:13px;color:#64748b;\">No action is required at this time. "
-    "Our team is actively monitoring the situation.</p>"
+    "{% if message %}"
+    "<p style=\"white-space:pre-wrap;\">{{ message }}</p>"
+    "{% else %}"
+    "<p>This incident has now been closed{% if closure_reason %} ({{ closure_reason }}){% endif %}. "
+    "No further action is required.</p>"
+    "{% endif %}"
+    "<p style=\"font-size:13px;color:#64748b;\">This update was sent by your security team.</p>"
 )
 
 # ---------------------------------------------------------------------------

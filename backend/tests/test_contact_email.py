@@ -125,3 +125,55 @@ def test_send_contact_message_context_contains_frontend_url(acme, settings):
 
     context = mock_send.call_args[0][1]
     assert context["frontend_url"] == "https://app.example.com"
+
+
+@pytest.mark.django_db
+def test_send_contact_message_context_contains_description(acme):
+    inc = make_incident(acme)
+    contact = make_contact(acme)
+
+    with patch("contacts.services.send_html_email") as mock_send:
+        send_contact_message(inc, contact, "notified", "FYI.")
+
+    context = mock_send.call_args[0][1]
+    assert context["description"] == inc.description
+    assert "closure_reason" in context
+
+
+# ── contact_notified template rendering (ADR-0034: content-first, body renders) ──
+
+
+@pytest.mark.django_db
+def test_closure_template_renders_summary_body_and_description():
+    from notifications.email import render_email
+
+    subject, html, plain = render_email("contact_notified", {
+        "contact_name": "Carol",
+        "display_id": "INC-2026-0001",
+        "title": "Phishing report",
+        "description": "Suspicious email from attacker@evil.com",
+        "closure_reason": "resolved",
+        "message": "We investigated the report and closed it as resolved.",
+        "frontend_url": "https://app.example.com",
+    })
+    # The summary body is actually rendered (the pre-ADR-0034 template dropped it).
+    assert "We investigated the report and closed it as resolved." in html
+    assert "INC-2026-0001" in html
+    assert "Suspicious email from attacker@evil.com" in html
+
+
+@pytest.mark.django_db
+def test_closure_template_bare_notice_when_no_summary():
+    from notifications.email import render_email
+
+    subject, html, plain = render_email("contact_notified", {
+        "contact_name": "Carol",
+        "display_id": "INC-2026-0001",
+        "title": "Phishing report",
+        "description": "Suspicious email from attacker@evil.com",
+        "closure_reason": "false_positive",
+        "message": "",
+        "frontend_url": "https://app.example.com",
+    })
+    assert "has now been closed" in html
+    assert "false_positive" in html
