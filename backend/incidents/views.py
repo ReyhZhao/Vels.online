@@ -78,8 +78,6 @@ from .tasks import acquire_triage_lock, enrich_iocs_then_triage, enrich_single_i
 
 logger = logging.getLogger(__name__)
 
-TRIAGE_STATES = {"new", "triaged"}
-
 SEVERITY_RANK = Case(
     When(severity="critical", then=Value(4)),
     When(severity="high",     then=Value(3)),
@@ -1364,9 +1362,9 @@ class IncidentDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if "subject" in request.data and incident.state not in TRIAGE_STATES:
+        if "subject" in request.data and incident.state == Incident.STATE_CLOSED:
             return Response(
-                {"detail": "Subject can only be changed while the incident is in new or triaged state."},
+                {"detail": "Subject cannot be changed once the incident is closed."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

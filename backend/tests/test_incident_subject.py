@@ -55,8 +55,11 @@ def patch_incident(client, incident, data):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("state", ["new", "triaged"])
-def test_subject_settable_in_triage_states(state, client, acme_member, acme, phishing):
+@pytest.mark.parametrize(
+    "state",
+    ["new", "triaged", "in_progress", "on_hold", "needs_tuning", "pending_closure", "resolved"],
+)
+def test_subject_settable_until_closed(state, client, acme_member, acme, phishing):
     incident = make_incident(acme, state=state)
     client.force_login(acme_member)
     response = patch_incident(client, incident, {"subject": phishing.id})
@@ -66,13 +69,12 @@ def test_subject_settable_in_triage_states(state, client, acme_member, acme, phi
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("state", ["in_progress", "on_hold", "resolved", "closed"])
-def test_subject_locked_after_triage(state, client, acme_member, acme, phishing):
-    incident = make_incident(acme, state=state)
+def test_subject_locked_when_closed(client, acme_member, acme, phishing):
+    incident = make_incident(acme, state="closed")
     client.force_login(acme_member)
     response = patch_incident(client, incident, {"subject": phishing.id})
     assert response.status_code == 400
-    assert "subject" in response.json()["detail"].lower() or "triage" in response.json()["detail"].lower()
+    assert "closed" in response.json()["detail"].lower()
 
 
 @pytest.mark.django_db
