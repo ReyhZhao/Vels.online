@@ -60,11 +60,11 @@ export const NAV_SECTIONS = [
       { to: '/admin/incidents/subjects', icon: Tag, label: 'Subjects', staffOnly: true },
       { to: '/admin/incidents/task-templates', icon: ListChecks, label: 'Task Templates', staffOnly: true },
       { to: '/admin/incidents/report-templates', icon: FileText, label: 'Report Templates', staffOnly: true },
-      { to: '/admin/incidents/triage-lessons', icon: Lightbulb, label: 'Triage Lessons', staffOnly: true },
+      { to: '/admin/incidents/triage-lessons', icon: Lightbulb, label: 'Triage Lessons', staffOnly: true, badge: 'proposedTriageLessons', badgeTone: 'info' },
       { to: '/admin/incidents/automations', icon: Zap, label: 'Automations', staffOnly: true },
       { to: '/admin/wazuh-responses', icon: ShieldCheck, label: 'Wazuh Responses', staffOnly: true },
       { to: '/admin/partners/connections', icon: Handshake, label: 'Partner Connections', staffOnly: true },
-      { to: '/admin/partners/intake-inbox', icon: Inbox, label: 'Intake Inbox', staffOnly: true },
+      { to: '/admin/partners/intake-inbox', icon: Inbox, label: 'Intake Inbox', staffOnly: true, badge: 'intakeInbox', badgeTone: 'info' },
     ],
   },
   {

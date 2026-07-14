@@ -92,6 +92,17 @@ class LessonReviewQueueView(APIView):
         return Response(TriageLessonSerializer(lesson).data, status=status.HTTP_201_CREATED)
 
 
+class LessonReviewCountView(APIView):
+    """Count of Triage Lessons awaiting review (proposed) for the sidebar badge (#702). Staff-only."""
+
+    def get(self, request):
+        err = _require_staff(request)
+        if err:
+            return err
+        count = TriageLesson.objects.filter(status=TriageLesson.STATUS_PROPOSED).count()
+        return Response({"count": count})
+
+
 class DistillationRunSerializer(serializers.ModelSerializer):
     class Meta:
         model = DistillationRun

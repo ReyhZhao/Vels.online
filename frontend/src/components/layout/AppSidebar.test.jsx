@@ -28,7 +28,15 @@ const mockStorage = {
 };
 
 // api.get responder for the useNavCounts endpoints.
-function mockCounts({ alerts = 0, incidents = 0, tasksNew = 0, tasksInProgress = 0, signups = 0 } = {}) {
+function mockCounts({
+  alerts = 0,
+  incidents = 0,
+  tasksNew = 0,
+  tasksInProgress = 0,
+  signups = 0,
+  triageLessons = 0,
+  intakeInbox = 0,
+} = {}) {
   api.get.mockImplementation((url, opts) => {
     const params = opts?.params ?? {};
     if (url === '/api/alerts/') return Promise.resolve({ data: { count: alerts } });
@@ -37,6 +45,8 @@ function mockCounts({ alerts = 0, incidents = 0, tasksNew = 0, tasksInProgress =
       return Promise.resolve({ data: { count: params.state === 'new' ? tasksNew : tasksInProgress } });
     }
     if (url === '/api/signups/pending-count/') return Promise.resolve({ data: { count: signups } });
+    if (url === '/api/incidents/triage-lessons/count/') return Promise.resolve({ data: { count: triageLessons } });
+    if (url === '/api/partners/intake-inbox/count/') return Promise.resolve({ data: { count: intakeInbox } });
     return Promise.resolve({ data: {} });
   });
 }
@@ -228,6 +238,31 @@ describe('AppSidebar', () => {
 
     const link = screen.getByRole('link', { name: /signup requests/i });
     expect(await within(link).findByText('6')).toBeInTheDocument();
+  });
+
+  it('shows proposed triage lessons badge on the Triage Lessons link for staff', async () => {
+    mockCounts({ triageLessons: 3 });
+    renderSidebar(staffUser);
+
+    const link = screen.getByRole('link', { name: /triage lessons/i });
+    expect(await within(link).findByText('3')).toBeInTheDocument();
+  });
+
+  it('shows intake inbox badge on the Intake Inbox link for staff', async () => {
+    mockCounts({ intakeInbox: 8 });
+    renderSidebar(staffUser);
+
+    const link = screen.getByRole('link', { name: /intake inbox/i });
+    expect(await within(link).findByText('8')).toBeInTheDocument();
+  });
+
+  it('does not fetch staff-only counts for a regular user', async () => {
+    mockCounts({ alerts: 1 });
+    renderSidebar(regularUser);
+    await screen.findByText('1');
+
+    expect(api.get).not.toHaveBeenCalledWith('/api/incidents/triage-lessons/count/', undefined);
+    expect(api.get).not.toHaveBeenCalledWith('/api/partners/intake-inbox/count/', undefined);
   });
 
   it('does not fetch pending signups for a regular user', async () => {

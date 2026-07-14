@@ -1,5 +1,7 @@
 from rest_framework import generics
 from rest_framework.permissions import IsAdminUser
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import Connection, IntakeInboxMessage
 from .serializers import ConnectionSerializer, IntakeInboxMessageSerializer
@@ -37,6 +39,15 @@ class IntakeInboxListView(generics.ListAPIView):
     permission_classes = [IsAdminUser]
     serializer_class = IntakeInboxMessageSerializer
     queryset = IntakeInboxMessage.objects.all()
+
+
+class IntakeInboxCountView(APIView):
+    """Count of items in the Intake Inbox for the sidebar badge (#702). Staff-only."""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        return Response({"count": IntakeInboxMessage.objects.count()})
 
 
 class IntakeInboxDetailView(generics.RetrieveDestroyAPIView):

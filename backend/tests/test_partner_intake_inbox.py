@@ -118,3 +118,19 @@ def test_staff_lists_and_dismisses(client, staff):
     assert listing.json()[0]["sender"] == "a@x.example"
     assert client.delete(f"/api/partners/intake-inbox/{row.id}/").status_code == 204
     assert not IntakeInboxMessage.objects.filter(pk=row.id).exists()
+
+
+@pytest.mark.django_db
+def test_count_requires_staff(client, regular_user):
+    client.force_login(regular_user)
+    assert client.get("/api/partners/intake-inbox/count/").status_code == 403
+
+
+@pytest.mark.django_db
+def test_count_returns_inbox_total(client, staff):
+    IntakeInboxMessage.objects.create(sender="a@x.example", drop_reason="dropped:x")
+    IntakeInboxMessage.objects.create(sender="b@x.example", drop_reason="dropped:y")
+    client.force_login(staff)
+    res = client.get("/api/partners/intake-inbox/count/")
+    assert res.status_code == 200
+    assert res.json() == {"count": 2}

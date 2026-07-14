@@ -106,6 +106,24 @@ def test_queue_requires_staff(client, member_user):
 
 
 @pytest.mark.django_db
+def test_count_requires_staff(client, member_user):
+    client.force_login(member_user)
+    assert client.get("/api/incidents/triage-lessons/count/").status_code == 403
+
+
+@pytest.mark.django_db
+def test_count_returns_only_proposed(client, acme, brute, staff_user):
+    proposed(acme, brute)
+    proposed(acme, brute)
+    active = proposed(acme, brute)
+    review.approve_lesson(active, staff=staff_user)  # no longer proposed
+    client.force_login(staff_user)
+    res = client.get("/api/incidents/triage-lessons/count/")
+    assert res.status_code == 200
+    assert res.json() == {"count": 2}
+
+
+@pytest.mark.django_db
 def test_queue_lists_proposed_and_approve_activates(client, acme, brute, staff_user):
     lesson = proposed(acme, brute)
     client.force_login(staff_user)
