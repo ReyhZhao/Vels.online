@@ -2103,6 +2103,14 @@ class IncidentCommentListView(APIView):
             sync_comment_to_partner(comment)
         except Exception:
             logger.exception("partner sync failed for comment %s", comment.id)
+        # All-updates contact notifications (ADR-0034): email all_updates contacts about a
+        # customer-facing comment. The task re-checks internal/kind/TLP, so this is safe to
+        # dispatch for every comment; the async boundary keeps it off the request path.
+        try:
+            from incidents.tasks import notify_contacts_of_update
+            notify_contacts_of_update.delay(comment.id)
+        except Exception:
+            logger.exception("update-notification dispatch failed for comment %s", comment.id)
         return Response(CommentSerializer(comment, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 

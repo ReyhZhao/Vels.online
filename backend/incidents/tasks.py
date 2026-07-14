@@ -113,6 +113,46 @@ def notify_contacts_on_close(incident_id: int):
             )
 
 
+@shared_task
+def notify_contacts_of_update(comment_id: int):
+    """Email all-updates contacts when an analyst posts a customer-facing comment (ADR-0034).
+
+    Fires only for a non-internal, human `user` comment on a WHITE/GREEN incident — the
+    update body IS a comment, which the customer floor hides at AMBER/RED, so there is no
+    AMBER-safe variant. Recipients are the incident's contacts whose notify_level is
+    all_updates; closure_only contacts are left for the on-close notification.
+    """
+    from incidents.models import Comment, Incident
+    from contacts.models import IncidentContact
+    from contacts.services import send_contact_message
+
+    try:
+        comment = Comment.objects.select_related("incident").get(id=comment_id)
+    except Comment.DoesNotExist:
+        return
+
+    if comment.is_internal or comment.kind != Comment.KIND_USER or comment.deleted_at is not None:
+        return
+
+    incident = comment.incident
+    if incident.tlp not in (Incident.TLP_WHITE, Incident.TLP_GREEN):
+        return
+
+    contacts = (
+        IncidentContact.objects
+        .filter(incident=incident, notify_level=IncidentContact.NOTIFY_ALL_UPDATES)
+        .select_related("contact")
+    )
+    for ic in contacts:
+        try:
+            send_contact_message(incident, ic.contact, role="update", body=comment.body)
+        except Exception as exc:
+            logger.warning(
+                "notify_contacts_of_update: failed to notify contact %s for incident %s: %s",
+                ic.contact.id, incident.id, exc,
+            )
+
+
 def _clamp_severity(current: str, recommended: str) -> str:
     """Return the recommended severity clamped to at most 2 rank levels from the current."""
     current_rank = SEVERITY_RANK.get(current, 2)

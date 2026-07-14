@@ -103,6 +103,29 @@ describe('ContactMessagesCard', () => {
     expect(screen.getByTitle('Unread reply')).toBeInTheDocument();
   });
 
+  it('renders auto-sent update messages in a collapsible section', async () => {
+    const withUpdate = [
+      {
+        contact_id: 10,
+        name: 'Carol',
+        email: 'carol@example.com',
+        department: 'IT',
+        messages: [
+          { id: 5, direction: 'outbound', role: 'update', body: 'We blocked the sender.', parent_id: null, read_at: null, created_at: '2026-01-02T10:00:00Z' },
+        ],
+      },
+    ];
+    mockBothEndpoints({ messages: withUpdate, contacts: [CAROL_CONTACT] });
+    api.post.mockResolvedValue({});
+
+    render(<ContactMessagesCard displayId="INC-001" />);
+    await waitFor(() => screen.getByText('Carol'));
+    fireEvent.click(screen.getByText('Carol'));
+
+    await waitFor(() => screen.getByText('1 automatic update sent'));
+    expect(screen.getByText('We blocked the sender.')).toBeInTheDocument();
+  });
+
   it('expands thread and calls mark-read when row is toggled open', async () => {
     mockBothEndpoints({ messages: GROUP_WITH_MESSAGES, contacts: [CAROL_CONTACT] });
     api.post.mockResolvedValue({});

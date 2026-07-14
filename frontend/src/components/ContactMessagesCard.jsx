@@ -5,6 +5,7 @@ import ContactComposeModal from './ContactComposeModal';
 const ROLE_CLASSES = {
   notified:   'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
   questioned: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+  update:     'bg-slate-100 text-slate-700 dark:bg-slate-800/50 dark:text-slate-300',
 };
 
 export default function ContactMessagesCard({ displayId }) {
@@ -73,7 +74,10 @@ export default function ContactMessagesCard({ displayId }) {
           const hasUnread = g.messages.some(m => m.direction === 'inbound' && !m.read_at);
           const isExpanded = !!expanded[g.contact_id];
 
-          const outbound = g.messages.filter(m => m.direction === 'outbound');
+          // Auto-sent all-updates notifications (role=update) are collapsed separately
+          // so they don't bury the human questioned/notified conversation.
+          const outbound = g.messages.filter(m => m.direction === 'outbound' && m.role !== 'update');
+          const autoUpdates = g.messages.filter(m => m.direction === 'outbound' && m.role === 'update');
           const inboundByParent = {};
           g.messages.filter(m => m.direction === 'inbound').forEach(m => {
             const key = m.parent_id ?? 'orphan';
@@ -118,7 +122,7 @@ export default function ContactMessagesCard({ displayId }) {
 
               {isExpanded && (
                 <div className="mt-2 space-y-2 pl-3 border-l border-border">
-                  {outbound.length === 0 && Object.values(inboundByParent).flat().length === 0 && (
+                  {outbound.length === 0 && autoUpdates.length === 0 && Object.values(inboundByParent).flat().length === 0 && (
                     <p className="text-xs text-muted-foreground italic">No messages yet.</p>
                   )}
                   {outbound.map(msg => (
@@ -161,6 +165,29 @@ export default function ContactMessagesCard({ displayId }) {
                       <p className="text-sm text-foreground whitespace-pre-wrap">{reply.body}</p>
                     </div>
                   ))}
+
+                  {autoUpdates.length > 0 && (
+                    <details className="rounded-md bg-muted/30 p-2">
+                      <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                        {autoUpdates.length} automatic update{autoUpdates.length !== 1 ? 's' : ''} sent
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {autoUpdates.map(msg => (
+                          <div key={msg.id} className="rounded-md bg-muted/50 p-2.5">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${ROLE_CLASSES.update}`}>
+                                Update
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(msg.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                            <p className="text-sm text-foreground whitespace-pre-wrap">{msg.body}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
               )}
             </div>

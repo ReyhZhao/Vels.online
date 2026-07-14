@@ -22,7 +22,10 @@ def send_contact_message(incident, contact, role, body):
         "role": role,
     })
 
-    template = "contact_questioned" if role == "questioned" else "contact_notified"
+    template = {
+        "questioned": "contact_questioned",
+        "update": "contact_update",
+    }.get(role, "contact_notified")
     context = {
         "contact_name": contact.name,
         "display_id": incident.display_id,

@@ -153,6 +153,24 @@ _CONTACT_NOTIFIED_BODY = (
 )
 
 # ---------------------------------------------------------------------------
+# contact_update  (all-updates notification — ADR-0034)
+# Context: contact_name, display_id, title, description, message, frontend_url
+# Leads with incident id + description; the recent comment (message) is the focus.
+# ---------------------------------------------------------------------------
+_CONTACT_UPDATE_BODY = (
+    "<h1>Security incident update</h1>"
+    "<p>Hi {{ contact_name }},</p>"
+    "<p>There is a new update on the security incident below.</p>"
+    "<div class=\"incident-card\">"
+    "<p class=\"incident-id\">{{ display_id }}</p>"
+    "<p class=\"incident-title\">{{ title }}</p>"
+    "{% if description %}<p class=\"meta\">{{ description }}</p>{% endif %}"
+    "</div>"
+    "<p style=\"white-space:pre-wrap;\">{{ message }}</p>"
+    "<p style=\"font-size:13px;color:#64748b;\">This update was sent by your security team.</p>"
+)
+
+# ---------------------------------------------------------------------------
 # contact_questioned
 # Context: contact_name, display_id, title, severity, message, frontend_url
 # ---------------------------------------------------------------------------
@@ -295,6 +313,11 @@ DEFAULT_TEMPLATES = {
         "description": "Sent to a contact when they are linked to an incident with role=notified",
         "subject": "[vels.online] Security incident notification: {{ display_id }}",
         "html_body": _base("Security incident notification", _CONTACT_NOTIFIED_BODY),
+    },
+    "contact_update": {
+        "description": "Sent to an all-updates contact when an analyst posts a customer-facing comment",
+        "subject": "[vels.online] Security incident update: {{ display_id }}",
+        "html_body": _base("Security incident update", _CONTACT_UPDATE_BODY),
     },
     "contact_questioned": {
         "description": "Sent to a contact when they are linked to an incident with role=questioned",
