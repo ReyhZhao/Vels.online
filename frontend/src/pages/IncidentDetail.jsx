@@ -1802,7 +1802,10 @@ export default function IncidentDetail() {
       )}
 
       {/* ── Tabbed content ── */}
-      <div className="rounded-lg border border-border bg-card overflow-hidden">
+      {/* No overflow-hidden here: it would clip row overflow menus (e.g. the
+          attachments kebab) opening near the card's bottom edge. The tab strip
+          clips its own horizontal scroll below. */}
+      <div className="rounded-lg border border-border bg-card">
         <div className="flex overflow-x-auto border-b border-border no-scrollbar">
           {(() => {
             const tabCounts = {

@@ -37,7 +37,10 @@ function AttachmentRowMenu({ attachment, canPreview, canDelete, onPreview, onDow
   }
 
   return (
-    <div className="relative shrink-0" ref={ref}>
+    // While open, promote the whole menu to its own stacking context (z-20) so
+    // the dropdown paints above later rows rather than being trapped beneath
+    // them. (The tab card must also not be overflow-hidden, or it clips this.)
+    <div className={`relative shrink-0${open ? ' z-20' : ''}`} ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
@@ -50,7 +53,7 @@ function AttachmentRowMenu({ attachment, canPreview, canDelete, onPreview, onDow
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-10 mt-1 w-40 overflow-hidden rounded-md border border-border bg-card shadow-lg"
+          className="absolute right-0 z-20 mt-1 w-40 overflow-hidden rounded-md border border-border bg-card shadow-lg"
         >
           {canPreview && (
             <button
