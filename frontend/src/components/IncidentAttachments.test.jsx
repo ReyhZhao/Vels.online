@@ -59,26 +59,65 @@ describe('IncidentAttachments', () => {
     expect(screen.getByText('internal')).toBeInTheDocument();
   });
 
-  it('shows Download button for each attachment', async () => {
+  async function openRowMenu(user, filename = 'report.pdf') {
+    await waitFor(() => screen.getByText(filename));
+    await user.click(screen.getByRole('button', { name: `Actions for ${filename}` }));
+  }
+
+  it('shows Download action in the row menu', async () => {
     api.get.mockResolvedValue({ data: [PUBLIC_ATTACHMENT] });
+    const user = userEvent.setup();
     render(<IncidentAttachments incidentId="1" />);
-    await waitFor(() => screen.getByText('report.pdf'));
-    expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument();
+    await openRowMenu(user);
+    expect(screen.getByRole('menuitem', { name: /Download/ })).toBeInTheDocument();
   });
 
-  it('does not show Delete button for non-staff', async () => {
+  it('offers Preview for a previewable attachment', async () => {
     api.get.mockResolvedValue({ data: [PUBLIC_ATTACHMENT] });
+    const user = userEvent.setup();
     render(<IncidentAttachments incidentId="1" />);
-    await waitFor(() => screen.getByText('report.pdf'));
-    expect(screen.queryByRole('button', { name: /Delete/ })).not.toBeInTheDocument();
+    await openRowMenu(user);
+    expect(screen.getByRole('menuitem', { name: /Preview/ })).toBeInTheDocument();
   });
 
-  it('shows Delete button for staff', async () => {
+  it('does not offer Preview for a non-viewable attachment', async () => {
+    api.get.mockResolvedValue({ data: [{ ...PUBLIC_ATTACHMENT, filename: 'bundle.zip', content_type: 'application/zip' }] });
+    const user = userEvent.setup();
+    render(<IncidentAttachments incidentId="1" />);
+    await openRowMenu(user, 'bundle.zip');
+    expect(screen.queryByRole('menuitem', { name: /Preview/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Download/ })).toBeInTheDocument();
+  });
+
+  it('opens the preview modal and requests the preview endpoint', async () => {
+    api.get.mockImplementation((url) => {
+      if (url === '/api/incidents/1/attachments/') return Promise.resolve({ data: [PUBLIC_ATTACHMENT] });
+      if (url.endsWith('/preview/')) return Promise.resolve({ data: { kind: 'pdf', url: 'https://s3.example.com/inline', content_type: 'application/pdf' } });
+      return Promise.resolve({ data: {} });
+    });
+    const user = userEvent.setup();
+    render(<IncidentAttachments incidentId="1" />);
+    await openRowMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Preview/ }));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/incidents/1/attachments/1/preview/'));
+    expect(await screen.findByRole('dialog', { name: /Preview of report.pdf/ })).toBeInTheDocument();
+  });
+
+  it('does not offer Delete for non-staff', async () => {
+    api.get.mockResolvedValue({ data: [PUBLIC_ATTACHMENT] });
+    const user = userEvent.setup();
+    render(<IncidentAttachments incidentId="1" />);
+    await openRowMenu(user);
+    expect(screen.queryByRole('menuitem', { name: /Delete/ })).not.toBeInTheDocument();
+  });
+
+  it('offers Delete for staff', async () => {
     mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true } });
     api.get.mockResolvedValue({ data: [PUBLIC_ATTACHMENT] });
+    const user = userEvent.setup();
     render(<IncidentAttachments incidentId="1" />);
-    await waitFor(() => screen.getByText('report.pdf'));
-    expect(screen.getByRole('button', { name: /Delete report.pdf/ })).toBeInTheDocument();
+    await openRowMenu(user);
+    expect(screen.getByRole('menuitem', { name: /Delete/ })).toBeInTheDocument();
   });
 
   it('calls download API and opens URL when Download clicked', async () => {
@@ -87,8 +126,8 @@ describe('IncidentAttachments', () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     const user = userEvent.setup();
     render(<IncidentAttachments incidentId="1" />);
-    await waitFor(() => screen.getByRole('button', { name: 'Download' }));
-    await user.click(screen.getByRole('button', { name: 'Download' }));
+    await openRowMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Download/ }));
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/incidents/1/attachments/1/download/'));
     expect(openSpy).toHaveBeenCalledWith('https://s3.example.com/get', '_blank', 'noopener,noreferrer');
     openSpy.mockRestore();
@@ -101,8 +140,8 @@ describe('IncidentAttachments', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = userEvent.setup();
     render(<IncidentAttachments incidentId="1" />);
-    await waitFor(() => screen.getByRole('button', { name: /Delete report.pdf/ }));
-    await user.click(screen.getByRole('button', { name: /Delete report.pdf/ }));
+    await openRowMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete/ }));
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/incidents/1/attachments/1/'));
     expect(screen.queryByText('report.pdf')).not.toBeInTheDocument();
   });
@@ -113,8 +152,8 @@ describe('IncidentAttachments', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     const user = userEvent.setup();
     render(<IncidentAttachments incidentId="1" />);
-    await waitFor(() => screen.getByRole('button', { name: /Delete report.pdf/ }));
-    await user.click(screen.getByRole('button', { name: /Delete report.pdf/ }));
+    await openRowMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete/ }));
     expect(api.delete).not.toHaveBeenCalled();
   });
 

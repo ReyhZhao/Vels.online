@@ -388,3 +388,106 @@ def test_cleanup_task_deletes_orphaned_objects(incident):
         cleanup_orphaned_attachments()
 
     MockClient.return_value.delete_file.assert_called_once_with(orphan_key)
+
+
+# ── preview (#707) ────────────────────────────────────────────────────────────
+
+def _eml_bytes(html="<p>hi</p>", text="hi", with_remote=False):
+    import email.message
+    msg = email.message.EmailMessage()
+    msg["From"] = "attacker@evil.example"
+    msg["To"] = "victim@acme.example"
+    msg["Subject"] = "You won"
+    msg["Date"] = "Mon, 1 Jan 2026 00:00:00 +0000"
+    body = html
+    if with_remote:
+        body = '<p>hi</p><img src="http://tracker.example/pixel.gif">'
+    msg.set_content(text)
+    msg.add_alternative(body, subtype="html")
+    return msg.as_bytes()
+
+
+@pytest.mark.django_db
+def test_preview_kind_classification(confirmed_attachment):
+    from incidents.views import attachment_preview_kind
+    confirmed_attachment.content_type = "image/png"
+    assert attachment_preview_kind(confirmed_attachment) == "image"
+    confirmed_attachment.content_type = "application/pdf"
+    assert attachment_preview_kind(confirmed_attachment) == "pdf"
+    confirmed_attachment.content_type = "message/rfc822"
+    assert attachment_preview_kind(confirmed_attachment) == "email"
+    confirmed_attachment.content_type = "text/plain"
+    assert attachment_preview_kind(confirmed_attachment) == "text"
+    # generic content type falls back to extension
+    confirmed_attachment.content_type = "application/octet-stream"
+    confirmed_attachment.filename = "phish.eml"
+    assert attachment_preview_kind(confirmed_attachment) == "email"
+    # non-viewable and unsafe html are download-only
+    confirmed_attachment.content_type = "application/zip"
+    confirmed_attachment.filename = "bundle.zip"
+    assert attachment_preview_kind(confirmed_attachment) is None
+    confirmed_attachment.content_type = "text/html"
+    confirmed_attachment.filename = "page.html"
+    assert attachment_preview_kind(confirmed_attachment) is None
+
+
+@pytest.mark.django_db
+def test_preview_returns_inline_url_for_pdf(client, incident, confirmed_attachment, member):
+    auth(client, member)
+    with patch("incidents.services.attachments.StorageClient") as MockClient:
+        MockClient.return_value.generate_presigned_url.return_value = "https://s3.example.com/inline"
+        res = client.get(
+            f"/api/incidents/{incident.display_id}/attachments/{confirmed_attachment.id}/preview/"
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["kind"] == "pdf"
+    assert body["url"] == "https://s3.example.com/inline"
+    # inline disposition + content type were requested
+    _, kwargs = MockClient.return_value.generate_presigned_url.call_args
+    assert kwargs["response_content_disposition"].startswith("inline")
+    assert kwargs["response_content_type"] == "application/pdf"
+
+
+@pytest.mark.django_db
+def test_preview_parses_email(client, incident, staff):
+    att = Attachment.objects.create(
+        incident=incident, uploader=staff, s3_key="incidents/1/mail.eml",
+        filename="mail.eml", size_bytes=10, content_type="message/rfc822",
+        is_internal=False, confirmed_at=timezone.now(),
+    )
+    auth(client, staff)
+    with patch("incidents.services.attachments.StorageClient") as MockClient:
+        MockClient.return_value.get_bytes.return_value = _eml_bytes(with_remote=True)
+        res = client.get(
+            f"/api/incidents/{incident.display_id}/attachments/{att.id}/preview/"
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["kind"] == "email"
+    assert body["email"]["headers"]["subject"] == "You won"
+    assert body["email"]["headers"]["from"] == "attacker@evil.example"
+    # the raw html body (incl. the tracking pixel) is returned verbatim; the
+    # frontend sandboxes it. The parser does not silently strip it.
+    assert "tracker.example" in body["email"]["html_body"]
+
+
+@pytest.mark.django_db
+def test_preview_non_viewable_type_rejected(client, incident, staff):
+    att = Attachment.objects.create(
+        incident=incident, uploader=staff, s3_key="incidents/1/a.zip",
+        filename="a.zip", size_bytes=10, content_type="application/zip",
+        is_internal=False, confirmed_at=timezone.now(),
+    )
+    auth(client, staff)
+    res = client.get(f"/api/incidents/{incident.display_id}/attachments/{att.id}/preview/")
+    assert res.status_code == 415
+
+
+@pytest.mark.django_db
+def test_preview_hides_internal_from_non_staff(client, incident, internal_attachment, member):
+    auth(client, member)
+    res = client.get(
+        f"/api/incidents/{incident.display_id}/attachments/{internal_attachment.id}/preview/"
+    )
+    assert res.status_code == 404

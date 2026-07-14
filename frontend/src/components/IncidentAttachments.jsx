@@ -1,12 +1,86 @@
 import { useState, useEffect, useRef } from 'react';
+import { MoreVertical, Eye, Download, Trash2 } from 'lucide-react';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
+import { isPreviewable } from '../lib/attachmentPreview';
+import AttachmentPreviewModal from './AttachmentPreviewModal';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+// Per-row overflow menu. Attachment rows carry up to three actions
+// (Preview / Download / Delete), so per the frontend conventions they collapse
+// into a kebab rather than a row of inline buttons.
+function AttachmentRowMenu({ attachment, canPreview, canDelete, onPreview, onDownload, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  function run(fn) {
+    setOpen(false);
+    fn();
+  }
+
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Actions for ${attachment.filename}`}
+        className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-10 mt-1 w-40 overflow-hidden rounded-md border border-border bg-card shadow-lg"
+        >
+          {canPreview && (
+            <button
+              role="menuitem"
+              onClick={() => run(onPreview)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-accent"
+            >
+              <Eye className="h-4 w-4" /> Preview
+            </button>
+          )}
+          <button
+            role="menuitem"
+            onClick={() => run(onDownload)}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-accent"
+          >
+            <Download className="h-4 w-4" /> Download
+          </button>
+          {canDelete && (
+            <button
+              role="menuitem"
+              onClick={() => run(onDelete)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive hover:bg-accent"
+            >
+              <Trash2 className="h-4 w-4" /> Delete
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function IncidentAttachments({ incidentId }) {
@@ -16,6 +90,7 @@ export default function IncidentAttachments({ incidentId }) {
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
+  const [previewing, setPreviewing] = useState(null);
   const fileInputRef = useRef(null);
 
   async function load() {
@@ -121,24 +196,25 @@ export default function IncidentAttachments({ incidentId }) {
                   )}
                 </p>
               </div>
-              <button
-                onClick={() => handleDownload(att)}
-                className="text-sm text-primary hover:underline shrink-0"
-              >
-                Download
-              </button>
-              {user?.is_staff && (
-                <button
-                  onClick={() => handleDelete(att)}
-                  className="text-sm text-destructive hover:underline shrink-0"
-                  aria-label={`Delete ${att.filename}`}
-                >
-                  Delete
-                </button>
-              )}
+              <AttachmentRowMenu
+                attachment={att}
+                canPreview={isPreviewable(att)}
+                canDelete={!!user?.is_staff}
+                onPreview={() => setPreviewing(att)}
+                onDownload={() => handleDownload(att)}
+                onDelete={() => handleDelete(att)}
+              />
             </li>
           ))}
         </ul>
+      )}
+
+      {previewing && (
+        <AttachmentPreviewModal
+          incidentId={incidentId}
+          attachment={previewing}
+          onClose={() => setPreviewing(null)}
+        />
       )}
     </div>
   );

@@ -16,12 +16,27 @@ class StorageClient:
     def upload_file(self, file_obj, key):
         self._s3.upload_fileobj(file_obj, self._bucket, key)
 
-    def generate_presigned_url(self, key, expiry_seconds=300):
+    def generate_presigned_url(
+        self,
+        key,
+        expiry_seconds=300,
+        response_content_type=None,
+        response_content_disposition=None,
+    ):
+        params = {"Bucket": self._bucket, "Key": key}
+        if response_content_type:
+            params["ResponseContentType"] = response_content_type
+        if response_content_disposition:
+            params["ResponseContentDisposition"] = response_content_disposition
         return self._s3.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self._bucket, "Key": key},
+            Params=params,
             ExpiresIn=expiry_seconds,
         )
+
+    def get_bytes(self, key):
+        obj = self._s3.get_object(Bucket=self._bucket, Key=key)
+        return obj["Body"].read()
 
     def generate_presigned_put_url(self, key, content_type, expiry_seconds=300):
         return self._s3.generate_presigned_url(

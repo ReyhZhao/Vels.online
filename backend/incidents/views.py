@@ -66,7 +66,7 @@ from .services.identifiers import next_display_id
 from .services.notifications_wiring import notify_comment, notify_incident_alert_if_needed, notify_severity_bump_if_needed
 from .services.promote import build_promote_payload, find_open_incidents, link_source_assets
 from .services.templates import apply_template, auto_apply_for_subject, cancel_template_tasks_on_subject_change
-from .services.attachments import confirm_upload, delete_attachment, issue_download_url, issue_upload_url
+from .services.attachments import confirm_upload, delete_attachment, issue_download_url, issue_upload_url, parse_email_attachment
 from .services.delegation import delegate, return_delegation
 from .services.transfer import transfer_incident
 from .services.transitions import transition_incident
@@ -2278,6 +2278,79 @@ class IncidentAttachmentDownloadView(APIView):
             return Response({"detail": "Internal error generating download link."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({"url": url})
+
+
+def attachment_preview_kind(attachment):
+    """Which in-app previewer (if any) can render this attachment: one of
+    'image', 'pdf', 'text', 'email', or None for download-only types.
+
+    An explicit content_type wins; the filename extension is only consulted when
+    the content_type is generic/unknown. text/html is deliberately download-only —
+    only an email's HTML *body* is ever rendered, and always sandboxed."""
+    ct = (attachment.content_type or "").lower().split(";")[0].strip()
+    name = (attachment.filename or "").lower()
+
+    if ct.startswith("image/"):
+        return "image"
+    if ct == "application/pdf":
+        return "pdf"
+    if ct == "message/rfc822":
+        return "email"
+    if ct == "text/html":
+        return None
+    if ct.startswith("text/"):
+        return "text"
+
+    if ct in ("", "application/octet-stream", "binary/octet-stream"):
+        if name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg")):
+            return "image"
+        if name.endswith(".pdf"):
+            return "pdf"
+        if name.endswith(".eml"):
+            return "email"
+        if name.endswith((".txt", ".log", ".csv", ".json", ".md")):
+            return "text"
+    return None
+
+
+class IncidentAttachmentPreviewView(APIView):
+    """In-app preview of a viewable attachment (#707). For email (.eml) returns a
+    parsed, render-safe structure; for image/pdf/text returns a short-lived inline
+    URL. Non-viewable types are rejected. Honours the same internal-visibility rule
+    as download."""
+
+    def get(self, request, display_id, attachment_id):
+        incident, err = _get_incident_for_user(request, display_id)
+        if err:
+            return err
+
+        try:
+            attachment = Attachment.objects.get(
+                pk=attachment_id, incident=incident,
+                confirmed_at__isnull=False, deleted_at__isnull=True,
+            )
+        except Attachment.DoesNotExist:
+            return Response({"detail": "Attachment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if attachment.is_internal and not request.user.is_staff:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        kind = attachment_preview_kind(attachment)
+        if kind is None:
+            return Response(
+                {"detail": "This attachment type cannot be previewed; download it instead."},
+                status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            )
+
+        try:
+            if kind == "email":
+                return Response({"kind": "email", "email": parse_email_attachment(attachment)})
+            url = issue_download_url(attachment, inline=True)
+        except Exception:
+            logger.exception("Error building preview for attachment=%s", attachment_id)
+            return Response({"detail": "Internal error building preview."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"kind": kind, "url": url, "content_type": attachment.content_type})
 
 
 class IncidentAttachmentDeleteView(APIView):
