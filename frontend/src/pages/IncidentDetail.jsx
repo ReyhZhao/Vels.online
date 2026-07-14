@@ -450,8 +450,12 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
 
   useEffect(() => {
     reload().finally(() => setLoading(false));
-    api.get('/api/contacts/').then(r => setAllContacts(r.data)).catch(() => {});
-  }, [displayId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Scope the picker to the incident's org so a cross-org contact can never be
+    // selected (staff otherwise see every org's contacts, and adding one 400s).
+    const params = orgSlug ? { org: orgSlug } : undefined;
+    api.get('/api/contacts/', params ? { params } : undefined)
+      .then(r => setAllContacts(r.data)).catch(() => {});
+  }, [displayId, orgSlug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const linkedIds = new Set(contacts.map(c => c.contact_id));
   const filteredAdd = allContacts.filter(c =>

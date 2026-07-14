@@ -19,8 +19,9 @@ function ContactsPanelWrapper({ displayId = 'INC-001', orgSlug = 'acme' }) {
 
   useEffect(() => {
     api.get(`/api/incidents/${displayId}/contacts/`).then(r => setContacts(r.data)).finally(() => setLoading(false));
-    api.get('/api/contacts/').then(r => setAllContacts(r.data));
-  }, [displayId]);
+    const params = orgSlug ? { org: orgSlug } : undefined;
+    api.get('/api/contacts/', params ? { params } : undefined).then(r => setAllContacts(r.data));
+  }, [displayId, orgSlug]);
 
   const linkedIds = new Set(contacts.map(c => c.contact_id));
   const filtered = allContacts.filter(c => !linkedIds.has(c.id) && c.name.toLowerCase().includes(addSearch.toLowerCase()));
@@ -75,6 +76,13 @@ describe('IncidentContactsPanel', () => {
     render(<MemoryRouter><ContactsPanelWrapper /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('contact-row'));
     expect(screen.getByText('Alice')).toBeInTheDocument();
+  });
+
+  it('scopes the contact picker to the incident org', async () => {
+    api.get.mockResolvedValue({ data: [] });
+    render(<MemoryRouter><ContactsPanelWrapper orgSlug="acme" /></MemoryRouter>);
+    await waitFor(() => screen.getByText('No contacts linked to this incident.'));
+    expect(api.get).toHaveBeenCalledWith('/api/contacts/', { params: { org: 'acme' } });
   });
 
   it('shows empty state when no contacts', async () => {
