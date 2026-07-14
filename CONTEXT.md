@@ -230,6 +230,20 @@ The **Executive Summary** Section is special: its prose is **LLM-generated at re
 The free-text blocks (`intro_text`, `outro_text`, `recommendations_text`, and the editable **Executive Summary**) accept a **constrained rich-text subset** — bold, italic, underline, bullet/ordered lists, and capped indent — *not* free-form markup. The subset is enforced **structurally**: stored as a tiny sanitized-HTML allowlist (`p, br, strong, em, u, ul, ol, li` + a fixed `indent-N` class, **zero attributes, no `style`/links/images**) run through a server-side sanitizer (`nh3`) on write, so it cannot express `<script>` or pull any **Incident** field. This is *formatting*, distinct from the rejected raw-template freedom below (which is about rendering arbitrary incident data and defeating the floor).
 _Avoid_: raw template / free-form markup (rejected for v1 — it reopens the leak surface the **Audience** floor closes; the constrained rich-text *formatting* subset above is **not** this), **task template** (unrelated — that is a **playbook** of work).
 
+### Contacts
+
+**Contact**:
+A named human at a customer **Organization** whom the SOC communicates with *about* an **Incident** — distinct from an **Organization** *member* (who logs into the platform and sees incidents through the **Audience** floor) and from a **Connection** (a machine-to-machine peer feed). A Contact is org-scoped and linked to a specific Incident (as an **Incident Contact**) to be communicated with about it. Two independent messaging modes: a **question** (an analyst asks the Contact something and the reply is imported back into the Incident — the deliberate two-way channel, unchanged) and **notifications** (one-way, auto-generated messages about the Incident's progress; see **Contact notification level**).
+_Avoid_: **Organization** member (a Contact need not have a login; it is a messaging target, not an identity), **Connection** (a Contact is a human the SOC messages *about* an incident; a Connection is a machine feed *from* a peer org).
+
+**Contact notification level** (a per-**Incident Contact** setting):
+How much a linked **Contact** is auto-notified about *this* **Incident**: **closure-only** (the default — one notification when the Incident closes) or **all-updates** (also notified each time an analyst posts a customer-facing update). It is chosen **per incident** where the Contact is linked, *not* globally on the Contact, because notification appetite tracks how relevant *this* Incident is to the person. Notifications never exceed the customer **Audience** floor:
+- an **all-updates** message fires only for a **non-internal analyst comment** (a human `user` comment) on a **TLP:WHITE/GREEN** Incident — one email per comment; there is no AMBER-safe version of an update because the update body *is* a comment (hidden from customers at AMBER);
+- a **closure** notification is **tiered by TLP**: nothing at **RED** (the customer cannot see the Incident at all), a **bare "resolved" notice** (incident id/title/description + closure reason, *no* summary) at **AMBER**, and a full **LLM-generated closure summary** at **WHITE/GREEN**.
+
+The closure summary is synthesised from the Incident's **non-internal comments plus its AI-triage comments** — triage being a *named exception* to the internal filter (it is the investigation narrative; without it there is little to tell the customer), while every *other* internal comment stays out. Both message kinds are recorded as outbound messages on the Incident (so the SOC can see exactly what a Contact received) and are **one-way** — replies are not imported (that remains the **question** channel's job). See [ADR-0034](docs/adr/0034-contact-notifications-reuse-audience-floor.md).
+_Avoid_: **question** (the two-way, analyst-initiated channel whose reply *is* imported), **Report** (an immutable, downloadable snapshot artifact — a notification is a transient progress email), staff **notification digest** (an in-app surface for platform **User**s, not external Contacts).
+
 ### Partner intake
 
 **Connection**:
