@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../lib/axios', () => ({
-  default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn(), delete: vi.fn(), patch: vi.fn() },
 }));
 
 import api from '../lib/axios';
@@ -38,6 +38,11 @@ function ContactsPanelWrapper({ displayId = 'INC-001', orgSlug = 'acme' }) {
     setContacts(prev => prev.filter(c => c.id !== rowId));
   }
 
+  async function setNotifyLevel(rowId, level) {
+    setContacts(prev => prev.map(c => c.id === rowId ? { ...c, notify_level: level } : c));
+    await api.patch(`/api/incidents/${displayId}/contacts/${rowId}/`, { notify_level: level });
+  }
+
   if (loading) return <div>Loading…</div>;
 
   return (
@@ -46,6 +51,14 @@ function ContactsPanelWrapper({ displayId = 'INC-001', orgSlug = 'acme' }) {
         <div key={c.id} data-testid="contact-row">
           <span>{c.name}</span>
           <button onClick={() => removeContact(c.id)}>Remove</button>
+          <select
+            aria-label={`Notify level for ${c.name}`}
+            value={c.notify_level || 'closure_only'}
+            onChange={e => setNotifyLevel(c.id, e.target.value)}
+          >
+            <option value="closure_only">Closure only</option>
+            <option value="all_updates">All updates</option>
+          </select>
         </div>
       ))}
       {contacts.length === 0 && <p>No contacts linked to this incident.</p>}
@@ -125,6 +138,27 @@ describe('IncidentContactsPanel', () => {
       '/api/incidents/INC-001/contacts/',
       { contact_id: 11 }
     ));
+  });
+
+  it('changes a contact notification level', async () => {
+    api.get.mockImplementation(url => {
+      if (url.includes('/incidents/')) return Promise.resolve({ data: LINKED });
+      return Promise.resolve({ data: [] });
+    });
+    api.patch.mockResolvedValue({});
+
+    render(<MemoryRouter><ContactsPanelWrapper /></MemoryRouter>);
+    await waitFor(() => screen.getByTestId('contact-row'));
+
+    const select = screen.getByLabelText('Notify level for Alice');
+    expect(select.value).toBe('closure_only');
+    fireEvent.change(select, { target: { value: 'all_updates' } });
+
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
+      '/api/incidents/INC-001/contacts/1/',
+      { notify_level: 'all_updates' }
+    ));
+    expect(select.value).toBe('all_updates');
   });
 
   it('removes a contact', async () => {

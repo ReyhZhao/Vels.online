@@ -143,3 +143,63 @@ def test_cannot_get_contacts_for_other_org_incident(client, alice, contoso):
     client.force_login(alice)
     resp = client.get(f"/api/incidents/{inc.display_id}/contacts/")
     assert resp.status_code == 404
+
+
+# ── notify_level (per-incident notification level, ADR-0034) ──────────────────
+
+
+@pytest.mark.django_db
+def test_link_defaults_to_closure_only(client, acme_member, acme):
+    inc = make_incident(acme)
+    c = make_contact(acme)
+    row = IncidentContact.objects.create(incident=inc, contact=c)
+    assert row.notify_level == "closure_only"
+    client.force_login(acme_member)
+    resp = client.get(f"/api/incidents/{inc.display_id}/contacts/")
+    assert resp.json()[0]["notify_level"] == "closure_only"
+
+
+@pytest.mark.django_db
+def test_patch_notify_level_to_all_updates(client, acme_member, acme):
+    inc = make_incident(acme)
+    c = make_contact(acme)
+    row = IncidentContact.objects.create(incident=inc, contact=c)
+    client.force_login(acme_member)
+    resp = client.patch(
+        f"/api/incidents/{inc.display_id}/contacts/{row.id}/",
+        {"notify_level": "all_updates"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    assert resp.json()["notify_level"] == "all_updates"
+    row.refresh_from_db()
+    assert row.notify_level == "all_updates"
+
+
+@pytest.mark.django_db
+def test_patch_notify_level_invalid_rejected(client, acme_member, acme):
+    inc = make_incident(acme)
+    c = make_contact(acme)
+    row = IncidentContact.objects.create(incident=inc, contact=c)
+    client.force_login(acme_member)
+    resp = client.patch(
+        f"/api/incidents/{inc.display_id}/contacts/{row.id}/",
+        {"notify_level": "everything"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    row.refresh_from_db()
+    assert row.notify_level == "closure_only"
+
+
+@pytest.mark.django_db
+def test_patch_notify_level_requires_auth(client, acme):
+    inc = make_incident(acme)
+    c = make_contact(acme)
+    row = IncidentContact.objects.create(incident=inc, contact=c)
+    resp = client.patch(
+        f"/api/incidents/{inc.display_id}/contacts/{row.id}/",
+        {"notify_level": "all_updates"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 401

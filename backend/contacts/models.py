@@ -31,8 +31,21 @@ class AssetOwner(models.Model):
 
 
 class IncidentContact(models.Model):
+    # Per-incident notification level (ADR-0034). closure_only is the default so an
+    # existing link keeps today's behaviour (notified once, on close); all_updates
+    # additionally emails the contact when an analyst posts a customer-facing comment.
+    NOTIFY_CLOSURE_ONLY = "closure_only"
+    NOTIFY_ALL_UPDATES = "all_updates"
+    NOTIFY_LEVEL_CHOICES = [
+        (NOTIFY_CLOSURE_ONLY, "Closure only"),
+        (NOTIFY_ALL_UPDATES, "All updates"),
+    ]
+
     incident = models.ForeignKey("incidents.Incident", on_delete=models.CASCADE, related_name="incident_contacts")
     contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name="incident_contacts")
+    notify_level = models.CharField(
+        max_length=20, choices=NOTIFY_LEVEL_CHOICES, default=NOTIFY_CLOSURE_ONLY
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -52,9 +65,11 @@ class ContactMessage(models.Model):
     ]
     ROLE_NOTIFIED = "notified"
     ROLE_QUESTIONED = "questioned"
+    ROLE_UPDATE = "update"
     ROLE_CHOICES = [
         (ROLE_NOTIFIED, "Notified"),
         (ROLE_QUESTIONED, "Questioned"),
+        (ROLE_UPDATE, "Update"),
     ]
 
     incident = models.ForeignKey("incidents.Incident", on_delete=models.CASCADE, related_name="contact_messages")

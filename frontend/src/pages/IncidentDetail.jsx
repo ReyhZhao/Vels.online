@@ -487,6 +487,15 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
     }
   }
 
+  async function setNotifyLevel(rowId, level) {
+    setContacts(prev => prev.map(c => c.id === rowId ? { ...c, notify_level: level } : c));
+    try {
+      await api.patch(`/api/incidents/${displayId}/contacts/${rowId}/`, { notify_level: level });
+    } catch {
+      reload();
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-card p-6 space-y-3">
@@ -518,6 +527,18 @@ function IncidentContactsPanel({ displayId, orgSlug }) {
                       Remove
                     </button>
                   </div>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <label htmlFor={`notify-${c.id}`} className="text-xs text-muted-foreground">Notify:</label>
+                  <select
+                    id={`notify-${c.id}`}
+                    value={c.notify_level || 'closure_only'}
+                    onChange={e => setNotifyLevel(c.id, e.target.value)}
+                    className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="closure_only">Closure only</option>
+                    <option value="all_updates">All updates</option>
+                  </select>
                 </div>
               </div>
             ))}

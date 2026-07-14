@@ -1004,6 +1004,7 @@ def _serialize_incident_contact(r):
         "contact_id": r.contact_id,
         "name": r.contact.name,
         "email": r.contact.email,
+        "notify_level": r.notify_level,
         "created_at": r.created_at,
     }
 
@@ -1081,6 +1082,22 @@ class IncidentContactDetailView(APIView):
         except IncidentContact.DoesNotExist:
             return None, Response(status=status.HTTP_404_NOT_FOUND)
         return row, None
+
+    def patch(self, request, display_id, pk):
+        row, err = self._get_row(request, display_id, pk)
+        if err:
+            return err
+        from contacts.models import IncidentContact
+        level = request.data.get("notify_level")
+        valid = {c[0] for c in IncidentContact.NOTIFY_LEVEL_CHOICES}
+        if level not in valid:
+            return Response(
+                {"notify_level": f"Must be one of: {', '.join(sorted(valid))}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        row.notify_level = level
+        row.save(update_fields=["notify_level"])
+        return Response(_serialize_incident_contact(row))
 
     def delete(self, request, display_id, pk):
         row, err = self._get_row(request, display_id, pk)
