@@ -1,17 +1,17 @@
 backend:
   image:
     repository: registry.vels.online/vels/backend
-    tag: 0.45.3
+    tag: 0.45.4
 frontend:
   image:
     repository: registry.vels.online/vels/frontend
-    tag: 0.45.3
+    tag: 0.45.4
 # OTA update server for the React Native staff app (mobile/): serves the
 # exported Expo update bundle (iOS + Android Hermes bundles + metadata.json).
 mobile:
   image:
     repository: registry.vels.online/vels/mobile
-    tag: 0.45.3
+    tag: 0.45.4
 imagePullSecrets:
   - name: registry-credentials
 # Operational observability (ADR-0019). Plugs into the cluster's existing Prometheus
