@@ -211,8 +211,24 @@ def _serialize_vulnerability_detail(vuln):
     return detail
 
 
-def _resolve_org(request, slug):
-    """Validates slug and checks the requesting user has access. Returns (org, error_response)."""
+# Sentinel slug a staff user can pass instead of a real org to request an
+# aggregate across every tenant org (the Infrastructure pseudo-org excluded —
+# ADR-0017). Only honoured where a view opts in with ``allow_all=True``.
+ALL_ORGS_SLUG = "__all__"
+ALL_ORGS = object()
+
+
+def _resolve_org(request, slug, allow_all=False):
+    """Validates slug and checks the requesting user has access. Returns (org, error_response).
+
+    When ``allow_all`` is set and a staff user passes ``ALL_ORGS_SLUG``, returns
+    the ``ALL_ORGS`` sentinel in place of an ``Organization``; the caller is
+    responsible for turning that into a cross-tenant queryset.
+    """
+    if allow_all and slug == ALL_ORGS_SLUG:
+        if not request.user.is_staff:
+            return None, Response(status=403)
+        return ALL_ORGS, None
     if not slug:
         return None, Response({"detail": "org is required."}, status=400)
     try:

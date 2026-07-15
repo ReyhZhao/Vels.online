@@ -24,6 +24,12 @@ def other_org(db):
 
 
 @pytest.fixture
+def infra_org(db):
+    # Seeded idempotently by a data migration (ADR-0017); fetch, don't recreate.
+    return Organization.get_infrastructure()
+
+
+@pytest.fixture
 def staff_user(db, django_user_model):
     return django_user_model.objects.create_user(username="staff", password="pass", is_staff=True)
 
@@ -88,6 +94,29 @@ def test_counts_are_scoped_to_org(client, staff_user, acme, other_org):
     data = resp.json()
     assert data["incidents"]["open_total"] == 1
     assert data["alerts"]["new_total"] == 0
+
+
+def test_all_orgs_aggregates_across_tenants_for_staff(client, staff_user, acme, other_org, infra_org):
+    _incident(acme, state="new")
+    _incident(other_org, state="new")
+    _incident(infra_org, state="new")  # Infrastructure must be excluded (ADR-0017)
+    _alert(acme)
+    _alert(other_org)
+
+    client.force_login(staff_user)
+    resp = client.get("/api/dashboard/overview/?org=__all__")
+    assert resp.status_code == 200
+    data = resp.json()
+    # acme + other, but not the Infrastructure pseudo-org
+    assert data["incidents"]["open_total"] == 2
+    assert data["alerts"]["new_total"] == 2
+
+
+def test_all_orgs_forbidden_for_non_staff(client, member, acme):
+    _incident(acme, state="new")
+    client.force_login(member)
+    resp = client.get("/api/dashboard/overview/?org=__all__")
+    assert resp.status_code == 403
 
 
 # ── incidents block ──────────────────────────────────────────────────────────

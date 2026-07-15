@@ -9,6 +9,10 @@ export function OrgProvider({ children }) {
   const [orgs, setOrgs] = useState([]);
   const [selectedOrg, setSelectedOrg] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Staff-only "All organisations" view. Kept separate from selectedOrg, which
+  // stays a concrete org so every other page keeps working; only the dashboard
+  // reads this flag. Cleared when leaving the dashboard.
+  const [viewAllOrgs, setViewAllOrgs] = useState(false);
 
   useEffect(() => {
     api
@@ -31,7 +35,7 @@ export function OrgProvider({ children }) {
   }
 
   return (
-    <OrgContext.Provider value={{ orgs, selectedOrg, setSelectedOrg, setDefaultOrg, isLoading }}>
+    <OrgContext.Provider value={{ orgs, selectedOrg, setSelectedOrg, setDefaultOrg, isLoading, viewAllOrgs, setViewAllOrgs }}>
       {children}
     </OrgContext.Provider>
   );

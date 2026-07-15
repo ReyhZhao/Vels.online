@@ -33,6 +33,12 @@ def contoso(db):
 
 
 @pytest.fixture
+def infra(db):
+    # Seeded idempotently by a data migration (ADR-0017); fetch, don't recreate.
+    return Organization.get_infrastructure()
+
+
+@pytest.fixture
 def staff(db, django_user_model):
     return django_user_model.objects.create_user(username="staff", password="p", is_staff=True)
 
@@ -237,6 +243,25 @@ def test_endpoint_staff_org_filter(client, staff, acme, contoso):
     client.force_login(staff)
     r = client.get("/api/incidents/trend/?org=contoso")
     assert _totals(r.json()) == 2
+
+
+@pytest.mark.django_db
+def test_endpoint_all_orgs_aggregates_tenants_excluding_infra(client, staff, acme, contoso, infra):
+    make_incident(acme)
+    make_incident(contoso)
+    make_incident(infra)  # Infrastructure pseudo-org excluded from all-orgs (ADR-0017)
+    client.force_login(staff)
+    r = client.get("/api/incidents/trend/?org=__all__")
+    assert r.status_code == 200
+    assert _totals(r.json()) == 2
+
+
+@pytest.mark.django_db
+def test_endpoint_all_orgs_forbidden_for_non_staff(client, member, acme):
+    make_incident(acme)
+    client.force_login(member)
+    r = client.get("/api/incidents/trend/?org=__all__")
+    assert r.status_code == 403
 
 
 @pytest.mark.django_db

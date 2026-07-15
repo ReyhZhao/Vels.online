@@ -561,13 +561,28 @@ class IncidentTrendView(APIView):
         if days not in (7, 30, 90):
             days = 30
 
+        from security.views import ALL_ORGS_SLUG
+
         qs = build_incident_queryset(request.user, request.query_params)
 
         # Apply the list's field filters, minus the two the chart owns.
         data = request.query_params.copy()
         data.pop("subject", None)
         data.pop("created_within", None)
+
+        # Staff "All organisations" view: aggregate across every tenant org
+        # instead of a single one (the Infrastructure pseudo-org excluded —
+        # ADR-0017). The sentinel is not a real slug, so drop it before the
+        # filterset and constrain to tenants directly.
+        all_orgs = data.get("org") == ALL_ORGS_SLUG
+        if all_orgs:
+            if not request.user.is_staff:
+                return Response(status=403)
+            data.pop("org", None)
+
         qs = IncidentFilterSet(data=data, queryset=qs, request=request).qs
+        if all_orgs:
+            qs = qs.filter(organization__is_infrastructure=False)
 
         return Response(compute_incident_trend(qs, days=days))
 

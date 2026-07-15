@@ -79,12 +79,20 @@ class DashboardOverviewView(APIView):
         from incidents.models import Incident
         from alerts.models import Alert
         from ingress.models import Route
-        from security.views import _resolve_org
+        from security.models import Organization
+        from security.views import _resolve_org, ALL_ORGS
 
         slug = request.query_params.get("org", "").strip()
-        org, err = _resolve_org(request, slug)
+        org, err = _resolve_org(request, slug, allow_all=True)
         if err:
             return err
+
+        # A single org, or — for the staff "All organisations" view — every
+        # tenant org (the Infrastructure pseudo-org excluded, ADR-0017).
+        if org is ALL_ORGS:
+            org_ids = list(Organization.objects.tenants().values_list("id", flat=True))
+        else:
+            org_ids = [org.id]
 
         now = timezone.now()
         week_ago = now - datetime.timedelta(days=7)
@@ -98,7 +106,7 @@ class DashboardOverviewView(APIView):
             Incident.STATE_NEEDS_TUNING,
             Incident.STATE_PENDING_CLOSURE,
         ]
-        incidents = Incident.objects.filter(organization=org)
+        incidents = Incident.objects.filter(organization_id__in=org_ids)
         open_incidents = incidents.filter(state__in=open_states)
 
         by_state = {s: 0 for s in open_states}
@@ -122,7 +130,7 @@ class DashboardOverviewView(APIView):
             for i in open_incidents.select_related("assignee").order_by("-created_at")[:5]
         ]
 
-        alerts = Alert.objects.filter(organization=org)
+        alerts = Alert.objects.filter(organization_id__in=org_ids)
         new_alerts = alerts.filter(state="new")
         alert_severity = {s: 0 for s, _ in Alert._meta.get_field("severity").choices}
         unrated = 0
@@ -148,7 +156,7 @@ class DashboardOverviewView(APIView):
         route_status.update(
             {
                 r["status"]: r["n"]
-                for r in Route.objects.filter(organization=org).values("status").annotate(n=Count("id"))
+                for r in Route.objects.filter(organization_id__in=org_ids).values("status").annotate(n=Count("id"))
             }
         )
 

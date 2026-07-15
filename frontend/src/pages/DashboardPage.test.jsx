@@ -100,14 +100,14 @@ function mockEndpoints({ overview = OVERVIEW } = {}) {
   });
 }
 
-function renderPage({ selectedOrg = SELECTED_ORG, isStaff = false } = {}) {
+function renderPage({ selectedOrg = SELECTED_ORG, isStaff = false, viewAllOrgs = false } = {}) {
   return render(
     <MemoryRouter>
       <AuthContext.Provider
         value={{ user: { is_staff: isStaff }, isAuthenticated: true, isLoading: false, staffProfile: null }}
       >
         <OrgContext.Provider
-          value={{ orgs: [SELECTED_ORG], selectedOrg, setSelectedOrg: vi.fn(), isLoading: false }}
+          value={{ orgs: [SELECTED_ORG], selectedOrg, setSelectedOrg: vi.fn(), isLoading: false, viewAllOrgs, setViewAllOrgs: vi.fn() }}
         >
           <DashboardPage />
         </OrgContext.Provider>
@@ -233,5 +233,26 @@ describe('DashboardPage', () => {
     renderPage({ selectedOrg: null });
     expect(api.get).not.toHaveBeenCalled();
     expect(screen.getByText(/no organisation selected/i)).toBeInTheDocument();
+  });
+});
+
+describe('DashboardPage — All organisations view (staff)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('aggregates DB panels across all orgs and never calls the per-org Wazuh endpoint', async () => {
+    mockEndpoints({ overview: STAFF_OVERVIEW });
+    renderPage({ isStaff: true, viewAllOrgs: true });
+
+    // Overview + incident trend are requested with the all-orgs sentinel.
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/dashboard/overview/', { params: { org: '__all__' } })
+    );
+    const urls = api.get.mock.calls.map(([u]) => u);
+    // The Wazuh/OpenSearch dashboard endpoint is per-org only — never called here.
+    expect(urls.some(u => u.includes('/api/security/dashboard/'))).toBe(false);
+
+    // Header reflects the aggregate scope, Wazuh tiles show the placeholder.
+    expect(screen.getByText('All organisations')).toBeInTheDocument();
+    expect(screen.getAllByText('Per-org only').length).toBeGreaterThan(0);
   });
 });

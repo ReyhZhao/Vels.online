@@ -45,10 +45,18 @@ function QueueTile({ icon: Icon, label, value, to }) {
 export default function DashboardPage() {
   const orgContext = useOrganization();
   const selectedOrg = orgContext?.selectedOrg ?? null;
+  const setViewAllOrgs = orgContext?.setViewAllOrgs;
   const { user } = useAuth();
   const isStaff = !!user?.is_staff;
+  // Staff "All organisations" view: aggregate the DB-backed panels across every
+  // tenant. Only staff can enter it; the switcher never offers it otherwise.
+  const allOrgs = isStaff && !!orgContext?.viewAllOrgs;
 
   const [days, setDays] = useState(30);
+
+  // Leaving the dashboard drops the all-orgs view so it never leaks into the
+  // concrete-org selection every other page depends on.
+  useEffect(() => () => setViewAllOrgs?.(false), [setViewAllOrgs]);
 
   // /api/dashboard/overview/ — incidents, alerts, routes (+ staff queues)
   const [overview, setOverview] = useState(null);
@@ -61,14 +69,20 @@ export default function DashboardPage() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchAll = useCallback((slug) => {
+  const fetchAll = useCallback((slug, aggregate) => {
     setOverviewLoading(true);
     setOverviewError(false);
-    api.get('/api/dashboard/overview/', { params: { org: slug } })
+    api.get('/api/dashboard/overview/', { params: { org: aggregate ? '__all__' : slug } })
       .then(res => setOverview(res.data))
       .catch(() => { setOverview(null); setOverviewError(true); })
       .finally(() => setOverviewLoading(false));
 
+    if (aggregate) {
+      // Wazuh/OpenSearch numbers are per-org only in the all-orgs view.
+      setStats(null);
+      setStatsLoading(false);
+      return;
+    }
     setStatsLoading(true);
     api.get(`/api/security/dashboard/?org=${slug}`)
       .then(res => setStats(res.data))
@@ -78,8 +92,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!selectedOrg) return;
-    fetchAll(selectedOrg.slug);
-  }, [selectedOrg, fetchAll]);
+    fetchAll(selectedOrg.slug, allOrgs);
+  }, [selectedOrg, allOrgs, fetchAll]);
 
   async function handleRefresh() {
     if (!selectedOrg || refreshing) return;
@@ -148,7 +162,7 @@ export default function DashboardPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">{selectedOrg.name}</p>
+          <p className="text-sm text-muted-foreground">{allOrgs ? 'All organisations' : selectedOrg.name}</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex gap-1 rounded-md border border-border bg-card p-0.5" role="group" aria-label="Trend range">
@@ -167,14 +181,16 @@ export default function DashboardPage() {
               </button>
             ))}
           </div>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
+          {!allOrgs && (
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -204,20 +220,22 @@ export default function DashboardPage() {
         />
         <StatTile
           label="Vulnerabilities"
-          value={vulnTotal}
+          value={allOrgs ? '—' : vulnTotal}
           isLoading={statsLoading}
-          delta={criticalVulns > 0 ? `${criticalVulns} critical` : null}
-          deltaGood={criticalVulns === 0 ? null : false}
+          delta={allOrgs ? null : (criticalVulns > 0 ? `${criticalVulns} critical` : null)}
+          deltaGood={allOrgs ? null : (criticalVulns === 0 ? null : false)}
+          sub={allOrgs ? 'Per-org only' : null}
           to="/security/vulnerabilities"
         />
         <StatTile
           label="Agents active"
-          value={stats ? `${stats.active_count}/${stats.agent_count}` : null}
+          value={allOrgs ? '—' : (stats ? `${stats.active_count}/${stats.agent_count}` : null)}
           isLoading={statsLoading}
-          delta={stats && stats.active_count < stats.agent_count
+          delta={allOrgs ? null : (stats && stats.active_count < stats.agent_count
             ? `${stats.agent_count - stats.active_count} disconnected`
-            : null}
-          deltaGood={stats ? stats.active_count === stats.agent_count : null}
+            : null)}
+          deltaGood={allOrgs ? null : (stats ? stats.active_count === stats.agent_count : null)}
+          sub={allOrgs ? 'Per-org only' : null}
           to="/security"
         />
         <StatTile
@@ -231,8 +249,9 @@ export default function DashboardPage() {
         />
         <StatTile
           label="Events (24h)"
-          value={stats?.events_24h}
+          value={allOrgs ? '—' : stats?.events_24h}
           isLoading={statsLoading}
+          sub={allOrgs ? 'Per-org only' : null}
           to="/security"
         />
       </section>
@@ -250,7 +269,7 @@ export default function DashboardPage() {
       {/* Charts */}
       <section aria-label="Trends" className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <IncidentTrendCard orgSlug={selectedOrg.slug} days={days} />
+          <IncidentTrendCard orgSlug={allOrgs ? '__all__' : selectedOrg.slug} days={days} />
         </div>
         <ChartCard title="Open incidents" to="/incidents" table={openBreakdownTable}>
           <div className="space-y-4">
@@ -266,7 +285,16 @@ export default function DashboardPage() {
         </ChartCard>
 
         <div className="lg:col-span-2">
-          <VulnTrendCard orgSlug={selectedOrg.slug} days={days} />
+          {allOrgs ? (
+            <div className="flex h-full min-h-[12rem] flex-col rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-medium text-foreground">Vulnerability trend</h3>
+              <div className="flex flex-1 items-center justify-center">
+                <p className="text-sm text-muted-foreground">Select an organisation to view vulnerability trends.</p>
+              </div>
+            </div>
+          ) : (
+            <VulnTrendCard orgSlug={selectedOrg.slug} days={days} />
+          )}
         </div>
         <AlertVolumeCard daily={alerts?.daily_7d} loading={overviewLoading} />
       </section>

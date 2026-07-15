@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../lib/axios', () => ({
   default: { get: vi.fn() },
@@ -16,14 +17,16 @@ const ORGS = [
   { id: 2, name: 'Contoso', slug: 'contoso', wazuh_group: 'contoso' },
 ];
 
-function renderSwitcher(orgs, { isAdmin = false } = {}) {
+function renderSwitcher(orgs, { isAdmin = false, route = '/' } = {}) {
   api.get.mockResolvedValue({ data: orgs });
   return render(
-    <AuthContext.Provider value={{ user: { is_staff: isAdmin }, isAuthenticated: true, isLoading: false }}>
-      <OrgProvider>
-        <OrgSwitcher />
-      </OrgProvider>
-    </AuthContext.Provider>
+    <MemoryRouter initialEntries={[route]}>
+      <AuthContext.Provider value={{ user: { is_staff: isAdmin }, isAuthenticated: true, isLoading: false }}>
+        <OrgProvider>
+          <OrgSwitcher />
+        </OrgProvider>
+      </AuthContext.Provider>
+    </MemoryRouter>
   );
 }
 
@@ -61,6 +64,28 @@ describe('OrgSwitcher', () => {
     renderSwitcher([ORGS[0]], { isAdmin: true });
 
     await waitFor(() => expect(screen.getByRole('combobox')).toBeInTheDocument());
+  });
+
+  it('offers an "All organisations" option to staff on the dashboard only', async () => {
+    renderSwitcher(ORGS, { isAdmin: true, route: '/dashboard' });
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeInTheDocument());
+    const options = screen.getAllByRole('option');
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveTextContent('All organisations');
+    expect(options[0]).toHaveValue('__all__');
+  });
+
+  it('does not offer "All organisations" off the dashboard', async () => {
+    renderSwitcher(ORGS, { isAdmin: true, route: '/incidents' });
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeInTheDocument());
+    expect(screen.getAllByRole('option')).toHaveLength(2);
+    expect(screen.queryByText('All organisations')).not.toBeInTheDocument();
+  });
+
+  it('does not offer "All organisations" to non-staff on the dashboard', async () => {
+    renderSwitcher(ORGS, { isAdmin: false, route: '/dashboard' });
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeInTheDocument());
+    expect(screen.getAllByRole('option')).toHaveLength(2);
   });
 
   it('selecting a different org updates the selected value', async () => {
