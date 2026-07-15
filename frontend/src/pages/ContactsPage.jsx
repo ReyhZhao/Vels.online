@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
+import { useAuth } from '../context/AuthContext';
 
 function CreateContactModal({ open, onClose, orgSlug, onCreated }) {
   const [form, setForm] = useState({ name: '', email: '', job_title: '', department: '' });
@@ -157,16 +158,33 @@ function EditContactModal({ contact, open, onClose, onSaved }) {
 
 export default function ContactsPage() {
   const { selectedOrg } = useOrganization();
+  const { user } = useAuth();
+  const isStaff = !!user?.is_staff;
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editContact, setEditContact] = useState(null);
   const [search, setSearch] = useState('');
-  const [currentOrgOnly, setCurrentOrgOnly] = useState(true);
+  // Scope for the list + the create target: 'current' (selected tenant),
+  // 'infra' (the Shared Infrastructure pseudo-org, staff only — ADR-0017),
+  // or 'all' (every org, staff only). Infra stays out of the global org
+  // switcher, so this page fetches it separately with include_infrastructure.
+  const [scope, setScope] = useState('current');
+  const [infraOrg, setInfraOrg] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [sortKey, setSortKey] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
+
+  const showOrgColumn = scope === 'all';
+  const createOrgSlug = scope === 'infra' ? infraOrg?.slug : selectedOrg?.slug;
+
+  useEffect(() => {
+    if (!isStaff) return;
+    api.get('/api/security/organizations/', { params: { include_infrastructure: 1 } })
+      .then(res => setInfraOrg(res.data.find(o => o.is_infrastructure) ?? null))
+      .catch(() => setInfraOrg(null));
+  }, [isStaff]);
 
   function setSort(key) {
     if (sortKey === key) {
@@ -180,12 +198,15 @@ export default function ContactsPage() {
   useEffect(() => {
     setLoading(true);
     setSelected(new Set());
-    const params = currentOrgOnly && selectedOrg ? { org: selectedOrg.slug } : {};
+    let orgSlug = null;
+    if (scope === 'current') orgSlug = selectedOrg?.slug ?? null;
+    else if (scope === 'infra') orgSlug = infraOrg?.slug ?? null;
+    const params = orgSlug ? { org: orgSlug } : {};
     api.get('/api/contacts/', { params })
       .then(res => setContacts(res.data))
       .catch(() => setError('Failed to load contacts.'))
       .finally(() => setLoading(false));
-  }, [currentOrgOnly, selectedOrg?.slug]);
+  }, [scope, selectedOrg?.slug, infraOrg?.slug]);
 
   async function handleDelete(contact) {
     if (!confirm(`Delete contact "${contact.name}"?`)) return;
@@ -244,14 +265,14 @@ export default function ContactsPage() {
     setSelected(new Set());
   }
 
-  const colSpan = currentOrgOnly ? 6 : 7;
+  const colSpan = showOrgColumn ? 7 : 6;
 
   return (
     <div className="space-y-4 p-6">
       <CreateContactModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        orgSlug={selectedOrg?.slug}
+        orgSlug={createOrgSlug}
         onCreated={contact => setContacts(prev => [...prev, contact].sort((a, b) => a.name.localeCompare(b.name)))}
       />
       <EditContactModal
@@ -285,15 +306,24 @@ export default function ContactsPage() {
         <div className="inline-flex rounded-md border border-border overflow-hidden text-sm">
           <button
             type="button"
-            onClick={() => setCurrentOrgOnly(true)}
-            className={`px-3 py-1.5 font-medium transition-colors ${currentOrgOnly ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-accent'}`}
+            onClick={() => setScope('current')}
+            className={`px-3 py-1.5 font-medium transition-colors ${scope === 'current' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-accent'}`}
           >
             {selectedOrg ? selectedOrg.name : 'Current org'}
           </button>
+          {isStaff && infraOrg && (
+            <button
+              type="button"
+              onClick={() => setScope('infra')}
+              className={`border-l border-border px-3 py-1.5 font-medium transition-colors ${scope === 'infra' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-accent'}`}
+            >
+              {infraOrg.name}
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => setCurrentOrgOnly(false)}
-            className={`px-3 py-1.5 font-medium transition-colors ${!currentOrgOnly ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-accent'}`}
+            onClick={() => setScope('all')}
+            className={`border-l border-border px-3 py-1.5 font-medium transition-colors ${scope === 'all' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-accent'}`}
           >
             All contacts
           </button>
@@ -342,7 +372,7 @@ export default function ContactsPage() {
             <p className="text-xs text-muted-foreground">{contact.email}</p>
             <p className="text-xs text-muted-foreground">
               {[contact.job_title, contact.department].filter(Boolean).join(' · ') || '—'}
-              {!currentOrgOnly && contact.org_name ? ` · ${contact.org_name}` : ''}
+              {showOrgColumn && contact.org_name ? ` · ${contact.org_name}` : ''}
             </p>
             <div className="flex gap-2 pt-1">
               <button onClick={() => setEditContact(contact)} className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors">Edit</button>
@@ -373,7 +403,7 @@ export default function ContactsPage() {
                 </button>
               </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Email</th>
-              {!currentOrgOnly && (
+              {showOrgColumn && (
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Organisation</th>
               )}
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">
@@ -412,7 +442,7 @@ export default function ContactsPage() {
                   <Link to={`/contacts/${contact.id}`} className="hover:underline">{contact.name}</Link>
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">{contact.email}</td>
-                {!currentOrgOnly && (
+                {showOrgColumn && (
                   <td className="px-4 py-3 text-muted-foreground">{contact.org_name || '—'}</td>
                 )}
                 <td className="px-4 py-3 text-muted-foreground">{contact.department || '—'}</td>

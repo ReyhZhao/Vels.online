@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/axios';
 import { useOrganization } from '../context/OrgContext';
+import { useAuth } from '../context/AuthContext';
 
 const ASSET_ROLES = [
   { value: '', label: 'Unknown / unset' },
@@ -293,6 +294,8 @@ function AssetRow({ asset, selected, onToggle, onDeleted }) {
 
 export default function AssetsPage() {
   const { selectedOrg } = useOrganization();
+  const { user } = useAuth();
+  const isStaff = !!user?.is_staff;
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -300,9 +303,23 @@ export default function AssetsPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [internetFacingOnly, setInternetFacingOnly] = useState(false);
+  // Scope for the list + the create/bulk target: 'current' (selected tenant)
+  // or 'infra' (the Shared Infrastructure pseudo-org, staff only — ADR-0017,
+  // kept out of the global switcher so it's fetched separately here).
+  const [scope, setScope] = useState('current');
+  const [infraOrg, setInfraOrg] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [sortKey, setSortKey] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
+
+  const activeOrg = scope === 'infra' ? infraOrg : selectedOrg;
+
+  useEffect(() => {
+    if (!isStaff) return;
+    api.get('/api/security/organizations/', { params: { include_infrastructure: 1 } })
+      .then(res => setInfraOrg(res.data.find(o => o.is_infrastructure) ?? null))
+      .catch(() => setInfraOrg(null));
+  }, [isStaff]);
 
   function setSort(key) {
     if (sortKey === key) {
@@ -316,12 +333,12 @@ export default function AssetsPage() {
   useEffect(() => {
     setLoading(true);
     setSelected(new Set());
-    const params = selectedOrg ? { org: selectedOrg.slug } : {};
+    const params = activeOrg ? { org: activeOrg.slug } : {};
     api.get('/api/assets/', { params })
       .then(res => setAssets(res.data.results || res.data))
       .catch(() => setError('Failed to load assets.'))
       .finally(() => setLoading(false));
-  }, [selectedOrg]);
+  }, [activeOrg?.slug]);
 
   const filtered = assets
     .filter(a => !internetFacingOnly || a.internet_facing)
@@ -386,14 +403,14 @@ export default function AssetsPage() {
       <CreateAssetModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        orgSlug={selectedOrg?.slug}
+        orgSlug={activeOrg?.slug}
         onCreated={asset => setAssets(prev => [...prev, asset].sort((a, b) => a.name.localeCompare(b.name)))}
       />
       <BulkUpdateModal
         open={bulkOpen}
         onClose={() => setBulkOpen(false)}
         selectedIds={selectedIds}
-        orgSlug={selectedOrg?.slug}
+        orgSlug={activeOrg?.slug}
         onUpdated={handleBulkUpdated}
       />
 
@@ -415,6 +432,24 @@ export default function AssetsPage() {
           onChange={e => setSearch(e.target.value)}
           className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-64"
         />
+        {isStaff && infraOrg && (
+          <div className="inline-flex rounded-md border border-border overflow-hidden text-sm">
+            <button
+              type="button"
+              onClick={() => setScope('current')}
+              className={`px-3 py-1.5 font-medium transition-colors ${scope === 'current' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-accent'}`}
+            >
+              {selectedOrg ? selectedOrg.name : 'Current org'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setScope('infra')}
+              className={`border-l border-border px-3 py-1.5 font-medium transition-colors ${scope === 'infra' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-accent'}`}
+            >
+              {infraOrg.name}
+            </button>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setInternetFacingOnly(v => !v)}
