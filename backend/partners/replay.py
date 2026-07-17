@@ -67,6 +67,44 @@ def _delete_raw(row):
         logger.exception("partner: replay could not delete raw object %r for row %s", row.raw_s3_key, row.pk)
 
 
+def preview_connection_backlog(connection):
+    """Dry-run what a replay would do, without mutating anything (ADR-0035 / #715).
+
+    Uses the *same* gathering + mapping as the actual replay, so preview and POST agree.
+    For each covered held row it reconstructs the message and extracts the External
+    Reference the mapping would use, so staff can see whether the backlog threads into one
+    incident or fragments into several flagged ones *before* committing. Returns
+    {count, without_reference, messages:[{id, sender, subject, received_at,
+    external_reference, has_reference}]}."""
+    from inbound_mail.adapters import message_from_bytes
+    from partners.mapping import extract_external_reference
+
+    messages = []
+    without_reference = 0
+    for row in covered_backlog(connection):
+        raw = _load_raw(row)
+        if raw is None:
+            # Unreadable object won't be replayed either — omit so preview matches POST.
+            continue
+        message = message_from_bytes(raw)
+        ext_ref = extract_external_reference(connection, message)
+        if not ext_ref:
+            without_reference += 1
+        messages.append({
+            "id": row.id,
+            "sender": row.sender,
+            "subject": row.subject,
+            "received_at": row.received_at.isoformat() if row.received_at else None,
+            "external_reference": ext_ref,
+            "has_reference": bool(ext_ref),
+        })
+    return {
+        "count": len(messages),
+        "without_reference": without_reference,
+        "messages": messages,
+    }
+
+
 def replay_connection_backlog(connection):
     """Replay the Connection's held backlog oldest-first through the live pipeline.
 

@@ -252,6 +252,8 @@ export default function PartnerConnections() {
   const [sortOrder, setSortOrder] = useState('asc');
   const [editing, setEditing] = useState(null); // connection | 'new' | null
   const [prefillSender, setPrefillSender] = useState('');
+  const [replayOffer, setReplayOffer] = useState(null); // { connection, preview } | null
+  const [replaying, setReplaying] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -280,10 +282,28 @@ export default function PartnerConnections() {
     else { setSortKey(key); setSortOrder('asc'); }
   }
 
-  function handleSaved(saved, isNew) {
+  async function handleSaved(saved, isNew) {
     setConnections(prev => isNew ? [...prev, saved] : prev.map(c => c.id === saved.id ? saved : c));
     setEditing(null);
     setPrefillSender('');
+    // Offer to replay any held Intake Inbox backlog these senders now cover (ADR-0035).
+    // Best-effort: a preview failure must not break the save.
+    try {
+      const { data } = await api.get(`/api/partners/connections/${saved.id}/replay-intake/`);
+      if (data.count > 0) setReplayOffer({ connection: saved, preview: data });
+    } catch { /* ignore — replay stays available later from the Intake Inbox */ }
+  }
+
+  async function confirmReplay() {
+    setReplaying(true);
+    try {
+      await api.post(`/api/partners/connections/${replayOffer.connection.id}/replay-intake/`);
+      setReplayOffer(null);
+    } catch {
+      setError('Failed to replay held messages.');
+    } finally {
+      setReplaying(false);
+    }
   }
 
   async function handleDelete(conn) {
@@ -439,6 +459,62 @@ export default function PartnerConnections() {
           onCancel={() => { setEditing(null); setPrefillSender(''); }}
         />
       )}
+
+      {replayOffer && (
+        <ReplayOffer
+          offer={replayOffer}
+          replaying={replaying}
+          onReplay={confirmReplay}
+          onDismiss={() => setReplayOffer(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReplayOffer({ offer, replaying, onReplay, onDismiss }) {
+  const { connection, preview } = offer;
+  const fragmenting = preview.without_reference > 0;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-background p-6 shadow-xl">
+        <h2 className="mb-2 text-base font-semibold text-foreground">Replay held messages?</h2>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {preview.count} held message{preview.count === 1 ? '' : 's'} from{' '}
+          <span className="font-medium text-foreground">{connection.name}</span>’s senders can be
+          replayed into incidents now. Declining leaves them held — you can replay them later from
+          the Intake Inbox.
+        </p>
+
+        {fragmenting && (
+          <p className="mb-3 rounded-md bg-amber-100 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+            {preview.without_reference} message{preview.without_reference === 1 ? '' : 's'} have no
+            extracted reference and will each open a <strong>separate flagged incident</strong>
+            {' '}rather than threading together. Add an External Reference regex first if these
+            should be one incident.
+          </p>
+        )}
+
+        <ul className="mb-4 max-h-60 space-y-1 overflow-y-auto rounded-md border border-border p-2 text-xs">
+          {preview.messages.map(m => (
+            <li key={m.id} className="flex items-center justify-between gap-2">
+              <span className="truncate text-muted-foreground" title={m.subject}>{m.subject || '(no subject)'}</span>
+              {m.has_reference
+                ? <span className="whitespace-nowrap font-mono text-foreground">→ {m.external_reference}</span>
+                : <span className="whitespace-nowrap text-amber-600 dark:text-amber-400">no reference</span>}
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex justify-end gap-3">
+          <button type="button" onClick={onDismiss} disabled={replaying}
+            className="text-sm text-muted-foreground hover:underline">Not now</button>
+          <button type="button" onClick={onReplay} disabled={replaying}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
+            {replaying ? 'Replaying…' : 'Replay now'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

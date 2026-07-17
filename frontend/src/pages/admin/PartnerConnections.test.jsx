@@ -94,4 +94,53 @@ describe('PartnerConnections', () => {
     renderPage(['/admin/partners/connections?sender=unknown@peer.example']);
     await waitFor(() => expect(screen.getByLabelText('Sender addresses')).toHaveValue('unknown@peer.example'));
   });
+
+  it('offers replay after saving when covered held messages exist, and POSTs the replay', async () => {
+    api.get.mockImplementation(url => {
+      if (url === '/api/security/organizations/') return Promise.resolve({ data: ORGS });
+      if (url.includes('/replay-intake/')) return Promise.resolve({ data: {
+        count: 2, without_reference: 1,
+        messages: [
+          { id: 1, subject: '[CASE-1] a', external_reference: 'CASE-1', has_reference: true },
+          { id: 2, subject: 'no ref', external_reference: '', has_reference: false },
+        ],
+      } });
+      return Promise.resolve({ data: [] });
+    });
+    api.post.mockResolvedValue({ data: mkConn({ id: 5, name: 'New Peer' }) });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: 'New Connection' }));
+    await user.type(screen.getByLabelText('Connection name'), 'New Peer');
+    await user.type(screen.getByLabelText('Sender addresses'), 'soc@new.example');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await screen.findByText('Replay held messages?');
+    // Ref-less messages are flagged as fragmenting into separate incidents.
+    expect(screen.getByText(/separate flagged incident/i)).toBeInTheDocument();
+
+    api.post.mockResolvedValueOnce({ data: { results: [] } });
+    await user.click(screen.getByRole('button', { name: 'Replay now' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/partners/connections/5/replay-intake/'));
+  });
+
+  it('shows no replay offer when no held messages are covered', async () => {
+    api.get.mockImplementation(url => {
+      if (url === '/api/security/organizations/') return Promise.resolve({ data: ORGS });
+      if (url.includes('/replay-intake/')) return Promise.resolve({ data: { count: 0, without_reference: 0, messages: [] } });
+      return Promise.resolve({ data: [] });
+    });
+    api.post.mockResolvedValue({ data: mkConn({ id: 5, name: 'New Peer' }) });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: 'New Connection' }));
+    await user.type(screen.getByLabelText('Connection name'), 'New Peer');
+    await user.type(screen.getByLabelText('Sender addresses'), 'soc@new.example');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/partners/connections/5/replay-intake/'));
+    expect(screen.queryByText('Replay held messages?')).not.toBeInTheDocument();
+  });
 });

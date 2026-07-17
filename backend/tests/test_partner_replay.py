@@ -7,7 +7,7 @@ import pytest
 
 from incidents.models import Comment, Incident
 from partners.models import Connection, ConnectionSender, IntakeInboxMessage
-from partners.replay import replay_connection_backlog
+from partners.replay import preview_connection_backlog, replay_connection_backlog
 from security.models import Organization
 
 
@@ -149,6 +149,63 @@ def test_replay_ignores_uncovered_and_rawless_rows(acme):
         results = replay_connection_backlog(conn)
 
     assert [x["id"] for x in results] == [covered.id]
+
+
+# ── preview (slice 3 / #715) ───────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_preview_returns_extracted_refs_without_mutating(acme):
+    conn = make_connection(acme)
+    storage = FakeStorage()
+    make_row("peer@partner.example", "[CASE-7] a", "intake-inbox/1/raw.eml", storage)
+    make_row("peer@partner.example", "[CASE-7] b", "intake-inbox/2/raw.eml", storage)
+
+    with patch("security.storage.StorageClient", return_value=storage):
+        preview = preview_connection_backlog(conn)
+
+    assert preview["count"] == 2
+    assert preview["without_reference"] == 0
+    assert {m["external_reference"] for m in preview["messages"]} == {"CASE-7"}
+    # No mutation: nothing created, nothing marked, raw untouched.
+    assert Incident.objects.filter(source_kind=Incident.SOURCE_PARTNER).count() == 0
+    assert IntakeInboxMessage.objects.filter(replayed_at__isnull=False).count() == 0
+    assert storage.deleted == []
+
+
+@pytest.mark.django_db
+def test_preview_flags_refless_messages(acme):
+    conn = make_connection(acme)  # regex captures [CASE-n]
+    storage = FakeStorage()
+    make_row("peer@partner.example", "no reference here", "intake-inbox/1/raw.eml", storage)
+
+    with patch("security.storage.StorageClient", return_value=storage):
+        preview = preview_connection_backlog(conn)
+
+    assert preview["without_reference"] == 1
+    assert preview["messages"][0]["has_reference"] is False
+
+
+@pytest.mark.django_db
+def test_preview_and_post_agree(acme):
+    conn = make_connection(acme)
+    storage = FakeStorage()
+    make_row("peer@partner.example", "[CASE-8] a", "intake-inbox/1/raw.eml", storage)
+    make_row("peer@partner.example", "[CASE-8] b", "intake-inbox/2/raw.eml", storage)
+
+    with patch("security.storage.StorageClient", return_value=storage):
+        preview = preview_connection_backlog(conn)
+        results = replay_connection_backlog(conn)
+
+    assert preview["count"] == len(results)
+    assert [m["id"] for m in preview["messages"]] == [r["id"] for r in results]
+
+
+@pytest.mark.django_db
+def test_preview_endpoint_requires_staff(client, regular_user, acme):
+    conn = make_connection(acme)
+    client.force_login(regular_user)
+    assert client.get(f"/api/partners/connections/{conn.id}/replay-intake/").status_code == 403
 
 
 # ── endpoint (slice 2 / #714) ──────────────────────────────────────────────────────

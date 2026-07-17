@@ -80,13 +80,21 @@ class ConnectionReplayIntakeView(APIView):
     """Replay a Connection's held Intake Inbox backlog through the live partner pipeline
     (ADR-0035). Staff-only.
 
-    POST replays the whole covered backlog oldest-first and returns per-message outcomes.
+    - GET previews the covered held rows, dry-running the field mapping to show each
+      message's extracted External Reference (or that it has none), without mutating.
+    - POST replays the whole covered backlog oldest-first and returns per-message outcomes.
     """
 
     permission_classes = [IsAdminUser]
 
     def _connection(self, pk):
         return get_object_or_404(Connection, pk=pk)
+
+    def get(self, request, pk):
+        from .replay import preview_connection_backlog
+
+        connection = self._connection(pk)
+        return Response(preview_connection_backlog(connection))
 
     def post(self, request, pk):
         from .replay import replay_connection_backlog
