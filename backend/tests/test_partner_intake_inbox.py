@@ -45,7 +45,8 @@ def message(from_address="stranger@nowhere.example", to_address="soc@vels.online
 
 @pytest.mark.django_db
 def test_unrecognised_to_lands_in_inbox(acme):
-    outcome = route_inbound_message(message(to_address="someone@else.example"))
+    with patch("security.storage.StorageClient", return_value=MagicMock()):
+        outcome = route_inbound_message(message(to_address="someone@else.example"))
     assert outcome == "dropped:unrecognised_to"
     row = IntakeInboxMessage.objects.get()
     assert row.sender == "stranger@nowhere.example"
@@ -53,10 +54,38 @@ def test_unrecognised_to_lands_in_inbox(acme):
     assert row.body_excerpt == "body text"
 
 
+# ── raw retention (slice 1 / #713) ─────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_terminal_drop_retains_raw_eml(acme):
+    storage = MagicMock()
+    with patch("security.storage.StorageClient", return_value=storage):
+        route_inbound_message(message(to_address="someone@else.example"))
+    row = IntakeInboxMessage.objects.get()
+    assert row.raw_s3_key == f"intake-inbox/{row.id}/raw.eml"
+    # Bytes went to storage under the isolated prefix, never into the DB.
+    storage.upload_file.assert_called_once()
+    assert storage.upload_file.call_args.args[1] == row.raw_s3_key
+
+
+@pytest.mark.django_db
+def test_storage_failure_still_records_metadata_without_raw(acme):
+    storage = MagicMock()
+    storage.upload_file.side_effect = RuntimeError("bucket down")
+    with patch("security.storage.StorageClient", return_value=storage):
+        outcome = route_inbound_message(message(to_address="someone@else.example"))
+    assert outcome == "dropped:unrecognised_to"
+    row = IntakeInboxMessage.objects.get()
+    assert row.raw_s3_key == ""
+    assert row.sender == "stranger@nowhere.example"
+
+
 @pytest.mark.django_db
 def test_phishing_drop_lands_in_inbox(acme):
     # A non-forwarded email to the SOC mailbox is dropped by the phishing handler.
-    outcome = route_inbound_message(message(subject="not a forward"))
+    with patch("security.storage.StorageClient", return_value=MagicMock()):
+        outcome = route_inbound_message(message(subject="not a forward"))
     assert outcome.startswith("phishing:dropped:")
     assert IntakeInboxMessage.objects.filter(drop_reason=outcome).exists()
 
@@ -94,9 +123,43 @@ def test_purge_removes_aged_rows(monkeypatch):
     # auto_now_add can't be set at create; backdate directly.
     IntakeInboxMessage.objects.filter(pk=old.pk).update(received_at=timezone.now() - timedelta(days=40))
 
-    deleted = purge_intake_inbox()
+    with patch("security.storage.StorageClient", return_value=MagicMock()):
+        deleted = purge_intake_inbox()
     assert deleted == 1
     assert IntakeInboxMessage.objects.filter(pk=fresh.pk).exists()
+    assert not IntakeInboxMessage.objects.filter(pk=old.pk).exists()
+
+
+@pytest.mark.django_db
+def test_purge_deletes_raw_object_before_row(monkeypatch):
+    monkeypatch.setenv("PARTNER_INTAKE_RETENTION_DAYS", "30")
+    old = IntakeInboxMessage.objects.create(
+        sender="b@x.example", drop_reason="dropped:x", raw_s3_key="intake-inbox/1/raw.eml"
+    )
+    IntakeInboxMessage.objects.filter(pk=old.pk).update(received_at=timezone.now() - timedelta(days=40))
+
+    storage = MagicMock()
+    with patch("security.storage.StorageClient", return_value=storage):
+        deleted = purge_intake_inbox()
+    assert deleted == 1
+    storage.delete_file.assert_called_once_with("intake-inbox/1/raw.eml")
+    assert not IntakeInboxMessage.objects.filter(pk=old.pk).exists()
+
+
+@pytest.mark.django_db
+def test_purge_tolerates_missing_raw_object(monkeypatch):
+    monkeypatch.setenv("PARTNER_INTAKE_RETENTION_DAYS", "30")
+    old = IntakeInboxMessage.objects.create(
+        sender="b@x.example", drop_reason="dropped:x", raw_s3_key="intake-inbox/1/raw.eml"
+    )
+    IntakeInboxMessage.objects.filter(pk=old.pk).update(received_at=timezone.now() - timedelta(days=40))
+
+    storage = MagicMock()
+    storage.delete_file.side_effect = RuntimeError("no such key")
+    with patch("security.storage.StorageClient", return_value=storage):
+        deleted = purge_intake_inbox()
+    # The row is still removed even though the object delete failed.
+    assert deleted == 1
     assert not IntakeInboxMessage.objects.filter(pk=old.pk).exists()
 
 

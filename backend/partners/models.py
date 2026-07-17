@@ -85,15 +85,20 @@ class IntakeInboxMessage(models.Model):
     """A staff-only dead-letter row for an inbound email that reached the SOC mailbox but
     no handler accepted — an unknown sender, a Connection sender that failed DKIM/SPF, or
     otherwise un-routable mail (incl. misfired phishing forwards). Carries bounded
-    metadata only (no raw-message storage in v1); its primary action is "Create
-    Connection" pre-filling the sender. Auto-purged after a retention window (CONTEXT.md
-    → Intake Inbox)."""
+    metadata plus, for Replay, the retained raw `.eml` (in object storage, never the DB);
+    its primary action is "Create Connection" pre-filling the sender. Row and raw object
+    are auto-purged together after a retention window (CONTEXT.md → Intake Inbox, Replay;
+    ADR-0035)."""
 
     sender = models.CharField(max_length=320, blank=True, default="")
     subject = models.CharField(max_length=500, blank=True, default="")
     drop_reason = models.CharField(max_length=100, blank=True, default="")
     body_excerpt = models.TextField(blank=True, default="")
     received_at = models.DateTimeField(auto_now_add=True)
+    # Object-storage key for the retained raw `.eml` (empty = none retained, e.g. a
+    # storage failure at capture or the bytes dropped after a successful replay). Bytes
+    # live under an isolated `intake-inbox/{id}/` prefix, never in the DB (ADR-0035).
+    raw_s3_key = models.CharField(max_length=1024, blank=True, default="")
 
     class Meta:
         ordering = ["-received_at"]

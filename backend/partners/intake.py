@@ -19,13 +19,14 @@ def is_terminal_drop(outcome):
 
 
 def record_intake_drop(message, drop_reason):
-    """Persist a dropped inbound message as an Intake Inbox row. Best-effort — never
-    raises into the router."""
+    """Persist a dropped inbound message as an Intake Inbox row, retaining its raw `.eml`
+    in object storage for later Replay (ADR-0035). Best-effort — never raises into the
+    router; a storage failure still records the metadata row (with no raw)."""
     from partners.models import IntakeInboxMessage
 
     try:
         _, sender = email.utils.parseaddr(message.from_address or "")
-        IntakeInboxMessage.objects.create(
+        row = IntakeInboxMessage.objects.create(
             sender=(sender or message.from_address or "")[:320],
             subject=(message.subject or "")[:500],
             drop_reason=(drop_reason or "")[:100],
@@ -33,3 +34,26 @@ def record_intake_drop(message, drop_reason):
         )
     except Exception:
         logger.exception("partner: failed to record Intake Inbox drop (%s)", drop_reason)
+        return
+
+    _retain_raw(row, getattr(message, "raw_bytes", b""))
+
+
+def _retain_raw(row, raw_bytes):
+    """Store the raw `.eml` under the row's isolated `intake-inbox/{id}/` prefix and point
+    the row at it. Best-effort: on any storage failure the row keeps its metadata with no
+    retained raw (that message simply cannot be replayed)."""
+    import io
+
+    from partners.models import IntakeInboxMessage
+
+    if not raw_bytes:
+        return
+    try:
+        from security.storage import StorageClient
+
+        key = f"intake-inbox/{row.id}/raw.eml"
+        StorageClient().upload_file(io.BytesIO(raw_bytes), key)
+        IntakeInboxMessage.objects.filter(pk=row.pk).update(raw_s3_key=key)
+    except Exception:
+        logger.exception("partner: failed to retain raw .eml for Intake Inbox row %s", row.pk)
