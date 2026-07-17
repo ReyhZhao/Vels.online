@@ -63,6 +63,24 @@ def _extract_attachments(msg):
     return attachments
 
 
+def message_from_bytes(raw):
+    """Parse raw `.eml` bytes into a NormalisedMessage, the same shape the IMAP fetch
+    yields. Used by partner Replay to re-run a retained message through the live pipeline
+    (ADR-0035)."""
+    msg = email.message_from_bytes(raw)
+    body_text, body_html = _extract_body(msg)
+    return NormalisedMessage(
+        from_address=msg.get("From", ""),
+        to_address=msg.get("To", ""),
+        reply_to=msg.get("Reply-To"),
+        subject=msg.get("Subject", ""),
+        body_text=body_text,
+        body_html=body_html,
+        raw_bytes=raw,
+        attachments=_extract_attachments(msg),
+    )
+
+
 class ImapAdapter:
     def __init__(self):
         self._configured = _env_configured()
@@ -88,18 +106,7 @@ class ImapAdapter:
             for uid in uids:
                 _, msg_data = conn.fetch(uid, "(RFC822)")
                 raw = msg_data[0][1]
-                msg = email.message_from_bytes(raw)
-                body_text, body_html = _extract_body(msg)
-                yield NormalisedMessage(
-                    from_address=msg.get("From", ""),
-                    to_address=msg.get("To", ""),
-                    reply_to=msg.get("Reply-To"),
-                    subject=msg.get("Subject", ""),
-                    body_text=body_text,
-                    body_html=body_html,
-                    raw_bytes=raw,
-                    attachments=_extract_attachments(msg),
-                )
+                yield message_from_bytes(raw)
                 conn.store(uid, "+FLAGS", "\\Seen")
         finally:
             try:

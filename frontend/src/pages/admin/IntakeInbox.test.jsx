@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('@/lib/axios', () => ({
-  default: { get: vi.fn(), delete: vi.fn() },
+  default: { get: vi.fn(), delete: vi.fn(), post: vi.fn() },
 }));
 
 import api from '@/lib/axios';
@@ -50,5 +50,26 @@ describe('IntakeInbox', () => {
     await waitFor(() => within(table()).getByText('unknown@peer.example'));
     await user.click(within(table()).getByRole('button', { name: 'Dismiss' }));
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/partners/intake-inbox/1/'));
+  });
+
+  it('offers Replay for a covered row and POSTs the Connection replay', async () => {
+    const covered = { ...ROWS[0], covering_connection: { id: 9, name: 'Peer CSIRT' }, has_raw: true, replayed_incident: null };
+    api.get.mockResolvedValueOnce({ data: [covered] }).mockResolvedValueOnce({ data: [covered] });
+    api.post.mockResolvedValue({ data: { results: [] } });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('unknown@peer.example'));
+    await user.click(within(table()).getByRole('button', { name: 'Replay → Peer CSIRT' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/partners/connections/9/replay-intake/'));
+  });
+
+  it('shows a Replayed link once a row has become an incident', async () => {
+    const replayed = { ...ROWS[0], replayed_incident: { id: 42, display_id: 'INC-42' } };
+    api.get.mockResolvedValue({ data: [replayed] });
+    renderPage();
+    await waitFor(() => within(table()).getByText('unknown@peer.example'));
+    const link = within(table()).getByRole('link', { name: 'Replayed → INC-42' });
+    expect(link).toHaveAttribute('href', '/incidents/42');
+    expect(within(table()).queryByRole('link', { name: 'Create Connection' })).not.toBeInTheDocument();
   });
 });

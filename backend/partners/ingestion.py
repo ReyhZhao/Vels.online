@@ -47,42 +47,50 @@ class PartnerIngestionHandler:
         A message that fails DKIM/SPF verification is rejected and logged, never
         ingested (ADR-0032) — a spoofed From cannot inject incidents. Slice 2 otherwise
         always creates a new Partner Incident."""
-        from partners.mapping import map_email_to_incident_fields
-        from partners.verification import verify_message_auth
+        outcome, _ = ingest_partner_message(message, connection, sender_address)
+        return outcome
 
-        from partners.matching import find_partner_incident
 
-        if not verify_message_auth(getattr(message, "raw_bytes", b"")):
-            logger.warning(
-                "inbound_mail: partner: dropped — sender-auth verification failed "
-                "from=%r connection=%r subject=%r",
-                sender_address, connection.name, message.subject,
-            )
-            return "partner:dropped:verification_failed"
+def ingest_partner_message(message, connection, sender_address):
+    """Core partner ingest, shared by the live router (via PartnerIngestionHandler) and
+    Replay (ADR-0035). Returns `(outcome, incident_or_None)` — the incident is the one
+    created or threaded onto, or None when verification failed."""
+    from partners.mapping import map_email_to_incident_fields
+    from partners.verification import verify_message_auth
 
-        fields = map_email_to_incident_fields(connection, message)
-        ext_ref = fields.get("external_reference") or ""
+    from partners.matching import find_partner_incident
 
-        # Follow-up: a known reference threads onto the existing incident as a comment.
-        # An inbound message NEVER mutates the incident's state (ADR-0032).
-        existing = find_partner_incident(connection, ext_ref)
-        if existing is not None:
-            append_partner_comment(existing, message, connection, sender_address, ext_ref)
-            logger.info(
-                "inbound_mail: partner: matched follow-up onto %s connection=%r ref=%r",
-                existing.display_id, connection.name, ext_ref,
-            )
-            return "partner:matched"
-
-        incident = create_partner_incident(
-            connection, message, fields, sender_address, flagged_no_reference=not ext_ref
+    if not verify_message_auth(getattr(message, "raw_bytes", b"")):
+        logger.warning(
+            "inbound_mail: partner: dropped — sender-auth verification failed "
+            "from=%r connection=%r subject=%r",
+            sender_address, connection.name, message.subject,
         )
+        return "partner:dropped:verification_failed", None
+
+    fields = map_email_to_incident_fields(connection, message)
+    ext_ref = fields.get("external_reference") or ""
+
+    # Follow-up: a known reference threads onto the existing incident as a comment.
+    # An inbound message NEVER mutates the incident's state (ADR-0032).
+    existing = find_partner_incident(connection, ext_ref)
+    if existing is not None:
+        append_partner_comment(existing, message, connection, sender_address, ext_ref)
         logger.info(
-            "inbound_mail: partner: created %s org=%s connection=%r sender=%r ref=%r",
-            incident.display_id, connection.organization.slug, connection.name,
-            sender_address, ext_ref,
+            "inbound_mail: partner: matched follow-up onto %s connection=%r ref=%r",
+            existing.display_id, connection.name, ext_ref,
         )
-        return "partner:created"
+        return "partner:matched", existing
+
+    incident = create_partner_incident(
+        connection, message, fields, sender_address, flagged_no_reference=not ext_ref
+    )
+    logger.info(
+        "inbound_mail: partner: created %s org=%s connection=%r sender=%r ref=%r",
+        incident.display_id, connection.organization.slug, connection.name,
+        sender_address, ext_ref,
+    )
+    return "partner:created", incident
 
 
 def create_partner_incident(connection, message, fields, sender_address, flagged_no_reference=False):

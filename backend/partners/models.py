@@ -99,6 +99,16 @@ class IntakeInboxMessage(models.Model):
     # storage failure at capture or the bytes dropped after a successful replay). Bytes
     # live under an isolated `intake-inbox/{id}/` prefix, never in the DB (ADR-0035).
     raw_s3_key = models.CharField(max_length=1024, blank=True, default="")
+    # Replay markers (ADR-0035): set once this row has been re-run through the live
+    # partner pipeline into an Incident. Idempotency is per-row — replay skips marked rows.
+    replayed_at = models.DateTimeField(null=True, blank=True)
+    replayed_incident = models.ForeignKey(
+        "incidents.Incident",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
 
     class Meta:
         ordering = ["-received_at"]

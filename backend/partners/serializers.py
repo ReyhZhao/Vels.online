@@ -131,7 +131,37 @@ class ConnectionSerializer(serializers.ModelSerializer):
 
 
 class IntakeInboxMessageSerializer(serializers.ModelSerializer):
+    # The active Connection (id + name) whose sender set covers this row's sender, if any —
+    # drives the "Replay → {Connection}" affordance (ADR-0035). Computed from a prebuilt
+    # `active_sender_map` in the serializer context so the list stays a single query.
+    covering_connection = serializers.SerializerMethodField()
+    # Once replayed, the incident this row became — drives "Replayed → INC-…".
+    replayed_incident = serializers.SerializerMethodField()
+    has_raw = serializers.SerializerMethodField()
+
     class Meta:
         model = IntakeInboxMessage
-        fields = ["id", "sender", "subject", "drop_reason", "body_excerpt", "received_at"]
+        fields = [
+            "id",
+            "sender",
+            "subject",
+            "drop_reason",
+            "body_excerpt",
+            "received_at",
+            "covering_connection",
+            "replayed_incident",
+            "has_raw",
+        ]
         read_only_fields = fields
+
+    def get_covering_connection(self, obj):
+        sender_map = self.context.get("active_sender_map") or {}
+        return sender_map.get((obj.sender or "").strip().lower())
+
+    def get_replayed_incident(self, obj):
+        if obj.replayed_incident_id is None:
+            return None
+        return {"id": obj.replayed_incident_id, "display_id": obj.replayed_incident.display_id}
+
+    def get_has_raw(self, obj):
+        return bool(obj.raw_s3_key)

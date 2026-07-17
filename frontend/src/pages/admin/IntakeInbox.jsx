@@ -17,13 +17,16 @@ export default function IntakeInbox() {
   const [reasonFilter, setReasonFilter] = useState('all');
   const [sortKey, setSortKey] = useState('received_at');
   const [sortOrder, setSortOrder] = useState('desc');
+  const [replayingId, setReplayingId] = useState(null);
 
-  useEffect(() => {
-    api.get('/api/partners/intake-inbox/')
+  function load() {
+    return api.get('/api/partners/intake-inbox/')
       .then(res => setRows(res.data))
       .catch(() => setError('Failed to load the Intake Inbox.'))
       .finally(() => setLoading(false));
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   async function dismiss(row) {
     try {
@@ -32,6 +35,44 @@ export default function IntakeInbox() {
     } catch {
       setError('Failed to dismiss the row.');
     }
+  }
+
+  // Replay the whole covered backlog for this row's Connection, then refresh so newly
+  // created "Replayed → INC-…" links appear (ADR-0035).
+  async function replay(row) {
+    setError(null);
+    setReplayingId(row.id);
+    try {
+      await api.post(`/api/partners/connections/${row.covering_connection.id}/replay-intake/`);
+      await load();
+    } catch {
+      setError('Failed to replay held messages.');
+    } finally {
+      setReplayingId(null);
+    }
+  }
+
+  function RowActions({ row }) {
+    if (row.replayed_incident) {
+      return (
+        <Link to={`/incidents/${row.replayed_incident.id}`} className="text-xs text-primary hover:underline">
+          Replayed → {row.replayed_incident.display_id}
+        </Link>
+      );
+    }
+    if (row.covering_connection && row.has_raw) {
+      return (
+        <button onClick={() => replay(row)} disabled={replayingId === row.id}
+          className="text-xs text-primary hover:underline disabled:opacity-50">
+          {replayingId === row.id ? 'Replaying…' : `Replay → ${row.covering_connection.name}`}
+        </button>
+      );
+    }
+    return (
+      <Link to={`/admin/partners/connections?sender=${encodeURIComponent(row.sender)}`} className="text-xs text-primary hover:underline">
+        Create Connection
+      </Link>
+    );
   }
 
   function setSort(key) {
@@ -107,7 +148,7 @@ export default function IntakeInbox() {
             <p className="text-xs"><span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">{r.drop_reason}</span></p>
             <p className="text-xs text-muted-foreground">{formatTs(r.received_at)}</p>
             <div className="flex gap-2 pt-1">
-              <Link to={`/admin/partners/connections?sender=${encodeURIComponent(r.sender)}`} className="text-xs text-primary hover:underline">Create Connection</Link>
+              <RowActions row={r} />
               <button onClick={() => dismiss(r)} className="text-xs text-muted-foreground hover:underline">Dismiss</button>
             </div>
           </div>
@@ -139,7 +180,7 @@ export default function IntakeInbox() {
                 <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatTs(r.received_at)}</td>
                 <td className="px-4 py-3">
                   <div className="flex gap-3">
-                    <Link to={`/admin/partners/connections?sender=${encodeURIComponent(r.sender)}`} className="text-xs text-primary hover:underline">Create Connection</Link>
+                    <RowActions row={r} />
                     <button onClick={() => dismiss(r)} className="text-xs text-muted-foreground hover:text-foreground hover:underline">Dismiss</button>
                   </div>
                 </td>

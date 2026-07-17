@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
@@ -38,7 +39,24 @@ class IntakeInboxListView(generics.ListAPIView):
 
     permission_classes = [IsAdminUser]
     serializer_class = IntakeInboxMessageSerializer
-    queryset = IntakeInboxMessage.objects.all()
+    queryset = IntakeInboxMessage.objects.select_related("replayed_incident")
+
+    def get_serializer_context(self):
+        """Prebuild a {lowercased sender address → {id, name}} map of *active* Connections
+        so each row can surface its covering Connection without an N+1 (ADR-0035)."""
+        from .models import ConnectionSender
+
+        context = super().get_serializer_context()
+        sender_map = {}
+        rows = (
+            ConnectionSender.objects.filter(connection__active=True)
+            .select_related("connection")
+            .values_list("address", "connection_id", "connection__name")
+        )
+        for address, conn_id, conn_name in rows:
+            sender_map[(address or "").strip().lower()] = {"id": conn_id, "name": conn_name}
+        context["active_sender_map"] = sender_map
+        return context
 
 
 class IntakeInboxCountView(APIView):
@@ -56,3 +74,22 @@ class IntakeInboxDetailView(generics.RetrieveDestroyAPIView):
     permission_classes = [IsAdminUser]
     serializer_class = IntakeInboxMessageSerializer
     queryset = IntakeInboxMessage.objects.all()
+
+
+class ConnectionReplayIntakeView(APIView):
+    """Replay a Connection's held Intake Inbox backlog through the live partner pipeline
+    (ADR-0035). Staff-only.
+
+    POST replays the whole covered backlog oldest-first and returns per-message outcomes.
+    """
+
+    permission_classes = [IsAdminUser]
+
+    def _connection(self, pk):
+        return get_object_or_404(Connection, pk=pk)
+
+    def post(self, request, pk):
+        from .replay import replay_connection_backlog
+
+        connection = self._connection(pk)
+        return Response({"results": replay_connection_backlog(connection)})
