@@ -18,8 +18,10 @@ single-record view. These do not get filter/sort/search.
 - **Sort** — always. Sortable columns (or a sort control for card lists).
 - **Filter** — required **only when the records have a natural facet** (state,
   severity, type, org). Do not invent meaningless filters for facet-less data.
-  See the multi-select state filter in `IncidentList.jsx` for the canonical
-  pattern.
+  Multi-value facets use the shared `MultiSelectFilter` component
+  (`frontend/src/components/MultiSelectFilter.jsx`) — a checkbox dropdown with
+  "Select all" / "Reset" affordances. See its three consumers (state, severity,
+  closure-reason) in `IncidentList.jsx` for the canonical wiring.
 
 ### Bulk selection
 

@@ -69,6 +69,7 @@ function renderPage(initialEntry = '/') {
 describe('IncidentList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear(); // persisted filter prefs must not leak between tests
     mockUseAuth.mockReturnValue({ user: null });
     mockUseOrganization.mockReturnValue(null);
     mockNavigate.mockReset();
@@ -259,16 +260,36 @@ describe('IncidentList', () => {
     );
   });
 
-  it('changing severity filter re-fetches with severity param', async () => {
+  it('selecting a severity re-fetches with severity param', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE([]));
     renderPage();
     await waitFor(() => screen.getByLabelText('Severity filter'));
-    fireEvent.change(screen.getByLabelText('Severity filter'), { target: { value: 'critical' } });
-    await waitFor(() =>
-      expect(api.get).toHaveBeenCalledWith('/api/incidents/', expect.objectContaining({
-        params: expect.objectContaining({ severity: 'critical' }),
-      }))
-    );
+    fireEvent.click(screen.getByLabelText('Severity filter'));
+    fireEvent.click(screen.getByLabelText('critical'));
+    await waitFor(() => expect(lastListParams().severity).toBe('critical'));
+  });
+
+  it('selecting two severities sends a comma-separated param', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Severity filter'));
+    fireEvent.click(screen.getByLabelText('Severity filter'));
+    fireEvent.click(screen.getByLabelText('critical'));
+    await waitFor(() => expect(lastListParams().severity).toBe('critical'));
+    fireEvent.click(screen.getByLabelText('high'));
+    await waitFor(() => {
+      const severity = lastListParams().severity;
+      expect(severity.split(',')).toEqual(expect.arrayContaining(['critical', 'high']));
+    });
+  });
+
+  it('severity Reset clears the severity param', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage('/incidents?severity=critical');
+    await waitFor(() => screen.getByLabelText('Severity filter'));
+    fireEvent.click(screen.getByLabelText('Severity filter'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(lastListParams().severity).toBeUndefined());
   });
 
   it('clicking a row navigates directly to the incident detail page', async () => {
@@ -364,6 +385,53 @@ describe('IncidentList', () => {
     expect(screen.getByLabelText('new')).not.toBeChecked();
     // The lone remaining state cannot be unchecked
     expect(screen.getByLabelText('closed')).toBeDisabled();
+  });
+
+  it('state "Select all" selects every state including closed', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    await waitFor(() => {
+      expect(lastListParams().state.split(',')).toHaveLength(8);
+    });
+    expect(lastListParams().state).toEqual(expect.stringContaining('closed'));
+  });
+
+  it('state "Reset" returns to the all-except-closed baseline (no state param)', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage('/incidents?state=closed');
+    await waitFor(() => screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(lastListParams().state).toBeUndefined());
+  });
+
+  it('state "Reset" is disabled at the baseline, "Select all" disabled when all selected', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage('/'); // fresh visit → baseline (all except closed)
+    await waitFor(() => screen.getByLabelText('State filter'));
+    fireEvent.click(screen.getByLabelText('State filter'));
+    // At the baseline: Reset is a no-op, Select all is live
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Select all' })).toBeEnabled();
+    // Select everything → now Select all is the no-op
+    fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    expect(screen.getByRole('button', { name: 'Select all' })).toBeDisabled();
+  });
+
+  it('closure-reason "Select all" then "Reset" sets and clears the param', async () => {
+    api.get.mockResolvedValue(PAGE_RESPONSE([]));
+    renderPage();
+    await waitFor(() => screen.getByLabelText('Closure reason filter'));
+    fireEvent.click(screen.getByLabelText('Closure reason filter'));
+    fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    await waitFor(() => {
+      expect(lastListParams().closure_reason.split(',')).toHaveLength(6);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(lastListParams().closure_reason).toBeUndefined());
   });
 
   // ── bulk actions (staff only) ─────────────────────────────────────────────
@@ -550,7 +618,8 @@ describe('IncidentList — preference storage', () => {
   it('saves preferences to localStorage when a filter is changed', async () => {
     renderPage();
     await waitFor(() => screen.getByLabelText('Severity filter'));
-    fireEvent.change(screen.getByLabelText('Severity filter'), { target: { value: 'critical' } });
+    fireEvent.click(screen.getByLabelText('Severity filter'));
+    fireEvent.click(screen.getByLabelText('critical'));
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem('incident_list_prefs_42') ?? '{}');
       expect(saved.severity).toBe('critical');
@@ -572,7 +641,8 @@ describe('IncidentList — preference storage', () => {
     mockUseAuth.mockReturnValue({ user: { id: 99, is_staff: false } });
     renderPage();
     await waitFor(() => screen.getByLabelText('Severity filter'));
-    fireEvent.change(screen.getByLabelText('Severity filter'), { target: { value: 'low' } });
+    fireEvent.click(screen.getByLabelText('Severity filter'));
+    fireEvent.click(screen.getByLabelText('low'));
     await waitFor(() => {
       expect(localStorage.getItem('incident_list_prefs_99')).toBeTruthy();
       expect(localStorage.getItem('incident_list_prefs_42')).toBeNull();
