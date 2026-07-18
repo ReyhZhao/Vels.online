@@ -30,6 +30,20 @@ def _matching_keys(incident):
     return ioc_values, asset_names, asset_ips
 
 
+def _match_q(ioc_values, asset_names, asset_ips):
+    """The predicate matching resolved incidents that share an Entity/IOC value. Shared by
+    `build_precedents` and the #657 `semantic_measure` job so both retrieve on identical
+    match logic — changing one must change the other, never silently diverge."""
+    match = Q()
+    if ioc_values:
+        match |= Q(iocs__value__in=ioc_values)
+    if asset_names:
+        match |= Q(incident_assets__asset__agent_name__in=asset_names)
+    if asset_ips:
+        match |= Q(incident_assets__asset__ip_address__in=asset_ips)
+    return match
+
+
 def was_corrected(incident) -> bool:
     """Whether a human overturned the agent's Classify call on this incident.
 
@@ -57,13 +71,7 @@ def build_precedents(incident, *, limit=PRECEDENT_LIMIT):
     if not (ioc_values or asset_names or asset_ips):
         return []
 
-    match = Q()
-    if ioc_values:
-        match |= Q(iocs__value__in=ioc_values)
-    if asset_names:
-        match |= Q(incident_assets__asset__agent_name__in=asset_names)
-    if asset_ips:
-        match |= Q(incident_assets__asset__ip_address__in=asset_ips)
+    match = _match_q(ioc_values, asset_names, asset_ips)
 
     # Isolation invariant (ADR-0031): hard-filter on the incident's own organisation.
     candidates = (
