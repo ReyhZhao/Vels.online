@@ -109,7 +109,29 @@ class Command(BaseCommand):
             ))
             return
 
+        provider = (opts["provider"] or getattr(settings, "EMBED_MEASURE_PROVIDER", "ollama")).lower()
+        model = getattr(settings, "GEMINI_EMBED_MODEL" if provider == "gemini"
+                        else "OLLAMA_EMBED_MODEL", "?")
+        self.stdout.write(self.style.NOTICE(
+            f"Embedder: provider={provider}, model={model}, corrections={total}"
+        ))
         embedder = build_embedder(opts["provider"])
+
+        # Fail fast on a misconfigured embedder — a single tiny vector before any DB work,
+        # so a bad key/model surfaces one legible line instead of a mid-run traceback.
+        try:
+            probe = embedder(["preflight"])
+            if not probe or not probe[0]:
+                raise CommandError("embedder returned an empty vector on preflight.")
+        except CommandError:
+            raise
+        except Exception as exc:
+            other = "gemini" if provider == "ollama" else "ollama"
+            raise CommandError(
+                f"Embedder '{provider}' (model={model}) failed on a preflight embed: {exc}\n"
+                f"Check the provider's credentials/model, or retry with --provider {other}."
+            ) from exc
+
         report = sm.run_measurement(
             corrections, embedder, top_k=opts["top_k"], min_sample=opts["min_sample"]
         )

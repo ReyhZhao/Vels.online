@@ -50,6 +50,22 @@ def test_command_reports_nothing_when_no_corrections(acme):
 
 
 @pytest.mark.django_db
+def test_command_preflight_fails_fast_on_a_broken_embedder(acme, monkeypatch):
+    def boom(texts):
+        raise RuntimeError("401 unauthorized")
+
+    monkeypatch.setattr(cmd, "build_embedder", lambda provider=None: boom)
+    subj = Subject.objects.create(name="Brute Force", slug="sem-cmd-boom")
+    query = Incident.objects.create(
+        organization=acme, title="x", description="y", display_id="INC-2026-9100", state="new",
+    )
+    ClassificationCorrection.objects.create(incident=query, human_subject=subj)
+
+    with pytest.raises(CommandError, match="preflight"):
+        call_command("measure_semantic_precedent_recall", stdout=StringIO())
+
+
+@pytest.mark.django_db
 def test_command_runs_end_to_end_with_injected_embedder(acme, monkeypatch):
     monkeypatch.setattr(cmd, "build_embedder", lambda provider=None: bow_embedder)
     subj = Subject.objects.create(name="Brute Force", slug="sem-cmd-bf")

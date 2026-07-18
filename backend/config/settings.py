@@ -326,7 +326,7 @@ OLLAMA_TIMEOUT_S = float(os.environ.get("OLLAMA_TIMEOUT_S", "60"))
 # the measurement against Gemini's embedding endpoint instead.
 EMBED_MEASURE_PROVIDER = os.environ.get("EMBED_MEASURE_PROVIDER", "ollama")
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "embeddinggemma")
-GEMINI_EMBED_MODEL = os.environ.get("GEMINI_EMBED_MODEL", "text-embedding-004")
+GEMINI_EMBED_MODEL = os.environ.get("GEMINI_EMBED_MODEL", "gemini-embedding-001")
 
 # Assistant agentic tool-calling loop (ADR-0011). Caps bound a single turn.
 # ASSISTANT_LOOP_DEADLINE_S (research) + pass-1 + pass-2 (each ≤ OLLAMA_TIMEOUT_S) must
