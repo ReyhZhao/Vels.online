@@ -199,7 +199,7 @@ jobs:
   update-chart-values:
     name: Update chart image tags
     runs-on: ubuntu-latest
-    needs: [build-backend, build-frontend, build-mobile]
+    needs: [build-backend, build-frontend]
     permissions:
       contents: write
     steps:
