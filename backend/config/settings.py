@@ -320,6 +320,14 @@ OLLAMA_API_KEY  = os.environ.get("OLLAMA_API_KEY", "")
 # --timeout (see backend/Dockerfile) so the worker is never SIGABRT-killed mid-call.
 OLLAMA_TIMEOUT_S = float(os.environ.get("OLLAMA_TIMEOUT_S", "60"))
 
+# Embedding config for the #657 semantic-precedent-recall measurement (a background research
+# job — measure_semantic_precedent_recall — NOT a production serving path; see ADR-0030).
+# Defaults to Ollama Cloud to match the production triage provider; set to "gemini" to run
+# the measurement against Gemini's embedding endpoint instead.
+EMBED_MEASURE_PROVIDER = os.environ.get("EMBED_MEASURE_PROVIDER", "ollama")
+OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "embeddinggemma")
+GEMINI_EMBED_MODEL = os.environ.get("GEMINI_EMBED_MODEL", "text-embedding-004")
+
 # Assistant agentic tool-calling loop (ADR-0011). Caps bound a single turn.
 # ASSISTANT_LOOP_DEADLINE_S (research) + pass-1 + pass-2 (each ≤ OLLAMA_TIMEOUT_S) must
 # stay comfortably under the gunicorn --timeout so the loop self-limits before gunicorn.
