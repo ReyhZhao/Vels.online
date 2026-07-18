@@ -7,6 +7,7 @@ import SLAPill from '../components/SLAPill';
 import CreateIncidentModal from '../components/CreateIncidentModal';
 import { OnCallWidgetCompact } from '../components/OnCallWidget';
 import IncidentTrendChart from '../components/IncidentTrendChart';
+import MultiSelectFilter from '../components/MultiSelectFilter';
 
 // Keys that are persisted as user preferences (excludes transient keys like page, q).
 // `subject` is the trend chart's drill-down filter; `trend` is the panel's
@@ -113,6 +114,29 @@ const CLOSURE_REASONS = [
   { value: 'informational',  label: 'Informational' },
   { value: 'accepted_risk',  label: 'Accepted Risk' },
 ];
+const CLOSURE_REASON_VALUES = CLOSURE_REASONS.map(r => r.value);
+const closureReasonLabel = v => CLOSURE_REASONS.find(r => r.value === v)?.label ?? v;
+
+// Trigger-button summaries for each facet's MultiSelectFilter.
+function summarizeStates(selected) {
+  if (selected.length === 0) return 'No states';
+  if (selected.length === STATE_OPTIONS.length) return 'All states';
+  if (sameStateSet(selected, DEFAULT_STATES)) return 'All except closed';
+  if (selected.length <= 2) return selected.map(prettyState).join(', ');
+  return `${selected.length} states`;
+}
+
+function summarizeSeverities(selected) {
+  if (selected.length === 0) return 'All severities';
+  if (selected.length <= 2) return selected.join(', ');
+  return `${selected.length} severities`;
+}
+
+function summarizeClosureReasons(selected) {
+  if (selected.length === 0) return 'All closure reasons';
+  if (selected.length <= 2) return selected.map(closureReasonLabel).join(', ');
+  return `${selected.length} closure reasons`;
+}
 
 function CanonicalIncidentCombobox({ incidents, loading, value, onChange }) {
   const [open, setOpen] = useState(false);
@@ -325,139 +349,6 @@ function BulkReassignDialog({ staffUsers, onConfirm, onCancel, loading }) {
   );
 }
 
-function StateMultiSelect({ selected, onToggle }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClickOutside(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [open]);
-
-  const selectedSet = new Set(selected);
-
-  let summary;
-  if (selected.length === 0) summary = 'No states';
-  else if (selected.length === STATE_OPTIONS.length) summary = 'All states';
-  else if (sameStateSet(selected, DEFAULT_STATES)) summary = 'All except closed';
-  else if (selected.length <= 2) summary = selected.map(prettyState).join(', ');
-  else summary = `${selected.length} states`;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label="State filter"
-        aria-haspopup="true"
-        aria-expanded={open}
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-      >
-        <span>{summary}</span>
-        <span aria-hidden="true" className="text-muted-foreground">▾</span>
-      </button>
-      {open && (
-        <div
-          role="group"
-          aria-label="Incident states"
-          className="absolute z-50 mt-1 min-w-[12rem] rounded-md border border-border bg-card py-1 shadow-lg"
-        >
-          {STATE_OPTIONS.map(s => {
-            const checked = selectedSet.has(s);
-            // Never let the user clear the last remaining state — an empty
-            // selection has no sensible meaning, so keep at least one checked.
-            const lockLast = checked && selected.length === 1;
-            return (
-              <label
-                key={s}
-                className={`flex items-center gap-2 px-3 py-1.5 text-sm capitalize hover:bg-accent ${lockLast ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-              >
-                <input
-                  type="checkbox"
-                  aria-label={s}
-                  checked={checked}
-                  disabled={lockLast}
-                  onChange={() => onToggle(s)}
-                  className="rounded border-border"
-                />
-                <span className={STATE_CLASSES[s] ?? 'text-foreground'}>{prettyState(s)}</span>
-              </label>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Closure-reason multi-select, modelled on StateMultiSelect. Unlike state, an
-// empty selection is meaningful ("no closure-reason filter"), so nothing is
-// locked and the all-clear summary reads "All closure reasons".
-function ClosureReasonMultiSelect({ selected, onToggle }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClickOutside(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [open]);
-
-  const selectedSet = new Set(selected);
-  const labelFor = v => CLOSURE_REASONS.find(r => r.value === v)?.label ?? v;
-
-  let summary;
-  if (selected.length === 0) summary = 'All closure reasons';
-  else if (selected.length <= 2) summary = selected.map(labelFor).join(', ');
-  else summary = `${selected.length} closure reasons`;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label="Closure reason filter"
-        aria-haspopup="true"
-        aria-expanded={open}
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-      >
-        <span>{summary}</span>
-        <span aria-hidden="true" className="text-muted-foreground">▾</span>
-      </button>
-      {open && (
-        <div
-          role="group"
-          aria-label="Closure reasons"
-          className="absolute z-50 mt-1 min-w-[12rem] rounded-md border border-border bg-card py-1 shadow-lg"
-        >
-          {CLOSURE_REASONS.map(r => (
-            <label
-              key={r.value}
-              className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent"
-            >
-              <input
-                type="checkbox"
-                aria-label={r.value}
-                checked={selectedSet.has(r.value)}
-                onChange={() => onToggle(r.value)}
-                className="rounded border-border"
-              />
-              <span className="text-foreground">{r.label}</span>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function IncidentList() {
   const { user } = useAuth();
   const orgContext = useOrganization();
@@ -614,15 +505,23 @@ export default function IncidentList() {
     });
   }
 
-  function toggleState(stateValue) {
-    const current = new Set(selectedStates);
-    if (current.has(stateValue)) {
-      if (current.size === 1) return; // keep at least one state selected
-      current.delete(stateValue);
-    } else {
-      current.add(stateValue);
-    }
-    setStates(STATE_OPTIONS.filter(s => current.has(s)));
+  // Multi-value severity filter. Like closure-reason (and unlike state) it has
+  // no default exclusion: no param means "all severities", so an empty
+  // selection is valid and simply clears the param.
+  const severityParam = searchParams.get('severity');
+  const selectedSeverities = severityParam
+    ? severityParam.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+
+  function setSeverities(next) {
+    setSelectAllPages(false);
+    setSearchParams(prev => {
+      const nextParams = new URLSearchParams(prev);
+      if (next.length) nextParams.set('severity', next.join(','));
+      else nextParams.delete('severity');
+      nextParams.delete('page');
+      return nextParams;
+    });
   }
 
   // Multi-value closure-reason filter. No param means "no filter" (all reasons),
@@ -632,11 +531,7 @@ export default function IncidentList() {
     ? closureReasonParam.split(',').map(s => s.trim()).filter(Boolean)
     : [];
 
-  function toggleClosureReason(reason) {
-    const current = new Set(selectedClosureReasons);
-    if (current.has(reason)) current.delete(reason);
-    else current.add(reason);
-    const next = CLOSURE_REASONS.map(r => r.value).filter(v => current.has(v));
+  function setClosureReasons(next) {
     setSelectAllPages(false);
     setSearchParams(prev => {
       const nextParams = new URLSearchParams(prev);
@@ -840,17 +735,43 @@ export default function IncidentList() {
           onChange={e => setParam('q', e.target.value)}
           className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-48"
         />
-        <select
-          value={searchParams.get('severity') || ''}
-          onChange={e => setParam('severity', e.target.value)}
-          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          aria-label="Severity filter"
-        >
-          <option value="">All severities</option>
-          {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <StateMultiSelect selected={selectedStates} onToggle={toggleState} />
-        <ClosureReasonMultiSelect selected={selectedClosureReasons} onToggle={toggleClosureReason} />
+        <MultiSelectFilter
+          ariaLabel="Severity filter"
+          groupLabel="Severities"
+          options={SEVERITY_OPTIONS}
+          selected={selectedSeverities}
+          onChange={setSeverities}
+          resetTo={[]}
+          summarize={summarizeSeverities}
+          renderOption={s => (
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[s] ?? ''}`}>
+              {s}
+            </span>
+          )}
+        />
+        <MultiSelectFilter
+          ariaLabel="State filter"
+          groupLabel="Incident states"
+          options={STATE_OPTIONS}
+          selected={selectedStates}
+          onChange={setStates}
+          resetTo={DEFAULT_STATES}
+          lockLast
+          summarize={summarizeStates}
+          renderOption={s => (
+            <span className={`capitalize ${STATE_CLASSES[s] ?? 'text-foreground'}`}>{prettyState(s)}</span>
+          )}
+        />
+        <MultiSelectFilter
+          ariaLabel="Closure reason filter"
+          groupLabel="Closure reasons"
+          options={CLOSURE_REASON_VALUES}
+          selected={selectedClosureReasons}
+          onChange={setClosureReasons}
+          resetTo={[]}
+          summarize={summarizeClosureReasons}
+          renderOption={v => <span className="text-foreground">{closureReasonLabel(v)}</span>}
+        />
         <select
           value={searchParams.get('tlp') || ''}
           onChange={e => setParam('tlp', e.target.value)}
