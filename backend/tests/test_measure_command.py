@@ -42,6 +42,32 @@ def test_build_embedder_rejects_unknown_provider():
         cmd.build_embedder("pinecone")
 
 
+def test_retrying_recovers_after_transient_timeouts(monkeypatch):
+    import httpx
+    monkeypatch.setattr(cmd.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < cmd._EMBED_RETRIES:
+            raise httpx.ReadTimeout("slow")
+        return "ok"
+
+    assert cmd._retrying(flaky, what="test") == "ok"
+    assert calls["n"] == cmd._EMBED_RETRIES
+
+
+def test_retrying_reraises_after_exhausting_retries(monkeypatch):
+    import httpx
+    monkeypatch.setattr(cmd.time, "sleep", lambda _s: None)
+
+    def always_down():
+        raise httpx.ConnectError("down")
+
+    with pytest.raises(httpx.ConnectError):
+        cmd._retrying(always_down, what="test")
+
+
 @pytest.mark.django_db
 def test_command_reports_nothing_when_no_corrections(acme):
     out = StringIO()
