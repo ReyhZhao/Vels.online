@@ -360,3 +360,139 @@ def test_scan_autocreate_skipped_below_threshold(db, org):
     s = DetectionSuggestion.objects.get(organization=org)
     assert s.status == DetectionSuggestion.STATUS_PENDING
     assert s.incident is None
+
+
+# ── Suggestion reconciler (dedup ledger, #729) ───────────────────────────────
+
+from correlations.services.suggestion_reconciler import (  # noqa: E402
+    ACTION_CREATE,
+    ACTION_FOLD,
+    ACTION_SUPPRESS,
+    reconcile,
+)
+from correlations.tasks import _create_incident_from_suggestion  # noqa: E402
+
+
+def _make_suggestion(org, alerts, status=DetectionSuggestion.STATUS_PENDING):
+    s = DetectionSuggestion.objects.create(
+        organization=org, rationale="prior grouping", confidence=0.7, status=status
+    )
+    s.proposed_alerts.set(alerts)
+    return s
+
+
+def test_reconcile_creates_when_no_overlap(db, org):
+    a1, a2 = _make_alert(org), _make_alert(org)
+    _make_suggestion(org, [_make_alert(org), _make_alert(org)])
+
+    decision = reconcile(org, {a1.id, a2.id})
+    assert decision.action == ACTION_CREATE
+
+
+def test_reconcile_suppresses_same_set_as_pending(db, org):
+    a1, a2 = _make_alert(org), _make_alert(org)
+    _make_suggestion(org, [a1, a2])
+
+    decision = reconcile(org, {a1.id, a2.id})
+    assert decision.action == ACTION_SUPPRESS
+
+
+def test_reconcile_folds_overlapping_into_pending(db, org):
+    a1, a2, a3 = _make_alert(org), _make_alert(org), _make_alert(org)
+    live = _make_suggestion(org, [a1, a2])
+
+    decision = reconcile(org, {a1.id, a2.id, a3.id})
+    assert decision.action == ACTION_FOLD
+    assert decision.suggestion.id == live.id
+
+
+def test_reconcile_dismissed_same_set_suppresses(db, org):
+    a1, a2 = _make_alert(org), _make_alert(org)
+    _make_suggestion(org, [a1, a2], status=DetectionSuggestion.STATUS_DISMISSED)
+
+    decision = reconcile(org, {a1.id, a2.id})
+    assert decision.action == ACTION_SUPPRESS
+
+
+def test_reconcile_dismissed_subset_suppresses(db, org):
+    a1, a2, a3 = _make_alert(org), _make_alert(org), _make_alert(org)
+    _make_suggestion(org, [a1, a2, a3], status=DetectionSuggestion.STATUS_DISMISSED)
+
+    decision = reconcile(org, {a1.id, a2.id})
+    assert decision.action == ACTION_SUPPRESS
+
+
+def test_reconcile_dismissed_one_new_alert_still_suppresses(db, org):
+    """One stray extra alert is not material new evidence."""
+    a1, a2, a3 = _make_alert(org), _make_alert(org), _make_alert(org)
+    _make_suggestion(org, [a1, a2], status=DetectionSuggestion.STATUS_DISMISSED)
+
+    decision = reconcile(org, {a1.id, a2.id, a3.id})
+    assert decision.action == ACTION_SUPPRESS
+
+
+def test_reconcile_dismissed_materially_larger_reproposes(db, org):
+    a1, a2, a3, a4 = (_make_alert(org) for _ in range(4))
+    _make_suggestion(org, [a1, a2], status=DetectionSuggestion.STATUS_DISMISSED)
+
+    decision = reconcile(org, {a1.id, a2.id, a3.id, a4.id})
+    assert decision.action == ACTION_CREATE
+
+
+def test_scan_folds_new_evidence_into_live_suggestion(db, org):
+    """Orchestrator + reconciler: a grown grouping updates the pending row in place."""
+    a1 = _make_alert(org, entities=[("host.name", "web-01")])
+    a2 = _make_alert(org, entities=[("host.name", "web-01")])
+
+    provider = _stub_provider(
+        [ResidualGroup(alert_ids=[a1.id, a2.id], rationale="pair", confidence=0.7)]
+    )
+    _run_with(provider, org)
+
+    a3 = _make_alert(org, entities=[("host.name", "web-01")])
+    provider = _stub_provider(
+        [ResidualGroup(alert_ids=[a1.id, a2.id, a3.id], rationale="trio", confidence=0.8)]
+    )
+    _run_with(provider, org)
+
+    suggestion = DetectionSuggestion.objects.get(organization=org)
+    assert suggestion.status == DetectionSuggestion.STATUS_PENDING
+    assert set(suggestion.proposed_alerts.values_list("id", flat=True)) == {
+        a1.id, a2.id, a3.id,
+    }
+    assert suggestion.confidence == 0.8
+
+
+def test_scan_dismissed_grouping_stays_dismissed(db, org):
+    """Orchestrator + reconciler: a dismissed grouping does not come back."""
+    a1 = _make_alert(org, entities=[("host.name", "web-01")])
+    a2 = _make_alert(org, entities=[("host.name", "web-01")])
+    _make_suggestion(org, [a1, a2], status=DetectionSuggestion.STATUS_DISMISSED)
+
+    provider = _stub_provider(
+        [ResidualGroup(alert_ids=[a1.id, a2.id], rationale="again", confidence=0.9)]
+    )
+    _run_with(provider, org)
+
+    assert (
+        DetectionSuggestion.objects.filter(
+            organization=org, status=DetectionSuggestion.STATUS_PENDING
+        ).count()
+        == 0
+    )
+
+
+def test_accepted_alerts_leave_residual_pool(db, org):
+    """Accepting moves alerts to imported, removing them from Residual candidacy."""
+    a1 = _make_alert(org, entities=[("host.name", "web-01")])
+    a2 = _make_alert(org, entities=[("host.name", "web-01")])
+    suggestion = _make_suggestion(org, [a1, a2])
+
+    with patch("incidents.tasks.enrich_iocs_then_triage") as mock_enrich:
+        mock_enrich.delay = MagicMock()
+        _create_incident_from_suggestion(suggestion)
+
+    a1.refresh_from_db()
+    assert a1.state == "imported"
+    # No residual anchor remains, so no neighbourhood is assembled at all.
+    assert assemble_neighbourhoods(org) == []

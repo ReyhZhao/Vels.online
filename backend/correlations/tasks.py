@@ -180,22 +180,14 @@ def _create_incident_from_suggestion(suggestion):
     return incident
 
 
-def _pending_grouping_exists(org, proposed_ids: set) -> bool:
-    """Basic cross-run idempotency: an identical pending grouping already lives."""
-    from correlations.models import DetectionSuggestion
-
-    pending = DetectionSuggestion.objects.filter(
-        organization=org, status=DetectionSuggestion.STATUS_PENDING
-    ).prefetch_related("proposed_alerts")
-    for suggestion in pending:
-        if {a.id for a in suggestion.proposed_alerts.all()} == proposed_ids:
-            return True
-    return False
-
-
 def _run_scan_for_org(org):
     from correlations.models import DetectionSuggestion
     from correlations.services.neighbourhoods import assemble_neighbourhoods
+    from correlations.services.suggestion_reconciler import (
+        ACTION_FOLD,
+        ACTION_SUPPRESS,
+        reconcile,
+    )
     from incidents.llm.base import TriageConfigError, TriageError
     from incidents.llm.factory import get_triage_provider
 
@@ -233,7 +225,17 @@ def _run_scan_for_org(org):
                 continue
 
             proposed_ids = {a.id for a in matched}
-            if _pending_grouping_exists(org, proposed_ids):
+            decision = reconcile(org, proposed_ids)
+            if decision.action == ACTION_SUPPRESS:
+                continue
+            if decision.action == ACTION_FOLD:
+                # Absorb the new evidence into the live pending Suggestion
+                # instead of spawning a second row for the same grouping.
+                live = decision.suggestion
+                live.proposed_alerts.add(*matched)
+                if group.confidence > live.confidence:
+                    live.confidence = group.confidence
+                live.save(update_fields=["confidence", "updated_at"])
                 continue
 
             suggestion = DetectionSuggestion.objects.create(
