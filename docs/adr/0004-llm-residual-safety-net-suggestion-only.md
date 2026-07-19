@@ -1,5 +1,12 @@
 # LLM detection is a suggestion-only safety-net over residual alerts
 
+> **Superseded in part by [ADR-0036](0036-detection-scan-primary-llm-detector-over-neighbourhoods.md).**
+> The *scope* decision below — "reviews **only** the residual" — is superseded: the
+> LLM detector (now the **Detection Scan**) reasons over handled alerts as
+> read-only context within entity-neighbourhoods. Everything else here still holds:
+> it remains **suggestion-only**, never auto-creates incidents in v1, and keeps a
+> confidence threshold separate from `_CORRELATION_THRESHOLD`.
+
 The LLM-assisted detection pillar complements the static Correlation Rules
 rather than replacing them. Static rules handle known patterns deterministically
 and cheaply; the LLM then reviews only the **residual** — alerts still `new`/
