@@ -1,17 +1,17 @@
 backend:
   image:
     repository: registry.vels.online/vels/backend
-    tag: 0.50.0
+    tag: 0.50.1
 frontend:
   image:
     repository: registry.vels.online/vels/frontend
-    tag: 0.50.0
+    tag: 0.50.1
 # OTA update server for the React Native staff app (mobile/): serves the
 # exported Expo update bundle (iOS + Android Hermes bundles + metadata.json).
 mobile:
   image:
     repository: registry.vels.online/vels/mobile
-    tag: 0.50.0
+    tag: 0.50.1
 imagePullSecrets:
   - name: registry-credentials
 # Self-hosted Ollama used ONLY for embeddings (issue #657 semantic precedent-recall
