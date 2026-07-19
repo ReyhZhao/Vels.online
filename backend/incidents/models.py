@@ -57,6 +57,15 @@ class TaskTemplateItem(models.Model):
     wazuh_response = models.ForeignKey(
         WazuhActiveResponse, on_delete=models.SET_NULL, null=True, blank=True, related_name="template_items"
     )
+    # Contact task flavor (#721): when set, applying this item creates a Task that,
+    # when run, emails the incident's contacts a template-rendered message via the
+    # existing contact-messaging path. Mutually exclusive with automation/wazuh_response.
+    is_contact_task = models.BooleanField(default=False)
+    # One of ContactMessage.ROLE_* ("notified"/"questioned"/"update"); blank => "notified".
+    contact_role = models.CharField(max_length=20, blank=True, default="")
+    # Body template with incident placeholders (e.g. {{ display_id }}, {{ title }}),
+    # rendered against the incident at send time.
+    contact_body = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["display_order", "id"]
@@ -66,8 +75,13 @@ class TaskTemplateItem(models.Model):
 
     def clean(self):
         from django.core.exceptions import ValidationError
-        if self.automation_id and self.wazuh_response_id:
-            raise ValidationError("A template item cannot have both automation and wazuh_response set.")
+        flavors = [bool(self.automation_id), bool(self.wazuh_response_id), bool(self.is_contact_task)]
+        if sum(flavors) > 1:
+            raise ValidationError(
+                "A template item can have at most one of automation, wazuh_response, or contact."
+            )
+        if self.is_contact_task and not (self.contact_body or "").strip():
+            raise ValidationError("A contact task item requires a message body.")
 
 
 class Incident(models.Model):
@@ -240,10 +254,12 @@ class Task(models.Model):
     TYPE_MANUAL = "manual"
     TYPE_AUTOMATED = "automated"
     TYPE_WAZUH_RESPONSE = "wazuh_response"
+    TYPE_CONTACT = "contact"
     TYPE_CHOICES = [
         (TYPE_MANUAL, "Manual"),
         (TYPE_AUTOMATED, "Automated"),
         (TYPE_WAZUH_RESPONSE, "Wazuh Response"),
+        (TYPE_CONTACT, "Contact"),
     ]
 
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name="tasks")
@@ -260,6 +276,11 @@ class Task(models.Model):
     wazuh_response = models.ForeignKey(
         WazuhActiveResponse, on_delete=models.SET_NULL, null=True, blank=True, related_name="tasks"
     )
+    # Contact task (#721): role + body template copied from the template item at
+    # apply time so execution is independent of later template edits. Recipients are
+    # supplied at run time (default: the incident's linked contacts).
+    contact_role = models.CharField(max_length=20, blank=True, default="")
+    contact_body = models.TextField(blank=True, default="")
     semaphore_task_id = models.IntegerField(null=True, blank=True)
     automation_error = models.TextField(null=True, blank=True)
     assignee = models.ForeignKey(

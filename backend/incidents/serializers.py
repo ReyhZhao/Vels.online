@@ -338,29 +338,44 @@ class IncidentUpdateSerializer(serializers.ModelSerializer):
         ]
 
 
+CONTACT_TASK_ROLES = {"", "notified", "questioned", "update"}
+
+
+def _validate_template_item_flavor(attrs):
+    """At most one action flavor per item; a contact item needs a body and a valid role."""
+    flavors = [bool(attrs.get("automation")), bool(attrs.get("wazuh_response")), bool(attrs.get("is_contact_task"))]
+    if sum(flavors) > 1:
+        raise serializers.ValidationError(
+            "A template item can have at most one of automation, wazuh_response, or contact."
+        )
+    if attrs.get("is_contact_task") and not (attrs.get("contact_body") or "").strip():
+        raise serializers.ValidationError({"contact_body": "A contact task requires a message body."})
+    if (attrs.get("contact_role") or "") not in CONTACT_TASK_ROLES:
+        raise serializers.ValidationError({"contact_role": "Invalid contact role."})
+    return attrs
+
+
 class TaskTemplateItemSerializer(serializers.ModelSerializer):
     automation_name = serializers.CharField(source="automation.name", read_only=True, default=None)
     wazuh_response_name = serializers.CharField(source="wazuh_response.name", read_only=True, default=None)
 
     class Meta:
         model = TaskTemplateItem
-        fields = ["id", "title", "description", "display_order", "automation", "automation_name", "wazuh_response", "wazuh_response_name"]
+        fields = ["id", "title", "description", "display_order", "automation", "automation_name",
+                  "wazuh_response", "wazuh_response_name", "is_contact_task", "contact_role", "contact_body"]
 
     def validate(self, attrs):
-        if attrs.get("automation") and attrs.get("wazuh_response"):
-            raise serializers.ValidationError("A template item cannot have both automation and wazuh_response set.")
-        return attrs
+        return _validate_template_item_flavor(attrs)
 
 
 class TaskTemplateItemWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskTemplateItem
-        fields = ["title", "description", "display_order", "automation", "wazuh_response"]
+        fields = ["title", "description", "display_order", "automation", "wazuh_response",
+                  "is_contact_task", "contact_role", "contact_body"]
 
     def validate(self, attrs):
-        if attrs.get("automation") and attrs.get("wazuh_response"):
-            raise serializers.ValidationError("A template item cannot have both automation and wazuh_response set.")
-        return attrs
+        return _validate_template_item_flavor(attrs)
 
 
 class TaskTemplateSerializer(serializers.ModelSerializer):
@@ -412,6 +427,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "title", "description", "state",
             "task_type", "automation", "automation_name",
             "wazuh_response", "wazuh_response_name", "wazuh_response_command", "wazuh_response_requires_confirmation",
+            "contact_role", "contact_body",
             "semaphore_task_id", "automation_error",
             "assignee", "assignee_username", "display_order",
             "created_at", "closed_at",
@@ -437,13 +453,16 @@ class TaskSerializer(serializers.ModelSerializer):
 class TaskCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
-        fields = ["title", "description", "display_order", "assignee", "task_type", "automation", "wazuh_response"]
+        fields = ["title", "description", "display_order", "assignee", "task_type", "automation",
+                  "wazuh_response", "contact_role", "contact_body"]
 
     def validate(self, attrs):
         if attrs.get("task_type") == "automated" and not attrs.get("automation"):
             raise serializers.ValidationError({"automation": "An automation must be selected when task type is automated."})
         if attrs.get("task_type") == "wazuh_response" and not attrs.get("wazuh_response"):
             raise serializers.ValidationError({"wazuh_response": "A Wazuh response must be selected when task type is wazuh_response."})
+        if attrs.get("task_type") == "contact" and not (attrs.get("contact_body") or "").strip():
+            raise serializers.ValidationError({"contact_body": "A message body is required for a contact task."})
         return attrs
 
 

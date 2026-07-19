@@ -302,4 +302,32 @@ describe('TaskTemplatesAdmin', () => {
     ));
     await waitFor(() => screen.getByText('New Step'));
   });
+
+  it('adds a contact-task item with role and body (#721)', async () => {
+    mockGet();
+    api.post.mockResolvedValue({
+      data: { id: 100, title: 'Notify owner', description: '', display_order: 3, is_contact_task: true },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Phishing Playbook'));
+    const menu = await openKebab(user, 'Phishing Playbook');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Edit items' }));
+    await waitFor(() => screen.getByPlaceholderText('Title'));
+
+    await user.type(screen.getByPlaceholderText('Title'), 'Notify owner');
+    await user.click(screen.getByRole('button', { name: 'Contact' }));
+    await user.type(screen.getByLabelText('Contact message body'), 'Please contact the owner.');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/task-templates/1/items/',
+      expect.objectContaining({
+        title: 'Notify owner',
+        is_contact_task: true,
+        contact_role: 'notified',
+        contact_body: 'Please contact the owner.',
+      })
+    ));
+  });
 });

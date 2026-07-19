@@ -34,6 +34,8 @@ def apply_template(incident, template, actor):
                 task_type = Task.TYPE_AUTOMATED
             elif item.wazuh_response_id:
                 task_type = Task.TYPE_WAZUH_RESPONSE
+            elif item.is_contact_task:
+                task_type = Task.TYPE_CONTACT
             else:
                 task_type = Task.TYPE_MANUAL
             Task.objects.create(
@@ -45,6 +47,8 @@ def apply_template(incident, template, actor):
                 automation=item.automation,
                 wazuh_response=item.wazuh_response,
                 task_type=task_type,
+                contact_role=item.contact_role,
+                contact_body=item.contact_body,
             )
 
         event_kind = "incident_template_reapplied" if previous else "incident_template_applied"

@@ -215,7 +215,113 @@ def execute_wazuh_response_task(task, *, actor, args=None, agent_ids=None, timeo
     return task
 
 
-def run_task(task, *, actor, by_agent=False, args=None, agent_ids=None, timeout=None, vars_override=None):
+CONTACT_ROLES = {"notified", "questioned", "update"}
+
+
+def resolve_default_contact_recipients(incident):
+    """The incident's linked contacts — the default recipient set for a contact task."""
+    from contacts.models import IncidentContact
+
+    rows = IncidentContact.objects.filter(incident=incident).select_related("contact")
+    return [
+        {"contact_id": r.contact_id, "name": r.contact.name, "email": r.contact.email}
+        for r in rows
+    ]
+
+
+def render_contact_body(task):
+    """Render the task's stored body template against its incident."""
+    from notifications.email import render_template_string
+
+    incident = task.incident
+    context = {
+        "display_id": incident.display_id,
+        "title": incident.title,
+        "severity": incident.severity,
+        "description": incident.description or "",
+        "org_name": incident.organization.name if incident.organization_id else "",
+    }
+    return render_template_string(task.contact_body, context)
+
+
+def execute_contact_task(task, *, actor, contact_ids=None, emails=None):
+    """Send the task's template-rendered message to the selected recipients (#721).
+
+    Contact recipients go through the existing contact-messaging path (records an
+    outbound ContactMessage, emits an event, threads replies for the reply-eligible
+    role). Custom addresses receive the same rendered email with no ContactMessage.
+    On success the task closes as done; on failure it surfaces the error and stays open.
+    """
+    from contacts.models import Contact
+    from contacts.services import send_contact_email_to_address, send_contact_message
+
+    if task.task_type != Task.TYPE_CONTACT:
+        raise TaskExecutionError(
+            "Task is not of type contact.", code="not_contact", http_status=400
+        )
+
+    contact_ids = list(contact_ids or [])
+    emails = [e.strip() for e in (emails or []) if e and e.strip()]
+    if not contact_ids and not emails:
+        raise TaskExecutionError(
+            "Select at least one recipient.", code="no_recipients", http_status=400
+        )
+
+    # Resolve and authorise Contact recipients up front so a bad id fails before any send.
+    contacts = []
+    for cid in contact_ids:
+        try:
+            contact = Contact.objects.get(pk=cid)
+        except Contact.DoesNotExist:
+            raise TaskExecutionError(
+                f"Contact {cid} not found.", code="bad_recipient", http_status=400
+            )
+        if contact.organisation_id != task.incident.organization_id:
+            raise TaskExecutionError(
+                "Contact belongs to a different organisation.",
+                code="bad_recipient",
+                http_status=400,
+            )
+        contacts.append(contact)
+
+    role = task.contact_role if task.contact_role in CONTACT_ROLES else "notified"
+    body = render_contact_body(task)
+
+    try:
+        for contact in contacts:
+            send_contact_message(task.incident, contact, role, body)
+        for email in emails:
+            send_contact_email_to_address(task.incident, email, role, body)
+    except Exception as exc:  # pragma: no cover - defensive; surfaces send failures
+        logger.exception("Contact task send failed task=%s", task.pk)
+        Task.objects.filter(pk=task.pk).update(automation_error=str(exc))
+        task.refresh_from_db()
+        raise TaskExecutionError(
+            "Failed to send contact message.", code="contact_send_error", http_status=502
+        )
+
+    Task.objects.filter(pk=task.pk).update(
+        state=Task.STATE_DONE,
+        automation_error=None,
+        assignee=task.assignee or actor,
+    )
+    task.refresh_from_db()
+    record_event(
+        task.incident,
+        "contact_task_sent",
+        actor=actor,
+        payload={
+            "task_id": task.id,
+            "role": role,
+            "contact_ids": [c.id for c in contacts],
+            "emails": emails,
+        },
+    )
+    return task
+
+
+def run_task(task, *, actor, by_agent=False, args=None, agent_ids=None, timeout=None, vars_override=None,
+             contact_ids=None, emails=None):
     """High-level entry: run an automated or wazuh_response task, with the agent guards.
 
     For `by_agent=True` (the unattended Triage Agent): the task-state guard and the
@@ -233,6 +339,17 @@ def run_task(task, *, actor, by_agent=False, args=None, agent_ids=None, timeout=
             code="already_executed",
             http_status=409,
         )
+
+    if task.task_type == Task.TYPE_CONTACT:
+        # Contact tasks are worked and sent by a human (recipient selection is a human
+        # touchpoint); the unattended agent does not send external email (#721).
+        if by_agent:
+            raise TaskExecutionError(
+                "Contact tasks require a human sender.",
+                code="not_executable_by_agent",
+                http_status=403,
+            )
+        return execute_contact_task(task, actor=actor, contact_ids=contact_ids, emails=emails)
 
     if task.task_type == Task.TYPE_WAZUH_RESPONSE:
         if by_agent and not (task.wazuh_response_id and task.wazuh_response.autonomous_triage_approved):

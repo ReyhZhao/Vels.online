@@ -452,4 +452,90 @@ describe('IncidentTasks — staff assignee picker', () => {
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Assignee' }), '2');
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/tasks/1/', { assignee: 2 }));
   });
+
+  // ── contact tasks (#721) ────────────────────────────────────────────────────
+
+  describe('contact tasks', () => {
+    const CONTACT_TASK = {
+      id: 7, incident: 10, template_item: null, template_name: null,
+      title: 'Notify owner', description: '', state: 'new', task_type: 'contact',
+      contact_role: 'notified', contact_body: 'Re {{ display_id }}',
+      assignee: null, assignee_username: null, display_order: 0,
+      created_at: '2026-01-01T00:00:00Z', closed_at: null,
+    };
+    const PREVIEW = {
+      role: 'notified',
+      rendered_body: 'Re INC-2026-0001',
+      default_recipients: [{ contact_id: 5, name: 'Carol', email: 'carol@example.com' }],
+    };
+
+    beforeEach(() => {
+      mockUseAuth.mockReturnValue({ user: { id: 1, username: 'alice', is_staff: true }, isAuthenticated: true, isLoading: false });
+    });
+
+    function mockContact() {
+      api.get.mockImplementation(url => {
+        if (url.includes('/preview/')) return Promise.resolve({ data: PREVIEW });
+        if (url.includes('/comments/')) return Promise.resolve({ data: [] });
+        if (url.includes('/tasks/')) return Promise.resolve({ data: [CONTACT_TASK] });
+        if (url.includes('staff-users')) return Promise.resolve({ data: [] });
+        return Promise.resolve({ data: [] });
+      });
+    }
+
+    it('shows a contact badge in the task row', async () => {
+      mockContact();
+      renderTasks();
+      await waitFor(() => screen.getByText('Notify owner'));
+      expect(screen.getByText('contact')).toBeInTheDocument();
+    });
+
+    it('opens the send modal pre-selecting incident contacts and dispatches contact_ids', async () => {
+      mockContact();
+      api.post.mockResolvedValue({ data: { ...CONTACT_TASK, state: 'done' } });
+      const user = userEvent.setup();
+      renderTasks();
+      await waitFor(() => screen.getByText('Notify owner'));
+
+      await user.click(screen.getByText('Notify owner').closest('tr'));
+      await user.click(screen.getByRole('button', { name: /^send$/i }));
+
+      // Preview loads: rendered body + linked contact pre-checked.
+      await waitFor(() => expect(screen.getByText('Re INC-2026-0001')).toBeInTheDocument());
+      const checkbox = screen.getByRole('checkbox', { name: /Carol/ });
+      expect(checkbox.checked).toBe(true);
+      expect(screen.getByText('carol@example.com')).toBeInTheDocument();
+
+      // Dispatch — the modal's Send button.
+      const sendButtons = screen.getAllByRole('button', { name: /^send$/i });
+      await user.click(sendButtons[sendButtons.length - 1]);
+
+      await waitFor(() =>
+        expect(api.post).toHaveBeenCalledWith('/api/tasks/7/run/', { contact_ids: [5], emails: [] })
+      );
+    });
+
+    it('can add a custom email address as a recipient', async () => {
+      mockContact();
+      api.post.mockResolvedValue({ data: { ...CONTACT_TASK, state: 'done' } });
+      const user = userEvent.setup();
+      renderTasks();
+      await waitFor(() => screen.getByText('Notify owner'));
+
+      await user.click(screen.getByText('Notify owner').closest('tr'));
+      await user.click(screen.getByRole('button', { name: /^send$/i }));
+      await waitFor(() => screen.getByText('Re INC-2026-0001'));
+
+      // Deselect the linked contact, add a custom address.
+      await user.click(screen.getByRole('checkbox', { name: /Carol/ }));
+      await user.type(screen.getByPlaceholderText('external@vendor.example'), 'ext@vendor.test');
+
+      const sendButtons = screen.getAllByRole('button', { name: /^send$/i });
+      await user.click(sendButtons[sendButtons.length - 1]);
+
+      await waitFor(() =>
+        expect(api.post).toHaveBeenCalledWith('/api/tasks/7/run/', { contact_ids: [], emails: ['ext@vendor.test'] })
+      );
+    });
+  });
 });

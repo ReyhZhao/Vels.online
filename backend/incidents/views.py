@@ -1928,6 +1928,18 @@ class TaskRunView(APIView):
 
         from incidents.services import task_execution
 
+        if task.task_type == Task.TYPE_CONTACT:
+            try:
+                task = task_execution.execute_contact_task(
+                    task,
+                    actor=request.user,
+                    contact_ids=request.data.get("contact_ids"),
+                    emails=request.data.get("emails"),
+                )
+            except task_execution.TaskExecutionError as exc:
+                return Response({"detail": exc.message}, status=exc.http_status)
+            return Response(TaskSerializer(task).data)
+
         if task.task_type == Task.TYPE_WAZUH_RESPONSE:
             try:
                 task = task_execution.execute_wazuh_response_task(
@@ -1990,6 +2002,14 @@ class TaskPreviewView(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_incident(request.user, task.incident):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if task.task_type == Task.TYPE_CONTACT:
+            from incidents.services import task_execution
+            return Response({
+                "role": task.contact_role or "notified",
+                "rendered_body": task_execution.render_contact_body(task),
+                "default_recipients": task_execution.resolve_default_contact_recipients(task.incident),
+            })
 
         if task.task_type == Task.TYPE_WAZUH_RESPONSE:
             if not task.wazuh_response_id:

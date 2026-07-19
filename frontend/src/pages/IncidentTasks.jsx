@@ -191,6 +191,129 @@ function WazuhRunModal({ task, onClose, onRunSuccess }) {
   );
 }
 
+// ── Contact task run modal ────────────────────────────────────────────────────
+
+function ContactRunModal({ task, onClose, onRunSuccess }) {
+  const [loading, setLoading] = useState(true);
+  const [preview, setPreview] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
+  const [selectedContactIds, setSelectedContactIds] = useState([]);
+  const [customEmails, setCustomEmails] = useState('');
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState(null);
+
+  useEffect(() => {
+    api.get(`/api/tasks/${task.id}/preview/`)
+      .then(res => {
+        setPreview(res.data);
+        // Default: the incident's linked contacts are pre-selected.
+        setSelectedContactIds((res.data.default_recipients || []).map(r => r.contact_id));
+      })
+      .catch(err => setPreviewError(err.response?.data?.detail || 'Failed to load preview.'))
+      .finally(() => setLoading(false));
+  }, [task.id]);
+
+  function toggleContact(contactId) {
+    setSelectedContactIds(prev =>
+      prev.includes(contactId) ? prev.filter(id => id !== contactId) : [...prev, contactId]
+    );
+  }
+
+  const parsedEmails = customEmails.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+  const canDispatch = !loading && !previewError && !running &&
+    (selectedContactIds.length > 0 || parsedEmails.length > 0);
+
+  async function handleDispatch() {
+    setRunning(true);
+    setRunError(null);
+    try {
+      const res = await api.post(`/api/tasks/${task.id}/run/`, {
+        contact_ids: selectedContactIds,
+        emails: parsedEmails,
+      });
+      onRunSuccess(res.data);
+      onClose();
+    } catch (err) {
+      setRunError(err.response?.data?.detail || 'Failed to send.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="flex w-full max-w-lg flex-col rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <h3 className="text-base font-semibold text-foreground">Send: {task.title}</h3>
+          <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {previewError && <p className="text-sm text-red-600">{previewError}</p>}
+          {preview && (
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Message preview</label>
+                <div className="whitespace-pre-wrap rounded border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+                  {preview.rendered_body || <span className="italic text-muted-foreground">Empty message.</span>}
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Incident contacts</label>
+                {(preview.default_recipients || []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No contacts linked to this incident. Add a custom address below.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {preview.default_recipients.map(r => (
+                      <label key={r.contact_id} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedContactIds.includes(r.contact_id)}
+                          onChange={() => toggleContact(r.contact_id)}
+                          className="rounded border-border"
+                        />
+                        <span className="font-medium text-foreground">{r.name}</span>
+                        <span className="text-muted-foreground text-xs">{r.email}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  Custom email addresses (one per line or comma-separated)
+                </label>
+                <textarea
+                  value={customEmails}
+                  onChange={e => setCustomEmails(e.target.value)}
+                  rows={2}
+                  placeholder="external@vendor.example"
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
+                />
+              </div>
+            </>
+          )}
+          {runError && <p className="text-sm text-red-600">{runError}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+          <button onClick={onClose} className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent">
+            Cancel
+          </button>
+          <button
+            onClick={handleDispatch}
+            disabled={!canDispatch}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {running ? 'Sending…' : 'Send'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Pre-run preview modal ─────────────────────────────────────────────────────
 
 function PreviewModal({ taskId, onClose, onRunSuccess }) {
@@ -307,6 +430,7 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
   const [saving, setSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showWazuhRun, setShowWazuhRun] = useState(false);
+  const [showContactRun, setShowContactRun] = useState(false);
   const [error, setError] = useState(null);
   const [staffUsers, setStaffUsers] = useState(null);
 
@@ -360,6 +484,7 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
 
   const isAutomated = currentTask.task_type === 'automated';
   const isWazuhResponse = currentTask.task_type === 'wazuh_response';
+  const isContact = currentTask.task_type === 'contact';
   const autoStatus = isAutomated ? automationStatus(currentTask) : null;
   const nextStates = ALL_STATES.filter(s => s !== currentTask.state);
 
@@ -382,6 +507,11 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
               {isWazuhResponse && (
                 <span className="inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
                   Wazuh Response
+                </span>
+              )}
+              {isContact && (
+                <span className="inline-flex items-center rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800 dark:bg-teal-900/30 dark:text-teal-400">
+                  Contact
                 </span>
               )}
             </div>
@@ -461,6 +591,27 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
             </div>
           )}
 
+          {/* Send contact message */}
+          {isContact && isStaff && (
+            <div className="space-y-2">
+              <button
+                onClick={() => setShowContactRun(true)}
+                disabled={saving || currentTask.state === 'done'}
+                className="rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50 transition-colors"
+              >
+                Send
+              </button>
+              {currentTask.state === 'done' && !currentTask.automation_error && (
+                <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                  Sent
+                </span>
+              )}
+              {currentTask.automation_error && (
+                <p className="text-xs text-red-600">{currentTask.automation_error}</p>
+              )}
+            </div>
+          )}
+
           {/* Assignee */}
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground shrink-0">Assigned to:</span>
@@ -532,6 +683,13 @@ function TaskModal({ task, onClose, onUpdate, currentUserId, isStaff }) {
           onRunSuccess={handleRunSuccess}
         />
       )}
+      {showContactRun && (
+        <ContactRunModal
+          task={currentTask}
+          onClose={() => setShowContactRun(false)}
+          onRunSuccess={handleRunSuccess}
+        />
+      )}
     </div>
   );
 }
@@ -543,6 +701,7 @@ function TaskRow({ task, onSelect }) {
   const isTemplateDerived = task.template_name !== null;
   const isAutomated = task.task_type === 'automated';
   const isWazuhResponse = task.task_type === 'wazuh_response';
+  const isContact = task.task_type === 'contact';
 
   return (
     <tr
@@ -573,6 +732,11 @@ function TaskRow({ task, onSelect }) {
           {isWazuhResponse && (
             <span className="shrink-0 inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
               wazuh
+            </span>
+          )}
+          {isContact && (
+            <span className="shrink-0 inline-flex items-center rounded-full bg-teal-100 px-1.5 py-0.5 text-xs text-teal-800 dark:bg-teal-900/30 dark:text-teal-400">
+              contact
             </span>
           )}
         </div>

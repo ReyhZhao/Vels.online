@@ -1,16 +1,31 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import api from '@/lib/axios';
 
+const ITEM_KIND_LABELS = {
+  manual: 'Manual',
+  automation: 'Automation',
+  wazuh: 'Wazuh Response',
+  contact: 'Contact',
+};
+
+const CONTACT_ROLE_OPTIONS = [
+  { value: 'notified', label: 'Notify' },
+  { value: 'questioned', label: 'Question (reply-enabled)' },
+  { value: 'update', label: 'Update' },
+];
+
 function ItemRow({ item, templateId, onUpdate, onDelete, automations, wazuhResponses }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description || '');
   const [order, setOrder] = useState(item.display_order);
   const [itemKind, setItemKind] = useState(
-    item.wazuh_response ? 'wazuh' : item.automation ? 'automation' : 'manual'
+    item.is_contact_task ? 'contact' : item.wazuh_response ? 'wazuh' : item.automation ? 'automation' : 'manual'
   );
   const [automationId, setAutomationId] = useState(item.automation ?? '');
   const [wazuhResponseId, setWazuhResponseId] = useState(item.wazuh_response ?? '');
+  const [contactRole, setContactRole] = useState(item.contact_role || 'notified');
+  const [contactBody, setContactBody] = useState(item.contact_body || '');
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -20,6 +35,9 @@ function ItemRow({ item, templateId, onUpdate, onDelete, automations, wazuhRespo
         title, description, display_order: Number(order),
         automation: itemKind === 'automation' && automationId !== '' ? Number(automationId) : null,
         wazuh_response: itemKind === 'wazuh' && wazuhResponseId !== '' ? Number(wazuhResponseId) : null,
+        is_contact_task: itemKind === 'contact',
+        contact_role: itemKind === 'contact' ? contactRole : '',
+        contact_body: itemKind === 'contact' ? contactBody : '',
       });
       onUpdate(res.data);
       setEditing(false);
@@ -57,17 +75,38 @@ function ItemRow({ item, templateId, onUpdate, onDelete, automations, wazuhRespo
             className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
           />
           <div className="mt-1 flex gap-1">
-            {['manual', 'automation', 'wazuh'].map(k => (
+            {['manual', 'automation', 'wazuh', 'contact'].map(k => (
               <button
                 key={k}
                 type="button"
                 onClick={() => setItemKind(k)}
                 className={`rounded px-2 py-0.5 text-xs font-medium border transition-colors ${itemKind === k ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground border-border hover:bg-accent'}`}
               >
-                {k === 'manual' ? 'Manual' : k === 'automation' ? 'Automation' : 'Wazuh Response'}
+                {ITEM_KIND_LABELS[k]}
               </button>
             ))}
           </div>
+          {itemKind === 'contact' && (
+            <div className="mt-1 space-y-1">
+              <select
+                value={contactRole}
+                onChange={e => setContactRole(e.target.value)}
+                disabled={saving}
+                aria-label="Contact role"
+                className="w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+              >
+                {CONTACT_ROLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <textarea
+                value={contactBody}
+                onChange={e => setContactBody(e.target.value)}
+                disabled={saving}
+                rows={3}
+                placeholder="Message body. Placeholders: {{ display_id }}, {{ title }}, {{ severity }}"
+                className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
+              />
+            </div>
+          )}
           {itemKind === 'automation' && (
             <select
               value={automationId}
@@ -115,6 +154,8 @@ function ItemRow({ item, templateId, onUpdate, onDelete, automations, wazuhRespo
           ? <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-xs text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">{item.automation_name}</span>
           : item.wazuh_response_name
           ? <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">{item.wazuh_response_name}</span>
+          : item.is_contact_task
+          ? <span className="inline-flex items-center rounded-full bg-teal-100 px-1.5 py-0.5 text-xs text-teal-800 dark:bg-teal-900/30 dark:text-teal-400">Contact</span>
           : '—'}
       </td>
       <td className="px-3 py-2">
@@ -136,6 +177,8 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
   const [newItemKind, setNewItemKind] = useState('manual');
   const [newAutomation, setNewAutomation] = useState('');
   const [newWazuhResponse, setNewWazuhResponse] = useState('');
+  const [newContactRole, setNewContactRole] = useState('notified');
+  const [newContactBody, setNewContactBody] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState(null);
 
@@ -157,6 +200,9 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
         display_order: nextOrder,
         automation: newItemKind === 'automation' && newAutomation !== '' ? Number(newAutomation) : null,
         wazuh_response: newItemKind === 'wazuh' && newWazuhResponse !== '' ? Number(newWazuhResponse) : null,
+        is_contact_task: newItemKind === 'contact',
+        contact_role: newItemKind === 'contact' ? newContactRole : '',
+        contact_body: newItemKind === 'contact' ? newContactBody : '',
       });
       setItems(prev => [...prev, res.data].sort((a, b) => a.display_order - b.display_order));
       setNewTitle('');
@@ -164,8 +210,10 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
       setNewItemKind('manual');
       setNewAutomation('');
       setNewWazuhResponse('');
+      setNewContactRole('notified');
+      setNewContactBody('');
     } catch (err) {
-      setAddError(err.response?.data?.title?.[0] || err.response?.data?.detail || 'Failed to add item.');
+      setAddError(err.response?.data?.contact_body?.[0] || err.response?.data?.title?.[0] || err.response?.data?.detail || 'Failed to add item.');
     } finally {
       setAdding(false);
     }
@@ -241,14 +289,14 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
           </div>
           <div className="flex gap-2 flex-wrap items-center">
             <div className="flex items-center rounded-md border border-border bg-background text-sm overflow-hidden">
-              {['manual', 'automation', 'wazuh'].map(k => (
+              {['manual', 'automation', 'wazuh', 'contact'].map(k => (
                 <button
                   key={k}
                   type="button"
                   onClick={() => setNewItemKind(k)}
                   className={`px-3 py-1.5 font-medium transition-colors ${newItemKind === k ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'}`}
                 >
-                  {k === 'manual' ? 'Manual' : k === 'automation' ? 'Automation' : 'Wazuh Response'}
+                  {ITEM_KIND_LABELS[k]}
                 </button>
               ))}
             </div>
@@ -276,12 +324,34 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
             )}
             <button
               type="submit"
-              disabled={adding || !newTitle.trim()}
+              disabled={adding || !newTitle.trim() || (newItemKind === 'contact' && !newContactBody.trim())}
               className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               Add
             </button>
           </div>
+          {newItemKind === 'contact' && (
+            <div className="space-y-1">
+              <select
+                value={newContactRole}
+                onChange={e => setNewContactRole(e.target.value)}
+                disabled={adding}
+                aria-label="Contact role"
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              >
+                {CONTACT_ROLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <textarea
+                value={newContactBody}
+                onChange={e => setNewContactBody(e.target.value)}
+                disabled={adding}
+                rows={3}
+                placeholder="Message body. Placeholders: {{ display_id }}, {{ title }}, {{ severity }}, {{ description }}"
+                aria-label="Contact message body"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              />
+            </div>
+          )}
           {addError && <p className="text-sm text-red-600">{addError}</p>}
         </form>
       </div>

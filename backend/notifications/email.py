@@ -28,6 +28,15 @@ def _render_string(template_string, context_dict):
     return template.nodelist.render(ctx)
 
 
+def render_template_string(template_string, context):
+    """Render an arbitrary Django template string against a context dict.
+
+    Public wrapper over the signal-free renderer, for callers (e.g. contact-task
+    bodies) that store their own template text rather than a named EmailTemplate.
+    """
+    return _render_string(template_string or "", context)
+
+
 def render_email(template_name, context):
     """Return (subject, html_body, plain_body) for the named template.
 
