@@ -90,6 +90,32 @@ def test_unknown_source_kind_defaults():
     assert payload["severity"] == "medium"
 
 
+def test_inbound_email_payload_title_and_severity():
+    ref = {"subject_normalised": "win a prize", "sender_address": "phisher@evil.com"}
+    payload = build_promote_payload("inbound_email", ref)
+    assert payload["title"] == "Phishing: win a prize"
+    assert "phisher@evil.com" in payload["description"]
+    assert payload["severity"] == "high"
+
+
+def test_inbound_email_defaults_tlp_pap_green():
+    # Forwarded phishing is a public, non-confidential lure: default it below the
+    # system-wide AMBER floor so the reporting customer gets closure feedback and
+    # the indicators render in customer reports. See build_promote_payload.
+    payload = build_promote_payload("inbound_email", {"sender_address": "phisher@evil.com"})
+    assert payload["tlp"] == "green"
+    assert payload["pap"] == "green"
+
+
+def test_non_phishing_payload_omits_tlp_pap():
+    # Other source kinds must NOT carry tlp/pap so the Incident model default
+    # (AMBER) still applies — the GREEN override is phishing-only.
+    for kind in ("wazuh_event", "vulnerability", "agent_finding", "manual"):
+        payload = build_promote_payload(kind, {})
+        assert "tlp" not in payload
+        assert "pap" not in payload
+
+
 def test_payload_contains_source_ref():
     ref = {"cve_id": "CVE-2025-12345"}
     payload = build_promote_payload("vulnerability", ref)

@@ -69,6 +69,9 @@ def test_happy_path_creates_alert_and_incident(acme, forwarder):
     assert alert.organization == acme
     assert alert.incident is not None
     assert alert.incident.source_kind == "inbound_email"
+    # Phishing incidents drop below the system-wide AMBER floor to GREEN/GREEN.
+    assert alert.incident.tlp == "green"
+    assert alert.incident.pap == "green"
 
 
 @pytest.mark.django_db
