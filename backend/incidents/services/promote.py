@@ -26,6 +26,10 @@ def _cvss_to_severity(score):
 
 
 def build_promote_payload(source_kind, source_ref):
+    # tlp/pap stay None for most kinds so the Incident model default (AMBER)
+    # applies; only phishing lowers them (below).
+    tlp = None
+    pap = None
     if source_kind == "wazuh_event":
         rule_desc = source_ref.get("rule_description", "Unknown rule")
         agent_name = source_ref.get("agent_name", "unknown agent")
@@ -58,18 +62,34 @@ def build_promote_payload(source_kind, source_ref):
         title = f"Phishing: {subject}"
         description = f"Forwarded phishing email from {sender}."
         severity = "high"
+        # A forwarded phishing lure is public, non-confidential content, so it
+        # diverges from the system-wide AMBER default down to GREEN/GREEN: the
+        # reporting customer gets a closure summary + timeline visibility (TLP),
+        # and the indicators render in customer reports so they can be blocked
+        # (PAP). Staff override per-incident for the rare targeted/confidential
+        # case. Only the first alert to promote sets this; later dedup'd alerts
+        # link to the existing incident and never re-derive its classification.
+        tlp = "green"
+        pap = "green"
     else:
         title = ""
         description = ""
         severity = "medium"
 
-    return {
+    payload = {
         "title": title,
         "description": description,
         "severity": severity,
         "source_kind": source_kind,
         "source_ref": source_ref,
     }
+    # Only include tlp/pap when explicitly derived; otherwise the Incident model
+    # default applies (passing None would override that default with a null).
+    if tlp is not None:
+        payload["tlp"] = tlp
+    if pap is not None:
+        payload["pap"] = pap
+    return payload
 
 
 def link_source_assets(incident, org):
