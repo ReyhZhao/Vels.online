@@ -81,3 +81,18 @@ def test_org_list_endpoint_includes_infrastructure_with_flag(admin_client, acme)
     slugs = [o["slug"] for o in resp.json()]
     assert "acme" in slugs
     assert "infrastructure" in slugs
+
+
+def test_infrastructure_org_triage_thresholds_are_patchable(admin_client):
+    """#720: the Infrastructure org's AI-triage settings can be edited from the
+    management page (which resolves the org by slug)."""
+    infra = Organization.get_infrastructure()
+    resp = admin_client.patch(
+        f"/api/security/organizations/{infra.slug}/",
+        data={"triage_fp_threshold": 0.7, "triage_work_threshold": 0.6},
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    infra.refresh_from_db()
+    assert infra.triage_fp_threshold == 0.7
+    assert infra.triage_work_threshold == 0.6

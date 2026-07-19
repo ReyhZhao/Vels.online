@@ -293,20 +293,34 @@ function OrgRow({ org }) {
   return (
     <>
       <tr className="border-b last:border-0">
-        <td className="py-3 font-medium text-foreground">{org.name}</td>
+        <td className="py-3 font-medium text-foreground">
+          <span className="inline-flex items-center gap-2">
+            {org.name}
+            {org.is_infrastructure && (
+              <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
+                Infrastructure
+              </span>
+            )}
+          </span>
+        </td>
         <td className="py-3 font-mono text-sm text-muted-foreground">{org.slug}</td>
         <td className="py-3 font-mono text-sm text-muted-foreground">{org.wazuh_group}</td>
         <td className="py-3 text-right">
           <div className="flex items-center justify-end gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowInviteDialog(true)}
-              aria-label={`Invite user to ${org.name}`}
-            >
-              <UserPlus className="h-3.5 w-3.5 mr-1" />
-              Invite
-            </Button>
+            {/* The Infrastructure pseudo-org (ADR-0017) has no members — invite
+                does not apply to it. Its per-org settings (AI-triage thresholds)
+                remain editable via the expand row below. */}
+            {!org.is_infrastructure && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowInviteDialog(true)}
+                aria-label={`Invite user to ${org.name}`}
+              >
+                <UserPlus className="h-3.5 w-3.5 mr-1" />
+                Invite
+              </Button>
+            )}
             <button
               onClick={handleToggle}
               className="text-muted-foreground hover:text-foreground transition-colors"
@@ -633,7 +647,10 @@ function OrgManagement() {
 
   useEffect(() => {
     api
-      .get('/api/security/organizations/')
+      // Opt into the Infrastructure pseudo-org (ADR-0017) so its settings —
+      // notably the AI-triage thresholds — are editable from this page. Other
+      // callers keep the default tenants-only listing.
+      .get('/api/security/organizations/?include_infrastructure=1')
       .then((res) => setOrgs(res.data))
       .catch(() => setError('Failed to load organisations.'))
       .finally(() => setIsLoading(false));

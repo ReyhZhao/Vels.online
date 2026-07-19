@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('@/lib/axios', () => ({
-  default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn(), delete: vi.fn(), patch: vi.fn() },
 }));
 
 import api from '@/lib/axios';
@@ -12,6 +12,16 @@ import OrgManagement from './OrgManagement';
 
 const ACME = { id: 1, name: 'Acme', slug: 'acme', wazuh_group: 'acme' };
 const CONTOSO = { id: 2, name: 'Contoso', slug: 'contoso', wazuh_group: 'contoso' };
+const INFRA = {
+  id: 9,
+  name: 'Shared Infrastructure',
+  slug: 'infrastructure',
+  wazuh_group: '',
+  is_infrastructure: true,
+  triage_fp_threshold: 0.9,
+  triage_work_threshold: 0.9,
+  triage_prompt_context: '',
+};
 
 const PENDING_INV = {
   id: 10,
@@ -34,6 +44,7 @@ describe('OrgManagement', () => {
     vi.clearAllMocks();
     api.get.mockResolvedValue({ data: [ACME, CONTOSO] });
     api.post.mockResolvedValue({ data: {} });
+    api.patch.mockResolvedValue({ data: {} });
   });
 
   it('renders page heading', async () => {
@@ -451,6 +462,60 @@ describe('OrgManagement', () => {
 
       await waitFor(() =>
         expect(screen.getByText('No system rules defined.')).toBeInTheDocument()
+      );
+    });
+  });
+
+  describe('Infrastructure org (#720)', () => {
+    it('requests the org list opting into the Infrastructure org', async () => {
+      renderPage();
+      await waitFor(() =>
+        expect(api.get).toHaveBeenCalledWith(
+          '/api/security/organizations/?include_infrastructure=1'
+        )
+      );
+    });
+
+    it('lists the Infrastructure org with a badge', async () => {
+      api.get.mockResolvedValue({ data: [ACME, INFRA] });
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Shared Infrastructure')).toBeInTheDocument());
+      expect(screen.getByText('Infrastructure')).toBeInTheDocument();
+    });
+
+    it('does not offer Invite for the Infrastructure org but does for tenants', async () => {
+      api.get.mockResolvedValue({ data: [ACME, INFRA] });
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Shared Infrastructure')).toBeInTheDocument());
+
+      expect(
+        screen.getByRole('button', { name: /invite user to acme/i })
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /invite user to shared infrastructure/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('saves AI-triage thresholds for the Infrastructure org via PATCH by slug', async () => {
+      api.get
+        .mockResolvedValueOnce({ data: [INFRA] }) // org list
+        .mockResolvedValue({ data: [] }); // invitations + system rules loads
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Shared Infrastructure')).toBeInTheDocument());
+
+      await user.click(screen.getByLabelText('Expand Shared Infrastructure invitations'));
+
+      const fpInput = await screen.findByLabelText('False-positive auto-close threshold');
+      await user.clear(fpInput);
+      await user.type(fpInput, '0.7');
+      await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() =>
+        expect(api.patch).toHaveBeenCalledWith(
+          '/api/security/organizations/infrastructure/',
+          expect.objectContaining({ triage_fp_threshold: 0.7 })
+        )
       );
     });
   });
