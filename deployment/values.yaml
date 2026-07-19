@@ -14,6 +14,28 @@ mobile:
     tag: 0.48.1
 imagePullSecrets:
   - name: registry-credentials
+# Self-hosted Ollama used ONLY for embeddings (issue #657 semantic precedent-recall
+# measurement) — Ollama Cloud serves no embedding models. A standalone Deployment (not a
+# backend sidecar) pinned to the GPU node keeps the backend schedulable anywhere; chat
+# stays on Ollama Cloud (configmap OLLAMA_MODEL). The measurement job targets this service
+# via a per-run OLLAMA_BASE_URL=http://ollama-embed:11434 override.
+ollamaEmbed:
+  enabled: true
+  nodeName: k3s01
+  # k3s auto-creates the "nvidia" RuntimeClass when the NVIDIA container runtime is present;
+  # set to "nvidia" if GPU pods need it explicitly on your cluster, else leave empty.
+  runtimeClassName: ""
+  gpuCount: 1
+  memoryRequest: "1Gi"
+  model: nomic-embed-text
+  image:
+    # Public image; mirror into registry.vels.online if the cluster can't reach Docker Hub.
+    repository: docker.io/ollama/ollama
+    tag: latest    # pin to a released tag in production
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""   # empty ⇒ cluster default (k3s local-path, node-local)
 # Operational observability (ADR-0019). Plugs into the cluster's existing Prometheus
 # Operator (kube-prometheus-stack) — we ship only the CRDs/dashboards/alerts, never the
 # stack itself. Gated so the chart still installs cleanly with monitoring disabled.

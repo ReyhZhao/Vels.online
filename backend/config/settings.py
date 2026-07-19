@@ -325,7 +325,9 @@ OLLAMA_TIMEOUT_S = float(os.environ.get("OLLAMA_TIMEOUT_S", "60"))
 # Defaults to Ollama Cloud to match the production triage provider; set to "gemini" to run
 # the measurement against Gemini's embedding endpoint instead.
 EMBED_MEASURE_PROVIDER = os.environ.get("EMBED_MEASURE_PROVIDER", "ollama")
-OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "embeddinggemma")
+# Embeddings need a SELF-HOSTED Ollama (the ollama-embed Deployment) — Ollama Cloud serves
+# no embedding models. Point OLLAMA_BASE_URL at that service for the measurement run.
+OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 GEMINI_EMBED_MODEL = os.environ.get("GEMINI_EMBED_MODEL", "gemini-embedding-001")
 
 # Assistant agentic tool-calling loop (ADR-0011). Caps bound a single turn.

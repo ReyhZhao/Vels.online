@@ -127,9 +127,14 @@ class Command(BaseCommand):
             raise
         except Exception as exc:
             other = "gemini" if provider == "ollama" else "ollama"
+            hint = ""
+            if provider == "ollama":
+                hint = ("\nNote: Ollama Cloud (ollama.com) serves NO embedding models — point "
+                        "OLLAMA_BASE_URL at a self-hosted Ollama (e.g. http://ollama-embed:11434) "
+                        "with the model pulled, and clear OLLAMA_API_KEY for the local endpoint.")
             raise CommandError(
-                f"Embedder '{provider}' (model={model}) failed on a preflight embed: {exc}\n"
-                f"Check the provider's credentials/model, or retry with --provider {other}."
+                f"Embedder '{provider}' (model={model}) failed on a preflight embed: {exc}{hint}"
+                f"\nCheck credentials/model, or retry with --provider {other}."
             ) from exc
 
         report = sm.run_measurement(
