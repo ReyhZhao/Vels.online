@@ -14,6 +14,31 @@ const CONTACT_ROLE_OPTIONS = [
   { value: 'update', label: 'Update' },
 ];
 
+const CONTACT_PLACEHOLDERS = [
+  { token: '{{ display_id }}', label: 'Incident display id (e.g. INC-2026-0042)' },
+  { token: '{{ title }}', label: 'Incident title' },
+  { token: '{{ severity }}', label: 'Incident severity' },
+  { token: '{{ description }}', label: 'Incident description' },
+  { token: '{{ org_name }}', label: 'Organisation name' },
+];
+
+function ContactPlaceholderHelp() {
+  return (
+    <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+      <p className="font-medium text-foreground">Available placeholders</p>
+      <p className="mt-0.5">Filled in from the incident when the message is sent.</p>
+      <ul className="mt-1.5 space-y-0.5">
+        {CONTACT_PLACEHOLDERS.map(p => (
+          <li key={p.token} className="flex items-baseline gap-2">
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground whitespace-nowrap">{p.token}</code>
+            <span>{p.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ItemRow({ item, templateId, onUpdate, onDelete, automations, wazuhResponses }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(item.title);
@@ -102,9 +127,10 @@ function ItemRow({ item, templateId, onUpdate, onDelete, automations, wazuhRespo
                 onChange={e => setContactBody(e.target.value)}
                 disabled={saving}
                 rows={3}
-                placeholder="Message body. Placeholders: {{ display_id }}, {{ title }}, {{ severity }}"
+                placeholder="Message body"
                 className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
               />
+              <ContactPlaceholderHelp />
             </div>
           )}
           {itemKind === 'automation' && (
@@ -346,10 +372,11 @@ function TemplateEditor({ template, onClose, onTemplateUpdate }) {
                 onChange={e => setNewContactBody(e.target.value)}
                 disabled={adding}
                 rows={3}
-                placeholder="Message body. Placeholders: {{ display_id }}, {{ title }}, {{ severity }}, {{ description }}"
+                placeholder="Message body"
                 aria-label="Contact message body"
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
               />
+              <ContactPlaceholderHelp />
             </div>
           )}
           {addError && <p className="text-sm text-red-600">{addError}</p>}

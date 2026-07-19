@@ -317,6 +317,8 @@ describe('TaskTemplatesAdmin', () => {
 
     await user.type(screen.getByPlaceholderText('Title'), 'Notify owner');
     await user.click(screen.getByRole('button', { name: 'Contact' }));
+    expect(screen.getByText('Available placeholders')).toBeInTheDocument();
+    expect(screen.getByText('{{ org_name }}')).toBeInTheDocument();
     await user.type(screen.getByLabelText('Contact message body'), 'Please contact the owner.');
     await user.click(screen.getByRole('button', { name: 'Add' }));
 
