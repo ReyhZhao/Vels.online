@@ -325,6 +325,12 @@ OLLAMA_TIMEOUT_S = float(os.environ.get("OLLAMA_TIMEOUT_S", "60"))
 # Defaults to Ollama Cloud to match the production triage provider; set to "gemini" to run
 # the measurement against Gemini's embedding endpoint instead.
 EMBED_MEASURE_PROVIDER = os.environ.get("EMBED_MEASURE_PROVIDER", "ollama")
+# The embedding measurement is a batch job with no gunicorn worker to protect, so its
+# per-request timeout is generous and independent of the chat OLLAMA_TIMEOUT_S — a small GPU
+# embedding a large batch (or a cold load) can exceed the 60s chat bound. keep_alive holds
+# the embed model in VRAM between batches so it never reloads mid-run.
+EMBED_TIMEOUT_S = float(os.environ.get("EMBED_TIMEOUT_S", "300"))
+EMBED_KEEP_ALIVE = os.environ.get("EMBED_KEEP_ALIVE", "30m")
 # Embeddings need a SELF-HOSTED Ollama (the ollama-embed Deployment) — Ollama Cloud serves
 # no embedding models. Point OLLAMA_BASE_URL at that service for the measurement run.
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text")

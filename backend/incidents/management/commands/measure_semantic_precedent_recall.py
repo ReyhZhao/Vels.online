@@ -13,6 +13,7 @@ production `BaseTriageProvider` abstraction stays chat-only until (if) a serving
 
     docker compose exec backend python manage.py measure_semantic_precedent_recall --days 90
 """
+import time
 from datetime import timedelta
 
 from django.conf import settings
@@ -21,24 +22,50 @@ from django.utils import timezone
 
 from incidents.memory import semantic_measure as sm
 
+_EMBED_RETRIES = 3
+
 
 # ── embedders (the only real-provider glue; semantic_measure stays provider-free) ──
 
 
-def _ollama_embedder(batch_size=64):
+def _retrying(call, *, what):
+    """Run an embed `call`, retrying transient network/timeout errors with backoff. This is
+    a long batch job on a small GPU — one slow or dropped response must not kill the run."""
+    import httpx
+
+    last = None
+    for attempt in range(_EMBED_RETRIES):
+        try:
+            return call()
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last = exc
+            if attempt < _EMBED_RETRIES - 1:
+                time.sleep(2 ** attempt)  # 1s, 2s
+    raise last
+
+
+def _ollama_embedder(batch_size=16):
     import ollama
 
     base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
     api_key = getattr(settings, "OLLAMA_API_KEY", "")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    timeout = getattr(settings, "OLLAMA_TIMEOUT_S", 60.0)
-    model = getattr(settings, "OLLAMA_EMBED_MODEL", "embeddinggemma")
+    # A batch job has no gunicorn worker to protect, so its per-request budget is generous
+    # and independent of the chat OLLAMA_TIMEOUT_S (a small GPU can exceed the 60s chat bound).
+    timeout = getattr(settings, "EMBED_TIMEOUT_S", 300.0)
+    keep_alive = getattr(settings, "EMBED_KEEP_ALIVE", "30m")
+    model = getattr(settings, "OLLAMA_EMBED_MODEL", "nomic-embed-text")
     client = ollama.Client(host=base_url, headers=headers, timeout=timeout)
 
     def embed(texts):
         out = []
         for i in range(0, len(texts), batch_size):
-            resp = client.embed(model=model, input=texts[i:i + batch_size])
+            chunk = texts[i:i + batch_size]
+            # keep_alive holds the model in VRAM between batches so it never reloads mid-run.
+            resp = _retrying(
+                lambda: client.embed(model=model, input=chunk, keep_alive=keep_alive),
+                what="ollama.embed",
+            )
             out.extend(resp.embeddings)
         return out
 
@@ -52,12 +79,16 @@ def _gemini_embedder(batch_size=100):
     from google import genai
 
     client = genai.Client(api_key=api_key)
-    model = getattr(settings, "GEMINI_EMBED_MODEL", "text-embedding-004")
+    model = getattr(settings, "GEMINI_EMBED_MODEL", "gemini-embedding-001")
 
     def embed(texts):
         out = []
         for i in range(0, len(texts), batch_size):
-            resp = client.models.embed_content(model=model, contents=texts[i:i + batch_size])
+            chunk = texts[i:i + batch_size]
+            resp = _retrying(
+                lambda: client.models.embed_content(model=model, contents=chunk),
+                what="gemini.embed_content",
+            )
             out.extend(e.values for e in resp.embeddings)
         return out
 
