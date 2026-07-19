@@ -27,6 +27,7 @@ INTENDED_PERIODIC_TASKS = frozenset(
     {
         "attackmap.tasks.produce_attack_snapshot",
         "celery_tasks.tasks.cleanup_old_task_results",
+        "correlations.tasks.run_detection_scan",
         "inbound_mail.tasks.poll_inbound_mail",
         "incidents.tasks.auto_close_stale_incidents",
         "incidents.tasks.cleanup_orphaned_attachments",

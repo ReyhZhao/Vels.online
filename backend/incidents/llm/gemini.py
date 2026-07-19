@@ -24,7 +24,7 @@ from .prompts import (
     CORRELATION_SYSTEM_PROMPT,
     LESSON_DISTILL_SYSTEM_PROMPT,
     REPORT_SUMMARY_SYSTEM_PROMPT,
-    RESIDUAL_GROUPING_SYSTEM_PROMPT,
+    SCAN_NEIGHBOURHOOD_SYSTEM_PROMPT,
     SEARCH_SUMMARY_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
     TASK_SUMMARY_SYSTEM_PROMPT,
@@ -381,21 +381,23 @@ class GeminiTriageProvider(BaseTriageProvider):
 
         return _parse_correlation_result(data)
 
-    def group_residual_alerts(self, alerts: list) -> ResidualGroupingResult:
-        if not alerts:
+    def scan_neighbourhood(self, residual_alerts: list, context_alerts: list) -> ResidualGroupingResult:
+        if not residual_alerts:
             return ResidualGroupingResult(provider="gemini")
-        prompt = json.dumps(alerts, indent=2)
+        prompt = json.dumps(
+            {"residual_alerts": residual_alerts, "context_alerts": context_alerts}, indent=2
+        )
         try:
             response = self._client.models.generate_content(
                 model=settings.GEMINI_MODEL,
                 contents=prompt,
                 config=self._types.GenerateContentConfig(
-                    system_instruction=RESIDUAL_GROUPING_SYSTEM_PROMPT,
+                    system_instruction=SCAN_NEIGHBOURHOOD_SYSTEM_PROMPT,
                 ),
             )
             text = response.text.strip()
         except Exception as exc:
-            raise TriageError(f"Gemini residual grouping error: {exc}") from exc
+            raise TriageError(f"Gemini neighbourhood scan error: {exc}") from exc
 
         if text.startswith("```"):
             lines = text.splitlines()
@@ -404,7 +406,7 @@ class GeminiTriageProvider(BaseTriageProvider):
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise TriageError(f"Gemini returned non-JSON for residual grouping: {text[:200]}") from exc
+            raise TriageError(f"Gemini returned non-JSON for neighbourhood scan: {text[:200]}") from exc
 
         return _parse_residual_grouping_result(data)
 

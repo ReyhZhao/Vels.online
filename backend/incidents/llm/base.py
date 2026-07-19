@@ -118,8 +118,14 @@ class BaseTriageProvider(ABC):
         """
         return {}
 
-    def group_residual_alerts(self, alerts: list) -> ResidualGroupingResult:
-        """Group residual (unlinked, settled) alerts into suspicious clusters. Override in providers that support it."""
+    def scan_neighbourhood(self, residual_alerts: list, context_alerts: list) -> ResidualGroupingResult:
+        """Detection Scan over one Candidate Neighbourhood (ADR-0036).
+
+        ``residual_alerts`` are the unhandled alerts the model may propose grouping;
+        ``context_alerts`` are already-handled alerts passed as read-only context.
+        The distinction MUST reach the model input. Override in providers that
+        support it; the default proposes nothing.
+        """
         return ResidualGroupingResult()
 
     def generate_closure_message(self, incident_context: dict) -> str:

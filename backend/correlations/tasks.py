@@ -1,12 +1,8 @@
 import logging
-from datetime import timedelta
 
 from celery import shared_task
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
-
-_RESIDUAL_SETTLE_MINUTES = 15
 
 
 @shared_task(name="correlations.tasks.run_scheduled_search_rule")
@@ -50,9 +46,10 @@ def run_scheduled_search_rule(rule_id: int):
             logger.exception(
                 "run_scheduled_search_rule: failed for rule %s org %s — continuing", rule_id, org.id
             )
-_RESIDUAL_LOOKBACK_HOURS = 24
-_RESIDUAL_CONFIDENCE_THRESHOLD = 0.6
-_RESIDUAL_BATCH_LIMIT = 200
+_SCAN_CONFIDENCE_THRESHOLD = 0.6
+# Cap on neighbourhoods scanned per org per run — with the per-neighbourhood size
+# cap, this bounds the total LLM input of one Scan run.
+_SCAN_NEIGHBOURHOOD_BATCH_LIMIT = 20
 
 
 @shared_task
@@ -80,20 +77,22 @@ def evaluate_correlation_rules(alert_id: int):
 
 
 @shared_task
-def run_residual_safety_net():
-    """Periodic LLM safety-net over residual (unlinked, settled) alerts.
+def run_detection_scan():
+    """The Detection Scan (PRD #727, ADR-0036): the primary LLM detector.
 
-    Runs per organisation; alerts aged past the settle delay but within the
-    lookback window are grouped by the LLM and emitted as DetectionSuggestion
-    records for analyst review.
+    Runs per organisation on a schedule. Assembles Candidate Neighbourhoods from
+    the entity envelope, has the LLM reason over each (Residual alerts proposable,
+    handled alerts read-only context) and emits DetectionSuggestion records for
+    analyst review. Suggestion-only in v1; replaces the never-scheduled residual
+    safety-net (#722).
     """
     from security.models import Organization
 
     for org in Organization.objects.tenants():
         try:
-            _run_residual_for_org(org)
+            _run_scan_for_org(org)
         except Exception:
-            logger.exception("run_residual_safety_net: failed for org %s", org.id)
+            logger.exception("run_detection_scan: failed for org %s", org.id)
 
 
 def _alert_to_payload(alert) -> dict:
@@ -103,6 +102,8 @@ def _alert_to_payload(alert) -> dict:
         "title": alert.title or "",
         "severity": alert.severity or "",
         "source_kind": alert.source_kind or "",
+        "state": alert.state or "",
+        "created_at": alert.created_at.isoformat() if alert.created_at else "",
         "entities": entities,
     }
 
@@ -179,67 +180,76 @@ def _create_incident_from_suggestion(suggestion):
     return incident
 
 
-def _run_residual_for_org(org):
-    from alerts.models import Alert
+def _pending_grouping_exists(org, proposed_ids: set) -> bool:
+    """Basic cross-run idempotency: an identical pending grouping already lives."""
     from correlations.models import DetectionSuggestion
+
+    pending = DetectionSuggestion.objects.filter(
+        organization=org, status=DetectionSuggestion.STATUS_PENDING
+    ).prefetch_related("proposed_alerts")
+    for suggestion in pending:
+        if {a.id for a in suggestion.proposed_alerts.all()} == proposed_ids:
+            return True
+    return False
+
+
+def _run_scan_for_org(org):
+    from correlations.models import DetectionSuggestion
+    from correlations.services.neighbourhoods import assemble_neighbourhoods
     from incidents.llm.base import TriageConfigError, TriageError
     from incidents.llm.factory import get_triage_provider
-
-    now = timezone.now()
-    settle_cutoff = now - timedelta(minutes=_RESIDUAL_SETTLE_MINUTES)
-    lookback_cutoff = now - timedelta(hours=_RESIDUAL_LOOKBACK_HOURS)
-
-    residuals = list(
-        Alert.objects.filter(
-            organization=org,
-            state="new",
-            incident__isnull=True,
-            created_at__gte=lookback_cutoff,
-            created_at__lte=settle_cutoff,
-        ).prefetch_related("entities")[:_RESIDUAL_BATCH_LIMIT]
-    )
-
-    if not residuals:
-        return
-
-    alert_payloads = [_alert_to_payload(a) for a in residuals]
 
     try:
         provider = get_triage_provider()
     except TriageConfigError:
-        logger.debug("run_residual_safety_net: LLM provider not configured, skipping org %s", org.id)
+        logger.debug("run_detection_scan: LLM provider not configured, skipping org %s", org.id)
         return
 
-    try:
-        result = provider.group_residual_alerts(alert_payloads)
-    except TriageError:
-        logger.exception("_run_residual_for_org: LLM grouping failed for org %s", org.id)
-        return
+    neighbourhoods = assemble_neighbourhoods(org)[:_SCAN_NEIGHBOURHOOD_BATCH_LIMIT]
 
-    alert_by_id = {a.id: a for a in residuals}
+    for neighbourhood in neighbourhoods:
+        residual_payloads = [_alert_to_payload(a) for a in neighbourhood.residual_alerts]
+        context_payloads = [_alert_to_payload(a) for a in neighbourhood.context_alerts]
 
-    for group in result.groups:
-        if group.confidence < _RESIDUAL_CONFIDENCE_THRESHOLD:
+        try:
+            result = provider.scan_neighbourhood(residual_payloads, context_payloads)
+        except TriageError:
+            logger.exception("_run_scan_for_org: LLM scan failed for org %s", org.id)
             continue
 
-        matched = [alert_by_id[aid] for aid in group.alert_ids if aid in alert_by_id]
-        if len(matched) < 2:
-            continue
+        alert_by_id = {a.id: a for a in neighbourhood.alerts}
+        residual_ids = {a.id for a in neighbourhood.residual_alerts}
 
-        suggestion = DetectionSuggestion.objects.create(
-            organization=org,
-            rationale=group.rationale,
-            confidence=group.confidence,
-        )
-        suggestion.proposed_alerts.set(matched)
+        for group in result.groups:
+            if group.confidence < _SCAN_CONFIDENCE_THRESHOLD:
+                continue
 
-        if (
-            org.llm_residual_autocreate_threshold is not None
-            and group.confidence >= org.llm_residual_autocreate_threshold
-        ):
-            try:
-                _create_incident_from_suggestion(suggestion)
-            except Exception:
-                logger.exception(
-                    "_run_residual_for_org: auto-create failed for suggestion %s", suggestion.id
-                )
+            matched = [alert_by_id[aid] for aid in group.alert_ids if aid in alert_by_id]
+            if len(matched) < 2:
+                continue
+            if not any(a.id in residual_ids for a in matched):
+                # All-handled grouping — a duplicate of an incident that already
+                # exists; the Scan widens context, never its output target.
+                continue
+
+            proposed_ids = {a.id for a in matched}
+            if _pending_grouping_exists(org, proposed_ids):
+                continue
+
+            suggestion = DetectionSuggestion.objects.create(
+                organization=org,
+                rationale=group.rationale,
+                confidence=group.confidence,
+            )
+            suggestion.proposed_alerts.set(matched)
+
+            if (
+                org.llm_residual_autocreate_threshold is not None
+                and group.confidence >= org.llm_residual_autocreate_threshold
+            ):
+                try:
+                    _create_incident_from_suggestion(suggestion)
+                except Exception:
+                    logger.exception(
+                        "_run_scan_for_org: auto-create failed for suggestion %s", suggestion.id
+                    )

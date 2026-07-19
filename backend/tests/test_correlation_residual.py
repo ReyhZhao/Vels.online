@@ -1,4 +1,9 @@
-"""Tests for the LLM residual safety-net (DetectionSuggestion) feature."""
+"""Tests for DetectionSuggestion parsing, accept transition and API.
+
+The scheduled detector that produces suggestions is the Detection Scan
+(PRD #727, ADR-0036) — its assembler/orchestrator tests live in
+``test_detection_scan.py``.
+"""
 import pytest
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
@@ -6,16 +11,10 @@ from unittest.mock import MagicMock, patch
 from django.utils import timezone
 
 from security.models import Organization, OrganizationMembership
-from alerts.models import Alert, AlertEntity
-from incidents.models import Incident
-from incidents.llm.base import ResidualGroup, ResidualGroupingResult
+from alerts.models import Alert
 from incidents.llm.gemini import _parse_residual_grouping_result
 from correlations.models import DetectionSuggestion
 from correlations.tasks import (
-    _RESIDUAL_SETTLE_MINUTES,
-    _RESIDUAL_LOOKBACK_HOURS,
-    _RESIDUAL_CONFIDENCE_THRESHOLD,
-    _run_residual_for_org,
     _create_incident_from_suggestion,
     _derive_severity,
 )
@@ -116,180 +115,6 @@ def test_derive_severity_takes_highest(db, org):
     a2 = _make_alert(org, severity="high")
     a3 = _make_alert(org, severity="medium")
     assert _derive_severity([a1, a2, a3]) == "high"
-
-
-# ── residual alert selection logic (integration) ──────────────────────────────
-
-def test_run_residual_selects_settled_unlinked_new_alerts(db, org):
-    """Only settled, unlinked, new alerts within the lookback window should be selected."""
-    settled_age = _RESIDUAL_SETTLE_MINUTES + 10  # well past settle delay
-
-    a_good1 = _make_alert(org, state="new", age_minutes=settled_age)
-    a_good2 = _make_alert(org, state="new", age_minutes=settled_age + 5)
-
-    # too fresh — within settle delay, should be excluded
-    _make_alert(org, state="new", age_minutes=_RESIDUAL_SETTLE_MINUTES - 2)
-
-    # already linked
-    inc = Incident.objects.create(
-        organization=org, display_id="INC-0001", title="existing",
-        source_kind="wazuh_event", source_ref={}, state="new", severity="medium",
-    )
-    _make_alert(org, state="imported", incident=inc, age_minutes=settled_age)
-
-    # wrong state
-    _make_alert(org, state="acknowledged", age_minutes=settled_age)
-
-    # too old — outside lookback window
-    _make_alert(org, state="new", age_minutes=(_RESIDUAL_LOOKBACK_HOURS * 60) + 10)
-
-    captured_payloads = []
-
-    def fake_group(payloads):
-        captured_payloads.extend(payloads)
-        return ResidualGroupingResult(groups=[])
-
-    mock_provider = MagicMock()
-    mock_provider.group_residual_alerts.side_effect = fake_group
-
-    with patch("incidents.llm.factory.get_triage_provider", return_value=mock_provider):
-        _run_residual_for_org(org)
-
-    selected_ids = {p["id"] for p in captured_payloads}
-    assert a_good1.id in selected_ids
-    assert a_good2.id in selected_ids
-    assert len(selected_ids) == 2
-
-
-def test_run_residual_creates_suggestion_above_threshold(db, org):
-    settled_age = _RESIDUAL_SETTLE_MINUTES + 10
-    a1 = _make_alert(org, state="new", age_minutes=settled_age)
-    a2 = _make_alert(org, state="new", age_minutes=settled_age)
-
-    mock_provider = MagicMock()
-    mock_provider.group_residual_alerts.return_value = ResidualGroupingResult(
-        groups=[
-            ResidualGroup(
-                alert_ids=[a1.id, a2.id],
-                rationale="Suspicious brute-force pattern",
-                confidence=0.75,
-            )
-        ]
-    )
-
-    with patch("incidents.llm.factory.get_triage_provider", return_value=mock_provider):
-        _run_residual_for_org(org)
-
-    assert DetectionSuggestion.objects.filter(organization=org).count() == 1
-    suggestion = DetectionSuggestion.objects.get(organization=org)
-    assert suggestion.status == DetectionSuggestion.STATUS_PENDING
-    assert suggestion.confidence == 0.75
-    assert suggestion.rationale == "Suspicious brute-force pattern"
-    assert set(suggestion.proposed_alerts.values_list("id", flat=True)) == {a1.id, a2.id}
-
-
-def test_run_residual_skips_group_below_threshold(db, org):
-    settled_age = _RESIDUAL_SETTLE_MINUTES + 10
-    a1 = _make_alert(org, state="new", age_minutes=settled_age)
-    a2 = _make_alert(org, state="new", age_minutes=settled_age)
-
-    mock_provider = MagicMock()
-    mock_provider.group_residual_alerts.return_value = ResidualGroupingResult(
-        groups=[
-            ResidualGroup(alert_ids=[a1.id, a2.id], rationale="weak signal", confidence=0.3)
-        ]
-    )
-
-    with patch("incidents.llm.factory.get_triage_provider", return_value=mock_provider):
-        _run_residual_for_org(org)
-
-    assert DetectionSuggestion.objects.filter(organization=org).count() == 0
-
-
-def test_run_residual_skips_singleton_group(db, org):
-    """A group with only one matching alert in the residual set is discarded."""
-    settled_age = _RESIDUAL_SETTLE_MINUTES + 10
-    a1 = _make_alert(org, state="new", age_minutes=settled_age)
-
-    mock_provider = MagicMock()
-    mock_provider.group_residual_alerts.return_value = ResidualGroupingResult(
-        groups=[
-            ResidualGroup(alert_ids=[a1.id, 999999], rationale="unknown id", confidence=0.8)
-        ]
-    )
-
-    with patch("incidents.llm.factory.get_triage_provider", return_value=mock_provider):
-        _run_residual_for_org(org)
-
-    # Only one alert matched from residuals, so suggestion should not be created
-    assert DetectionSuggestion.objects.filter(organization=org).count() == 0
-
-
-# ── auto-create threshold (integration) ──────────────────────────────────────
-
-def test_autocreate_off_by_default(db, org):
-    """With no autocreate threshold, accepted suggestions remain pending."""
-    settled_age = _RESIDUAL_SETTLE_MINUTES + 10
-    a1 = _make_alert(org, state="new", age_minutes=settled_age)
-    a2 = _make_alert(org, state="new", age_minutes=settled_age)
-
-    mock_provider = MagicMock()
-    mock_provider.group_residual_alerts.return_value = ResidualGroupingResult(
-        groups=[ResidualGroup(alert_ids=[a1.id, a2.id], rationale="test", confidence=0.9)]
-    )
-
-    with patch("incidents.llm.factory.get_triage_provider", return_value=mock_provider):
-        _run_residual_for_org(org)
-
-    s = DetectionSuggestion.objects.get(organization=org)
-    assert s.status == DetectionSuggestion.STATUS_PENDING
-    assert s.incident is None
-
-
-def test_autocreate_fires_when_threshold_met(db, org):
-    """When org.llm_residual_autocreate_threshold is set and confidence >= threshold, incident is created."""
-    org.llm_residual_autocreate_threshold = 0.8
-    org.save()
-
-    settled_age = _RESIDUAL_SETTLE_MINUTES + 10
-    a1 = _make_alert(org, state="new", age_minutes=settled_age)
-    a2 = _make_alert(org, state="new", age_minutes=settled_age)
-
-    mock_provider = MagicMock()
-    mock_provider.group_residual_alerts.return_value = ResidualGroupingResult(
-        groups=[ResidualGroup(alert_ids=[a1.id, a2.id], rationale="attack cluster", confidence=0.85)]
-    )
-
-    with patch("incidents.llm.factory.get_triage_provider", return_value=mock_provider):
-        with patch("incidents.tasks.enrich_iocs_then_triage") as mock_enrich:
-            mock_enrich.delay = MagicMock()
-            _run_residual_for_org(org)
-
-    s = DetectionSuggestion.objects.get(organization=org)
-    assert s.status == DetectionSuggestion.STATUS_ACCEPTED
-    assert s.incident is not None
-    assert s.incident.source_kind == "correlation"
-
-
-def test_autocreate_skipped_when_below_threshold(db, org):
-    org.llm_residual_autocreate_threshold = 0.9
-    org.save()
-
-    settled_age = _RESIDUAL_SETTLE_MINUTES + 10
-    a1 = _make_alert(org, state="new", age_minutes=settled_age)
-    a2 = _make_alert(org, state="new", age_minutes=settled_age)
-
-    mock_provider = MagicMock()
-    mock_provider.group_residual_alerts.return_value = ResidualGroupingResult(
-        groups=[ResidualGroup(alert_ids=[a1.id, a2.id], rationale="borderline", confidence=0.85)]
-    )
-
-    with patch("incidents.llm.factory.get_triage_provider", return_value=mock_provider):
-        _run_residual_for_org(org)
-
-    s = DetectionSuggestion.objects.get(organization=org)
-    assert s.status == DetectionSuggestion.STATUS_PENDING
-    assert s.incident is None
 
 
 # ── _create_incident_from_suggestion (accept transition) ─────────────────────

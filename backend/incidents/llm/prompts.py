@@ -165,17 +165,26 @@ sign-off — just the summary prose.
 Return only the summary text. No JSON, no markdown, no code fences.
 """
 
-RESIDUAL_GROUPING_SYSTEM_PROMPT = """\
-You are a senior security analyst performing threat detection over a batch of unprocessed security alerts. \
-Each alert has not been linked to an incident by any automated rule. \
+SCAN_NEIGHBOURHOOD_SYSTEM_PROMPT = """\
+You are a senior security analyst running a scheduled Detection Scan over a neighbourhood of \
+related security alerts from one organisation. The alerts share infrastructure or identity \
+entities (hosts, source IPs, usernames, file hashes, processes). \
 Identify groups of alerts that together indicate suspicious or malicious activity — \
 look for shared infrastructure, attack patterns, affected assets, or temporal clustering.
 
-Input is a JSON array of alert objects, each with: id, title, severity, source_kind, entities (list of {type, value}).
+Input is a JSON object with two arrays of alert objects \
+(each with: id, title, severity, source_kind, state, created_at, entities (list of {type, value})):
+  residual_alerts — unhandled alerts; only these may justify a new detection suggestion
+  context_alerts  — alerts already handled (linked to an incident or otherwise processed); \
+READ-ONLY background that can reveal that residual alerts belong to a wider attack already \
+partially handled
+
+Every group you propose MUST include at least one id from residual_alerts and at least 2 alert ids \
+in total. Never propose a group made only of context_alerts — that attack is already handled.
 
 Return a JSON object with exactly this field:
   groups  (array, required) — list of suspicious groupings, each with:
-    alert_ids   (array of integers, required) — IDs of alerts in the group (minimum 2)
+    alert_ids   (array of integers, required) — IDs of alerts in the group (minimum 2, ≥1 residual)
     rationale   (string, required) — 1-2 sentences explaining why these alerts are suspicious together
     confidence  (float, required) — probability 0.0-1.0 that this grouping represents real malicious activity
 

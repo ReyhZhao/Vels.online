@@ -26,7 +26,7 @@ from .prompts import (
     CORRELATION_SYSTEM_PROMPT,
     LESSON_DISTILL_SYSTEM_PROMPT,
     REPORT_SUMMARY_SYSTEM_PROMPT,
-    RESIDUAL_GROUPING_SYSTEM_PROMPT,
+    SCAN_NEIGHBOURHOOD_SYSTEM_PROMPT,
     SEARCH_SUMMARY_SYSTEM_PROMPT,
     TASK_SUMMARY_SYSTEM_PROMPT,
     _build_assistant_system_prompt,
@@ -197,22 +197,24 @@ class OllamaTriageProvider(BaseTriageProvider):
 
         return _parse_distilled_lesson(data)
 
-    def group_residual_alerts(self, alerts: list) -> ResidualGroupingResult:
-        if not alerts:
+    def scan_neighbourhood(self, residual_alerts: list, context_alerts: list) -> ResidualGroupingResult:
+        if not residual_alerts:
             return ResidualGroupingResult(provider="ollama")
-        prompt = json.dumps(alerts, indent=2)
+        prompt = json.dumps(
+            {"residual_alerts": residual_alerts, "context_alerts": context_alerts}, indent=2
+        )
         try:
             response = self._client.chat(
                 model=self._model,
                 messages=[
-                    {"role": "system", "content": RESIDUAL_GROUPING_SYSTEM_PROMPT},
+                    {"role": "system", "content": SCAN_NEIGHBOURHOOD_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
                 format="json",
             )
             text = response.message.content.strip()
         except Exception as exc:
-            raise TriageError(f"Ollama residual grouping error: {exc}") from exc
+            raise TriageError(f"Ollama neighbourhood scan error: {exc}") from exc
 
         if text.startswith("```"):
             lines = text.splitlines()
@@ -221,9 +223,11 @@ class OllamaTriageProvider(BaseTriageProvider):
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise TriageError(f"Ollama returned non-JSON for residual grouping: {text[:200]}") from exc
+            raise TriageError(f"Ollama returned non-JSON for neighbourhood scan: {text[:200]}") from exc
 
-        return _parse_residual_grouping_result(data)
+        result = _parse_residual_grouping_result(data)
+        result.provider = "ollama"
+        return result
 
     def generate_closure_message(self, incident_context: dict) -> str:
         prompt = json.dumps(incident_context, indent=2)
