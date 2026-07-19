@@ -63,6 +63,8 @@ class _DetectionSuggestionSerializer(_s.ModelSerializer):
             "proposed_alerts",
             "rationale",
             "confidence",
+            "detector",
+            "model_version",
             "status",
             "incident",
             "incident_display_id",

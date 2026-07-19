@@ -156,6 +156,11 @@ class DetectionSuggestion(models.Model):
     )
     rationale = models.TextField()
     confidence = models.FloatField()
+    # Calibration stamps (ADR-0036, lean): which detector produced this suggestion
+    # and under which model/prompt era, so later accept/dismiss precision analysis
+    # can separate one model era from the next. Blank on pre-stamp rows.
+    detector = models.CharField(max_length=100, blank=True, default="")
+    model_version = models.CharField(max_length=200, blank=True, default="")
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
     incident = models.ForeignKey(
         "incidents.Incident",

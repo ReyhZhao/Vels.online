@@ -227,6 +227,7 @@ class OllamaTriageProvider(BaseTriageProvider):
 
         result = _parse_residual_grouping_result(data)
         result.provider = "ollama"
+        result.model = self._model
         return result
 
     def generate_closure_message(self, incident_context: dict) -> str:

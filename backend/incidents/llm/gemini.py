@@ -408,7 +408,9 @@ class GeminiTriageProvider(BaseTriageProvider):
         except json.JSONDecodeError as exc:
             raise TriageError(f"Gemini returned non-JSON for neighbourhood scan: {text[:200]}") from exc
 
-        return _parse_residual_grouping_result(data)
+        result = _parse_residual_grouping_result(data)
+        result.model = settings.GEMINI_MODEL
+        return result
 
     def summarize_task_output(self, task_title: str, task_output: str) -> TaskSummaryResult:
         prompt = json.dumps({"task_title": task_title, "output": task_output[:8000]}, indent=2)

@@ -70,6 +70,9 @@ class ResidualGroup:
 class ResidualGroupingResult:
     groups: List[ResidualGroup] = field(default_factory=list)
     provider: str = ""
+    # Model identifier used for the call (e.g. the Gemini or Ollama model name) —
+    # feeds the Detection Suggestion calibration stamp (ADR-0036).
+    model: str = ""
 
 
 class AssistantError(Exception):

@@ -281,6 +281,12 @@ function SuggestionCard({ suggestion, acting, onAccept, onDismiss, onCodify, isS
         </div>
       </div>
       <p className="text-sm text-foreground">{suggestion.rationale}</p>
+      {suggestion.detector && (
+        <p className="text-xs text-muted-foreground font-mono">
+          {suggestion.detector}
+          {suggestion.model_version && ` · ${suggestion.model_version}`}
+        </p>
+      )}
       {suggestion.proposed_alerts.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {suggestion.proposed_alerts.map(a => (

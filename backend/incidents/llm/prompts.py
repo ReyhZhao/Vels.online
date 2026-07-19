@@ -165,6 +165,11 @@ sign-off — just the summary prose.
 Return only the summary text. No JSON, no markdown, no code fences.
 """
 
+# Bump when SCAN_NEIGHBOURHOOD_SYSTEM_PROMPT changes materially — part of the
+# Detection Suggestion calibration stamp (ADR-0036), so precision analysis can
+# separate one prompt era from the next.
+SCAN_PROMPT_VERSION = "v1"
+
 SCAN_NEIGHBOURHOOD_SYSTEM_PROMPT = """\
 You are a senior security analyst running a scheduled Detection Scan over a neighbourhood of \
 related security alerts from one organisation. The alerts share infrastructure or identity \

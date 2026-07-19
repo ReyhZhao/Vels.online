@@ -205,6 +205,30 @@ def test_scan_valid_group_creates_suggestion(db, org):
     assert suggestion.status == DetectionSuggestion.STATUS_PENDING
     assert suggestion.confidence == 0.8
     assert set(suggestion.proposed_alerts.values_list("id", flat=True)) == {a1.id, a2.id}
+    # Calibration stamps (#730): producing detector + model/prompt era.
+    assert suggestion.detector == "detection-scan"
+    assert "stub" in suggestion.model_version
+    assert "prompt-" in suggestion.model_version
+
+
+def test_unstamped_suggestion_tolerated(db, org, client, django_user_model):
+    """Pre-stamp rows (blank provenance) list without error."""
+    from security.models import OrganizationMembership
+
+    a1, a2 = _make_alert(org), _make_alert(org)
+    s = DetectionSuggestion.objects.create(
+        organization=org, rationale="legacy row", confidence=0.7
+    )
+    s.proposed_alerts.set([a1, a2])
+    assert s.detector == ""
+    assert s.model_version == ""
+
+    user = django_user_model.objects.create_user(username="stampmember", password="pass")
+    OrganizationMembership.objects.create(user=user, organization=org)
+    client.force_login(user)
+    resp = client.get(f"/api/correlations/suggestions/?org={org.slug}")
+    assert resp.status_code == 200
+    assert resp.json()[0]["detector"] == ""
 
 
 def test_scan_group_may_span_residual_and_handled(db, org):

@@ -46,6 +46,10 @@ def run_scheduled_search_rule(rule_id: int):
             logger.exception(
                 "run_scheduled_search_rule: failed for rule %s org %s — continuing", rule_id, org.id
             )
+# Calibration-stamp detector identifier (ADR-0036) written on every suggestion
+# the Detection Scan creates.
+SCAN_DETECTOR = "detection-scan"
+
 _SCAN_CONFIDENCE_THRESHOLD = 0.6
 # Cap on neighbourhoods scanned per org per run — with the per-neighbourhood size
 # cap, this bounds the total LLM input of one Scan run.
@@ -190,6 +194,7 @@ def _run_scan_for_org(org):
     )
     from incidents.llm.base import TriageConfigError, TriageError
     from incidents.llm.factory import get_triage_provider
+    from incidents.llm.prompts import SCAN_PROMPT_VERSION
 
     try:
         provider = get_triage_provider()
@@ -242,6 +247,11 @@ def _run_scan_for_org(org):
                 organization=org,
                 rationale=group.rationale,
                 confidence=group.confidence,
+                detector=SCAN_DETECTOR,
+                model_version=(
+                    f"{result.provider or 'unknown'}:{result.model or 'unknown'}"
+                    f"/prompt-{SCAN_PROMPT_VERSION}"
+                ),
             )
             suggestion.proposed_alerts.set(matched)
 
