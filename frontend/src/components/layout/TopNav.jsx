@@ -34,16 +34,6 @@ function TopNav({ onMenuClick }) {
           </Link>
         </div>
         <nav className="flex items-center gap-6">
-          <NavLink
-            to="/blog"
-            className={({ isActive }) =>
-              `hidden md:inline-flex text-sm font-medium transition-colors hover:text-foreground ${
-                isActive ? 'text-foreground' : 'text-muted-foreground'
-              }`
-            }
-          >
-            Blog
-          </NavLink>
           <span className="hidden md:flex"><StatusIndicator /></span>
           {isAuthenticated ? (
             <>

@@ -1,7 +1,6 @@
 
 from django.urls import include, path
 
-from blog.urls import router as blog_router
 from notifications.views import TestEmailView
 
 from . import views
@@ -42,5 +41,4 @@ urlpatterns = [
     path("oncall/", include("oncall.urls")),
     path("hunts/", include("hunts.urls")),
     path("attack-map/", include("attackmap.urls")),
-    path("", include(blog_router.urls)),
 ]

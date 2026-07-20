@@ -41,13 +41,6 @@ describe('TopNav', () => {
     expect(brand).toHaveAttribute('href', '/');
   });
 
-  it('renders a Blog navigation link pointing to /blog', () => {
-    renderTopNav();
-    const blogLink = screen.getByRole('link', { name: 'Blog' });
-    expect(blogLink).toBeInTheDocument();
-    expect(blogLink).toHaveAttribute('href', '/blog');
-  });
-
   it('renders StatusIndicator linking to /status', () => {
     renderTopNav();
     const statusLink = screen.getByRole('link', { name: /site status/i });
@@ -170,13 +163,6 @@ describe('TopNav', () => {
   });
 
   // ── responsive visibility ─────────────────────────────────────────────────
-
-  it('Blog link carries hidden md:inline-flex for mobile hiding', () => {
-    renderTopNav();
-    const blogLink = screen.getByRole('link', { name: 'Blog' });
-    expect(blogLink.className).toContain('hidden');
-    expect(blogLink.className).toContain('md:inline-flex');
-  });
 
   it('StatusIndicator is wrapped in a hidden md:flex container', () => {
     renderTopNav();

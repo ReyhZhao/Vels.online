@@ -15,55 +15,29 @@ function renderAt(path, routePattern = path) {
 
 describe('Breadcrumb', () => {
   // Root pages — hidden
-  it('renders nothing on /admin root', () => {
-    renderAt('/admin');
-    expect(screen.queryByRole('navigation', { name: /breadcrumb/i })).not.toBeInTheDocument();
-  });
-
   it('renders nothing on /security root', () => {
     renderAt('/security');
     expect(screen.queryByRole('navigation', { name: /breadcrumb/i })).not.toBeInTheDocument();
   });
 
-  // Admin — Posts
-  it('renders Admin › Posts on /admin/posts', () => {
-    renderAt('/admin/posts');
-    expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
-    expect(screen.getByText('Posts')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Posts' })).not.toBeInTheDocument();
-  });
-
-  it('renders Admin › Posts › New Post on /admin/posts/new', () => {
-    renderAt('/admin/posts/new');
-    expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
-    expect(screen.getByRole('link', { name: 'Posts' })).toHaveAttribute('href', '/admin/posts');
-    expect(screen.getByText('New Post')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'New Post' })).not.toBeInTheDocument();
-  });
-
-  it('renders Admin › Posts › Edit Post on /admin/posts/:slug/edit', () => {
-    renderAt('/admin/posts/my-post/edit', '/admin/posts/:slug/edit');
-    expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
-    expect(screen.getByRole('link', { name: 'Posts' })).toHaveAttribute('href', '/admin/posts');
-    expect(screen.getByText('Edit Post')).toBeInTheDocument();
-  });
-
-  // Admin — Services
+  // Admin — Services. "Admin" is a non-clickable label (the /admin blog dashboard
+  // was removed with the blog split), only the leaf identifies the page.
   it('renders Admin › Service Monitor on /admin/status-settings', () => {
     renderAt('/admin/status-settings');
-    expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(screen.getByText('Admin')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
     expect(screen.getByText('Service Monitor')).toBeInTheDocument();
   });
 
   it('renders Admin › Organisations on /admin/security/organizations', () => {
     renderAt('/admin/security/organizations');
-    expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(screen.getByText('Admin')).toBeInTheDocument();
     expect(screen.getByText('Organisations')).toBeInTheDocument();
   });
 
   it('renders Admin › Downloads on /admin/security/downloads', () => {
     renderAt('/admin/security/downloads');
-    expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(screen.getByText('Admin')).toBeInTheDocument();
     expect(screen.getByText('Downloads')).toBeInTheDocument();
   });
 
@@ -85,7 +59,7 @@ describe('Breadcrumb', () => {
 
   // Accessibility
   it('has aria-label="breadcrumb" on the nav element', () => {
-    renderAt('/admin/posts');
+    renderAt('/admin/status-settings');
     expect(screen.getByRole('navigation', { name: /breadcrumb/i })).toBeInTheDocument();
   });
 });
