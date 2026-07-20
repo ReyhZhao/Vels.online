@@ -1,12 +1,12 @@
 # Architecture
 
-How data moves through Vels.online — from raw detection to closed incident — and where the code that does it lives. For the domain language behind these concepts, see [`CONTEXT.md`](../CONTEXT.md) and the decision records in [`docs/adr/`](adr/).
+How data moves through Polaris Security — from raw detection to closed incident — and where the code that does it lives. For the domain language behind these concepts, see [`CONTEXT.md`](../CONTEXT.md) and the decision records in [`docs/adr/`](adr/).
 
 ---
 
 ## How It Works
 
-Everything in Vels.online flows through two stages: detections arrive as **Alerts** and are filtered in the **Alert Ingestion Pipeline**, and the ones that matter become **Incidents** that move through an automated **Incident Lifecycle** — IOC enrichment, two-stage AI triage (a cheap classify plus a confidence-gated **Triage Agent** that works the playbook unattended), on-call routing, and the Incident Assistant — with notifications firing at every meaningful step. Triage is **self-learning**: it carries the SOC's past dispositions forward through retrieved **Precedents** and distilled **Triage Lessons**, learned only from human-ratified outcomes.
+Everything in Polaris Security flows through two stages: detections arrive as **Alerts** and are filtered in the **Alert Ingestion Pipeline**, and the ones that matter become **Incidents** that move through an automated **Incident Lifecycle** — IOC enrichment, two-stage AI triage (a cheap classify plus a confidence-gated **Triage Agent** that works the playbook unattended), on-call routing, and the Incident Assistant — with notifications firing at every meaningful step. Triage is **self-learning**: it carries the SOC's past dispositions forward through retrieved **Precedents** and distilled **Triage Lessons**, learned only from human-ratified outcomes.
 
 ```mermaid
 flowchart TD

@@ -1,6 +1,6 @@
 # Correlation Rules: system baseline + per-org overlay
 
-Vels operates the SOC for many tenant organisations. Correlation Rules are owned
+Polaris operates the SOC for many tenant organisations. Correlation Rules are owned
 two ways: **system rules** (authored centrally, `organization = null`, applied to
 every tenant) provide baseline detection coverage so a new tenant gets value on
 day one; **org rules** (`organization` set) let a tenant add their own detections.

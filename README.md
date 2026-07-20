@@ -1,6 +1,6 @@
-# Vels.online
+# Polaris Security
 
-**Vels.online** is a source-available Managed Security Service Provider (MSSP) platform. It gives security teams a unified workspace to monitor infrastructure, respond to incidents, manage vulnerabilities, publish services safely to the internet, and automate repetitive operational work — all from a single multi-tenant application.
+**Polaris Security** is a source-available Managed Security Service Provider (MSSP) platform. It gives security teams a unified workspace to monitor infrastructure, respond to incidents, manage vulnerabilities, publish services safely to the internet, and automate repetitive operational work — all from a single multi-tenant application.
 
 The platform is built around a Wazuh-integrated SOC workflow: detections flow in from Wazuh agents (and other sources) as **Alerts**, get triaged (manually or by an LLM), and are worked to resolution through structured playbooks. Everything is scoped per organisation so an MSSP can manage multiple customers from one deployment.
 
@@ -42,7 +42,7 @@ The platform is built around a Wazuh-integrated SOC workflow: detections flow in
 
 ## What it does
 
-Vels.online turns multi-source security signals into worked, closed incidents. Detections land as **Alerts**, the pipeline filters noise and correlates related signals, and the ones that matter become **Incidents** that flow through IOC enrichment, two-stage AI triage — a cheap classify plus a confidence-gated **Triage Agent** that works the playbook unattended — on-call routing, and an agentic Incident Assistant. Triage is **self-learning**: retrieved **Precedents** and distilled, staff-approved **Triage Lessons** carry the SOC's past dispositions forward, learned only from human-ratified outcomes. See the [architecture overview](docs/architecture.md) for the full picture.
+Polaris Security turns multi-source security signals into worked, closed incidents. Detections land as **Alerts**, the pipeline filters noise and correlates related signals, and the ones that matter become **Incidents** that flow through IOC enrichment, two-stage AI triage — a cheap classify plus a confidence-gated **Triage Agent** that works the playbook unattended — on-call routing, and an agentic Incident Assistant. Triage is **self-learning**: retrieved **Precedents** and distilled, staff-approved **Triage Lessons** carry the SOC's past dispositions forward, learned only from human-ratified outcomes. See the [architecture overview](docs/architecture.md) for the full picture.
 
 Capabilities are documented in depth under **[docs/features](docs/features/)**:
 
@@ -76,8 +76,8 @@ Capabilities are documented in depth under **[docs/features](docs/features/)**:
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-org>/vels-online.git
-cd vels-online
+git clone https://github.com/<your-org>/polaris.git
+cd polaris
 docker compose up --build
 ```
 
