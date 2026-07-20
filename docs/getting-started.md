@@ -1,6 +1,6 @@
 # Getting Started
 
-How to run Vels.online locally, configure it, and deploy it to Kubernetes.
+How to run Polaris Security locally, configure it, and deploy it to Kubernetes.
 
 ---
 
@@ -14,8 +14,8 @@ How to run Vels.online locally, configure it, and deploy it to Kubernetes.
 ## Run locally
 
 ```bash
-git clone https://github.com/<your-org>/vels-online.git
-cd vels-online
+git clone https://github.com/<your-org>/polaris.git
+cd polaris
 docker compose up --build
 ```
 

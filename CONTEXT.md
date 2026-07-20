@@ -1,4 +1,4 @@
-# Vels Online — Security Operations Context
+# Polaris Security — Security Operations Context
 
 The domain language for turning multi-source security signals into actionable
 investigations: alerts arrive, get correlated, and become incidents that analysts work.
@@ -35,7 +35,7 @@ A single triggering of a Correlation Rule for one Correlation Key value, recorde
 _Avoid_: Match, Hit, Trigger (use "trigger" only as the verb).
 
 **System Rule**:
-A Correlation Rule authored centrally by the Vels SOC (`organization = null`) and applied to every tenant as baseline detection. Tenants cannot edit it but can **mute** it for themselves. See [ADR-0003](docs/adr/0003-system-baseline-plus-per-org-overlay-rules.md).
+A Correlation Rule authored centrally by the Polaris SOC (`organization = null`) and applied to every tenant as baseline detection. Tenants cannot edit it but can **mute** it for themselves. See [ADR-0003](docs/adr/0003-system-baseline-plus-per-org-overlay-rules.md).
 
 **Org Rule**:
 A Correlation Rule a tenant authors for its own organisation (`organization` set).
