@@ -18,7 +18,7 @@ function Footer() {
   return (
     <footer className="border-t border-border">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <p className="text-sm text-muted-foreground">© {year} vels.online</p>
+        <p className="text-sm text-muted-foreground">© {year} Polaris Security</p>
         <a
           href="https://www.linkedin.com/in/eddievels/"
           target="_blank"

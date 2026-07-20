@@ -11,14 +11,14 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: vels-online-dashboard
+  name: polaris-dashboard
   labels:
     {{- toYaml .Values.monitoring.grafanaDashboardLabel | nindent 4 }}
 data:
-  vels-online.json: |
+  polaris.json: |
     {
-      "title": "Vels Online — Platform Operations",
-      "uid": "vels-online-ops",
+      "title": "Polaris Security — Platform Operations",
+      "uid": "polaris-ops",
       "schemaVersion": 39,
       "editable": true,
       "time": { "from": "now-6h", "to": "now" },

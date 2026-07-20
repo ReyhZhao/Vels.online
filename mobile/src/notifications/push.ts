@@ -31,7 +31,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
-      name: 'Vels Online',
+      name: 'Polaris Security',
       importance: Notifications.AndroidImportance.HIGH,
       lightColor: '#3B82F6',
     });

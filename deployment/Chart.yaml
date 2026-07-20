@@ -1,5 +1,5 @@
 apiVersion: v2
-name: vels-online
+name: polaris
 version: 1.0.0
 dependencies:
   - name: valkey

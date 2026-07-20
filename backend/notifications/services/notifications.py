@@ -57,7 +57,7 @@ def notify(category, recipients, *, incident=None, task=None, payload):
         if needs_push:
             from notifications.tasks import send_push_notifications
             send_push_notifications.delay(recipient.id, {
-                "title": payload.get("title", "Vels Online"),
+                "title": payload.get("title", "Polaris Security"),
                 "body": payload.get("body", ""),
                 "url": payload.get("link", "/dashboard"),
             })

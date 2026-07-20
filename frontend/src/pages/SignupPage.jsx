@@ -106,7 +106,7 @@ function SignupPage() {
     <div className="min-h-screen flex items-center justify-center p-6 bg-background">
       <Card className="w-full max-w-lg">
         <CardHeader>
-          <CardTitle className="text-xl">Request access to vels.online</CardTitle>
+          <CardTitle className="text-xl">Request access to Polaris Security</CardTitle>
           <p className="text-sm text-muted-foreground">
             Fill in the form below and our team will review your request.
           </p>

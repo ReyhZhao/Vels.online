@@ -95,7 +95,7 @@ export default function LoginScreen() {
         style={styles.form}
       >
         <Image source={require('@/assets/images/icon.png')} style={styles.logo} />
-        <Text style={styles.title}>Vels Online</Text>
+        <Text style={styles.title}>Polaris Security</Text>
         <Text style={styles.subtitle}>Security Operations</Text>
 
         <Text style={styles.label}>Server</Text>

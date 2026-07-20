@@ -30,7 +30,7 @@ function TopNav({ onMenuClick }) {
             to="/"
             className="text-lg font-semibold tracking-tight text-foreground hover:text-primary transition-colors"
           >
-            vels.online
+            Polaris Security
           </Link>
         </div>
         <nav className="flex items-center gap-6">
