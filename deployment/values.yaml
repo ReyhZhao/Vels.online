@@ -1,17 +1,17 @@
 backend:
   image:
     repository: registry.vels.online/polaris/backend
-    tag: 0.50.1
+    tag: 0.51.0
 frontend:
   image:
     repository: registry.vels.online/polaris/frontend
-    tag: 0.50.1
+    tag: 0.51.0
 # OTA update server for the React Native staff app (mobile/): serves the
 # exported Expo update bundle (iOS + Android Hermes bundles + metadata.json).
 mobile:
   image:
     repository: registry.vels.online/polaris/mobile
-    tag: 0.50.1
+    tag: 0.51.0
 imagePullSecrets:
   - name: registry-credentials
 # Self-hosted Ollama used ONLY for embeddings (issue #657 semantic precedent-recall
