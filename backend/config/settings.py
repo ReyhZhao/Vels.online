@@ -207,8 +207,8 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "Vels Online API",
-    "DESCRIPTION": "API for Vels Online services.",
+    "TITLE": "Polaris Security API",
+    "DESCRIPTION": "API for Polaris Security services.",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }

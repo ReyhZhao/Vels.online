@@ -1,5 +1,5 @@
 {
-  "name": "vels-online-mobile",
+  "name": "polaris-mobile",
   "main": "expo-router/entry",
   "version": "0.1.0",
   "dependencies": {

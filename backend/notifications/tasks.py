@@ -105,7 +105,7 @@ def _send_expo_push(user_id, payload_dict, unread_count):
     messages = [
         {
             "to": t.token,
-            "title": payload_dict.get("title", "Vels Online"),
+            "title": payload_dict.get("title", "Polaris Security"),
             "body": payload_dict.get("body", ""),
             "data": {"url": payload_dict.get("url", "/dashboard")},
             "badge": unread_count,

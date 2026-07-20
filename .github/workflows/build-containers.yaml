@@ -98,7 +98,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: registry.vels.online/vels/backend
+          images: registry.vels.online/polaris/backend
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -137,7 +137,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: registry.vels.online/vels/frontend
+          images: registry.vels.online/polaris/frontend
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -177,7 +177,7 @@ jobs:
   #       id: meta
   #       uses: docker/metadata-action@v5
   #       with:
-  #         images: registry.vels.online/vels/mobile
+  #         images: registry.vels.online/polaris/mobile
   #         tags: |
   #           type=semver,pattern={{version}}
   #           type=semver,pattern={{major}}.{{minor}}

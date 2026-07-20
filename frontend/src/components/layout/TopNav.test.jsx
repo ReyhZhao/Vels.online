@@ -36,7 +36,7 @@ describe('TopNav', () => {
 
   it('renders the site brand link', () => {
     renderTopNav();
-    const brand = screen.getByRole('link', { name: 'vels.online' });
+    const brand = screen.getByRole('link', { name: 'Polaris Security' });
     expect(brand).toBeInTheDocument();
     expect(brand).toHaveAttribute('href', '/');
   });

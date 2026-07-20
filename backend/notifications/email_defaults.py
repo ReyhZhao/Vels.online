@@ -32,7 +32,7 @@ _STYLES = (
 # _FOOTER uses {{ frontend_url }} — a Django template variable rendered at send time.
 _FOOTER = (
     "<td style=\"padding-top:20px;text-align:center;font-size:12px;color:#475569;line-height:1.5;\">"
-    "&copy; vels.online &mdash; "
+    "&copy; Polaris Security &mdash; "
     "<a href=\"{{ frontend_url }}\" style=\"color:#3b82f6;text-decoration:none;\">Open dashboard</a>"
     "</td>"
 )
@@ -55,8 +55,8 @@ def _base(title, content):
         "<table width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:600px;width:100%;\">"
         # Logo row
         "<tr><td style=\"padding-bottom:20px;\">"
-        "<span style=\"font-size:22px;font-weight:700;color:#3b82f6;\">vels"
-        "<span style=\"color:#f0f4ff;\">.online</span></span>"
+        "<span style=\"font-size:22px;font-weight:700;color:#3b82f6;\">Polaris"
+        "<span style=\"color:#f0f4ff;\"> Security</span></span>"
         "</td></tr>"
         # Card row
         "<tr><td style=\"background:#111d35;border:1px solid #1e2d4f;border-radius:8px;padding:32px;\">"
@@ -274,7 +274,7 @@ _PHISHING_DROP_BODY = (
 _TEST_BODY = (
     "<h1>Test email</h1>"
     "<p>Hi {{ recipient_name }},</p>"
-    "<p>This is a test email from <strong style=\"color:#f0f4ff;\">vels.online</strong> "
+    "<p>This is a test email from <strong style=\"color:#f0f4ff;\">Polaris Security</strong> "
     "confirming that email delivery is working correctly.</p>"
     "<hr class=\"divider\">"
     "<p style=\"font-size:13px;color:#64748b;\">No action is required. You can safely ignore this message.</p>"
@@ -286,52 +286,52 @@ _TEST_BODY = (
 DEFAULT_TEMPLATES = {
     "notification_digest": {
         "description": "Digest of in-app notifications sent to users",
-        "subject": "{{ count }} notification{{ count|pluralize }} from vels.online",
+        "subject": "{{ count }} notification{{ count|pluralize }} from Polaris Security",
         "html_body": _base("Notifications", _NOTIF_DIGEST_BODY),
     },
     "incident_digest": {
         "description": "Daily digest of active incidents sent to assignees",
-        "subject": "[vels.online] Incident digest: {{ count }} {{ noun }} assigned to you",
+        "subject": "[Polaris Security] Incident digest: {{ count }} {{ noun }} assigned to you",
         "html_body": _base("Incident digest", _INCIDENT_DIGEST_BODY),
     },
     "invite": {
         "description": "Account invitation sent when a signup request is approved",
-        "subject": "Your invitation to vels.online",
+        "subject": "Your invitation to Polaris Security",
         "html_body": _base("You're invited", _INVITE_BODY),
     },
     "rejection": {
         "description": "Sent to the applicant when a signup request is rejected",
-        "subject": "Your signup request to vels.online",
+        "subject": "Your signup request to Polaris Security",
         "html_body": _base("Signup request update", _REJECTION_BODY),
     },
     "signup_request": {
         "description": "Sent to staff when a new signup request is submitted",
-        "subject": "[vels.online] New signup request: {{ org_name }}",
+        "subject": "[Polaris Security] New signup request: {{ org_name }}",
         "html_body": _base("New signup request", _SIGNUP_REQUEST_BODY),
     },
     "contact_notified": {
         "description": "Sent to a contact when they are linked to an incident with role=notified",
-        "subject": "[vels.online] Security incident notification: {{ display_id }}",
+        "subject": "[Polaris Security] Security incident notification: {{ display_id }}",
         "html_body": _base("Security incident notification", _CONTACT_NOTIFIED_BODY),
     },
     "contact_update": {
         "description": "Sent to an all-updates contact when an analyst posts a customer-facing comment",
-        "subject": "[vels.online] Security incident update: {{ display_id }}",
+        "subject": "[Polaris Security] Security incident update: {{ display_id }}",
         "html_body": _base("Security incident update", _CONTACT_UPDATE_BODY),
     },
     "contact_questioned": {
         "description": "Sent to a contact when they are linked to an incident with role=questioned",
-        "subject": "[vels.online] Security incident — your input requested: {{ display_id }}",
+        "subject": "[Polaris Security] Security incident — your input requested: {{ display_id }}",
         "html_body": _base("Security incident — your input requested", _CONTACT_QUESTIONED_BODY),
     },
     "phishing_drop_notification": {
         "description": "Sent to a known contact when their forwarded phishing report could not be processed",
-        "subject": "[vels.online] Security report — unable to process",
+        "subject": "[Polaris Security] Security report — unable to process",
         "html_body": _base("Security report — unable to process", _PHISHING_DROP_BODY),
     },
     "test": {
         "description": "Test email sent from the admin dashboard",
-        "subject": "[vels.online] Test email",
+        "subject": "[Polaris Security] Test email",
         "html_body": _base("Test email", _TEST_BODY),
     },
 }

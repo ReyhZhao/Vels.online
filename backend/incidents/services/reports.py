@@ -27,7 +27,7 @@ from .report_sections import SECTION_TITLES, render_section
 logger = logging.getLogger(__name__)
 
 # SOC/platform branding used as letterhead (no per-org logo in v1).
-SOC_BRAND = "Vels Online · Security Operations Centre"
+SOC_BRAND = "Polaris Security · Security Operations Centre"
 
 
 class ReportGenerationError(Exception):

@@ -1,5 +1,5 @@
 {
-  "name": "vels-online",
+  "name": "polaris",
   "version": "0.1.0",
   "scripts": {
     "sandcastle": "npx tsx .sandcastle/main.mts"

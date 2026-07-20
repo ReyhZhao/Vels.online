@@ -4,12 +4,12 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: vels-online
+  name: polaris
   labels:
     {{- toYaml .Values.monitoring.selectorLabels | nindent 4 }}
 spec:
   groups:
-    - name: vels-online.web
+    - name: polaris.web
       rules:
         - alert: BackendMetricsDown
           expr: up{service="backend-metrics"} == 0
@@ -29,7 +29,7 @@ spec:
           annotations:
             summary: "High 5xx error rate on the API"
             description: "More than 5% of HTTP responses are 5xx over the last 10m."
-    - name: vels-online.celery
+    - name: polaris.celery
       rules:
         - alert: CeleryTaskBacklog
           expr: sum(celery_queue_length) > 100
@@ -49,7 +49,7 @@ spec:
           annotations:
             summary: "High Celery task failure rate"
             description: "More than 10% of Celery tasks have failed over the last 10m."
-    - name: vels-online.platform
+    - name: polaris.platform
       rules:
         - alert: PodCrashLooping
           expr: |

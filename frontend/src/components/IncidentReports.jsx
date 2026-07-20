@@ -386,7 +386,7 @@ export default function IncidentReports({ incidentId }) {
                 mobilePane === 'preview' ? '' : 'hidden'
               } lg:block`}
             >
-              <div className="rp-letterhead"><span className="rp-brand">Vels Online · Security Operations Centre</span></div>
+              <div className="rp-letterhead"><span className="rp-brand">Polaris Security · Security Operations Centre</span></div>
               <h1 className="mt-2">Report preview</h1>
 
               <PreviewEditable

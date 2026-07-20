@@ -38,8 +38,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['apple-touch-icon.png'],
       manifest: {
-        name: 'Vels Online',
-        short_name: 'Vels',
+        name: 'Polaris Security',
+        short_name: 'Polaris',
         description: 'Security monitoring and incident management',
         start_url: '/dashboard',
         display: 'standalone',
