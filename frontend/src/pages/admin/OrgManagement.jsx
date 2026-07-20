@@ -1,9 +1,13 @@
-import { useEffect, useState } from 'react';
-import { Shield, ChevronDown, ChevronRight, UserPlus, X } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Shield, ChevronRight, UserPlus, X, Search, Users, SlidersHorizontal,
+  Network, ListFilter, Plus,
+} from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
 import api from '@/lib/axios';
 
 const ROLE_LABELS = { member: 'Member', staff: 'Staff', admin: 'Admin' };
@@ -12,6 +16,20 @@ const STATUS_CLASSES = {
   accepted: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
   expired:  'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
+const PROMPT_MAX = 4000;
+
+function SavedFlash({ saved, error }) {
+  if (error) return <p className="text-xs text-destructive">{error}</p>;
+  if (saved) return <p className="text-xs text-green-600 dark:text-green-400">Saved.</p>;
+  return null;
+}
+
+function InfraBadge({ org }) {
+  if (!org.is_infrastructure) return null;
+  return <Badge variant="secondary" className="text-[10px]">Infrastructure</Badge>;
+}
+
+/* ---------------------------------------------------------- Users section */
 
 function InviteDialog({ org, onClose, onCreated }) {
   const [email, setEmail] = useState('');
@@ -104,546 +122,497 @@ function InviteDialog({ org, onClose, onCreated }) {
   );
 }
 
-const PROMPT_MAX = 4000;
-
-function OrgRow({ org }) {
-  const [expanded, setExpanded] = useState(false);
+function UsersSection({ org }) {
   const [invitations, setInvitations] = useState(null);
-  const [loadingInvites, setLoadingInvites] = useState(false);
-  const [showInviteDialog, setShowInviteDialog] = useState(false);
-  const [triageContext, setTriageContext] = useState(org.triage_prompt_context ?? '');
-  const [fpThreshold, setFpThreshold] = useState(org.triage_fp_threshold ?? 0.95);
-  const [workThreshold, setWorkThreshold] = useState(org.triage_work_threshold ?? 0.95);
-  const [savingTriage, setSavingTriage] = useState(false);
-  const [triageSaveError, setTriageSaveError] = useState(null);
-  const [triageSaved, setTriageSaved] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
 
-  const [alertLookback, setAlertLookback] = useState(org.alert_match_lookback_days ?? 30);
-  const [alertThreshold, setAlertThreshold] = useState(org.alert_auto_promote_threshold ?? 5);
-  const [alertWindow, setAlertWindow] = useState(org.alert_auto_promote_window_minutes ?? 60);
-  const [timezone, setTimezone] = useState(org.timezone ?? 'UTC');
-  const [savingAlerts, setSavingAlerts] = useState(false);
-  const [alertSaveError, setAlertSaveError] = useState(null);
-  const [alertSaved, setAlertSaved] = useState(false);
+  useEffect(() => {
+    if (org.is_infrastructure) return;
+    let live = true;
+    setLoading(true);
+    api.get(`/api/security/organizations/${org.slug}/invite/`)
+      .then(res => { if (live) setInvitations(res.data); })
+      .catch(() => { if (live) setInvitations([]); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [org.slug, org.is_infrastructure]);
 
-  const [internalRanges, setInternalRanges] = useState((org.internal_ip_ranges ?? []).join('\n'));
-  const [ownedDomains, setOwnedDomains] = useState((org.owned_domains ?? []).join('\n'));
-  const [savingIoc, setSavingIoc] = useState(false);
-  const [iocSaveError, setIocSaveError] = useState(null);
-  const [iocSaved, setIocSaved] = useState(false);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">Members &amp; invitations</h3>
+        {/* The Infrastructure pseudo-org (ADR-0017) has no members — invite does
+            not apply to it. Its per-org settings stay editable under the other tabs. */}
+        {!org.is_infrastructure && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowDialog(true)}
+            aria-label={`Invite user to ${org.name}`}
+          >
+            <UserPlus className="h-3.5 w-3.5 mr-1" /> Invite
+          </Button>
+        )}
+      </div>
 
-  const [systemRules, setSystemRules] = useState(null);
-  const [loadingSystemRules, setLoadingSystemRules] = useState(false);
-  const [muteTogglingId, setMuteTogglingId] = useState(null);
+      {org.is_infrastructure && (
+        <p className="text-sm text-muted-foreground">The Infrastructure organisation has no members.</p>
+      )}
+      {loading && <p className="text-sm text-muted-foreground">Loading invitations…</p>}
+      {!loading && invitations !== null && invitations.length === 0 && !org.is_infrastructure && (
+        <p className="text-sm text-muted-foreground">No invitations yet.</p>
+      )}
 
-  const [systemSearchRules, setSystemSearchRules] = useState(null);
-  const [loadingSystemSearchRules, setLoadingSystemSearchRules] = useState(false);
-  const [searchMuteTogglingId, setSearchMuteTogglingId] = useState(null);
+      {!loading && invitations && invitations.length > 0 && (
+        <>
+          {/* Mobile card list */}
+          <div className="space-y-2 sm:hidden">
+            {invitations.map(inv => (
+              <div key={inv.id} className="rounded-md border border-border p-3 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="break-all font-medium text-foreground">{inv.email}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[inv.status] ?? ''}`}>
+                    {inv.status}
+                  </span>
+                </div>
+                <p className="text-muted-foreground">
+                  {inv.full_name} · {ROLE_LABELS[inv.role] ?? inv.role}
+                </p>
+              </div>
+            ))}
+          </div>
 
-  async function loadInvitations() {
-    if (invitations !== null) return;
-    setLoadingInvites(true);
-    try {
-      const res = await api.get(`/api/security/organizations/${org.slug}/invite/`);
-      setInvitations(res.data);
-    } catch {
-      setInvitations([]);
-    } finally {
-      setLoadingInvites(false);
-    }
-  }
+          {/* Desktop table */}
+          <table className="hidden w-full text-sm sm:table" aria-label={`Invitations for ${org.name}`}>
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="pb-1.5 font-medium">Email</th>
+                <th className="pb-1.5 font-medium">Name</th>
+                <th className="pb-1.5 font-medium">Role</th>
+                <th className="pb-1.5 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invitations.map(inv => (
+                <tr key={inv.id} className="border-b border-border/50 last:border-0">
+                  <td className="py-1.5 break-all text-foreground">{inv.email}</td>
+                  <td className="py-1.5 text-muted-foreground">{inv.full_name}</td>
+                  <td className="py-1.5 text-muted-foreground">{ROLE_LABELS[inv.role] ?? inv.role}</td>
+                  <td className="py-1.5">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[inv.status] ?? ''}`}>
+                      {inv.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
-  async function loadSystemRules() {
-    if (systemRules !== null) return;
-    setLoadingSystemRules(true);
-    try {
-      const res = await api.get(`/api/correlations/org-system-rules/?org=${org.slug}`);
-      setSystemRules(res.data);
-    } catch {
-      setSystemRules([]);
-    } finally {
-      setLoadingSystemRules(false);
-    }
-  }
+      {showDialog && (
+        <InviteDialog
+          org={org}
+          onClose={() => setShowDialog(false)}
+          onCreated={inv => setInvitations(prev => [inv, ...(prev ?? [])])}
+        />
+      )}
+    </div>
+  );
+}
 
-  async function handleToggleMute(rule) {
-    setMuteTogglingId(rule.id);
-    try {
-      if (rule.muted) {
-        await api.delete(`/api/correlations/org-system-rules/${rule.id}/mute/?org=${org.slug}`);
-      } else {
-        await api.post(`/api/correlations/org-system-rules/${rule.id}/mute/`, { org: org.slug });
-      }
-      setSystemRules(prev =>
-        prev.map(r => (r.id === rule.id ? { ...r, muted: !r.muted } : r))
-      );
-    } catch {
-      // leave state unchanged on error
-    } finally {
-      setMuteTogglingId(null);
-    }
-  }
+/* -------------------------------------------------------- AI Triage section */
 
-  async function loadSystemSearchRules() {
-    if (systemSearchRules !== null) return;
-    setLoadingSystemSearchRules(true);
-    try {
-      const res = await api.get(`/api/correlations/org-system-search-rules/?org=${org.slug}`);
-      setSystemSearchRules(res.data);
-    } catch {
-      setSystemSearchRules([]);
-    } finally {
-      setLoadingSystemSearchRules(false);
-    }
-  }
+function TriageSection({ org }) {
+  const [context, setContext] = useState(org.triage_prompt_context ?? '');
+  const [fp, setFp] = useState(org.triage_fp_threshold ?? 0.95);
+  const [work, setWork] = useState(org.triage_work_threshold ?? 0.95);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
 
-  async function handleToggleSearchMute(rule) {
-    setSearchMuteTogglingId(rule.id);
-    try {
-      if (rule.muted) {
-        await api.delete(`/api/correlations/org-system-search-rules/${rule.id}/mute/?org=${org.slug}`);
-      } else {
-        await api.post(`/api/correlations/org-system-search-rules/${rule.id}/mute/`, { org: org.slug });
-      }
-      setSystemSearchRules(prev =>
-        prev.map(r => (r.id === rule.id ? { ...r, muted: !r.muted } : r))
-      );
-    } catch {
-      // leave state unchanged on error
-    } finally {
-      setSearchMuteTogglingId(null);
-    }
-  }
-
-  function handleToggle() {
-    if (!expanded) {
-      loadInvitations();
-      loadSystemRules();
-      loadSystemSearchRules();
-    }
-    setExpanded(v => !v);
-  }
-
-  function handleInviteCreated(inv) {
-    setInvitations(prev => [inv, ...(prev ?? [])]);
-  }
-
-  async function handleSaveTriage(e) {
+  async function save(e) {
     e.preventDefault();
-    setSavingTriage(true);
-    setTriageSaveError(null);
-    setTriageSaved(false);
+    setSaving(true); setError(null); setSaved(false);
     try {
       await api.patch(`/api/security/organizations/${org.slug}/`, {
-        triage_prompt_context: triageContext || null,
-        triage_fp_threshold: Number(fpThreshold),
-        triage_work_threshold: Number(workThreshold),
+        triage_prompt_context: context || null,
+        triage_fp_threshold: Number(fp),
+        triage_work_threshold: Number(work),
       });
-      setTriageSaved(true);
+      setSaved(true);
     } catch (err) {
-      setTriageSaveError(err.response?.data?.triage_prompt_context?.[0] ?? 'Failed to save.');
+      setError(err.response?.data?.triage_prompt_context?.[0] ?? 'Failed to save.');
     } finally {
-      setSavingTriage(false);
+      setSaving(false);
     }
   }
 
-  async function handleSaveAlertSettings(e) {
-    e.preventDefault();
-    setSavingAlerts(true);
-    setAlertSaveError(null);
-    setAlertSaved(false);
-    try {
-      await api.patch(`/api/security/organizations/${org.slug}/`, {
-        alert_match_lookback_days: Number(alertLookback),
-        alert_auto_promote_threshold: Number(alertThreshold),
-        alert_auto_promote_window_minutes: Number(alertWindow),
-        timezone: timezone.trim() || 'UTC',
-      });
-      setAlertSaved(true);
-    } catch (err) {
-      setAlertSaveError(err.response?.data?.timezone?.[0] ?? 'Failed to save alert settings.');
-    } finally {
-      setSavingAlerts(false);
-    }
-  }
+  return (
+    <form onSubmit={save} className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium text-foreground" htmlFor={`triage-context-${org.slug}`}>
+          Custom triage instructions
+        </label>
+        <span className={`text-xs ${context.length > PROMPT_MAX ? 'text-destructive' : 'text-muted-foreground'}`}>
+          {context.length} / {PROMPT_MAX}
+        </span>
+      </div>
+      <Textarea
+        id={`triage-context-${org.slug}`}
+        rows={4}
+        placeholder="e.g. We are a healthcare provider. Treat PHI-related alerts as critical. Ignore SSH from 10.0.0.5 (jump host)."
+        value={context}
+        onChange={e => { setContext(e.target.value); setSaved(false); }}
+        disabled={saving}
+        className="text-sm resize-y"
+      />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor={`triage-fp-${org.slug}`}>
+            False-positive auto-close threshold
+          </label>
+          <input
+            id={`triage-fp-${org.slug}`}
+            type="number" min="0" max="1" step="0.01"
+            value={fp}
+            onChange={e => { setFp(e.target.value); setSaved(false); }}
+            disabled={saving}
+            className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor={`triage-work-${org.slug}`}>
+            Agentic work-confidence threshold
+          </label>
+          <input
+            id={`triage-work-${org.slug}`}
+            type="number" min="0" max="1" step="0.01"
+            value={work}
+            onChange={e => { setWork(e.target.value); setSaved(false); }}
+            disabled={saving}
+            className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Minimum confidence before the Triage Agent works the incident unattended.
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center justify-between pt-1">
+        <SavedFlash saved={saved} error={error} />
+        <Button type="submit" size="sm" disabled={saving || context.length > PROMPT_MAX}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </form>
+  );
+}
 
-  async function handleSaveIocExclusions(e) {
+/* -------------------------------------------------- Network & Alerts section */
+
+function IocSettings({ org }) {
+  const [ranges, setRanges] = useState((org.internal_ip_ranges ?? []).join('\n'));
+  const [domains, setDomains] = useState((org.owned_domains ?? []).join('\n'));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save(e) {
     e.preventDefault();
-    setSavingIoc(true);
-    setIocSaveError(null);
-    setIocSaved(false);
-    const toList = (text) => text.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    setSaving(true); setError(null); setSaved(false);
+    const toList = t => t.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
     try {
       await api.patch(`/api/security/organizations/${org.slug}/`, {
-        internal_ip_ranges: toList(internalRanges),
-        owned_domains: toList(ownedDomains),
+        internal_ip_ranges: toList(ranges),
+        owned_domains: toList(domains),
       });
-      setIocSaved(true);
+      setSaved(true);
     } catch (err) {
-      setIocSaveError(
+      setError(
         err.response?.data?.internal_ip_ranges?.[0]
         ?? err.response?.data?.owned_domains?.[0]
         ?? 'Failed to save IOC exclusions.'
       );
     } finally {
-      setSavingIoc(false);
+      setSaving(false);
     }
   }
 
   return (
-    <>
-      <tr className="border-b last:border-0">
-        <td className="py-3 font-medium text-foreground">
-          <span className="inline-flex items-center gap-2">
-            {org.name}
-            {org.is_infrastructure && (
-              <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
-                Infrastructure
-              </span>
-            )}
-          </span>
-        </td>
-        <td className="py-3 font-mono text-sm text-muted-foreground">{org.slug}</td>
-        <td className="py-3 font-mono text-sm text-muted-foreground">{org.wazuh_group}</td>
-        <td className="py-3 text-right">
-          <div className="flex items-center justify-end gap-2">
-            {/* The Infrastructure pseudo-org (ADR-0017) has no members — invite
-                does not apply to it. Its per-org settings (AI-triage thresholds)
-                remain editable via the expand row below. */}
-            {!org.is_infrastructure && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setShowInviteDialog(true)}
-                aria-label={`Invite user to ${org.name}`}
-              >
-                <UserPlus className="h-3.5 w-3.5 mr-1" />
-                Invite
-              </Button>
-            )}
-            <button
-              onClick={handleToggle}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-              aria-label={expanded ? `Collapse ${org.name} invitations` : `Expand ${org.name} invitations`}
-            >
-              {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </button>
-          </div>
-        </td>
-      </tr>
-
-      {expanded && (
-        <tr className="border-b last:border-0 bg-muted/30">
-          <td colSpan={4} className="px-4 py-3 space-y-4">
-            <div>
-              {loadingInvites && <p className="text-sm text-muted-foreground">Loading invitations…</p>}
-              {!loadingInvites && invitations !== null && invitations.length === 0 && (
-                <p className="text-sm text-muted-foreground">No invitations yet.</p>
-              )}
-              {!loadingInvites && invitations && invitations.length > 0 && (
-                <table className="w-full text-xs" aria-label={`Invitations for ${org.name}`}>
-                  <thead>
-                    <tr className="text-left text-muted-foreground">
-                      <th className="pb-1 font-medium">Email</th>
-                      <th className="pb-1 font-medium">Name</th>
-                      <th className="pb-1 font-medium">Role</th>
-                      <th className="pb-1 font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {invitations.map(inv => (
-                      <tr key={inv.id} className="border-t border-border/50">
-                        <td className="py-1.5 text-foreground">{inv.email}</td>
-                        <td className="py-1.5 text-muted-foreground">{inv.full_name}</td>
-                        <td className="py-1.5 text-muted-foreground">{ROLE_LABELS[inv.role] ?? inv.role}</td>
-                        <td className="py-1.5">
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[inv.status] ?? ''}`}>
-                            {inv.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            <form onSubmit={handleSaveTriage} className="space-y-2 border-t border-border/50 pt-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-foreground" htmlFor={`triage-context-${org.slug}`}>
-                  Custom triage instructions
-                </label>
-                <span className={`text-xs ${triageContext.length > PROMPT_MAX ? 'text-destructive' : 'text-muted-foreground'}`}>
-                  {triageContext.length} / {PROMPT_MAX}
-                </span>
-              </div>
-              <Textarea
-                id={`triage-context-${org.slug}`}
-                rows={4}
-                placeholder="e.g. We are a healthcare provider. Treat PHI-related alerts as critical. Ignore SSH from 10.0.0.5 (jump host)."
-                value={triageContext}
-                onChange={e => { setTriageContext(e.target.value); setTriageSaved(false); }}
-                disabled={savingTriage}
-                className="text-xs resize-y"
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`triage-fp-${org.slug}`}>
-                    False-positive auto-close threshold
-                  </label>
-                  <input
-                    id={`triage-fp-${org.slug}`}
-                    type="number" min="0" max="1" step="0.01"
-                    value={fpThreshold}
-                    onChange={e => { setFpThreshold(e.target.value); setTriageSaved(false); }}
-                    disabled={savingTriage}
-                    className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`triage-work-${org.slug}`}>
-                    Agentic work-confidence threshold
-                  </label>
-                  <input
-                    id={`triage-work-${org.slug}`}
-                    type="number" min="0" max="1" step="0.01"
-                    value={workThreshold}
-                    onChange={e => { setWorkThreshold(e.target.value); setTriageSaved(false); }}
-                    disabled={savingTriage}
-                    className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    Minimum confidence before the Triage Agent works the incident unattended.
-                  </p>
-                </div>
-              </div>
-              {triageSaveError && <p className="text-xs text-destructive">{triageSaveError}</p>}
-              {triageSaved && <p className="text-xs text-green-600 dark:text-green-400">Saved.</p>}
-              <div className="flex justify-end">
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={savingTriage || triageContext.length > PROMPT_MAX}
-                >
-                  {savingTriage ? 'Saving…' : 'Save'}
-                </Button>
-              </div>
-            </form>
-
-            <form onSubmit={handleSaveAlertSettings} className="space-y-3 border-t border-border/50 pt-3 mt-3">
-              <p className="text-xs font-semibold text-foreground uppercase tracking-wider">Alert Settings</p>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`alert-lookback-${org.slug}`}>
-                    Match lookback (days)
-                  </label>
-                  <input
-                    id={`alert-lookback-${org.slug}`}
-                    type="number"
-                    min={1}
-                    value={alertLookback}
-                    onChange={e => { setAlertLookback(e.target.value); setAlertSaved(false); }}
-                    disabled={savingAlerts}
-                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`alert-threshold-${org.slug}`}>
-                    Auto-promote threshold
-                  </label>
-                  <input
-                    id={`alert-threshold-${org.slug}`}
-                    type="number"
-                    min={1}
-                    value={alertThreshold}
-                    onChange={e => { setAlertThreshold(e.target.value); setAlertSaved(false); }}
-                    disabled={savingAlerts}
-                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`alert-window-${org.slug}`}>
-                    Promote window (min)
-                  </label>
-                  <input
-                    id={`alert-window-${org.slug}`}
-                    type="number"
-                    min={1}
-                    value={alertWindow}
-                    onChange={e => { setAlertWindow(e.target.value); setAlertSaved(false); }}
-                    disabled={savingAlerts}
-                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`org-timezone-${org.slug}`}>
-                    Timezone (IANA)
-                  </label>
-                  <input
-                    id={`org-timezone-${org.slug}`}
-                    type="text"
-                    value={timezone}
-                    onChange={e => { setTimezone(e.target.value); setAlertSaved(false); }}
-                    disabled={savingAlerts}
-                    placeholder="e.g. Europe/Amsterdam"
-                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Used to evaluate Scheduled Search Rule time-of-day windows in this org's local time.
-              </p>
-              {alertSaveError && <p className="text-xs text-destructive">{alertSaveError}</p>}
-              {alertSaved && <p className="text-xs text-green-600 dark:text-green-400">Saved.</p>}
-              <div className="flex justify-end">
-                <Button type="submit" size="sm" disabled={savingAlerts}>
-                  {savingAlerts ? 'Saving…' : 'Save alert settings'}
-                </Button>
-              </div>
-            </form>
-
-            <form onSubmit={handleSaveIocExclusions} className="space-y-3 border-t border-border/50 pt-3 mt-3">
-              <p className="text-xs font-semibold text-foreground uppercase tracking-wider">IOC Exclusions</p>
-              <p className="text-xs text-muted-foreground">
-                Indicators inside these internal IP ranges or owned domains are excluded from
-                automatic IOC extraction. One entry per line (or comma-separated).
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`ioc-ranges-${org.slug}`}>
-                    Internal IP ranges (CIDR)
-                  </label>
-                  <Textarea
-                    id={`ioc-ranges-${org.slug}`}
-                    rows={4}
-                    placeholder={'10.0.0.0/8\n192.168.0.0/16\nfd00::/8'}
-                    value={internalRanges}
-                    onChange={e => { setInternalRanges(e.target.value); setIocSaved(false); }}
-                    disabled={savingIoc}
-                    className="text-xs font-mono resize-y"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor={`ioc-domains-${org.slug}`}>
-                    Owned domains
-                  </label>
-                  <Textarea
-                    id={`ioc-domains-${org.slug}`}
-                    rows={4}
-                    placeholder={'corp.example\nexample.com'}
-                    value={ownedDomains}
-                    onChange={e => { setOwnedDomains(e.target.value); setIocSaved(false); }}
-                    disabled={savingIoc}
-                    className="text-xs font-mono resize-y"
-                  />
-                </div>
-              </div>
-              {iocSaveError && <p className="text-xs text-destructive">{iocSaveError}</p>}
-              {iocSaved && <p className="text-xs text-green-600 dark:text-green-400">Saved.</p>}
-              <div className="flex justify-end">
-                <Button type="submit" size="sm" disabled={savingIoc}>
-                  {savingIoc ? 'Saving…' : 'Save IOC exclusions'}
-                </Button>
-              </div>
-            </form>
-
-            <div className="space-y-2 border-t border-border/50 pt-3 mt-3">
-              <p className="text-xs font-semibold text-foreground uppercase tracking-wider">System Rules</p>
-              {loadingSystemRules && <p className="text-sm text-muted-foreground">Loading system rules…</p>}
-              {!loadingSystemRules && systemRules !== null && systemRules.length === 0 && (
-                <p className="text-sm text-muted-foreground">No system rules defined.</p>
-              )}
-              {!loadingSystemRules && systemRules && systemRules.length > 0 && (
-                <table className="w-full text-xs" aria-label={`System rules for ${org.name}`}>
-                  <thead>
-                    <tr className="text-left text-muted-foreground">
-                      <th className="pb-1 font-medium">Rule</th>
-                      <th className="pb-1 font-medium">Severity</th>
-                      <th className="pb-1 font-medium text-right">Mute for this org</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {systemRules.map(rule => (
-                      <tr key={rule.id} className="border-t border-border/50">
-                        <td className="py-1.5 text-foreground">{rule.name}</td>
-                        <td className="py-1.5 text-muted-foreground capitalize">{rule.severity}</td>
-                        <td className="py-1.5 text-right">
-                          <Button
-                            size="sm"
-                            variant={rule.muted ? 'default' : 'outline'}
-                            disabled={muteTogglingId === rule.id}
-                            onClick={() => handleToggleMute(rule)}
-                            aria-label={rule.muted ? `Unmute ${rule.name} for ${org.name}` : `Mute ${rule.name} for ${org.name}`}
-                          >
-                            {muteTogglingId === rule.id ? '…' : rule.muted ? 'Unmute' : 'Mute'}
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            <div className="space-y-2 border-t border-border/50 pt-3 mt-3">
-              <p className="text-xs font-semibold text-foreground uppercase tracking-wider">System Search Rules</p>
-              {loadingSystemSearchRules && <p className="text-sm text-muted-foreground">Loading system search rules…</p>}
-              {!loadingSystemSearchRules && systemSearchRules !== null && systemSearchRules.length === 0 && (
-                <p className="text-sm text-muted-foreground">No system search rules defined.</p>
-              )}
-              {!loadingSystemSearchRules && systemSearchRules && systemSearchRules.length > 0 && (
-                <table className="w-full text-xs" aria-label={`System search rules for ${org.name}`}>
-                  <thead>
-                    <tr className="text-left text-muted-foreground">
-                      <th className="pb-1 font-medium">Rule</th>
-                      <th className="pb-1 font-medium">Severity</th>
-                      <th className="pb-1 font-medium text-right">Mute for this org</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {systemSearchRules.map(rule => (
-                      <tr key={rule.id} className="border-t border-border/50">
-                        <td className="py-1.5 text-foreground">{rule.name}</td>
-                        <td className="py-1.5 text-muted-foreground capitalize">{rule.severity}</td>
-                        <td className="py-1.5 text-right">
-                          <Button
-                            size="sm"
-                            variant={rule.muted ? 'default' : 'outline'}
-                            disabled={searchMuteTogglingId === rule.id}
-                            onClick={() => handleToggleSearchMute(rule)}
-                            aria-label={rule.muted ? `Unmute ${rule.name} for ${org.name}` : `Mute ${rule.name} for ${org.name}`}
-                          >
-                            {searchMuteTogglingId === rule.id ? '…' : rule.muted ? 'Unmute' : 'Mute'}
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </td>
-        </tr>
-      )}
-
-      {showInviteDialog && (
-        <InviteDialog
-          org={org}
-          onClose={() => setShowInviteDialog(false)}
-          onCreated={handleInviteCreated}
-        />
-      )}
-    </>
+    <form onSubmit={save} className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">IOC exclusions</h3>
+        <p className="text-xs text-muted-foreground">
+          Indicators inside these internal IP ranges or owned domains are excluded from
+          automatic IOC extraction. One entry per line (or comma-separated).
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor={`ioc-ranges-${org.slug}`}>
+            Internal IP ranges (CIDR)
+          </label>
+          <Textarea
+            id={`ioc-ranges-${org.slug}`}
+            rows={4}
+            placeholder={'10.0.0.0/8\n192.168.0.0/16\nfd00::/8'}
+            value={ranges}
+            onChange={e => { setRanges(e.target.value); setSaved(false); }}
+            disabled={saving}
+            className="text-xs font-mono resize-y"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor={`ioc-domains-${org.slug}`}>
+            Owned domains
+          </label>
+          <Textarea
+            id={`ioc-domains-${org.slug}`}
+            rows={4}
+            placeholder={'corp.example\nexample.com'}
+            value={domains}
+            onChange={e => { setDomains(e.target.value); setSaved(false); }}
+            disabled={saving}
+            className="text-xs font-mono resize-y"
+          />
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <SavedFlash saved={saved} error={error} />
+        <Button type="submit" size="sm" disabled={saving}>
+          {saving ? 'Saving…' : 'Save IOC exclusions'}
+        </Button>
+      </div>
+    </form>
   );
 }
+
+function AlertSettings({ org }) {
+  const [lookback, setLookback] = useState(org.alert_match_lookback_days ?? 30);
+  const [threshold, setThreshold] = useState(org.alert_auto_promote_threshold ?? 5);
+  const [win, setWin] = useState(org.alert_auto_promote_window_minutes ?? 60);
+  const [tz, setTz] = useState(org.timezone ?? 'UTC');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true); setError(null); setSaved(false);
+    try {
+      await api.patch(`/api/security/organizations/${org.slug}/`, {
+        alert_match_lookback_days: Number(lookback),
+        alert_auto_promote_threshold: Number(threshold),
+        alert_auto_promote_window_minutes: Number(win),
+        timezone: tz.trim() || 'UTC',
+      });
+      setSaved(true);
+    } catch (err) {
+      setError(err.response?.data?.timezone?.[0] ?? 'Failed to save alert settings.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls = 'rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground';
+  const field = (id, label, node) => (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-muted-foreground" htmlFor={id}>{label}</label>
+      {node}
+    </div>
+  );
+
+  return (
+    <form onSubmit={save} className="space-y-3">
+      <h3 className="text-sm font-semibold text-foreground">Alert settings</h3>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {field(`alert-lookback-${org.slug}`, 'Match lookback (days)',
+          <input id={`alert-lookback-${org.slug}`} type="number" min={1} value={lookback}
+            onChange={e => { setLookback(e.target.value); setSaved(false); }} disabled={saving} className={inputCls} />)}
+        {field(`alert-threshold-${org.slug}`, 'Auto-promote threshold',
+          <input id={`alert-threshold-${org.slug}`} type="number" min={1} value={threshold}
+            onChange={e => { setThreshold(e.target.value); setSaved(false); }} disabled={saving} className={inputCls} />)}
+        {field(`alert-window-${org.slug}`, 'Promote window (min)',
+          <input id={`alert-window-${org.slug}`} type="number" min={1} value={win}
+            onChange={e => { setWin(e.target.value); setSaved(false); }} disabled={saving} className={inputCls} />)}
+        {field(`org-timezone-${org.slug}`, 'Timezone (IANA)',
+          <input id={`org-timezone-${org.slug}`} type="text" value={tz} placeholder="e.g. Europe/Amsterdam"
+            onChange={e => { setTz(e.target.value); setSaved(false); }} disabled={saving} className={inputCls} />)}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Used to evaluate Scheduled Search Rule time-of-day windows in this org's local time.
+      </p>
+      <div className="flex items-center justify-between">
+        <SavedFlash saved={saved} error={error} />
+        <Button type="submit" size="sm" disabled={saving}>
+          {saving ? 'Saving…' : 'Save alert settings'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function NetworkSection({ org }) {
+  return (
+    <div className="space-y-6">
+      <IocSettings org={org} />
+      <div className="border-t border-border pt-4">
+        <AlertSettings org={org} />
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------- Detection Rules section */
+
+function RuleMuteTable({ org, title, listUrl, muteUrl, emptyLabel }) {
+  const [rules, setRules] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [togglingId, setTogglingId] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    api.get(`${listUrl}?org=${org.slug}`)
+      .then(res => { if (live) setRules(res.data); })
+      .catch(() => { if (live) setRules([]); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [org.slug, listUrl]);
+
+  async function toggle(rule) {
+    setTogglingId(rule.id);
+    try {
+      if (rule.muted) {
+        await api.delete(`${muteUrl}${rule.id}/mute/?org=${org.slug}`);
+      } else {
+        await api.post(`${muteUrl}${rule.id}/mute/`, { org: org.slug });
+      }
+      setRules(prev => prev.map(r => (r.id === rule.id ? { ...r, muted: !r.muted } : r)));
+    } catch {
+      // leave state unchanged on error
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {!loading && rules !== null && rules.length === 0 && (
+        <p className="text-sm text-muted-foreground">{emptyLabel}</p>
+      )}
+      {!loading && rules && rules.length > 0 && (
+        <table className="w-full text-sm" aria-label={`${title} for ${org.name}`}>
+          <thead>
+            <tr className="border-b text-left text-muted-foreground">
+              <th className="pb-1.5 font-medium">Rule</th>
+              <th className="pb-1.5 font-medium">Severity</th>
+              <th className="pb-1.5 font-medium text-right">Mute for this org</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rules.map(rule => (
+              <tr key={rule.id} className="border-b border-border/50 last:border-0">
+                <td className="py-1.5 text-foreground">{rule.name}</td>
+                <td className="py-1.5 text-muted-foreground capitalize">{rule.severity}</td>
+                <td className="py-1.5 text-right">
+                  <Button
+                    size="sm"
+                    variant={rule.muted ? 'default' : 'outline'}
+                    disabled={togglingId === rule.id}
+                    onClick={() => toggle(rule)}
+                    aria-label={rule.muted ? `Unmute ${rule.name} for ${org.name}` : `Mute ${rule.name} for ${org.name}`}
+                  >
+                    {togglingId === rule.id ? '…' : rule.muted ? 'Unmute' : 'Mute'}
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function RulesSection({ org }) {
+  return (
+    <div className="space-y-6">
+      <RuleMuteTable
+        org={org}
+        title="System Rules"
+        emptyLabel="No system rules defined."
+        listUrl="/api/correlations/org-system-rules/"
+        muteUrl="/api/correlations/org-system-rules/"
+      />
+      <RuleMuteTable
+        org={org}
+        title="System Search Rules"
+        emptyLabel="No system search rules defined."
+        listUrl="/api/correlations/org-system-search-rules/"
+        muteUrl="/api/correlations/org-system-search-rules/"
+      />
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------- tab catalogue */
+
+const SECTIONS = [
+  { key: 'users',   label: 'Users',            icon: Users,            render: org => <UsersSection org={org} /> },
+  { key: 'triage',  label: 'AI Triage',        icon: SlidersHorizontal, render: org => <TriageSection org={org} /> },
+  { key: 'rules',   label: 'Detection Rules',  icon: ListFilter,       render: org => <RulesSection org={org} /> },
+  { key: 'network', label: 'Network & Alerts', icon: Network,          render: org => <NetworkSection org={org} /> },
+];
+
+/* --------------------------------------------------------------- rail + create */
+
+function CreateOrgInline({ onCreated }) {
+  const [name, setName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  function submit(e) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    api.post('/api/security/organizations/', { name: name.trim() })
+      .then(res => { onCreated(res.data); setName(''); })
+      .catch(err => setError(err.response?.data?.detail ?? 'Failed to create organisation.'))
+      .finally(() => setSubmitting(false));
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-1">
+      <div className="flex items-center gap-2">
+        <Input
+          placeholder="Organisation name"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          disabled={submitting}
+        />
+        <Button type="submit" size="sm" disabled={submitting || !name.trim()}>
+          {submitting ? '…' : <><Plus className="h-4 w-4 mr-1" />Create</>}
+        </Button>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </form>
+  );
+}
+
+/* --------------------------------------------------------------------- page */
 
 function OrgManagement() {
   const [orgs, setOrgs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [name, setName] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [section, setSection] = useState('users');
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     api
@@ -651,91 +620,135 @@ function OrgManagement() {
       // notably the AI-triage thresholds — are editable from this page. Other
       // callers keep the default tenants-only listing.
       .get('/api/security/organizations/?include_infrastructure=1')
-      .then((res) => setOrgs(res.data))
+      .then((res) => {
+        setOrgs(res.data);
+        setSelectedId(prev => prev ?? res.data[0]?.id ?? null);
+      })
       .catch(() => setError('Failed to load organisations.'))
       .finally(() => setIsLoading(false));
   }, []);
 
-  function handleCreate(e) {
-    e.preventDefault();
-    if (!name.trim()) return;
-
-    setSubmitting(true);
-    setFormError(null);
-
-    api
-      .post('/api/security/organizations/', { name: name.trim() })
-      .then((res) => {
-        setOrgs((prev) => [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name)));
-        setName('');
-      })
-      .catch((err) => {
-        const detail = err.response?.data?.detail ?? 'Failed to create organisation.';
-        setFormError(detail);
-      })
-      .finally(() => setSubmitting(false));
+  function handleCreated(org) {
+    setOrgs(prev => [...prev, org].sort((a, b) => a.name.localeCompare(b.name)));
+    setSelectedId(org.id);
+    setSection('users');
   }
+
+  const filtered = useMemo(
+    () => orgs.filter(o => o.name.toLowerCase().includes(query.toLowerCase())),
+    [orgs, query]
+  );
+  const selected = orgs.find(o => o.id === selectedId) ?? null;
 
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Organisations</h1>
         <p className="text-sm text-muted-foreground">
-          Manage customer organisations and their Wazuh agent groups.
+          Manage customer organisations, their members, and per-org settings.
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Add Organisation</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleCreate} className="flex items-start gap-3">
-            <div className="flex-1 space-y-1">
-              <Input
-                placeholder="Organisation name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={submitting}
-              />
-              {formError && <p className="text-sm text-destructive">{formError}</p>}
-            </div>
-            <Button type="submit" disabled={submitting || !name.trim()}>
-              {submitting ? 'Creating…' : 'Create'}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">All Organisations</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {!isLoading && !error && orgs.length === 0 && (
+      {!isLoading && !error && orgs.length === 0 && (
+        <Card>
+          <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-muted-foreground">No organisations yet.</p>
-          )}
-          {!isLoading && !error && orgs.length > 0 && (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="pb-2 font-medium">Name</th>
-                  <th className="pb-2 font-medium">Slug</th>
-                  <th className="pb-2 font-medium">Wazuh group</th>
-                  <th className="pb-2 font-medium" />
-                </tr>
-              </thead>
-              <tbody>
-                {orgs.map((org) => (
-                  <OrgRow key={org.id} org={org} />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CardContent>
-      </Card>
+            <CreateOrgInline onCreated={handleCreated} />
+          </CardContent>
+        </Card>
+      )}
+
+      {!isLoading && !error && orgs.length > 0 && (
+        <div className="flex flex-col gap-4 lg:h-[calc(100vh-12rem)] lg:flex-row">
+          {/* Rail */}
+          <div className="flex w-full flex-col rounded-lg border border-border bg-card lg:w-80 lg:shrink-0">
+            <div className="space-y-2 border-b border-border p-3">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search organisations"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  className="pl-8"
+                  aria-label="Search organisations"
+                />
+              </div>
+              <CreateOrgInline onCreated={handleCreated} />
+            </div>
+            <div className="max-h-72 flex-1 overflow-y-auto p-2 lg:max-h-none">
+              {filtered.map(org => (
+                <button
+                  key={org.id}
+                  onClick={() => setSelectedId(org.id)}
+                  aria-current={org.id === selectedId ? 'true' : undefined}
+                  className={`mb-1 flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left transition-colors ${
+                    org.id === selectedId ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'
+                  }`}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-foreground">{org.name}</span>
+                    <span className="block truncate font-mono text-xs text-muted-foreground">{org.slug}</span>
+                  </span>
+                  {org.is_infrastructure
+                    ? <Shield className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-label="Infrastructure" />
+                    : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <p className="p-3 text-sm text-muted-foreground">No matches.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Detail */}
+          <div className="flex min-w-0 flex-1 flex-col rounded-lg border border-border bg-card">
+            {!selected ? (
+              <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+                Select an organisation.
+              </div>
+            ) : (
+              <>
+                <div className="border-b border-border p-4">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-semibold text-foreground">{selected.name}</h2>
+                    <InfraBadge org={selected} />
+                  </div>
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {selected.slug}{selected.wazuh_group ? ` · wazuh: ${selected.wazuh_group}` : ''}
+                  </p>
+                </div>
+                <div className="flex gap-1 overflow-x-auto border-b border-border px-2">
+                  {SECTIONS.map(s => {
+                    const Icon = s.icon;
+                    return (
+                      <button
+                        key={s.key}
+                        onClick={() => setSection(s.key)}
+                        aria-current={section === s.key ? 'page' : undefined}
+                        className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
+                          section === s.key
+                            ? 'border-foreground text-foreground'
+                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4" />{s.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {/* Key on org id so switching orgs remounts the section with fresh
+                    form state rather than carrying over the previous org's values. */}
+                <div key={selected.id} className="flex-1 overflow-y-auto p-4">
+                  {SECTIONS.find(s => s.key === section)?.render(selected)}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
