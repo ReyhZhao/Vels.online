@@ -2,14 +2,10 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 
 function buildCrumbs(pathname, params) {
   if (pathname.startsWith('/admin')) {
-    if (pathname === '/admin') return [{ label: 'Admin', to: null }];
-    if (pathname === '/admin/posts') return [{ label: 'Admin', to: '/admin' }, { label: 'Posts', to: null }];
-    if (pathname === '/admin/posts/new') return [{ label: 'Admin', to: '/admin' }, { label: 'Posts', to: '/admin/posts' }, { label: 'New Post', to: null }];
-    if (pathname.endsWith('/edit')) return [{ label: 'Admin', to: '/admin' }, { label: 'Posts', to: '/admin/posts' }, { label: 'Edit Post', to: null }];
-    if (pathname === '/admin/status-settings') return [{ label: 'Admin', to: '/admin' }, { label: 'Service Monitor', to: null }];
-    if (pathname === '/admin/security/organizations') return [{ label: 'Admin', to: '/admin' }, { label: 'Organisations', to: null }];
-    if (pathname === '/admin/security/service-accounts') return [{ label: 'Admin', to: '/admin' }, { label: 'Service Accounts', to: null }];
-    if (pathname === '/admin/security/downloads') return [{ label: 'Admin', to: '/admin' }, { label: 'Downloads', to: null }];
+    if (pathname === '/admin/status-settings') return [{ label: 'Admin', to: null }, { label: 'Service Monitor', to: null }];
+    if (pathname === '/admin/security/organizations') return [{ label: 'Admin', to: null }, { label: 'Organisations', to: null }];
+    if (pathname === '/admin/security/service-accounts') return [{ label: 'Admin', to: null }, { label: 'Service Accounts', to: null }];
+    if (pathname === '/admin/security/downloads') return [{ label: 'Admin', to: null }, { label: 'Downloads', to: null }];
   }
 
   if (pathname.startsWith('/security')) {

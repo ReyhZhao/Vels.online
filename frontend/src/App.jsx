@@ -1,14 +1,8 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route, Outlet } from 'react-router-dom';
+import { Routes, Route, Outlet, Navigate } from 'react-router-dom';
 import PublicLayout from './components/layout/PublicLayout';
 import AppLayout from './components/layout/AppLayout';
-import LandingPage from './pages/LandingPage';
-import BlogIndexPage from './pages/BlogIndexPage';
-import PostDetail from './pages/PostDetail';
 import StatusPage from './pages/StatusPage';
-import AdminDashboard from './pages/admin/AdminDashboard';
-import AdminPostList from './pages/AdminPostList';
-import AdminPostForm from './pages/AdminPostForm';
 import StatusSettings from './pages/admin/StatusSettings';
 import OrgManagement from './pages/admin/OrgManagement';
 import ServiceAccountsAdmin from './pages/admin/ServiceAccountsAdmin';
@@ -64,21 +58,17 @@ function App() {
   return (
     <Routes>
       <Route element={<PublicLayout />}>
-        <Route path="/" element={<LandingPage />} />
         <Route path="/signup" element={<SignupPage />} />
-        <Route path="/blog" element={<BlogIndexPage />} />
         <Route path="/status" element={<StatusPage />} />
-        <Route path="/:slug" element={<PostDetail />} />
       </Route>
 
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+        {/* Login-first front door: authenticated users land on the dashboard;
+            ProtectedRoute bounces everyone else to the OIDC login. */}
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
 
         <Route element={<StaffOnlyRoute><Outlet /></StaffOnlyRoute>}>
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/posts" element={<AdminPostList />} />
-          <Route path="/admin/posts/new" element={<AdminPostForm />} />
-          <Route path="/admin/posts/:slug/edit" element={<AdminPostForm />} />
           <Route path="/admin/status-settings" element={<StatusSettings />} />
           <Route path="/admin/security/organizations" element={<OrgManagement />} />
           <Route path="/admin/security/service-accounts" element={<ServiceAccountsAdmin />} />

@@ -53,7 +53,6 @@ INSTALLED_APPS = [
     "adrf",
     "django_filters",
     "api",
-    "blog",
     "status",
     "security",
     "incidents",

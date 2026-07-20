@@ -1,7 +1,6 @@
 import {
   LayoutDashboard,
   FileText,
-  FilePlus,
   HardDrive,
   Server,
   Shield,
@@ -111,16 +110,6 @@ export const NAV_SECTIONS = [
     label: 'App Ingress',
     items: [
       { to: '/routes', icon: Globe, label: 'Routes' },
-    ],
-  },
-  {
-    id: 'blog',
-    label: 'Blog',
-    staffOnly: true,
-    items: [
-      { to: '/admin', end: true, icon: FileText, label: 'Blog Administration' },
-      { to: '/admin/posts', icon: FileText, label: 'Posts' },
-      { to: '/admin/posts/new', icon: FilePlus, label: 'New Post' },
     ],
   },
   {
