@@ -39,6 +39,7 @@ INTENDED_PERIODIC_TASKS = frozenset(
         "incidents.tasks.update_classify_accuracy_metric",
         "notifications.tasks.cleanup_old_notifications",
         "partners.tasks.purge_intake_inbox",
+        "security.tasks.expire_stale_org_invites",
         "security.tasks.generate_work_packages",
         "security.tasks.refresh_stale_advisories",
         "security.tasks.snapshot_vulnerabilities",
