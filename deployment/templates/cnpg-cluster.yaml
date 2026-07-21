@@ -16,9 +16,30 @@ spec:
         login: true
 
   bootstrap:
-    initdb:
+    recovery:
+      source: cluster-velsonline
       database: velsonline
       owner: velsonline
+
+  externalClusters:
+    - name: cluster-velsonline
+      barmanObjectStore:
+        destinationPath: s3://vels-cnpg-backups/
+        endpointURL: https://s3.eu-central-1.wasabisys.com
+        s3Credentials:
+          accessKeyId:
+            name: minio
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: minio
+            key: ACCESS_SECRET_KEY
+        wal:
+          maxParallel: 8
+#  bootstrap:
+#    initdb:
+#      database: velsonline
+#      owner: velsonline
+
 
   plugins:
     - name: barman-cloud.cloudnative-pg.io
