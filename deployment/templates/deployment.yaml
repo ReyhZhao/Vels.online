@@ -37,9 +37,6 @@ spec:
                   name: cluster-velsonline-app
                   key: fqdn-uri
 
-            - name: DEBUG
-              value: "True"
-
             - name: CSRF_TRUSTED_ORIGINS
               value: "https://vels.online"
 

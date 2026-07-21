@@ -3,6 +3,7 @@ kind: ConfigMap
 metadata:
   name: backend-config
 data:
+  DEBUG: "False"
   EMAIL_SSL_NO_VERIFY: "True"
   BUNKERWEB_PUBLIC_FQDN: proxy.vels.online
   SEMAPHORE_PROJECT_ID: "1"
@@ -13,7 +14,7 @@ data:
   OLLAMA_MODEL: gpt-oss:120b-cloud
   INBOUND_IMAP_HOST: mail.vels.online
   ONCALL_ROUTING: llm_guided
-  ALLOWED_HOSTS: "vels.online,backend.velsonline.svc.cluster.local"
+  ALLOWED_HOSTS: "vels.online,backend.polaris.svc.cluster.local"
 
   EXCEPTION_LLM_PROVIDER: exceptions.llm.ollama.OllamaProvider
   TRIAGE_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
