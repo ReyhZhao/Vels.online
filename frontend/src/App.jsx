@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route, Outlet, Navigate } from 'react-router-dom';
+import { Routes, Route, Outlet } from 'react-router-dom';
 import PublicLayout from './components/layout/PublicLayout';
 import AppLayout from './components/layout/AppLayout';
 import StatusPage from './pages/StatusPage';
@@ -51,6 +51,9 @@ import HuntDetail from './pages/HuntDetail';
 // the main bundle until a staff user opens the map (also keeps the bundle under the
 // PWA precache size limit).
 const LiveAttackMap = lazy(() => import('./pages/LiveAttackMap'));
+import LandingLayout from './components/layout/LandingLayout';
+import LandingPage from './pages/LandingPage';
+import DocsPage from './pages/DocsPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
 
@@ -62,10 +65,16 @@ function App() {
         <Route path="/status" element={<StatusPage />} />
       </Route>
 
+      {/* Public front door. Owns a dark full-bleed treatment rather than
+          PublicLayout's container shell, so it gets its own layout. LandingPage
+          sends authenticated users straight to /dashboard, which is how `/`
+          behaved when it was a bare redirect. */}
+      <Route element={<LandingLayout />}>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/docs" element={<DocsPage />} />
+      </Route>
+
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-        {/* Login-first front door: authenticated users land on the dashboard;
-            ProtectedRoute bounces everyone else to the OIDC login. */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
 
         <Route element={<StaffOnlyRoute><Outlet /></StaffOnlyRoute>}>
