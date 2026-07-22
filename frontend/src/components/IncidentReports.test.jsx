@@ -101,7 +101,9 @@ describe('IncidentReports (staff Editor + Preview)', () => {
     await waitFor(() => expect(api.get).toHaveBeenCalledWith(
       expect.stringContaining('/reports/preview/?template_id=1')
     ));
-    expect(screen.getByText('Internal audience')).toBeInTheDocument();
+    // The badge renders from the preview *response*, which lands a tick after the
+    // request goes out — assert on it asynchronously or this races under CI load.
+    expect(await screen.findByText('Internal audience')).toBeInTheDocument();
   });
 
   it('generates a report with per-Report free-text overrides', async () => {
