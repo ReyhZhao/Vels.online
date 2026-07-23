@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Search, ChevronDown, ArrowRight, ArrowLeft } from 'lucide-react';
 import { CONTENT_ICONS, LOGIN_URL } from '../components/layout/LandingLayout';
 import { DOC_SECTIONS } from '../content/siteContent';
+import { useAuth } from '../context/AuthContext';
+import api from '../lib/axios';
 
 // Article headings sit below the fixed top bar; the observer's top margin has to
 // clear it too or the article behind the bar wins the "nearest the top" race.
@@ -25,29 +27,62 @@ function DocsPage() {
   const [navOpen, setNavOpen] = useState(false); // mobile only — always open from lg up
   const spySuppressedUntil = useRef(0);
 
+  // The in-depth sections are not bundled — they come from an authenticated API,
+  // so a logged-out visitor never receives them at all.
+  const { isAuthenticated } = useAuth();
+  const [extendedSections, setExtendedSections] = useState([]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setExtendedSections([]);
+      return undefined;
+    }
+    let cancelled = false;
+    api
+      .get('/api/docs/extended/')
+      .then((res) => {
+        if (!cancelled) {
+          setExtendedSections(
+            (res.data?.sections ?? []).map((section) => ({ ...section, access: 'authenticated' })),
+          );
+        }
+      })
+      .catch(() => {}); // docs are non-critical — a failed fetch just hides the extra sections
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
   const sections = useMemo(() => {
+    const allSections = [...DOC_SECTIONS, ...extendedSections];
     const needle = query.trim().toLowerCase();
-    if (!needle) return DOC_SECTIONS;
-    return DOC_SECTIONS.map((section) => ({
-      ...section,
-      articles: section.articles.filter((article) => matches(section, article, needle)),
-    })).filter((section) => section.articles.length > 0);
-  }, [query]);
+    if (!needle) return allSections;
+    return allSections
+      .map((section) => ({
+        ...section,
+        articles: section.articles.filter((article) => matches(section, article, needle)),
+      }))
+      .filter((section) => section.articles.length > 0);
+  }, [query, extendedSections]);
 
   const articleCount = sections.reduce((total, section) => total + section.articles.length, 0);
+  const firstExtendedId = sections.find((section) => section.access === 'authenticated')?.id;
 
   // Deep links: #incidents lands on a section, #doc-agentic-triage on an article.
+  // Re-runs once the extended sections arrive, so a link to an in-depth article scrolls too.
   useEffect(() => {
     const hash = window.location.hash.replace('#', '');
     if (!hash) return;
     const target = document.getElementById(hash);
     if (!target) return;
 
-    const section = DOC_SECTIONS.find((candidate) => candidate.id === hash);
+    const section = [...DOC_SECTIONS, ...extendedSections].find(
+      (candidate) => candidate.id === hash,
+    );
     setActiveArticle(section ? section.articles[0].id : hash.replace('doc-', ''));
     spySuppressedUntil.current = Date.now() + SCROLL_SETTLE_MS;
     target.scrollIntoView();
-  }, []);
+  }, [extendedSections]);
 
   // Highlight whichever article is nearest the top of the reading column.
   useEffect(() => {
@@ -148,7 +183,13 @@ function DocsPage() {
               {sections.map((section) => {
                 const Icon = CONTENT_ICONS[section.icon];
                 return (
-                  <div key={section.id} className="mb-6">
+                  <Fragment key={section.id}>
+                    {section.id === firstExtendedId && (
+                      <div className="mb-4 mt-1 border-t border-white/10 px-2 pt-4 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-sky-400/80">
+                        In-depth reference
+                      </div>
+                    )}
+                    <div className="mb-6">
                     <div className="mb-2 flex items-center gap-2 px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                       <Icon className="h-3 w-3" aria-hidden="true" />
                       {section.title}
@@ -171,7 +212,8 @@ function DocsPage() {
                         </li>
                       ))}
                     </ul>
-                  </div>
+                    </div>
+                  </Fragment>
                 );
               })}
               {sections.length === 0 && (
@@ -184,7 +226,19 @@ function DocsPage() {
             {sections.map((section) => {
               const Icon = CONTENT_ICONS[section.icon];
               return (
-                <section key={section.id} id={section.id} className="mb-16 scroll-mt-24 last:mb-0">
+                <Fragment key={section.id}>
+                {section.id === firstExtendedId && (
+                  <div className="mb-12 rounded-xl border border-sky-400/20 bg-sky-400/[0.05] px-6 py-5">
+                    <p className="text-[13px] font-semibold uppercase tracking-[0.14em] text-sky-300">
+                      In-depth reference
+                    </p>
+                    <p className="mt-2 max-w-xl text-[14.5px] leading-relaxed text-slate-400">
+                      The sections below go under the hood of the detection engine. They are here
+                      because you are signed in — logged-out visitors never load them.
+                    </p>
+                  </div>
+                )}
+                <section id={section.id} className="mb-16 scroll-mt-24 last:mb-0">
                   <div className="mb-8 flex items-center gap-2.5 border-b border-white/10 pb-3">
                     <Icon className="h-4 w-4 text-sky-400" aria-hidden="true" />
                     <h2 className="text-[13px] font-semibold uppercase tracking-[0.14em] text-slate-300">
@@ -212,6 +266,7 @@ function DocsPage() {
                     </article>
                   ))}
                 </section>
+                </Fragment>
               );
             })}
 

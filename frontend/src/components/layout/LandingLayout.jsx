@@ -1,15 +1,16 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import {
   Shield, ArrowRight, LayoutDashboard, Radar, Sparkles, Boxes, Bug, Globe,
-  ScrollText, CirclePlay, Siren, ShieldCheck, CircleAlert,
+  ScrollText, CirclePlay, Siren, ShieldCheck, CircleAlert, SlidersHorizontal,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export const LOGIN_URL = import.meta.env.VITE_LOGIN_URL ?? '/auth/oidc/authentik/login/';
 
-/** Icon names referenced by src/content/siteContent.js. */
+/** Icon names referenced by src/content/siteContent.js and the extended docs API. */
 export const CONTENT_ICONS = {
   Radar, Sparkles, Boxes, Bug, Globe, ScrollText, CirclePlay, Siren, ShieldCheck, CircleAlert,
+  SlidersHorizontal,
 };
 
 const NAV = [

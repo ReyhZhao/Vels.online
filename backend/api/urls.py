@@ -4,6 +4,7 @@ from django.urls import include, path
 from notifications.views import TestEmailView
 
 from . import views
+from .docs_views import ExtendedDocsView
 from .public_stats import PublicStatsView
 from incidents.views import AssetBulkUpdateView, AssetDetailView, AssetListView, AssetOwnerDetailView, AssetOwnerListView, NatExposureDetailView, NatExposureListView
 
@@ -11,6 +12,7 @@ urlpatterns = [
     path("health/", views.HealthView.as_view()),
     path("me/", views.MeView.as_view()),
     path("public/stats/", PublicStatsView.as_view()),
+    path("docs/extended/", ExtendedDocsView.as_view()),
     path("dashboard/overview/", views.DashboardOverviewView.as_view()),
     path("logout/", views.LogoutView.as_view()),
     path("admin/test-email/", TestEmailView.as_view()),
