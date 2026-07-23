@@ -303,15 +303,16 @@ describe('IncidentList', () => {
   it('renders pagination buttons when total_pages > 1', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE(INCIDENTS, { count: 30, total_pages: 2 }));
     renderPage();
-    await waitFor(() => screen.getByText('1'));
-    expect(screen.getByText('2')).toBeInTheDocument();
+    // Query the pagination buttons by role — bare digits now also appear in the KPI bar.
+    await waitFor(() => screen.getByRole('button', { name: '1' }));
+    expect(screen.getByRole('button', { name: '2' })).toBeInTheDocument();
   });
 
   it('clicking a page button re-fetches with page param', async () => {
     api.get.mockResolvedValue(PAGE_RESPONSE(INCIDENTS, { count: 30, total_pages: 2 }));
     renderPage();
-    await waitFor(() => screen.getByText('2'));
-    fireEvent.click(screen.getByText('2'));
+    await waitFor(() => screen.getByRole('button', { name: '2' }));
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith('/api/incidents/', expect.objectContaining({
         params: expect.objectContaining({ page: '2' }),
