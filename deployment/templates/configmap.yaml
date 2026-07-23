@@ -14,7 +14,7 @@ data:
   OLLAMA_MODEL: gpt-oss:120b-cloud
   INBOUND_IMAP_HOST: mail.vels.online
   ONCALL_ROUTING: llm_guided
-  ALLOWED_HOSTS: "vels.online,backend.polaris.svc.cluster.local"
+  ALLOWED_HOSTS: "vels.online,backend.polaris.svc.cluster.local,polaris-security.nl"
 
   EXCEPTION_LLM_PROVIDER: exceptions.llm.ollama.OllamaProvider
   TRIAGE_LLM_PROVIDER: incidents.llm.ollama.OllamaTriageProvider
