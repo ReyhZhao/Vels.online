@@ -155,6 +155,29 @@ def test_activate_requires_mapping_then_activates(acme, staff):
 
 
 @pytest.mark.django_db
+def test_deleting_endpoint_cascades_payloads_not_created_records(acme):
+    from webhook_ingest.materialise import materialise
+    from webhook_ingest.models import PayloadElementOutcome
+
+    ep = _endpoint(acme, state=IngestEndpoint.STATE_ACTIVE,
+                   field_mappings={"title": {"kind": "constant", "value": "x"}})
+    payload = CapturedPayload.objects.create(endpoint=ep, body={"a": 1})
+    inc, _, _ = materialise(ep, {"title": "keep me"})
+    PayloadElementOutcome.objects.create(
+        captured_payload=payload, endpoint=ep, element_index=0,
+        outcome=PayloadElementOutcome.OUTCOME_CREATED, incident=inc,
+    )
+
+    ep.delete()
+
+    # The endpoint's captured payloads and outcomes are gone...
+    assert not CapturedPayload.objects.filter(pk=payload.pk).exists()
+    assert not PayloadElementOutcome.objects.exists()
+    # ...but the Incident it created survives (an independent domain object).
+    assert Incident.objects.filter(pk=inc.pk).exists()
+
+
+@pytest.mark.django_db
 def test_purge_removes_aged_payloads(acme):
     from datetime import timedelta
 
