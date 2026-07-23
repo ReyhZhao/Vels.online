@@ -29,6 +29,7 @@ import {
   Handshake,
   Inbox,
   KeyRound,
+  Webhook,
 } from 'lucide-react';
 
 // Top-level link rendered above the sections.
@@ -64,6 +65,7 @@ export const NAV_SECTIONS = [
       { to: '/admin/wazuh-responses', icon: ShieldCheck, label: 'Wazuh Responses', staffOnly: true },
       { to: '/admin/partners/connections', icon: Handshake, label: 'Partner Connections', staffOnly: true },
       { to: '/admin/partners/intake-inbox', icon: Inbox, label: 'Intake Inbox', staffOnly: true, badge: 'intakeInbox', badgeTone: 'info' },
+      { to: '/admin/ingest-endpoints', icon: Webhook, label: 'Ingest Endpoints', staffOnly: true },
     ],
   },
   {

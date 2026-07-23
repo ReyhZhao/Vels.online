@@ -14,6 +14,7 @@ import TriageLessonsReview from './pages/admin/TriageLessonsReview';
 import AutomationsAdmin from './pages/admin/AutomationsAdmin';
 import WazuhResponsesAdmin from './pages/admin/WazuhResponsesAdmin';
 import PartnerConnections from './pages/admin/PartnerConnections';
+import IngestEndpoints from './pages/admin/IngestEndpoints';
 import IntakeInbox from './pages/admin/IntakeInbox';
 import SecurityDashboard from './pages/SecurityDashboard';
 import VulnerabilityDashboard from './pages/VulnerabilityDashboard';
@@ -92,6 +93,7 @@ function App() {
           <Route path="/admin/wazuh-responses" element={<WazuhResponsesAdmin />} />
           <Route path="/admin/partners/connections" element={<PartnerConnections />} />
           <Route path="/admin/partners/intake-inbox" element={<IntakeInbox />} />
+          <Route path="/admin/ingest-endpoints" element={<IngestEndpoints />} />
           <Route path="/admin/incidents/oncall" element={<OnCallCalendarPage />} />
           <Route path="/admin/correlations/rules" element={<CorrelationRulesAdmin />} />
           <Route path="/admin/correlations/search-rules" element={<SearchRulesAdmin />} />
