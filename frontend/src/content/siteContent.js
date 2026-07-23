@@ -111,12 +111,31 @@ export const DOC_SECTIONS = [
         ],
       },
       {
-        id: 'system-vs-org',
-        title: 'System rules vs. your own rules',
+        id: 'scheduled-search',
+        title: 'Scheduled Search Rules',
         body: [
-          '**System rules** are authored by the Polaris SOC and apply to every tenant as baseline detection. You cannot edit them, but you can **mute** one for your organisation if it is noisy in your environment.',
-          '**Org rules** are yours. You author, test and tune them, and they only ever evaluate against your data.',
-          'Before enabling a rule, run a **rule test**: it replays real data through the rule against a scratch index and tells you what it would have fired on.',
+          'A **scheduled search rule** looks for a pattern in your raw monitoring data on a repeating schedule. Where a correlation rule reacts the instant a matching alert arrives, a scheduled search rule works the other way round: every few minutes it *asks* the full stream of events your agents produce — “has this happened?” — and raises an incident when the answer is yes.',
+          'That difference is the whole point. Correlation rules are **push**: a signal has to reach Polaris as an alert before a rule can act on it. Scheduled search rules are **pull**: they query everything your endpoints report, including the vast majority of events that are never promoted to alerts. It lets the SOC detect things that would otherwise stay buried in the noise — a slow pattern building over an hour, a handful of events that only matter together.',
+          'When a rule matches, the events it found are pulled in as the **evidence** behind a new incident — the same incident, timeline and tasks you would get from any other detection. You never have to go digging in the raw data yourself; the rule brings the relevant events to you.',
+          'Some rules fire on **absence** rather than presence — they raise an incident precisely because something went quiet. “No logs from the firewall in the last hour” is a real detection: a device that stops reporting is often the first sign of trouble, not a non-event.',
+          'Scheduled search rules are written and tuned by the SOC on your behalf. You experience them through the incidents they raise, so there is nothing here for you to configure.',
+        ],
+      },
+      {
+        id: 'system-vs-org',
+        title: 'System rules and org rules',
+        body: [
+          'Detection rules — both correlation and scheduled search — come in two tiers. **System rules** are authored by the Polaris SOC and apply to every organisation as baseline detection: the shared coverage every tenant gets out of the box.',
+          '**Org rules** are specific to your organisation and only ever evaluate against your data. The SOC authors and tunes these for you as well, shaped around your environment and the threats that matter to you.',
+          'You do not edit rules yourself — detection engineering is the SOC’s job — but the tuning is a conversation. If a rule is too noisy in your environment, ask the SOC to **mute** it for your organisation or adjust its thresholds; if you think you are missing coverage, tell us what you want to catch.',
+        ],
+      },
+      {
+        id: 'rule-tests',
+        title: 'How we keep rules honest',
+        body: [
+          'Before a rule goes live — and every time we change one — the SOC can attach **rule tests** to it: small, saved checks that replay sample events through the rule and confirm it still fires exactly when it should, and stays quiet when it should not.',
+          'It is detection-as-code, the same discipline software teams use to stop a change from quietly breaking something. Rule tests are what let us tune a noisy rule for you without worrying that we have blunted the detection it was built for.',
         ],
       },
       {

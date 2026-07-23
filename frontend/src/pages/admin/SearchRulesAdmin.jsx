@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Play, Sparkles, Bug, FlaskConical, Copy, MoreVertical, Pencil, Power, TestTube, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Play, Sparkles, Bug, FlaskConical, Copy, MoreVertical, Pencil, Power, TestTube, Trash2, BookOpen } from 'lucide-react';
 import api from '@/lib/axios';
 import SearchRuleAuthorDrawer from '@/components/SearchRuleAuthorDrawer';
 import SearchRuleTestsDrawer from '@/components/SearchRuleTestsDrawer';
@@ -1517,6 +1518,13 @@ export default function SearchRulesAdmin() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Link
+            to="/docs#ssr-core"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+          >
+            <BookOpen className="h-4 w-4" />
+            Authoring guide
+          </Link>
           <button
             onClick={() => setShowAiDrawer(true)}
             className="inline-flex items-center gap-1.5 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
