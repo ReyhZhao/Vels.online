@@ -99,6 +99,8 @@ class Incident(models.Model):
     # Entered directly over email through a configured partner Connection (ADR-0032):
     # a peer CSIRT detection or a supplier bulletin. Never an Alert, never correlated.
     SOURCE_PARTNER = "partner"
+    # Created by a remote system through a webhook Ingest Endpoint (ADR-0040).
+    SOURCE_WEBHOOK = "webhook"
     SOURCE_CHOICES = [
         (SOURCE_MANUAL, "Manual"),
         (SOURCE_API, "API"),
@@ -112,6 +114,7 @@ class Incident(models.Model):
         (SOURCE_SCHEDULED_SEARCH, "Scheduled Search Rule"),
         (SOURCE_THREAT_HUNT, "Threat Hunt"),
         (SOURCE_PARTNER, "Partner"),
+        (SOURCE_WEBHOOK, "Webhook"),
     ]
 
     SEVERITY_CRITICAL = "critical"

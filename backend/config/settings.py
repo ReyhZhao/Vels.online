@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     "celery_tasks",
     "oncall",
     "partners",
+    "webhook_ingest",
 ]
 
 SITE_ID = 1

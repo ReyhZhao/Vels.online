@@ -39,6 +39,7 @@ urlpatterns = [
     path("admin/celery/", include("celery_tasks.urls")),
     path("contacts/", include("contacts.urls")),
     path("partners/", include("partners.urls")),
+    path("ingest-endpoints/", include("webhook_ingest.urls")),
     path("alerts/", include("alerts.urls")),
     path("correlations/", include("correlations.urls")),
     path("v2/alerts/", include("alerts.urls_v2")),

@@ -12,6 +12,7 @@ SOURCE_CHOICES = [
     ("external", "External"),
     ("scheduled_search", "Scheduled Search Rule"),
     ("threat_hunt", "Threat Hunt"),
+    ("webhook", "Webhook"),
 ]
 
 TLP_WHITE = "white"
