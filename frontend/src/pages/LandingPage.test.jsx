@@ -30,6 +30,10 @@ function renderPage() {
   );
 }
 
+function signedIn() {
+  useAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   useAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
@@ -37,13 +41,29 @@ beforeEach(() => {
 });
 
 describe('LandingPage', () => {
-  it('sends authenticated users to the dashboard instead of the marketing page', () => {
-    useAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+  it('shows the landing page to authenticated users instead of redirecting them away', async () => {
+    signedIn();
 
     renderPage();
 
-    expect(screen.getByText('Dashboard')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: /already triaged/i })).not.toBeInTheDocument();
+    // The page renders in place — no bounce to /dashboard.
+    expect(screen.getByRole('heading', { name: /already triaged/i })).toBeInTheDocument();
+    expect(screen.queryByText('Dashboard')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('stat-alerts')).toHaveTextContent('4.2M'));
+  });
+
+  it('points authenticated visitors into the app rather than at a login', async () => {
+    signedIn();
+
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('stat-alerts')).toHaveTextContent('4.2M'));
+
+    const dashboardLinks = screen
+      .getAllByRole('link')
+      .filter((link) => link.getAttribute('href') === '/dashboard');
+    expect(dashboardLinks.length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: /^sign in/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /request access/i })).not.toBeInTheDocument();
   });
 
   it('renders nothing while auth is still resolving', () => {

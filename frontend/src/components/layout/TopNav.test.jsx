@@ -115,6 +115,25 @@ describe('TopNav', () => {
     expect(screen.queryByRole('link', { name: 'Dashboard' })).not.toBeInTheDocument();
   });
 
+  it('shows a Documentation link to /docs when authenticated', () => {
+    useAuth.mockReturnValue({
+      user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: true },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+
+    renderTopNav();
+    const docsLink = screen.getByRole('link', { name: 'Documentation' });
+    expect(docsLink).toBeInTheDocument();
+    expect(docsLink).toHaveAttribute('href', '/docs');
+  });
+
+  it('does not show the Documentation link when not authenticated', () => {
+    // Anonymous users get the landing chrome's own nav; the app TopNav stays lean.
+    renderTopNav();
+    expect(screen.queryByRole('link', { name: 'Documentation' })).not.toBeInTheDocument();
+  });
+
   it('does not render OrgSwitcher in TopNav (moved to sidebar)', () => {
     useAuth.mockReturnValue({
       user: { id: 1, username: 'eddie', email: 'eddie@vels.online', is_staff: false },

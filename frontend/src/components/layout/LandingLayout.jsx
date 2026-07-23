@@ -1,8 +1,9 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import {
-  Shield, ArrowRight, Radar, Sparkles, Boxes, Bug, Globe, ScrollText,
-  CirclePlay, Siren, ShieldCheck, CircleAlert,
+  Shield, ArrowRight, LayoutDashboard, Radar, Sparkles, Boxes, Bug, Globe,
+  ScrollText, CirclePlay, Siren, ShieldCheck, CircleAlert,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export const LOGIN_URL = import.meta.env.VITE_LOGIN_URL ?? '/auth/oidc/authentik/login/';
 
@@ -19,6 +20,7 @@ const NAV = [
 
 function TopBar() {
   const { pathname } = useLocation();
+  const { isAuthenticated } = useAuth();
 
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/5 bg-[#070d1a]/70 backdrop-blur-xl">
@@ -48,19 +50,32 @@ function TopBar() {
           })}
         </nav>
 
-        <a
-          href={LOGIN_URL}
-          className="group inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-[#070d1a] transition-all hover:bg-sky-200 hover:shadow-lg hover:shadow-sky-400/25"
-        >
-          Sign in
-          <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-        </a>
+        {isAuthenticated ? (
+          <Link
+            to="/dashboard"
+            className="group inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-[#070d1a] transition-all hover:bg-sky-200 hover:shadow-lg hover:shadow-sky-400/25"
+          >
+            <LayoutDashboard className="h-3.5 w-3.5" aria-hidden="true" />
+            Dashboard
+            <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+          </Link>
+        ) : (
+          <a
+            href={LOGIN_URL}
+            className="group inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-[#070d1a] transition-all hover:bg-sky-200 hover:shadow-lg hover:shadow-sky-400/25"
+          >
+            Sign in
+            <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+          </a>
+        )}
       </div>
     </header>
   );
 }
 
 function SiteFooter() {
+  const { isAuthenticated } = useAuth();
+
   return (
     <footer className="border-t border-white/10 py-10">
       <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 text-sm text-slate-500 sm:flex-row">
@@ -68,8 +83,14 @@ function SiteFooter() {
         <div className="flex gap-6">
           <Link to="/status" className="hover:text-slate-300">Status</Link>
           <Link to="/docs" className="hover:text-slate-300">Docs</Link>
-          <Link to="/signup" className="hover:text-slate-300">Request access</Link>
-          <a href={LOGIN_URL} className="hover:text-slate-300">Sign in</a>
+          {isAuthenticated ? (
+            <Link to="/dashboard" className="hover:text-slate-300">Dashboard</Link>
+          ) : (
+            <>
+              <Link to="/signup" className="hover:text-slate-300">Request access</Link>
+              <a href={LOGIN_URL} className="hover:text-slate-300">Sign in</a>
+            </>
+          )}
         </div>
       </div>
     </footer>

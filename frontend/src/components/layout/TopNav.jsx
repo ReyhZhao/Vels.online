@@ -47,6 +47,16 @@ function TopNav({ onMenuClick }) {
               >
                 Dashboard
               </NavLink>
+              <NavLink
+                to="/docs"
+                className={({ isActive }) =>
+                  `hidden text-sm font-medium transition-colors hover:text-foreground sm:inline ${
+                    isActive ? 'text-foreground' : 'text-muted-foreground'
+                  }`
+                }
+              >
+                Documentation
+              </NavLink>
               <NotificationBell />
               <div className="flex items-center gap-3">
                 <span className="hidden md:inline text-sm text-muted-foreground" data-testid="nav-username">

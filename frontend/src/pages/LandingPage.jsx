@@ -1,5 +1,5 @@
-import { Link, Navigate } from 'react-router-dom';
-import { ArrowRight, LogIn, BookOpen } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, LogIn, BookOpen, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { usePublicStats, formatCount } from '../hooks/usePublicStats';
 import { CONTENT_ICONS, LOGIN_URL } from '../components/layout/LandingLayout';
@@ -59,7 +59,7 @@ function StatBand() {
   );
 }
 
-function Hero() {
+function Hero({ isAuthenticated }) {
   return (
     <section className="relative overflow-hidden pt-16">
       <div className="pointer-events-none absolute inset-0" aria-hidden="true">
@@ -93,14 +93,25 @@ function Hero() {
         </p>
 
         <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-          <a
-            href={LOGIN_URL}
-            className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-400 to-blue-500 px-7 py-3.5 text-[15px] font-semibold text-[#070d1a] shadow-xl shadow-blue-500/30 transition-all hover:shadow-2xl hover:shadow-blue-400/40"
-          >
-            <LogIn className="h-4 w-4" aria-hidden="true" />
-            Sign in to Polaris
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
-          </a>
+          {isAuthenticated ? (
+            <Link
+              to="/dashboard"
+              className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-400 to-blue-500 px-7 py-3.5 text-[15px] font-semibold text-[#070d1a] shadow-xl shadow-blue-500/30 transition-all hover:shadow-2xl hover:shadow-blue-400/40"
+            >
+              <LayoutDashboard className="h-4 w-4" aria-hidden="true" />
+              Go to your dashboard
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
+            </Link>
+          ) : (
+            <a
+              href={LOGIN_URL}
+              className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-400 to-blue-500 px-7 py-3.5 text-[15px] font-semibold text-[#070d1a] shadow-xl shadow-blue-500/30 transition-all hover:shadow-2xl hover:shadow-blue-400/40"
+            >
+              <LogIn className="h-4 w-4" aria-hidden="true" />
+              Sign in to Polaris
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
+            </a>
+          )}
           <Link
             to="/docs"
             className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-7 py-3.5 text-[15px] font-medium text-slate-200 backdrop-blur transition-colors hover:border-white/30 hover:bg-white/10"
@@ -207,7 +218,7 @@ function DocsIndex() {
   );
 }
 
-function Cta() {
+function Cta({ isAuthenticated }) {
   return (
     <section className="relative overflow-hidden border-t border-white/10 py-28">
       <div
@@ -215,47 +226,77 @@ function Cta() {
         aria-hidden="true"
       />
       <div className="relative mx-auto max-w-3xl px-6 text-center">
-        <h2 className="text-4xl font-semibold tracking-tight lg:text-5xl">Ready when you are</h2>
-        <p className="mx-auto mt-4 max-w-lg text-[15px] leading-relaxed text-slate-400">
-          Sign in with your organisation&apos;s identity provider. No separate password to
-          remember, no extra account to manage.
-        </p>
-        <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
-          <a
-            href={LOGIN_URL}
-            className="group inline-flex items-center gap-2 rounded-full bg-white px-7 py-3.5 text-[15px] font-semibold text-[#070d1a] transition-all hover:bg-sky-200"
-          >
-            Sign in
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
-          </a>
-          <Link
-            to="/signup"
-            className="inline-flex items-center gap-2 rounded-full border border-white/15 px-7 py-3.5 text-[15px] font-medium text-slate-200 transition-colors hover:bg-white/5"
-          >
-            Request access
-          </Link>
-        </div>
+        {isAuthenticated ? (
+          <>
+            <h2 className="text-4xl font-semibold tracking-tight lg:text-5xl">
+              Back to work
+            </h2>
+            <p className="mx-auto mt-4 max-w-lg text-[15px] leading-relaxed text-slate-400">
+              Your incidents, alerts and fleet are a click away.
+            </p>
+            <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+              <Link
+                to="/dashboard"
+                className="group inline-flex items-center gap-2 rounded-full bg-white px-7 py-3.5 text-[15px] font-semibold text-[#070d1a] transition-all hover:bg-sky-200"
+              >
+                Go to your dashboard
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
+              </Link>
+              <Link
+                to="/docs"
+                className="inline-flex items-center gap-2 rounded-full border border-white/15 px-7 py-3.5 text-[15px] font-medium text-slate-200 transition-colors hover:bg-white/5"
+              >
+                Browse the documentation
+              </Link>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 className="text-4xl font-semibold tracking-tight lg:text-5xl">Ready when you are</h2>
+            <p className="mx-auto mt-4 max-w-lg text-[15px] leading-relaxed text-slate-400">
+              Sign in with your organisation&apos;s identity provider. No separate password to
+              remember, no extra account to manage.
+            </p>
+            <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+              <a
+                href={LOGIN_URL}
+                className="group inline-flex items-center gap-2 rounded-full bg-white px-7 py-3.5 text-[15px] font-semibold text-[#070d1a] transition-all hover:bg-sky-200"
+              >
+                Sign in
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
+              </a>
+              <Link
+                to="/signup"
+                className="inline-flex items-center gap-2 rounded-full border border-white/15 px-7 py-3.5 text-[15px] font-medium text-slate-200 transition-colors hover:bg-white/5"
+              >
+                Request access
+              </Link>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
 }
 
 /**
- * The public front door. Signed-in users never see it — they go straight to the
- * dashboard, which is how `/` behaved before this page existed.
+ * The public front door, reachable by everyone. Signed-in visitors are no longer
+ * bounced to the dashboard — they can read the landing page like anyone else, and
+ * the calls to action point them back into the app rather than at a login.
  */
 function LandingPage() {
   const { isAuthenticated, isLoading } = useAuth();
 
+  // Wait for the auth probe so the CTAs render in their final form once, rather
+  // than flipping from "Sign in" to "Go to dashboard" after a beat.
   if (isLoading) return null;
-  if (isAuthenticated) return <Navigate to="/dashboard" replace />;
 
   return (
     <>
-      <Hero />
+      <Hero isAuthenticated={isAuthenticated} />
       <Features />
       <DocsIndex />
-      <Cta />
+      <Cta isAuthenticated={isAuthenticated} />
     </>
   );
 }
