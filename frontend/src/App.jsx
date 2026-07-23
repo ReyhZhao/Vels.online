@@ -57,7 +57,6 @@ import LandingPage from './pages/LandingPage';
 import DocsPage from './pages/DocsPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import StaffOnlyRoute from './components/StaffOnlyRoute';
-import IngestEndpointsPrototype from './prototypes/IngestEndpointsPrototype'; // PROTOTYPE — delete with src/prototypes/
 
 function App() {
   return (
@@ -102,8 +101,6 @@ function App() {
           <Route path="/admin/tasks/history" element={<TaskHistory />} />
           <Route path="/admin/tasks/scheduled" element={<ScheduledTasks />} />
           <Route path="/admin/email-templates" element={<EmailTemplates />} />
-          {/* PROTOTYPE — throwaway ingest-endpoints mapping-builder exploration. Delete with src/prototypes/. */}
-          <Route path="/prototype/ingest" element={<IngestEndpointsPrototype />} />
           <Route
             path="/attack-map"
             element={

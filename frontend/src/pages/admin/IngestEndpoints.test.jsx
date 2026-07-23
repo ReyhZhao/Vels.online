@@ -79,7 +79,28 @@ describe('IngestEndpoints', () => {
     await waitFor(() => within(table()).getByText('Splunk incidents'));
     await user.click(screen.getByRole('button', { name: 'Configure' }));
     await screen.findByLabelText('Mapping builder');
-    expect(screen.getByText(/ECS entity mapping/i)).toBeInTheDocument();
-    expect(screen.getByLabelText('source.ip path')).toBeInTheDocument();
+    expect(screen.getByText(/ECS entities/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Assign to source.ip' })).toBeInTheDocument();
+  });
+
+  it('maps a field by clicking a leaf then Assign (Inspector)', async () => {
+    api.get.mockImplementation(url => {
+      if (url === '/api/security/organizations/') return Promise.resolve({ data: ORGS });
+      if (url === '/api/ingest-endpoints/endpoints/') return Promise.resolve({ data: [mkEndpoint()] });
+      if (url.includes('/captured/')) return Promise.resolve({ data: [
+        { id: 7, status: 'pending', received_at: '2026-07-23T09:00:00Z', body: { search_name: 'Brute force' }, outcomes: [] },
+      ] });
+      return Promise.resolve({ data: [] });
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => within(table()).getByText('Splunk incidents'));
+    await user.click(screen.getByRole('button', { name: 'Configure' }));
+    await screen.findByLabelText('Mapping builder');
+    // Click the leaf in the JSON tree, then Assign it to the Title field.
+    await user.click(await screen.findByRole('button', { name: 'Pick search_name' }));
+    await user.click(screen.getByRole('button', { name: 'Assign to title' }));
+    // The field now resolves to the clicked value (shown in the per-field chip + dry-run).
+    await waitFor(() => expect(screen.getAllByText('Brute force').length).toBeGreaterThan(0));
   });
 });

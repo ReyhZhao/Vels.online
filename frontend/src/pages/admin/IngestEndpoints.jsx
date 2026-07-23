@@ -1,65 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '@/lib/axios';
+import {
+  ECS_TARGETS, TARGET_FIELDS, elementsFor, formatValueMap, getByPath,
+  mappingsToApi, parseValueMap, resolveField,
+} from './ingest/mappingEngine';
+import { JsonTree, RecordPreview, StatusBadge } from './ingest/InspectorWidgets';
 
 const TARGET_LABELS = { incident: 'Incident', alert: 'Alert', asset: 'Asset' };
-const STATE_LABELS = { capturing: 'Capturing', active: 'Active', paused: 'Paused' };
-const TARGET_FIELDS = {
-  incident: ['title', 'description', 'severity', 'tlp', 'pap'],
-  alert: ['title', 'description', 'severity', 'tlp', 'pap'],
-  asset: ['name', 'ip_address', 'role'],
-};
-const ECS_FIELDS = ['host.name', 'source.ip', 'user.name', 'file.hash.sha256', 'process.name'];
 const STATUSES = ['pending', 'created', 'failed', 'partial'];
+const INPUT = 'rounded border border-input bg-background px-2 py-1 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring';
 
-function parseValueMap(text) {
-  const out = {};
-  (text || '').split(',').forEach(pair => {
-    const [k, ...rest] = pair.split('=');
-    const key = (k || '').trim();
-    const val = rest.join('=').trim();
-    if (key && val) out[key] = val;
-  });
-  return out;
-}
-function formatValueMap(obj) {
-  return Object.entries(obj || {}).map(([k, v]) => `${k}=${v}`).join(', ');
-}
-
-function emptyFieldForm(fields) {
+function mappingsFromApi(keys, apiMap) {
   const m = {};
-  fields.forEach(f => { m[f] = { kind: 'path', path: '', value: '', value_map: '', default: '' }; });
-  return m;
-}
-function fieldFormFromApi(fields, apiMap) {
-  const m = emptyFieldForm(fields);
-  Object.entries(apiMap || {}).forEach(([f, cfg]) => {
-    if (!m[f]) return;
-    m[f] = {
+  keys.forEach(k => {
+    const cfg = (apiMap || {})[k] || {};
+    m[k] = {
       kind: cfg.kind || 'path',
       path: cfg.path || '',
       value: cfg.value || '',
-      value_map: formatValueMap(cfg.value_map),
+      value_map: cfg.value_map || {},
       default: cfg.default || '',
     };
   });
   return m;
 }
-function fieldFormToApi(form) {
-  const out = {};
-  Object.entries(form).forEach(([f, cfg]) => {
-    if (cfg.kind === 'constant') {
-      if ((cfg.value || '').trim()) out[f] = { kind: 'constant', value: cfg.value.trim() };
-    } else {
-      const path = (cfg.path || '').trim();
-      const value_map = parseValueMap(cfg.value_map);
-      const dflt = (cfg.default || '').trim();
-      if (path || Object.keys(value_map).length || dflt) {
-        out[f] = { kind: 'path', path, value_map, default: dflt };
-      }
-    }
-  });
-  return out;
-}
+
+// ── Create ─────────────────────────────────────────────────────────────────────────────
 
 function CreateForm({ orgs, onSaved, onCancel }) {
   const [name, setName] = useState('');
@@ -82,191 +48,245 @@ function CreateForm({ orgs, onSaved, onCancel }) {
   }
 
   return (
-    <form onSubmit={submit} className="ingest-form">
-      <h3>New Ingest Endpoint</h3>
-      <label>Name
-        <input aria-label="Endpoint name" value={name} onChange={e => setName(e.target.value)} required />
-      </label>
-      <label>Target type
-        <select aria-label="Target type" value={targetType} onChange={e => setTargetType(e.target.value)}>
-          {Object.entries(TARGET_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-      </label>
-      <label>Organization
-        <select aria-label="Target organization" value={orgId} onChange={e => setOrgId(e.target.value)}>
-          {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-      </label>
-      {error && <p role="alert" className="ingest-error">{error}</p>}
-      <div className="ingest-actions">
-        <button type="submit" disabled={saving}>Create</button>
-        <button type="button" onClick={onCancel}>Cancel</button>
+    <form onSubmit={submit} className="mb-4 space-y-3 rounded-lg border border-border bg-card p-4">
+      <h3 className="text-sm font-semibold text-foreground">New Ingest Endpoint</h3>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">Name
+          <input aria-label="Endpoint name" value={name} onChange={e => setName(e.target.value)} required className={INPUT} />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">Target type
+          <select aria-label="Target type" value={targetType} onChange={e => setTargetType(e.target.value)} className={INPUT}>
+            {Object.entries(TARGET_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">Organization
+          <select aria-label="Target organization" value={orgId} onChange={e => setOrgId(e.target.value)} className={INPUT}>
+            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </label>
+      </div>
+      {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
+      <div className="flex gap-2">
+        <button type="submit" disabled={saving} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50">Create</button>
+        <button type="button" onClick={onCancel} className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground">Cancel</button>
       </div>
     </form>
   );
 }
 
-function FieldRow({ name, cfg, onChange }) {
-  return (
-    <tr>
-      <th scope="row">{name}</th>
-      <td>
-        <select aria-label={`${name} kind`} value={cfg.kind} onChange={e => onChange({ ...cfg, kind: e.target.value })}>
-          <option value="path">Path</option>
-          <option value="constant">Constant</option>
-        </select>
-      </td>
-      <td>
-        {cfg.kind === 'constant' ? (
-          <input aria-label={`${name} value`} value={cfg.value} onChange={e => onChange({ ...cfg, value: e.target.value })} placeholder="fixed value" />
-        ) : (
-          <input aria-label={`${name} path`} value={cfg.path} onChange={e => onChange({ ...cfg, path: e.target.value })} placeholder="result.severity" />
-        )}
-      </td>
-      <td>
-        <input aria-label={`${name} value map`} value={cfg.value_map} disabled={cfg.kind === 'constant'}
-          onChange={e => onChange({ ...cfg, value_map: e.target.value })} placeholder="P1=critical, P2=high" />
-      </td>
-      <td>
-        <input aria-label={`${name} default`} value={cfg.default} disabled={cfg.kind === 'constant'}
-          onChange={e => onChange({ ...cfg, default: e.target.value })} placeholder="fallback" />
-      </td>
-    </tr>
-  );
-}
+// ── Inspector mapping builder ────────────────────────────────────────────────────────────
 
 function MappingBuilder({ endpoint, onUpdated }) {
+  const isAlert = endpoint.target_type === 'alert';
   const fields = TARGET_FIELDS[endpoint.target_type] || [];
   const [collectionRoot, setCollectionRoot] = useState(endpoint.collection_root_path || '');
   const [idemPath, setIdemPath] = useState(endpoint.idempotency_key_path || '');
-  const [fieldForm, setFieldForm] = useState(fieldFormFromApi(fields, endpoint.field_mappings));
-  const [entityForm, setEntityForm] = useState(fieldFormFromApi(ECS_FIELDS, endpoint.entity_mappings));
+  const [mappings, setMappings] = useState(() => mappingsFromApi(fields.map(f => f.key), endpoint.field_mappings));
+  const [ecs, setEcs] = useState(() => mappingsFromApi(ECS_TARGETS, endpoint.entity_mappings));
+  const [picked, setPicked] = useState(null);
   const [samples, setSamples] = useState([]);
   const [sampleId, setSampleId] = useState('');
-  const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
     api.get(`/api/ingest-endpoints/endpoints/${endpoint.id}/captured/`)
-      .then(({ data }) => setSamples(data.results || data))
+      .then(({ data }) => {
+        const rows = data.results || data;
+        setSamples(rows);
+        if (rows.length) setSampleId(String(rows[0].id));
+      })
       .catch(() => setSamples([]));
   }, [endpoint.id]);
 
-  function draftConfig() {
-    return {
-      collection_root_path: collectionRoot,
-      idempotency_key_path: idemPath,
-      field_mappings: fieldFormToApi(fieldForm),
-      entity_mappings: endpoint.target_type === 'alert' ? fieldFormToApi(entityForm) : {},
-    };
+  const sample = samples.find(s => String(s.id) === String(sampleId));
+  const body = sample?.body ?? null;
+  const firstEl = elementsFor(body, collectionRoot)[0] || {};
+
+  function assign(fieldKey, isEcs) {
+    if (!picked) return;
+    const setter = isEcs ? setEcs : setMappings;
+    setter(prev => ({ ...prev, [fieldKey]: { ...(prev[fieldKey] || {}), kind: 'path', path: picked } }));
+  }
+  function clearField(fieldKey, isEcs) {
+    const setter = isEcs ? setEcs : setMappings;
+    setter(prev => ({ ...prev, [fieldKey]: { ...(prev[fieldKey] || {}), path: '' } }));
+  }
+  function setValueMap(fieldKey, text) {
+    setMappings(prev => ({ ...prev, [fieldKey]: { ...prev[fieldKey], value_map: parseValueMap(text) } }));
   }
 
   async function save() {
     setMsg('');
     try {
-      const { data } = await api.patch(`/api/ingest-endpoints/endpoints/${endpoint.id}/`, draftConfig());
+      const { data } = await api.patch(`/api/ingest-endpoints/endpoints/${endpoint.id}/`, {
+        collection_root_path: collectionRoot,
+        idempotency_key_path: idemPath,
+        field_mappings: mappingsToApi(mappings),
+        entity_mappings: isAlert ? mappingsToApi(ecs) : {},
+      });
       onUpdated(data);
       setMsg('Mapping saved.');
     } catch { setMsg('Could not save mapping.'); }
   }
 
-  async function runPreview() {
-    if (!sampleId) return;
-    try {
-      const { data } = await api.post(`/api/ingest-endpoints/endpoints/${endpoint.id}/dry-run/`, {
-        ...draftConfig(), captured_payload: sampleId,
-      });
-      setPreview(data.elements);
-    } catch { setPreview(null); }
-  }
-
   return (
-    <section className="ingest-builder" aria-label="Mapping builder">
-      <h4>Field mapping</h4>
-      <label>Collection root (array to fan out)
-        <input aria-label="Collection root path" value={collectionRoot} onChange={e => setCollectionRoot(e.target.value)} placeholder="results" />
-      </label>
-      <label>Idempotency key path
-        <input aria-label="Idempotency key path" value={idemPath} onChange={e => setIdemPath(e.target.value)} placeholder="event_id" />
-      </label>
-      <table>
-        <thead><tr><th>Field</th><th>Kind</th><th>Path / value</th><th>Value map</th><th>Default</th></tr></thead>
-        <tbody>
-          {fields.map(f => (
-            <FieldRow key={f} name={f} cfg={fieldForm[f]}
-              onChange={cfg => setFieldForm(prev => ({ ...prev, [f]: cfg }))} />
-          ))}
-        </tbody>
-      </table>
+    <section aria-label="Mapping builder" className="mt-5">
+      <p className="mb-3 text-sm text-muted-foreground">
+        Click a value on the left to select it, then <b className="text-foreground">Assign</b> it to a target field.
+        Paths are relative to each <code className="text-foreground">Collection Root</code> element.
+      </p>
 
-      {endpoint.target_type === 'alert' && (
-        <>
-          <h4>ECS entity mapping <span className="hint">(at least one required to activate)</span></h4>
-          <table>
-            <thead><tr><th>Entity</th><th>Kind</th><th>Path / value</th><th>Value map</th><th>Default</th></tr></thead>
-            <tbody>
-              {ECS_FIELDS.map(f => (
-                <FieldRow key={f} name={f} cfg={entityForm[f]}
-                  onChange={cfg => setEntityForm(prev => ({ ...prev, [f]: cfg }))} />
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-
-      <div className="ingest-preview">
-        <label>Preview against sample
-          <select aria-label="Preview sample" value={sampleId} onChange={e => setSampleId(e.target.value)}>
-            <option value="">— pick a captured payload —</option>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">Collection Root
+          <input aria-label="Collection root path" value={collectionRoot} onChange={e => setCollectionRoot(e.target.value)} placeholder="results" className={`w-28 font-mono text-xs ${INPUT}`} />
+        </label>
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">Idempotency key
+          <input aria-label="Idempotency key path" value={idemPath} onChange={e => setIdemPath(e.target.value)} placeholder="event_id" className={`w-32 font-mono text-xs ${INPUT}`} />
+        </label>
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">Map against
+          <select aria-label="Preview sample" value={sampleId} onChange={e => setSampleId(e.target.value)} className={INPUT}>
+            <option value="">— sample —</option>
             {samples.map(s => <option key={s.id} value={s.id}>#{s.id} · {s.status}</option>)}
           </select>
         </label>
-        <button type="button" onClick={runPreview} disabled={!sampleId}>Dry-run preview</button>
-        {preview && (
-          <pre aria-label="Dry-run result">{JSON.stringify(preview, null, 2)}</pre>
-        )}
       </div>
 
-      {msg && <p role="status">{msg}</p>}
-      <button type="button" onClick={save}>Save mapping</button>
+      {samples.length === 0 && (
+        <p className="rounded-md border border-dashed border-border bg-background p-3 text-xs text-muted-foreground">
+          No captured payloads yet — POST a sample to this endpoint&apos;s URL, then map against it here.
+        </p>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* LEFT — raw payload, click to pick */}
+        <section className="rounded-lg border border-border bg-card p-3">
+          <h4 className="mb-2 text-sm font-semibold text-foreground">Captured payload</h4>
+          {picked && (
+            <div className="mb-2 flex items-center justify-between rounded bg-primary/15 px-2 py-1 font-mono text-xs">
+              <span className="truncate text-primary">
+                picked: {picked} <span className="text-muted-foreground">= {JSON.stringify(getByPath(firstEl, picked))}</span>
+              </span>
+              <button type="button" onClick={() => setPicked(null)} className="ml-2 shrink-0 text-muted-foreground hover:text-foreground" aria-label="Clear selection">✕</button>
+            </div>
+          )}
+          <div className="max-h-[26rem] overflow-auto rounded bg-background p-2">
+            <div className="mb-1 font-mono text-[11px] text-muted-foreground">
+              {collectionRoot ? `${collectionRoot}[0] (element view)` : 'body'}
+            </div>
+            <JsonTree data={firstEl} onPick={setPicked} activePath={picked} />
+          </div>
+        </section>
+
+        {/* RIGHT — target fields */}
+        <section className="space-y-2">
+          <h4 className="text-sm font-semibold text-foreground">Target: {TARGET_LABELS[endpoint.target_type]} fields</h4>
+          {fields.map(f => {
+            const m = mappings[f.key];
+            const r = resolveField(m, firstEl);
+            return (
+              <div key={f.key} className="rounded-lg border border-border bg-card p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-foreground">{f.label}{f.required && <span className="text-red-400">*</span>}</span>
+                  <button type="button" aria-label={`Assign to ${f.key}`} disabled={!picked} onClick={() => assign(f.key)}
+                    className="rounded bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground disabled:opacity-40">
+                    Assign ‹{picked || '…'}›
+                  </button>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2 font-mono text-xs">
+                  {m?.path ? <span className="text-muted-foreground">← {m.path}</span> : <span className="text-red-400">unmapped</span>}
+                  {m?.path && <button type="button" onClick={() => clearField(f.key)} className="text-muted-foreground hover:text-foreground">clear</button>}
+                </div>
+                {f.enum && (
+                  <input aria-label={`${f.key} value map`} defaultValue={formatValueMap(m?.value_map)} onBlur={e => setValueMap(f.key, e.target.value)}
+                    className={`mt-1.5 w-full font-mono text-[11px] ${INPUT}`} placeholder="value map: warning=medium, crit=critical" />
+                )}
+                <div className="mt-1.5 flex items-center gap-1.5 text-xs">
+                  <span className="text-muted-foreground">→</span>
+                  {r.ok
+                    ? <span className="rounded bg-emerald-400/15 px-1.5 py-0.5 text-emerald-300">{String(r.value)}</span>
+                    : <span className="text-red-400">unresolved</span>}
+                </div>
+              </div>
+            );
+          })}
+
+          {isAlert && (
+            <>
+              <h4 className="pt-1 text-sm font-semibold text-foreground">ECS entities <span className="font-normal text-muted-foreground">(≥1 required)</span></h4>
+              <div className="rounded-lg border border-border bg-card p-2.5">
+                {ECS_TARGETS.map(key => {
+                  const r = resolveField(ecs[key], firstEl);
+                  return (
+                    <div key={key} className="flex items-center justify-between gap-2 border-b border-border py-1 last:border-0">
+                      <span className="font-mono text-xs text-foreground">{key}</span>
+                      <div className="flex items-center gap-2">
+                        {r.ok
+                          ? <span className="rounded bg-indigo-400/20 px-1.5 py-0.5 font-mono text-[10px] text-indigo-200">{String(r.value)}</span>
+                          : <span className="font-mono text-[11px] text-muted-foreground">—</span>}
+                        <button type="button" aria-label={`Assign to ${key}`} disabled={!picked} onClick={() => assign(key, true)}
+                          className="rounded border border-input px-1.5 py-0.5 text-[11px] text-foreground hover:bg-accent disabled:opacity-40">Assign</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+
+      <section className="mt-4">
+        <h4 className="mb-2 text-sm font-semibold text-foreground">Dry-run preview {sample && <span className="font-normal text-muted-foreground">— #{sample.id}</span>}</h4>
+        {body != null
+          ? <RecordPreview body={body} collectionRoot={collectionRoot} targetType={endpoint.target_type} fields={fields} mappings={mappings} ecs={ecs} />
+          : <p className="text-xs text-muted-foreground">Pick a captured payload to preview.</p>}
+      </section>
+
+      <div className="mt-3 flex items-center gap-3">
+        <button type="button" onClick={save} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">Save mapping</button>
+        {msg && <span role="status" className="text-xs text-muted-foreground">{msg}</span>}
+      </div>
     </section>
   );
 }
+
+// ── Captured payloads / dead-letter ──────────────────────────────────────────────────────
 
 function CapturedPanel({ endpoint }) {
   const [statusFilter, setStatusFilter] = useState('');
   const [rows, setRows] = useState([]);
 
-  function load() {
+  useEffect(() => {
     const q = statusFilter ? `?status=${statusFilter}` : '';
     api.get(`/api/ingest-endpoints/endpoints/${endpoint.id}/captured/${q}`)
       .then(({ data }) => setRows(data.results || data))
       .catch(() => setRows([]));
-  }
-  useEffect(load, [endpoint.id, statusFilter]);
+  }, [endpoint.id, statusFilter]);
 
   return (
-    <section className="ingest-captured" aria-label="Captured payloads">
-      <h4>Captured payloads</h4>
-      <label>Status
-        <select aria-label="Status filter" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          <option value="">All</option>
-          {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </label>
-      <table>
-        <thead><tr><th>#</th><th>Status</th><th>Received</th><th>Elements</th></tr></thead>
+    <section aria-label="Captured payloads" className="mt-8 rounded-lg border border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2">
+        <h3 className="text-sm font-semibold text-foreground">Captured payloads <span className="font-normal text-muted-foreground">· dead-letter</span></h3>
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">Status
+          <select aria-label="Status filter" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={INPUT}>
+            <option value="">All</option>
+            {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="text-left text-xs text-muted-foreground">
+          <tr><th className="px-4 py-2">#</th><th className="px-4 py-2">Status</th><th className="px-4 py-2">Received</th><th className="px-4 py-2">Elements</th></tr>
+        </thead>
         <tbody>
           {rows.map(r => (
-            <tr key={r.id}>
-              <td>{r.id}</td>
-              <td>{r.status}</td>
-              <td>{new Date(r.received_at).toLocaleString()}</td>
-              <td>
+            <tr key={r.id} className="border-t border-border">
+              <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{r.id}</td>
+              <td className="px-4 py-2"><StatusBadge status={r.status} /></td>
+              <td className="px-4 py-2 text-xs text-muted-foreground">{new Date(r.received_at).toLocaleString()}</td>
+              <td className="px-4 py-2 text-xs">
                 {(r.outcomes || []).map(o => (
-                  <span key={o.id} title={o.error} className={`outcome outcome-${o.outcome}`}>
-                    {o.element_index}:{o.outcome}{' '}
-                  </span>
+                  <span key={o.id} title={o.error} className="mr-1 font-mono text-muted-foreground">{o.element_index}:{o.outcome}</span>
                 ))}
               </td>
             </tr>
@@ -277,6 +297,8 @@ function CapturedPanel({ endpoint }) {
   );
 }
 
+// ── Endpoint detail ──────────────────────────────────────────────────────────────────────
+
 function EndpointDetail({ endpoint, onUpdated, onBack }) {
   const [ep, setEp] = useState(endpoint);
   const [replayOffer, setReplayOffer] = useState(null);
@@ -284,10 +306,7 @@ function EndpointDetail({ endpoint, onUpdated, onBack }) {
 
   function update(data) { setEp(data); onUpdated(data); }
 
-  async function rotate() {
-    const { data } = await api.post(`/api/ingest-endpoints/endpoints/${ep.id}/rotate/`);
-    update(data);
-  }
+  async function rotate() { update((await api.post(`/api/ingest-endpoints/endpoints/${ep.id}/rotate/`)).data); }
   async function activate() {
     try {
       const { data } = await api.post(`/api/ingest-endpoints/endpoints/${ep.id}/activate/`);
@@ -297,8 +316,7 @@ function EndpointDetail({ endpoint, onUpdated, onBack }) {
   }
   async function pauseResume() {
     const resume = ep.state === 'paused';
-    const { data } = await api.post(`/api/ingest-endpoints/endpoints/${ep.id}/pause/`, { resume });
-    update(data);
+    update((await api.post(`/api/ingest-endpoints/endpoints/${ep.id}/pause/`, { resume })).data);
   }
   async function runReplay() {
     await api.post(`/api/ingest-endpoints/endpoints/${ep.id}/replay/`);
@@ -306,25 +324,46 @@ function EndpointDetail({ endpoint, onUpdated, onBack }) {
   }
 
   return (
-    <div className="ingest-detail">
-      <button type="button" onClick={onBack}>← Back</button>
-      <h2>{ep.name} <span className={`state state-${ep.state}`}>{STATE_LABELS[ep.state]}</span></h2>
-      <p className="ingest-meta">{TARGET_LABELS[ep.target_type]} → {ep.org_name}</p>
-      <div className="ingest-url">
-        <code>{url}</code>
-        <button type="button" onClick={() => navigator.clipboard?.writeText(url)}>Copy</button>
-        <button type="button" onClick={rotate}>Rotate URL</button>
-      </div>
-      <div className="ingest-lifecycle">
-        {ep.state !== 'active' && <button type="button" onClick={activate}>Activate</button>}
-        <button type="button" onClick={pauseResume}>{ep.state === 'paused' ? 'Resume' : 'Pause'}</button>
-      </div>
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      <button type="button" onClick={onBack} className="mb-3 text-xs text-primary hover:underline">← Back to endpoints</button>
+      <header className="rounded-lg border border-border bg-card p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold text-foreground">{ep.name}</h1>
+              <span className="rounded bg-indigo-400/20 px-2 py-0.5 text-xs font-semibold text-indigo-200">{TARGET_LABELS[ep.target_type]}</span>
+              <span className="text-xs text-muted-foreground">· {ep.org_name}</span>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <code className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">{url}</code>
+              <button type="button" onClick={() => navigator.clipboard?.writeText(url)} className="text-xs text-primary hover:underline">copy</button>
+              <button type="button" onClick={rotate} className="text-xs text-primary hover:underline" title="Regenerate = new URL">rotate</button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <StatusBadge status={ep.state} />
+            {ep.state !== 'active' && (
+              <button type="button" onClick={activate} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">Activate</button>
+            )}
+            <button type="button" onClick={pauseResume} className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground">
+              {ep.state === 'paused' ? 'Resume' : 'Pause'}
+            </button>
+          </div>
+        </div>
+        {ep.state === 'capturing' && (
+          <p className="mt-3 rounded bg-background px-3 py-1.5 text-xs text-muted-foreground">
+            URL is live: posts are cached &amp; 2xx&apos;d but <b className="text-foreground">no records are created</b> until you define a mapping and Activate.
+          </p>
+        )}
+      </header>
 
       {replayOffer && (
-        <div className="ingest-replay-offer" role="dialog" aria-label="Replay backlog">
+        <div role="dialog" aria-label="Replay backlog" className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-200">
           <p>Replay {replayOffer.payloads} captured payload(s) — {replayOffer.elements_to_attempt} element(s) to process?</p>
-          <button type="button" onClick={runReplay}>Replay now</button>
-          <button type="button" onClick={() => setReplayOffer(null)}>Not now</button>
+          <div className="mt-2 flex gap-2">
+            <button type="button" onClick={runReplay} className="rounded-md bg-primary px-3 py-1 font-medium text-primary-foreground">Replay now</button>
+            <button type="button" onClick={() => setReplayOffer(null)} className="rounded-md border border-border px-3 py-1 text-muted-foreground">Not now</button>
+          </div>
         </div>
       )}
 
@@ -334,6 +373,8 @@ function EndpointDetail({ endpoint, onUpdated, onBack }) {
   );
 }
 
+// ── List ─────────────────────────────────────────────────────────────────────────────────
+
 export default function IngestEndpoints() {
   const [endpoints, setEndpoints] = useState([]);
   const [orgs, setOrgs] = useState([]);
@@ -342,13 +383,8 @@ export default function IngestEndpoints() {
   const [search, setSearch] = useState('');
   const [targetFilter, setTargetFilter] = useState('');
 
-  function load() {
-    api.get('/api/ingest-endpoints/endpoints/')
-      .then(({ data }) => setEndpoints(data.results || data))
-      .catch(() => setEndpoints([]));
-  }
   useEffect(() => {
-    load();
+    api.get('/api/ingest-endpoints/endpoints/').then(({ data }) => setEndpoints(data.results || data)).catch(() => setEndpoints([]));
     api.get('/api/security/organizations/').then(({ data }) => setOrgs(data)).catch(() => setOrgs([]));
   }, []);
 
@@ -368,12 +404,12 @@ export default function IngestEndpoints() {
   }
 
   return (
-    <div className="ingest-endpoints">
-      <header className="ingest-header">
-        <h1>Ingest Endpoints</h1>
-        <button type="button" onClick={() => setCreating(true)}>New Endpoint</button>
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      <header className="mb-1 flex items-center justify-between">
+        <h1 className="text-lg font-semibold text-foreground">Ingest Endpoints</h1>
+        <button type="button" onClick={() => setCreating(true)} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">New Endpoint</button>
       </header>
-      <p className="ingest-intro">Webhook intakes that map a remote system's JSON onto incidents, alerts, and assets.</p>
+      <p className="mb-4 text-sm text-muted-foreground">Webhook intakes that map a remote system&apos;s JSON onto incidents, alerts, and assets.</p>
 
       {creating && (
         <CreateForm orgs={orgs}
@@ -381,29 +417,38 @@ export default function IngestEndpoints() {
           onCancel={() => setCreating(false)} />
       )}
 
-      <div className="ingest-filters">
-        <input aria-label="Search endpoints" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
-        <select aria-label="Target filter" value={targetFilter} onChange={e => setTargetFilter(e.target.value)}>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <input aria-label="Search endpoints" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} className={INPUT} />
+        <select aria-label="Target filter" value={targetFilter} onChange={e => setTargetFilter(e.target.value)} className={INPUT}>
           <option value="">All types</option>
           {Object.entries(TARGET_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
       </div>
 
-      <table>
-        <thead><tr><th>Name</th><th>Type</th><th>Organization</th><th>State</th><th>Captured</th><th></th></tr></thead>
-        <tbody>
-          {filtered.map(e => (
-            <tr key={e.id}>
-              <td>{e.name}</td>
-              <td>{TARGET_LABELS[e.target_type]}</td>
-              <td>{e.org_name}</td>
-              <td><span className={`state state-${e.state}`}>{STATE_LABELS[e.state]}</span></td>
-              <td>{e.captured_count}</td>
-              <td><button type="button" onClick={() => setSelected(e)}>Configure</button></td>
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-sm">
+          <thead className="bg-card text-left text-xs text-muted-foreground">
+            <tr>
+              <th className="px-4 py-2">Name</th><th className="px-4 py-2">Type</th><th className="px-4 py-2">Organization</th>
+              <th className="px-4 py-2">State</th><th className="px-4 py-2">Captured</th><th className="px-4 py-2" />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filtered.map(e => (
+              <tr key={e.id} className="border-t border-border">
+                <td className="px-4 py-2 text-foreground">{e.name}</td>
+                <td className="px-4 py-2 text-muted-foreground">{TARGET_LABELS[e.target_type]}</td>
+                <td className="px-4 py-2 text-muted-foreground">{e.org_name}</td>
+                <td className="px-4 py-2"><StatusBadge status={e.state} /></td>
+                <td className="px-4 py-2 text-muted-foreground">{e.captured_count}</td>
+                <td className="px-4 py-2 text-right">
+                  <button type="button" onClick={() => setSelected(e)} className="text-xs text-primary hover:underline">Configure</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
