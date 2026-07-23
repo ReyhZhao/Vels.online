@@ -3,10 +3,11 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrgContext';
-import SLAPill from '../components/SLAPill';
+import SLABar from '../components/SLABar';
 import CreateIncidentModal from '../components/CreateIncidentModal';
 import { OnCallWidgetCompact } from '../components/OnCallWidget';
 import IncidentTrendChart from '../components/IncidentTrendChart';
+import IncidentKpiBar from '../components/IncidentKpiBar';
 import MultiSelectFilter from '../components/MultiSelectFilter';
 
 // Keys that are persisted as user preferences (excludes transient keys like page, q).
@@ -46,6 +47,15 @@ const SEVERITY_CLASSES = {
   medium:   'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
   low:      'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
   info:     'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+};
+
+// Solid severity colours for the row's leading indicator rail.
+const SEVERITY_DOT = {
+  critical: 'bg-red-500',
+  high:     'bg-orange-500',
+  medium:   'bg-yellow-500',
+  low:      'bg-blue-500',
+  info:     'bg-gray-400',
 };
 
 const STATE_CLASSES = {
@@ -647,7 +657,8 @@ export default function IncidentList() {
   const visibleIds = results.map(inc => inc.id);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
   const someVisibleSelected = visibleIds.some(id => selectedIds.has(id));
-  const colSpan = user?.is_staff ? 9 : 8;
+  // Columns: rail + [checkbox] + severity, id, title, state, org, sla, assignee, created.
+  const colSpan = user?.is_staff ? 10 : 9;
 
   function getPaginationPages(current, total) {
     if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -885,6 +896,8 @@ export default function IncidentList() {
         </div>
       )}
 
+      {!loading && results.length > 0 && <IncidentKpiBar results={results} count={count} />}
+
       {/* Mobile card list */}
       <div className="sm:hidden space-y-2">
         {loading ? (
@@ -894,27 +907,32 @@ export default function IncidentList() {
         ) : results.map(inc => (
           <div
             key={inc.id}
-            className="rounded-lg border border-border bg-card px-4 py-3 space-y-1 cursor-pointer hover:bg-accent/50 transition-colors"
+            className="flex overflow-hidden rounded-lg border border-border bg-card cursor-pointer hover:bg-accent/50 transition-colors"
             onClick={() => navigate(`/incidents/${inc.display_id}`)}
           >
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-xs font-medium text-foreground">{inc.display_id}</span>
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[inc.severity] ?? ''}`}>
-                {inc.severity}
-              </span>
-            </div>
-            <p className="text-sm font-medium text-foreground leading-snug">{inc.title}</p>
-            <div className="flex items-center gap-3 text-xs">
-              <span className={`font-medium ${STATE_CLASSES[inc.state] ?? 'text-muted-foreground'}`}>
-                {inc.state?.replace('_', ' ')}
-              </span>
-              <span className="text-muted-foreground">{inc.assignee_username || 'Unassigned'}</span>
-              {(inc.org_name || inc.org_slug) && (
-                <span className="text-muted-foreground">{inc.org_name || inc.org_slug}</span>
-              )}
-              <span className="text-muted-foreground ml-auto">
-                {formatDatetime(inc.created_at)}
-              </span>
+            {/* Colored severity indicator rail */}
+            <div className={`w-1 shrink-0 ${SEVERITY_DOT[inc.severity] ?? 'bg-muted'}`} />
+            <div className="flex-1 px-4 py-3 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs font-medium text-foreground">{inc.display_id}</span>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[inc.severity] ?? ''}`}>
+                  {inc.severity}
+                </span>
+              </div>
+              <p className="text-sm font-medium text-foreground leading-snug">{inc.title}</p>
+              <SLABar incident={inc} />
+              <div className="flex items-center gap-3 text-xs">
+                <span className={`font-medium ${STATE_CLASSES[inc.state] ?? 'text-muted-foreground'}`}>
+                  {inc.state?.replace('_', ' ')}
+                </span>
+                <span className="text-muted-foreground">{inc.assignee_username || 'Unassigned'}</span>
+                {(inc.org_name || inc.org_slug) && (
+                  <span className="text-muted-foreground">{inc.org_name || inc.org_slug}</span>
+                )}
+                <span className="text-muted-foreground ml-auto">
+                  {formatDatetime(inc.created_at)}
+                </span>
+              </div>
             </div>
           </div>
         ))}
@@ -925,6 +943,8 @@ export default function IncidentList() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
+              {/* Leading severity-colour rail (no header label). */}
+              <th className="w-1 p-0" aria-hidden="true" />
               {user?.is_staff && (
                 <th className="px-4 py-3 w-8">
                   <input
@@ -937,8 +957,22 @@ export default function IncidentList() {
                   />
                 </th>
               )}
+              {['severity'].map(field => (
+                <th key={field} className="px-4 py-3 text-left font-medium text-muted-foreground">
+                  <button
+                    onClick={() => setSort(field)}
+                    className="flex items-center gap-1 hover:text-foreground transition-colors"
+                    aria-label={`Sort by ${SORT_COLUMNS[field].label}`}
+                  >
+                    {SORT_COLUMNS[field].label}
+                    {sortKey === field && (
+                      <span aria-hidden="true">{sortOrder === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </button>
+                </th>
+              ))}
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">ID</th>
-              {['title', 'severity', 'state'].map(field => (
+              {['title', 'state'].map(field => (
                 <th key={field} className="px-4 py-3 text-left font-medium text-muted-foreground">
                   <button
                     onClick={() => setSort(field)}
@@ -986,6 +1020,9 @@ export default function IncidentList() {
                   className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
                   onClick={() => navigate(`/incidents/${inc.display_id}`)}
                 >
+                  {/* Colored severity indicator — colour the cell so it fills the row height.
+                      aria-hidden mirrors the header rail so column indices stay aligned. */}
+                  <td className={`w-1 p-0 ${SEVERITY_DOT[inc.severity] ?? 'bg-muted'}`} title={inc.severity} aria-hidden="true" />
                   {user?.is_staff && (
                     <td className="px-4 py-3 w-8" onClick={e => e.stopPropagation()}>
                       <input
@@ -997,6 +1034,11 @@ export default function IncidentList() {
                       />
                     </td>
                   )}
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[inc.severity] ?? ''}`}>
+                      {inc.severity}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs font-medium text-foreground">
                     <div className="flex items-center gap-1.5">
                       {inc.display_id}
@@ -1009,21 +1051,13 @@ export default function IncidentList() {
                   </td>
                   <td className="px-4 py-3 text-foreground max-w-xs truncate">{inc.title}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[inc.severity] ?? ''}`}>
-                      {inc.severity}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
                     <span className={`text-xs font-medium ${STATE_CLASSES[inc.state] ?? 'text-muted-foreground'}`}>
                       {inc.state?.replace('_', ' ')}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-xs">{inc.org_name || inc.org_slug || '—'}</td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      <SLAPill sla={inc.response_sla} label="Response SLA" compact />
-                      <SLAPill sla={inc.resolve_sla} label="Resolve SLA" compact />
-                    </div>
+                    <div className="w-28"><SLABar incident={inc} /></div>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-xs">{inc.assignee_username || '—'}</td>
                   <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">

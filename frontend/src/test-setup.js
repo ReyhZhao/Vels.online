@@ -12,3 +12,13 @@ const localStorageMock = {
   key:        (i)          => Object.keys(_store)[i] ?? null,
 };
 Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true });
+
+// jsdom has no ResizeObserver; recharts' ResponsiveContainer needs it. Stub it so
+// components that render charts (e.g. IncidentKpiBar) don't blow up in tests.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
