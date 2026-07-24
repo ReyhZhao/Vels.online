@@ -324,7 +324,7 @@ function EndpointDetail({ endpoint, onUpdated, onBack }) {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="p-6">
       <button type="button" onClick={onBack} className="mb-3 text-xs text-primary hover:underline">← Back to endpoints</button>
       <header className="rounded-lg border border-border bg-card p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -404,7 +404,7 @@ export default function IngestEndpoints() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="p-6">
       <header className="mb-1 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-foreground">Ingest Endpoints</h1>
         <button type="button" onClick={() => setCreating(true)} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">New Endpoint</button>
